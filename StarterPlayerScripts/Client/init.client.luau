@@ -263,6 +263,10 @@ hud.onDiplomacyAction = function(action: string, targetSlot: number)
 	Remotes.get("DiplomacyOrder"):FireServer(action, targetSlot)
 end
 
+hud.onResearch = function()
+	Remotes.get("ResearchOrder"):FireServer()
+end
+
 --=============================================================================
 -- Reseau
 --=============================================================================

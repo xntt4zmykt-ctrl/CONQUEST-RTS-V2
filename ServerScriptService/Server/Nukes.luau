@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
+local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
 local Buildings = require(script.Parent.Buildings)
 
@@ -35,13 +36,14 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 		return false, "Faction inconnue."
 	end
 
-	if not Buildings.nukesUnlocked(state) then
-		return false, "Technologie nucleaire pas encore disponible."
-	end
-
 	local stats = Config.NUKE_STATS[kind]
 	if not stats then
 		return false, "Type de missile inconnu."
+	end
+
+	local requiredEra = Eras.requiredForNuke(kind)
+	if ps.era < requiredEra then
+		return false, `{stats.name} : necessite l'ere {Eras.get(requiredEra).name}.`
 	end
 
 	if targetTile < 0 or targetTile >= Config.TILE_COUNT then

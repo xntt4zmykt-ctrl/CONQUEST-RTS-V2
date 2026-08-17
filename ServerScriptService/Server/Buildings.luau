@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
+local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
 
 type GameState = GameState.GameState
@@ -20,12 +21,24 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+--[[
+	Prix courant d'un batiment pour un joueur donne.
+
+	Le cout croit avec le nombre deja possede : le dixieme bunker coute bien
+	plus cher que le premier. C'est ce qui empeche un empire riche de saturer la
+	carte, et ce qui rend l'expansion economique reellement couteuse a soutenir.
+]]
 function Buildings.priceFor(state: GameState, slot: number, kind: number): number
 	local def = BuildingDefs.get(kind)
 	if not def then
 		return math.huge
 	end
-	return math.floor(def.cost * state:doctrineOf(slot).buildCost)
+
+	local ps = state.players[slot]
+	local owned = if ps then (ps.buildingCounts[kind] or 0) else 0
+	local inflation = 1 + owned * Config.BUILD_COST_SCALING
+
+	return math.floor(def.cost * inflation * state:doctrineOf(slot).buildCost)
 end
 
 --[[
@@ -69,10 +82,10 @@ function Buildings.canBuild(state: GameState, slot: number, index: number, kind:
 		return false, "Un port doit etre construit sur la cote."
 	end
 
-	if kind == B.SILO or kind == B.SAM then
-		if not Buildings.nukesUnlocked(state) then
-			return false, "Technologie nucleaire pas encore disponible."
-		end
+	local requiredEra = Eras.requiredFor(kind)
+	if ps.era < requiredEra then
+		local era = Eras.get(requiredEra)
+		return false, `Necessite l'ere {era.name}.`
 	end
 
 	local price = Buildings.priceFor(state, slot, kind)
@@ -120,10 +133,10 @@ function Buildings.build(state: GameState, slot: number, index: number, kind: nu
 	return true, if def then `{def.name} construit.` else nil
 end
 
--- Le nucleaire ne s'ouvre qu'une fois la carte largement partagee, pour qu'il
--- soit un climax de fin de partie et pas une strategie d'ouverture.
-function Buildings.nukesUnlocked(state: GameState): boolean
-	return state:colonizedRatio() >= Config.NUKE_UNLOCK_LAND_RATIO
+-- Le nucleaire depend desormais de l'ere du joueur, pas de l'etat de la carte.
+function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
+	local ps = state.players[slot]
+	return ps ~= nil and ps.era >= Eras.requiredForNuke(Config.NUKE.ATOM)
 end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.

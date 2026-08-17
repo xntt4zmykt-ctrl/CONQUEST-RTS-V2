@@ -26,6 +26,7 @@ local NAMES = {
 	"BoatOrder", -- (targetTileIndex)
 	"NukeOrder", -- (targetTileIndex, nukeKind)
 	"DiplomacyOrder", -- (action: string, targetSlot: number)
+	"ResearchOrder", -- () : avancer d'une ere
 }
 
 local Remotes = {}

@@ -22,6 +22,7 @@ local Buildings = require(script.Parent.Buildings)
 local Navy = require(script.Parent.Navy)
 local Nukes = require(script.Parent.Nukes)
 local Diplomacy = require(script.Parent.Diplomacy)
+local Research = require(script.Parent.Research)
 
 type GameState = GameState.GameState
 
@@ -158,13 +159,18 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 		return
 	end
 
-	local nukesUp = Buildings.nukesUnlocked(state)
+	local nukesUp = Buildings.nukesUnlocked(state, ps.slot)
 
 	-- Une fois l'arsenal ouvert, le bot garde en permanence de quoi tirer une
 	-- bombe. Sans cette reserve il redepense tout en villes des qu'il atteint
 	-- 180 d'or et la phase nucleaire n'arrive jamais — la simulation ne
 	-- produisait qu'un seul silo et aucune frappe en dix minutes.
 	local reserve = if nukesUp and ps.siloCount > 0 then Config.NUKE_STATS[Config.NUKE.ATOM].cost else 0
+
+	-- Epargne pour la prochaine ere des que seul l'or manque encore. C'est la
+	-- difference entre un bot qui plafonne a l'age industriel et un bot qui
+	-- atteint l'atome.
+	reserve = math.max(reserve, Research.goldReserveFor(state, ps.slot))
 
 	-- Les compteurs sont plafonnes explicitement : sans plafond, un bot riche
 	-- retire indefiniment le meme batiment (315 batteries pour 8 silos).
@@ -174,6 +180,14 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 	if nukesUp and ps.siloCount < 1 then
 		wanted = B.SILO
 		reserve = 0 -- le silo est lui-meme l'objectif de l'epargne
+	elseif ps.buildingCounts[B.CITY] == nil or (ps.buildingCounts[B.CITY] or 0) < 8 then
+		-- Les villes sont la condition d'ere la plus exigeante : les prioriser
+		-- evite que le bot reste bloque a un palier faute d'un seul batiment.
+		wanted = B.CITY
+		reserve = 0
+	elseif (ps.buildingCounts[B.DEFENSE] or 0) < 2 and ps.era >= 2 then
+		wanted = B.DEFENSE
+		reserve = 0
 	elseif ps.portCount == 0 then
 		-- Le tout premier port passe avant le reste : c'est lui qui ouvre les
 		-- routes commerciales, et donc qui rend l'embargo jouable. Laisse en
@@ -300,7 +314,7 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 end
 
 local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Random)
-	if ps.siloCount == 0 or not Buildings.nukesUnlocked(state) then
+	if ps.siloCount == 0 or not Buildings.nukesUnlocked(state, ps.slot) then
 		return
 	end
 
@@ -401,6 +415,10 @@ function Bots.step(state: GameState, rng: Random)
 		if (state.tick + slot * 3) % DECISION_INTERVAL ~= 0 then
 			continue
 		end
+
+		-- La recherche passe avant tout : un bot qui n'avance pas d'ere reste
+		-- bloque a l'age de pierre pendant que les autres passent a l'atome.
+		Research.advance(state, ps.slot)
 
 		decideAttack(state, ps, rng)
 		decideBuild(state, ps, rng)

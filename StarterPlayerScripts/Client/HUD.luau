@@ -25,6 +25,7 @@ local Theme = require(Shared:WaitForChild("Theme"))
 local Types = require(Shared:WaitForChild("Types"))
 local Doctrines = require(Shared:WaitForChild("Doctrines"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
+local Eras = require(Shared:WaitForChild("Eras"))
 local SoundManager = require(script.Parent.SoundManager)
 
 local C = Theme.color
@@ -114,7 +115,8 @@ function HUD.new(parent: ScreenGui): HUD
 	self.ratio = Config.DEFAULT_ATTACK_RATIO
 	self.gold = 0
 	self.troops = 0
-	self.nukesUnlocked = false
+	self.era = 1
+	self.eraProgress = 0
 	self.modeButtons = {}
 	self.buildButtons = {}
 	self.nukeButtons = {}
@@ -134,6 +136,7 @@ function HUD.new(parent: ScreenGui): HUD
 	self.root = root
 
 	self:buildIdentity()
+	self:buildEraPanel()
 	self:buildMatchBar()
 	self:buildLeaderboard()
 	self:buildDiplomacyPanel()
@@ -181,6 +184,62 @@ function HUD.buildIdentity(self: HUD)
 	sub.FontFace = F.medium
 	sub.TextTruncate = Enum.TextTruncate.AtEnd
 	self.identitySub = sub
+end
+
+--=============================================================================
+-- Progression technologique (haut gauche, sous l'identite)
+--=============================================================================
+
+--[[
+	Le panneau d'ere est le tableau de bord du developpement.
+
+	Il repond a la question "que dois-je faire maintenant" : la barre montre
+	l'avancement, et le bouton indique en clair ce qui manque quand on ne peut
+	pas encore avancer. C'est ce qui remplace l'ancien deblocage automatique du
+	nucleaire, qui ne demandait aucune decision au joueur.
+]]
+function HUD.buildEraPanel(self: HUD)
+	local panel = Theme.panel("Era", self.root)
+	panel.Position = UDim2.fromOffset(S.md, 62 + S.md * 2)
+	panel.Size = UDim2.fromOffset(232, 92)
+
+	local name = Theme.label(panel, "", T.body, C.text)
+	name.Position = UDim2.fromOffset(S.md, S.sm)
+	name.Size = UDim2.new(1, -S.md * 2, 0, 18)
+	self.eraName = name
+
+	local tagline = Theme.label(panel, "", T.tiny, C.textFaint)
+	tagline.Position = UDim2.fromOffset(S.md, 26)
+	tagline.Size = UDim2.new(1, -S.md * 2, 0, 14)
+	tagline.FontFace = F.medium
+	tagline.TextTruncate = Enum.TextTruncate.AtEnd
+	self.eraTagline = tagline
+
+	local track = Instance.new("Frame")
+	track.Size = UDim2.new(1, -S.md * 2, 0, 5)
+	track.Position = UDim2.fromOffset(S.md, 44)
+	track.BackgroundColor3 = C.surfaceRaised
+	track.BorderSizePixel = 0
+	track.Parent = panel
+	Theme.corner(track, Theme.radius.pill)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = C.nuclear
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	Theme.corner(fill, Theme.radius.pill)
+	self.eraFill = fill
+
+	local advance = button(panel, "", T.small)
+	advance.Position = UDim2.fromOffset(S.md, 56)
+	advance.Size = UDim2.new(1, -S.md * 2, 0, 26)
+	advance.Activated:Connect(function()
+		if self.onResearch then
+			self.onResearch()
+		end
+	end)
+	self.eraButton = advance
 end
 
 --=============================================================================
@@ -824,8 +883,9 @@ function HUD.setMode(self: HUD, mode: Mode)
 		self:refreshPalettes()
 	elseif mode == "nuke" then
 		self:refreshPalettes()
-		if not self.nukesUnlocked then
-			self.hintLabel.Text = "Arsenal verrouille tant que la carte n'est pas majoritairement colonisee."
+		local needed = Eras.requiredForNuke(Config.NUKE.ATOM)
+		if self.era < needed then
+			self.hintLabel.Text = `Arsenal verrouille : necessite l'ere {Eras.get(needed).name}.`
 		end
 	end
 
@@ -839,7 +899,8 @@ end
 function HUD.refreshPalettes(self: HUD)
 	for id, b in self.buildButtons do
 		local def = BuildingDefs.get(id)
-		local affordable = def ~= nil and self.gold >= def.cost
+		local unlocked = self.era >= Eras.requiredFor(id)
+		local affordable = def ~= nil and unlocked and self.gold >= def.cost
 		setSelected(b, id == self.buildKind)
 		if id ~= self.buildKind then
 			b.BackgroundTransparency = if affordable then 0 else 0.55
@@ -850,7 +911,7 @@ function HUD.refreshPalettes(self: HUD)
 
 	for kind, b in self.nukeButtons do
 		local stats = Config.NUKE_STATS[kind]
-		local affordable = self.gold >= stats.cost and self.nukesUnlocked
+		local affordable = self.gold >= stats.cost and self.era >= Eras.requiredForNuke(kind)
 		setSelected(b, kind == self.nukeKind, C.nuclear)
 		if kind ~= self.nukeKind then
 			b.BackgroundTransparency = if affordable then 0 else 0.55
@@ -858,6 +919,35 @@ function HUD.refreshPalettes(self: HUD)
 			b.BackgroundTransparency = 0
 		end
 	end
+end
+
+--[[
+	Met a jour le tableau de bord technologique.
+
+	Le bouton affiche toujours le prochain palier et son prix : c'est
+	l'information qui oriente toute la partie economique, elle ne doit jamais
+	demander un clic pour etre lue.
+]]
+function HUD.refreshEraPanel(self: HUD)
+	local era = Eras.get(self.era)
+	self.eraName.Text = `{era.symbol}  {era.name}`
+	self.eraTagline.Text = era.tagline
+
+	if self.era >= Eras.MAX_ID then
+		self.eraFill.Size = UDim2.fromScale(1, 1)
+		self.eraButton.Text = "Apogee technologique"
+		self.eraButton.Visible = false
+		return
+	end
+
+	local next = Eras.get(self.era + 1)
+	self.eraButton.Visible = true
+	self.eraFill.Size = UDim2.fromScale(math.clamp(self.eraProgress, 0, 1), 1)
+
+	local ready = self.eraProgress >= 1
+	self.eraButton.Text = `{next.symbol} {next.name}  ·  {next.cost} or`
+	setSelected(self.eraButton, ready, C.nuclear)
+	self.eraFill.BackgroundColor3 = if ready then C.nuclear else C.info
 end
 
 function HUD.setIdentity(self: HUD, slot: number, name: string, doctrineId: number, betrayals: number)
@@ -878,25 +968,10 @@ function HUD.setMatch(self: HUD, match: Types.MatchInfo)
 	local seconds = math.floor(match.timeLeft % 60)
 	self.timerLabel.Text = string.format("%d:%02d", minutes, seconds)
 
-	-- Le passage du seuil nucleaire est l'evenement de rythme le plus
-	-- important de la partie : il change la couleur du bandeau.
-	local wasUnlocked = self.nukesUnlocked
-	self.nukesUnlocked = match.nukesUnlocked
-
-	if match.nukesUnlocked then
-		self.phaseLabel.Text = "\u{2622} ARSENAL ACTIF"
-		self.phaseLabel.TextColor3 = C.nuclear
-		self.timerLabel.TextColor3 = C.nuclear
-	else
-		self.phaseLabel.Text = "EXPANSION"
-		self.phaseLabel.TextColor3 = C.textMuted
-		self.timerLabel.TextColor3 = C.text
-	end
-
-	if match.nukesUnlocked and not wasUnlocked then
-		self:notify("\u{2622} Technologie nucleaire disponible.", "alert")
-		self:refreshPalettes()
-	end
+	local era = Eras.get(self.era)
+	self.phaseLabel.Text = `{era.symbol} {string.upper(era.name)}`
+	self.phaseLabel.TextColor3 = if self.era >= 4 then C.nuclear else C.textMuted
+	self.timerLabel.TextColor3 = if self.era >= 4 then C.nuclear else C.text
 end
 
 --=============================================================================
@@ -983,6 +1058,13 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 				self:refreshPalettes()
 			end
 		end
+
+		if self.era ~= mine.era then
+			self.era = mine.era
+			self:refreshPalettes()
+		end
+		self.eraProgress = mine.eraProgress
+		self:refreshEraPanel()
 	end
 
 	-- Classement trie par territoire : c'est la mesure qui decide la victoire.

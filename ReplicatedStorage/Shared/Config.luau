@@ -101,10 +101,13 @@ Config.START_GOLD = 120
 -- devient une formalite — mesure en simulation, un revenu lineaire produisait
 -- 4,4 millions d'or morts en dix minutes.
 Config.GOLD_TILE_EXPONENT = 0.8
-Config.GOLD_TILE_SCALE = 0.0045 -- par tick
+Config.GOLD_TILE_SCALE = 0.0042 -- par tick
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
-Config.GOLD_PER_CAPITAL = 0.35 -- par tick, tant qu'on tient sa capitale
+-- Volontairement faible : un joueur qui accumule les capitales conquises en
+-- tenait douze en simulation, soit l'equivalent de plusieurs milliers de
+-- territoires en revenu. La capitale est un objectif militaire, pas une rente.
+Config.GOLD_PER_CAPITAL = 0.08 -- par tick, par capitale tenue
 Config.TRADE_GOLD_PER_PARTNER = 0.14 -- par tick, par partenaire commercial
 Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux navires marchands (visuel)
 
@@ -151,11 +154,21 @@ Config.BUILDING = {
 -- Perdre sa capitale doit etre un desastre, pas une tuile de plus : c'est ce
 -- qui donne un objectif lisible a une offensive et un enjeu a la defense.
 Config.CAPITAL_TROOP_LOSS = 0.45 -- part de la reserve perdue par l'ancien proprietaire
-Config.CAPITAL_PLUNDER = 400 -- or pris par l'assaillant
+-- Butin volontairement modeste : mesure en simulation, 45 capitales prises en
+-- dix minutes a 400 d'or injectaient 18 000 d'or et faisaient exploser toute la
+-- progression technologique. La capitale doit valoir pour ce qu'elle retire a
+-- l'adversaire, pas pour ce qu'elle rapporte.
+Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
 
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
 Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
+
+-- Chaque batiment supplementaire du meme type coute plus cher. Sans cette
+-- inflation, un empire riche empile trois cents villes et le jeu se resume a
+-- cliquer partout : la simulation en produisait 357 en dix minutes. Avec un
+-- facteur de 0.35, la cinquieme ville coute deja 2,4 fois la premiere.
+Config.BUILD_COST_SCALING = 0.35
 
 --=============================================================================
 -- Nucleaire
@@ -163,7 +176,6 @@ Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
 -- La phase finale. Elle ne s'ouvre qu'une fois la carte largement partagee,
 -- pour qu'elle soit un climax et pas une strategie d'ouverture.
 
-Config.NUKE_UNLOCK_LAND_RATIO = 0.55 -- part des terres colonisees avant deblocage
 Config.MISSILE_SPEED = 1.6 -- tuiles par tick
 Config.SAM_RANGE = 34
 Config.SAM_INTERCEPT_CHANCE = 0.55

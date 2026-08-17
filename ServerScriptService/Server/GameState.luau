@@ -19,6 +19,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
 local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
+local Eras = require(ReplicatedStorage.Shared.Eras)
 
 local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
@@ -48,6 +49,10 @@ export type PlayerState = {
 	samCount: number,
 	capitalCount: number,
 	capitalTile: number?,
+	-- Ere technologique atteinte, et compte par type de batiment. Le second
+	-- sert a la fois aux conditions d'ere et a l'inflation des couts.
+	era: number,
+	buildingCounts: { [number]: number },
 	betrayals: number,
 	traitorUntil: number,
 }
@@ -181,6 +186,14 @@ function GameState.notify(self: GameState, text: string, kind: string, only: num
 end
 
 --[[
+	File un effet sonore. `only` le restreint a un joueur ; sinon tout le monde
+	l'entend, avec l'attenuation par distance geree cote client.
+]]
+function GameState.sound(self: GameState, name: string, only: number?)
+	table.insert(self.sounds, { name = name, only = only })
+end
+
+--[[
 	Message concernant deux factions.
 
 	Diffuse a tout le monde uniquement si un humain est implique. Sinon le
@@ -191,14 +204,6 @@ end
 	noient l'ecran du joueur sous des dizaines de notifications par minute qui
 	ne le concernent pas.
 ]]
---[[
-	File un effet sonore. `only` le restreint a un joueur ; sinon tout le monde
-	l'entend, avec l'attenuation par distance geree cote client.
-]]
-function GameState.sound(self: GameState, name: string, only: number?)
-	table.insert(self.sounds, { name = name, only = only })
-end
-
 function GameState.notifyBetween(self: GameState, text: string, kind: string, a: number, b: number)
 	local pa, pb = self.players[a], self.players[b]
 	local humanInvolved = (pa ~= nil and not pa.isBot) or (pb ~= nil and not pb.isBot)
@@ -338,6 +343,8 @@ function GameState.countBuilding(self: GameState, slot: number, kind: number, si
 	if not ps then
 		return
 	end
+
+	ps.buildingCounts[kind] = (ps.buildingCounts[kind] or 0) + sign
 	if kind == B.CITY or kind == B.CAPITAL then
 		local def = BuildingDefs.get(kind)
 		ps.cityPopBonus += sign * (if def then def.popCapBonus else 0)
@@ -488,6 +495,8 @@ function GameState.addPlayer(
 		samCount = 0,
 		capitalCount = 0,
 		capitalTile = nil,
+		era = 1,
+		buildingCounts = {},
 		betrayals = betrayals,
 		traitorUntil = 0,
 	}
@@ -598,6 +607,7 @@ function GameState.tileCost(self: GameState, index: number, attackerSlot: number
 		local density = defender.troops / math.max(1, defender.tiles)
 		cost *= 1 + density * Config.DEFENSE_DENSITY_K
 		cost *= Doctrines.get(defender.doctrine).defense
+		cost *= Eras.accumulate(defender.era).defense
 	else
 		cost *= Config.NEUTRAL_COST_MULT
 	end
@@ -782,11 +792,12 @@ end
 function GameState.stepEconomy(self: GameState)
 	for _, ps in self.players do
 		local doctrine = Doctrines.get(ps.doctrine)
+		local era = Eras.accumulate(ps.era)
 
 		local maxTroops = self:maxTroops(ps)
 		if ps.troops < maxTroops then
 			local gain = math.max(Config.MIN_GROWTH, (maxTroops - ps.troops) * Config.GROWTH_RATE)
-			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth)
+			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth * era.growth)
 		end
 
 		local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
@@ -794,7 +805,7 @@ function GameState.stepEconomy(self: GameState)
 			+ ps.portCount * Config.GOLD_PER_PORT
 			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
 			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
-		ps.gold += income * doctrine.goldRate
+		ps.gold += income * doctrine.goldRate * era.gold
 	end
 end
 

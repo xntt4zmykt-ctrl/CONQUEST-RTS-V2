@@ -16,6 +16,10 @@ export type PlayerStats = {
 	tiles: number,
 	gold: number,
 	maxTroops: number,
+	era: number,
+	-- Avancement vers l'ere suivante, 0..1 : c'est le minimum des criteres,
+	-- donc celui qui bloque reellement.
+	eraProgress: number,
 }
 
 export type Stats = { [number]: PlayerStats }
@@ -58,7 +62,6 @@ export type BuildingSnapshot = {
 export type MatchInfo = {
 	phase: string, -- "playing" | "ended"
 	timeLeft: number,
-	nukesUnlocked: boolean,
 	winner: number?,
 	winnerName: string?,
 	restartIn: number?,

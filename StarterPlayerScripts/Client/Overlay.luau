@@ -19,6 +19,7 @@ local TweenService = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
+local BuildingModels = require(script.Parent.BuildingModels)
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local Types = require(Shared:WaitForChild("Types"))
@@ -67,63 +68,60 @@ end
 --=============================================================================
 
 --[[
-	Un batiment est un pilier pose sur le relief, surmonte d'une etiquette
-	toujours face camera.
+	Un batiment est un vrai petit modele 3D pose sur le relief, surmonte d'une
+	etiquette toujours face camera.
 
-	Le pilier donne la presence physique et la couleur de faction ; l'etiquette
-	garantit qu'on identifie le batiment meme completement dezoome, ou le pilier
-	ne ferait plus qu'un pixel.
+	Le modele donne la presence et la lisibilite de pres ; l'etiquette garantit
+	qu'on identifie le batiment meme completement dezoome, ou le modele ne ferait
+	plus que quelques pixels.
 ]]
-local function makeBuilding(parent: Instance, index: number, kind: number, slot: number, terrain: buffer): Part
+local function makeBuilding(parent: Instance, index: number, kind: number, slot: number, terrain: buffer): Model
 	local def = BuildingDefs.get(kind)
-	local isCapital = kind == Config.BUILDING.CAPITAL
+	local color = colorFor(slot)
 
 	local base = WorldSpace.indexToWorld(index)
 	local ground = WorldSpace.surfaceHeight(terrain, index)
-	local height = if isCapital then 15 else 8
-	local width = if isCapital then 3.4 else 2.2
+	local model = BuildingModels.create(kind, color, Vector3.new(base.X, ground, base.Z))
+	model.Name = `Building{index}`
 
-	local part = Instance.new("Part")
-	part.Name = `Building{index}`
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = false
-	-- Ne doit jamais intercepter le clic destine au sol : sinon viser une tuile
-	-- occupee par un batiment devient impossible.
-	part.CanQuery = false
-	part.CastShadow = false
-	part.Material = Enum.Material.Metal
-	part.Size = Vector3.new(width, height, width)
-	part.CFrame = CFrame.new(base.X, ground + height / 2, base.Z)
-	part.Color = colorFor(slot)
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
+	-- L'etiquette a besoin d'un ancrage : le premier bloc du modele fait
+	-- l'affaire et evite d'ajouter une Part uniquement pour la porter.
+	local anchor = model:FindFirstChildWhichIsA("BasePart")
+	if anchor then
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "Marker"
+		local size = if kind == Config.BUILDING.CAPITAL then 32 else 22
+		billboard.Size = UDim2.fromOffset(size, size)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = 1400
+		-- Positionnee en absolu depuis le sol, pas depuis l'ancre : le premier
+		-- bloc n'est pas au meme endroit selon le modele.
+		billboard.StudsOffsetWorldSpace =
+			Vector3.new(base.X, ground + BuildingModels.heightOf(kind) + 3, base.Z) - anchor.Position
+		billboard.Parent = anchor
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "Marker"
-	billboard.Size = UDim2.fromOffset(if isCapital then 34 else 24, if isCapital then 34 else 24)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, height / 2 + 3, 0)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 1400
-	billboard.Parent = part
+		local label = Instance.new("TextLabel")
+		label.Name = "Symbol"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.FontFace = Theme.font.bold
+		label.TextScaled = true
+		label.Text = if def then def.symbol else "?"
+		label.TextColor3 = color
+		label.Parent = billboard
 
-	local label = Instance.new("TextLabel")
-	label.Name = "Symbol"
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.FontFace = Theme.font.bold
-	label.TextScaled = true
-	label.Text = if def then def.symbol else "?"
-	label.TextColor3 = colorFor(slot)
-	label.Parent = billboard
+		local outline = Instance.new("UIStroke")
+		outline.Color = Color3.fromRGB(8, 10, 16)
+		outline.Thickness = 2
+		outline.Parent = label
+	end
 
-	local outline = Instance.new("UIStroke")
-	outline.Color = Color3.fromRGB(8, 10, 16)
-	outline.Thickness = 2
-	outline.Parent = label
-
-	part.Parent = parent
-	return part
+	model:SetAttribute("Kind", kind)
+	model:SetAttribute("TintR", color.R)
+	model:SetAttribute("TintG", color.G)
+	model:SetAttribute("TintB", color.B)
+	model.Parent = parent
+	return model
 end
 
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
@@ -138,14 +136,26 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			continue
 		end
 
-		-- Un batiment capture change de couleur, pas de forme : on evite de le
-		-- detruire et de le recreer a chaque prise.
+		-- Un batiment capture change de couleur, pas de forme : reconstruire tout
+		-- le modele a chaque prise serait du gaspillage, et les prises sont
+		-- frequentes en fin de partie.
 		if existing and existing:GetAttribute("Kind") == entry.kind then
-			existing.Color = colorFor(entry.slot)
-			local marker = existing:FindFirstChild("Marker")
+			local previous = Color3.new(
+				existing:GetAttribute("TintR") :: number,
+				existing:GetAttribute("TintG") :: number,
+				existing:GetAttribute("TintB") :: number
+			)
+			local next = colorFor(entry.slot)
+			BuildingModels.recolor(existing, previous, next)
+			existing:SetAttribute("TintR", next.R)
+			existing:SetAttribute("TintG", next.G)
+			existing:SetAttribute("TintB", next.B)
+
+			local anchor = existing:FindFirstChildWhichIsA("BasePart")
+			local marker = anchor and anchor:FindFirstChild("Marker")
 			local label = marker and marker:FindFirstChild("Symbol")
 			if label and label:IsA("TextLabel") then
-				label.TextColor3 = colorFor(entry.slot)
+				label.TextColor3 = next
 			end
 			continue
 		end
@@ -154,9 +164,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			existing:Destroy()
 		end
 
-		local part = makeBuilding(self.root, entry.index, entry.kind, entry.slot, self.terrain)
-		part:SetAttribute("Kind", entry.kind)
-		self.buildings[entry.index] = part
+		self.buildings[entry.index] = makeBuilding(self.root, entry.index, entry.kind, entry.slot, self.terrain)
 	end
 end
 

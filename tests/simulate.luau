@@ -179,6 +179,11 @@ local function runMatch(seed, ticks)
 		explosions += 1
 	end
 
+	-- Instant ou la premiere faction franchit chaque palier : c'est la mesure
+	-- du rythme de partie. L'ancien systeme ouvrait le nucleaire avant la
+	-- premiere minute, ce qui rendait toute la progression decorative.
+	local firstEra = {}
+
 	local startClock = os.clock()
 
 	for tick = 1, ticks do
@@ -195,6 +200,12 @@ local function runMatch(seed, ticks)
 		table.clear(state.events)
 		table.clear(state.sounds)
 
+		for _, ps in state.players do
+			if not firstEra[ps.era] then
+				firstEra[ps.era] = tick
+			end
+		end
+
 		if tick % CHECK_EVERY == 0 then
 			checkInvariants(state, tick)
 		end
@@ -209,6 +220,7 @@ local function runMatch(seed, ticks)
 		explosions = explosions,
 		elapsed = os.clock() - startClock,
 		landRatio = landRatio,
+		firstEra = firstEra,
 	}
 end
 
@@ -279,7 +291,6 @@ print("")
 print(`--- apres {TICKS} ticks ({string.format("%.1f", TICKS / Config.TICK_RATE)} s de jeu simule) ---`)
 print(`temps de calcul   : {string.format("%.2f", elapsed)} s`)
 print(`colonisation      : {string.format("%.1f", state:colonizedRatio() * 100)} % des terres`)
-print(`nucleaire debloque: {tostring(Buildings.nukesUnlocked(state))}`)
 print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} capitale={buildingCounts[6] or 0}`)
 print(`navires en mer    : {#state.boats}`)
 print(`offensives actives: {#state.attacks}`)
@@ -287,6 +298,26 @@ print(`alliances         : {allianceCount}`)
 print(`trahisons         : {betrayalCount}`)
 print(`explosions        : {explosions}`)
 print(`capitales prises  : {state.capitalEvents}`)
+
+local eraCounts = {}
+for _, ps in state.players do
+	eraCounts[ps.era] = (eraCounts[ps.era] or 0) + 1
+end
+local eraLine = ""
+for era = 1, 5 do
+	eraLine ..= `{era}:{eraCounts[era] or 0}  `
+end
+print(`eres atteintes    : {eraLine}`)
+
+local function eraTime(era)
+	local tick = main.firstEra[era]
+	if not tick then
+		return "jamais"
+	end
+	local seconds = tick / Config.TICK_RATE
+	return `{math.floor(seconds / 60)}m{string.format("%02d", math.floor(seconds % 60))}`
+end
+print(`premiere ere 2/3/4/5 : {eraTime(2)} / {eraTime(3)} / {eraTime(4)} / {eraTime(5)}`)
 print(`or total          : {math.floor(totalGold)}`)
 print("")
 print("classement :")
@@ -335,6 +366,16 @@ print(`collision serveur : {serverBlocks} blocs (statique, repliquee une fois)`)
 print(`visuel client     : {clientParts} parts pour {landTiles} tuiles de terre`)
 print(`  compression     : {string.format("%.1f", landTiles / math.max(1, clientParts))}x`)
 print(`  pire chunk      : {worstChunk} parts`)
+
+-- Rythme : le nucleaire doit etre un climax de fin de partie. Trop tot il
+-- ecrase la phase d'expansion, jamais il rend toute la branche technologique
+-- decorative.
+local atomicTick = main.firstEra[4]
+if not atomicTick then
+	fail("aucune faction n'atteint l'ere Atomique en 10 minutes")
+elseif atomicTick < 2400 then
+	fail(`ere Atomique atteinte des {math.floor(atomicTick / Config.TICK_RATE)}s : trop tot`)
+end
 
 -- Seuils au-dela desquels le rendu devient un probleme sur mobile.
 if clientParts > 12000 then

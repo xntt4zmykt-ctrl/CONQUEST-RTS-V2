@@ -83,6 +83,7 @@ ReplicatedStorage/Shared/
   Theme.luau        Jetons de design : couleurs, espacements, typographie, animation
   Audio.luau        Catalogue sonore
   MapGen.luau       Génération de carte déterministe à partir d'une seed
+  Eras.luau         Les cinq ères technologiques et leurs conditions
   GreedyMesh.luau   Fusion de tuiles en rectangles (partagée serveur/client)
   WorldSpace.luau   Conversions grille ↔ monde 3D
   Doctrines.luau    Les quatre doctrines et leurs multiplicateurs
@@ -98,6 +99,7 @@ ServerScriptService/Server/
   Nukes.luau        Tirs, interception SAM, détonation
   Diplomacy.luau    Alliances, trahisons, embargos
   Persistence.luau  Réputation persistante (DataStore)
+  Research.luau     Avancement d'ère : conditions, coûts, progression
   WorldBuilder.luau Collision statique du monde
   Bots.luau         IA de remplissage
 
@@ -105,6 +107,7 @@ StarterPlayerScripts/Client/
   init.client.luau  Orchestration : saisie des ordres, réseau, avatar
   WorldRenderer.luau Géométrie colorée du monde, par chunks
   WorldCamera.luau  Caméra stratégique et sélection par lancer de rayon
+  BuildingModels.luau Modèles 3D procéduraux des bâtiments
   Overlay.luau      Bâtiments, navires, missiles, explosions
   Minimap.luau      Vue d'ensemble (facultative)
   HUD.luau          Commandement, construction, diplomatie, classement
@@ -172,6 +175,33 @@ deux camps, et surtout de la **densité de troupes** du défenseur
 (`troupes / territoires`) — ce qui punit l'expansion incontrôlée et récompense
 l'empire compact.
 
+### Progression technologique
+
+Cinq ères, achetées individuellement : **Colonisation → Fortification →
+Industrie → Atomique → Thermonucléaire**. Chacune coûte de l'or *et* exige un
+développement réel (des villes, un port, un silo, du territoire).
+
+La version précédente déverrouillait le nucléaire quand 55 % des terres étaient
+colonisées. C'était une erreur de conception : ce seuil mesure la vitesse à
+laquelle la carte se remplit, pas l'effort d'un joueur. Avec douze factions, il
+tombait **en moins d'une minute** et toute la branche technologique était
+décorative.
+
+Rythme mesuré en simulation sur une partie de 10 minutes :
+
+| Ère | Atteinte à |
+|---|---|
+| Fortification | 0m19 |
+| Industrie | 2m45 |
+| **Atomique** | **8m24** |
+| Thermonucléaire | hors de portée en 10 min |
+
+Le banc d'essai échoue si l'ère Atomique tombe avant 4 minutes ou n'arrive
+jamais — cette régression ne peut donc plus passer inaperçue.
+
+Le coût des bâtiments croît avec le nombre déjà possédé (`BUILD_COST_SCALING`) :
+sans cette inflation, un empire riche empilait 357 villes en dix minutes.
+
 ### Diplomatie
 
 Les traités sont **mécaniques**, pas déclaratifs. Une alliance empêche
@@ -198,16 +228,19 @@ victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
 
 1. **Chat vocal de proximité** pour les négociations.
 2. **Navires de guerre** — actuellement les transports sont inarrêtables en mer.
-3. **Modèles de bâtiments** — ce sont pour l'instant des piliers colorés.
 4. **Brouillard de guerre.**
 5. **Saisons et classement de clans.**
 
 ### Limites connues
 
 ⚠️ **L'équilibrage n'a pas été playtesté par des humains.** Les valeurs de
-`Config.luau` ont été réglées contre la simulation headless uniquement. Les
-premiers paramètres à revoir : `ATTACK_SPEND_RATE`, `GROWTH_RATE`,
-`DEFENSE_DENSITY_K` et `GOLD_TILE_SCALE`.
+`Config.luau` et `Eras.luau` ont été réglées contre la simulation headless
+uniquement. Les premiers paramètres à revoir : `GOLD_TILE_SCALE`, les `cost` des
+ères, `ATTACK_SPEND_RATE` et `DEFENSE_DENSITY_K`.
+
+⚠️ **Les bots construisent peu** (une trentaine de villes pour 12 factions sur
+10 minutes) parce qu'ils épargnent pour l'ère suivante. C'est cohérent avec la
+progression voulue, mais à revérifier quand des humains joueront à côté d'eux.
 
 ⚠️ **Les parties contre des bots seuls se terminent en 5 à 10 minutes**, bien
 avant les 25 minutes prévues — les bots ne se coalisent pas contre le leader.

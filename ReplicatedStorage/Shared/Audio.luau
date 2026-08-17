@@ -149,6 +149,13 @@ Audio.SOUNDS = {
 		throttle = 0.3,
 		category = "alert",
 	},
+	eraAdvance = {
+		id = "rbxasset://sounds/electronicpingshort.wav",
+		volume = 0.6,
+		pitchRange = 0,
+		throttle = 0.5,
+		category = "alert",
+	},
 	victory = {
 		id = "rbxasset://sounds/action_get_up.mp3",
 		volume = 0.8,

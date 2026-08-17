@@ -26,6 +26,7 @@ local Navy = require(script.Navy)
 local Nukes = require(script.Nukes)
 local Diplomacy = require(script.Diplomacy)
 local Persistence = require(script.Persistence)
+local Research = require(script.Research)
 local WorldBuilder = require(script.WorldBuilder)
 local Bots = require(script.Bots)
 
@@ -53,6 +54,7 @@ local buildOrder = Remotes.get("BuildOrder")
 local boatOrder = Remotes.get("BoatOrder")
 local nukeOrder = Remotes.get("NukeOrder")
 local diplomacyOrder = Remotes.get("DiplomacyOrder")
+local researchOrder = Remotes.get("ResearchOrder")
 
 --=============================================================================
 -- Etat du serveur
@@ -385,6 +387,15 @@ nukeOrder.OnServerEvent:Connect(function(player: Player, targetTile: any, kind: 
 	reply(player, ok, message)
 end)
 
+researchOrder.OnServerEvent:Connect(function(player: Player)
+	local slot = slotOf(player)
+	if not slot or matchPhase ~= "playing" then
+		return
+	end
+	local ok, message = Research.advance(state, slot)
+	reply(player, ok, message)
+end)
+
 diplomacyOrder.OnServerEvent:Connect(function(player: Player, action: any, targetSlot: any)
 	local slot = slotOf(player)
 	if not slot or matchPhase ~= "playing" then
@@ -431,6 +442,8 @@ local function replicate()
 			tiles = ps.tiles,
 			gold = math.floor(ps.gold),
 			maxTroops = math.floor(state:maxTroops(ps)),
+			era = ps.era,
+			eraProgress = Research.progress(state, slot),
 		}
 	end
 	stateDelta:FireAllClients(ownerDelta, stats)
@@ -481,7 +494,6 @@ local function replicate()
 		matchUpdate:FireAllClients({
 			phase = matchPhase,
 			timeLeft = math.max(0, matchEndsAt - os.clock()),
-			nukesUnlocked = Buildings.nukesUnlocked(state),
 			winner = winnerSlot,
 			winnerName = winnerName,
 			restartIn = math.max(0, restartAt - os.clock()),
