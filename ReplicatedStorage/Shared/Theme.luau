@@ -20,7 +20,7 @@ local Theme = {}
 Theme.color = {
 	-- Fonds, du plus profond au plus clair
 	void = Color3.fromRGB(8, 11, 18), -- derriere la carte
-	surface = Color3.fromRGB(16, 20, 29), -- panneaux
+	surface = Color3.fromRGB(13, 17, 25), -- panneaux
 	surfaceRaised = Color3.fromRGB(26, 32, 45), -- boutons, lignes
 	surfaceHover = Color3.fromRGB(38, 46, 63),
 
@@ -49,17 +49,19 @@ Theme.color = {
 -- Echelle de 4 px. Utiliser exclusivement ces valeurs.
 
 Theme.space = {
-	xs = 4,
-	sm = 8,
-	md = 12,
-	lg = 18,
-	xl = 26,
+	xs = 3,
+	sm = 6,
+	md = 9,
+	lg = 14,
+	xl = 20,
 }
 
+-- Rayons plus serres : un grand arrondi sur un petit panneau fait "application
+-- mobile gratuite". Les interfaces de strategie sont anguleuses.
 Theme.radius = {
-	sm = 6,
-	md = 10,
-	lg = 14,
+	sm = 4,
+	md = 6,
+	lg = 8,
 	pill = 999,
 }
 
@@ -74,12 +76,21 @@ Theme.font = {
 	regular = Font.fromEnum(Enum.Font.Gotham),
 }
 
+--[[
+	Echelle typographique resserree.
+
+	Les tailles precedentes (hero 34, body 14) donnaient une interface qui
+	mangeait un tiers de l'ecran et faisait, de l'aveu du testeur, "cheap".
+	Une interface de strategie doit etre dense : beaucoup d'information, petits
+	caracteres, hierarchie portee par le contraste et la graisse plutot que par
+	la taille.
+]]
 Theme.textSize = {
-	hero = 34, -- compteur de troupes
-	title = 18,
-	body = 14,
-	small = 12,
-	tiny = 11,
+	hero = 24, -- compteur de troupes
+	title = 14,
+	body = 12,
+	small = 11,
+	tiny = 10,
 }
 
 --=============================================================================
@@ -143,10 +154,12 @@ function Theme.panel(name: string, parent: GuiObject): Frame
 	local frame = Instance.new("Frame")
 	frame.Name = name
 	frame.BackgroundColor3 = Theme.color.surface
-	frame.BackgroundTransparency = 0.06
+	-- Panneaux nettement plus translucides : la carte doit rester lisible
+	-- derriere l'interface, sinon elle devient un cadre au lieu d'un jeu.
+	frame.BackgroundTransparency = 0.18
 	frame.BorderSizePixel = 0
 	frame.Parent = parent
-	Theme.corner(frame, Theme.radius.lg)
+	Theme.corner(frame, Theme.radius.md)
 	Theme.stroke(frame, Theme.color.line, 1)
 	return frame
 end

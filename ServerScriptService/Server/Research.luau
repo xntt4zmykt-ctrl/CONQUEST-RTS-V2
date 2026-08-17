@@ -17,6 +17,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Config = require(ReplicatedStorage.Shared.Config)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
@@ -24,6 +25,24 @@ local GameState = require(script.Parent.GameState)
 type GameState = GameState.GameState
 
 local Research = {}
+
+--[[
+	Cout reel de la prochaine ere pour un joueur, remise des laboratoires
+	comprise. C'est ce que la Science apporte : elle ne debloque rien par
+	elle-meme, elle raccourcit la course technologique — donc investir tot dans
+	des laboratoires est un pari sur la duree de la partie.
+]]
+function Research.eraCost(state: GameState, slot: number): number
+	local ps = state.players[slot]
+	if not ps or ps.era >= Eras.MAX_ID then
+		return 0
+	end
+
+	local labs = ps.buildingCounts[Config.BUILDING.LAB] or 0
+	local discount = math.min(labs * Config.LAB_ERA_DISCOUNT, Config.LAB_DISCOUNT_CAP)
+	local modeMultiplier = if state.mode then state.mode.eraCostMultiplier else 1
+	return math.floor(Eras.get(ps.era + 1).cost * (1 - discount) * modeMultiplier)
+end
 
 --[[
 	Renvoie (possible, raison). La raison est affichee telle quelle au joueur,
@@ -55,8 +74,9 @@ function Research.canAdvance(state: GameState, slot: number): (boolean, string?)
 		end
 	end
 
-	if ps.gold < next.cost then
-		return false, `Il te faut {next.cost} d'or ({math.floor(ps.gold)} actuellement).`
+	local cost = Research.eraCost(state, slot)
+	if ps.gold < cost then
+		return false, `Il te faut {cost} d'or ({math.floor(ps.gold)} actuellement).`
 	end
 
 	return true, nil
@@ -74,7 +94,7 @@ function Research.advance(state: GameState, slot: number): (boolean, string?)
 	end
 
 	local next = Eras.get(ps.era + 1)
-	ps.gold -= next.cost
+	ps.gold -= Research.eraCost(state, slot)
 	ps.era += 1
 
 	-- Franchir le seuil atomique est un evenement public : les voisins doivent
@@ -115,7 +135,7 @@ function Research.goldReserveFor(state: GameState, slot: number): number
 		end
 	end
 
-	return next.cost
+	return Research.eraCost(state, slot)
 end
 
 --[[
@@ -130,8 +150,9 @@ function Research.progress(state: GameState, slot: number): number
 	end
 
 	local next = Eras.get(ps.era + 1)
+	local cost = Research.eraCost(state, slot)
 	local ratios = {
-		if next.cost > 0 then ps.gold / next.cost else 1,
+		if cost > 0 then ps.gold / cost else 1,
 		if next.requiredTiles > 0 then ps.tiles / next.requiredTiles else 1,
 	}
 

@@ -21,6 +21,7 @@ local Diplomacy = __require("Diplomacy")
 local Bots = __require("Bots")
 local GreedyMesh = __require("GreedyMesh")
 local WorldBuilder = __require("WorldBuilder")
+local GameModes = __require("GameModes")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -157,6 +158,7 @@ end
 ]]
 local function runMatch(seed, ticks)
 	local state = GameState.new(seed)
+	state.mode = GameModes.get("classic")
 	local rng = Random.new(seed)
 
 	local landRatio = state.landCount / Config.TILE_COUNT

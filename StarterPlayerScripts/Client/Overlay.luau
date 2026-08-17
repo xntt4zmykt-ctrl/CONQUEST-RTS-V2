@@ -42,6 +42,10 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	self.buildings = {}
 	self.units = {}
 	self.seen = {}
+	-- Les batiments deja presents a l'arrivee ne s'animent pas : voir trente
+	-- chantiers demarrer en meme temps a la connexion serait absurde. Seuls
+	-- ceux poses apres ce delai sont mis en scene.
+	self.animateFrom = os.clock() + 3
 
 	local root = Instance.new("Folder")
 	root.Name = "Entities"
@@ -164,7 +168,14 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			existing:Destroy()
 		end
 
-		self.buildings[entry.index] = makeBuilding(self.root, entry.index, entry.kind, entry.slot, self.terrain)
+		local model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, self.terrain)
+		self.buildings[entry.index] = model
+
+		if os.clock() >= self.animateFrom then
+			local base = WorldSpace.indexToWorld(entry.index)
+			local ground = WorldSpace.surfaceHeight(self.terrain, entry.index)
+			BuildingModels.playConstruction(model, Vector3.new(base.X, ground + 0.4, base.Z))
+		end
 	end
 end
 

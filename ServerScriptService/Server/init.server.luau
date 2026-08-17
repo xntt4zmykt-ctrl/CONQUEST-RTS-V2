@@ -16,6 +16,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
+local Nations = require(ReplicatedStorage.Shared.Nations)
+local GameModes = require(ReplicatedStorage.Shared.GameModes)
 local WorldSpace = require(ReplicatedStorage.Shared.WorldSpace)
 
 -- init.server.luau devient le Script "Server" ; les modules voisins en sont
@@ -55,6 +57,7 @@ local boatOrder = Remotes.get("BoatOrder")
 local nukeOrder = Remotes.get("NukeOrder")
 local diplomacyOrder = Remotes.get("DiplomacyOrder")
 local researchOrder = Remotes.get("ResearchOrder")
+local joinRequest = Remotes.get("JoinRequest")
 
 --=============================================================================
 -- Etat du serveur
@@ -70,6 +73,15 @@ local restartAt = 0
 local doctrineLockAt = 0
 local winnerSlot: number? = nil
 local winnerName: string? = nil
+
+-- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
+-- se reconnait a son pays, pas a son pseudo Roblox.
+local nationByPlayer: { [Player]: number } = {}
+
+-- Mode demande au menu. Il ne peut pas s'appliquer en cours de partie, donc il
+-- attend la suivante — le menu le dit explicitement au joueur.
+local pendingMode = GameModes.DEFAULT
+local activeMode = GameModes.get(GameModes.DEFAULT)
 
 --=============================================================================
 -- Helpers de replication
@@ -156,24 +168,32 @@ end
 
 local function startMatch()
 	local seed = Random.new():NextInteger(1, 2 ^ 24)
+	activeMode = GameModes.get(pendingMode)
+
 	state = GameState.new(seed)
+	state.mode = activeMode
 	rng = Random.new(seed)
 
 	matchPhase = "playing"
 	winnerSlot = nil
 	winnerName = nil
-	matchEndsAt = os.clock() + Config.MATCH_DURATION
+	matchEndsAt = os.clock() + activeMode.duration
 	doctrineLockAt = os.clock() + 90
 
-	Bots.spawnAll(state, rng)
+	Bots.spawnAll(state, rng, activeMode.botCount)
 
-	-- Les joueurs deja connectes sont reintegres dans la nouvelle partie.
-	table.clear(slotByPlayer)
-	for _, player in Players:GetPlayers() do
-		local profile = Persistence.load(player.UserId)
-		local ps = state:addPlayer(player, player.DisplayName, rng, profile.betrayals)
-		if ps then
-			slotByPlayer[player] = ps.slot
+	-- Seuls les joueurs ayant deja franchi le menu sont reintegres : les autres
+	-- entreront quand ils auront choisi leur nation.
+	local previous = slotByPlayer
+	slotByPlayer = {}
+	for player in previous do
+		if player.Parent then
+			local profile = Persistence.load(player.UserId)
+			local nation = Nations.get(nationByPlayer[player] or 1)
+			local ps = state:addPlayer(player, nation.name, rng, profile.betrayals)
+			if ps then
+				slotByPlayer[player] = ps.slot
+			end
 		end
 	end
 
@@ -253,10 +273,21 @@ end
 -- Cycle de vie des joueurs
 --=============================================================================
 
-local function onPlayerAdded(player: Player)
+--[[
+	Deploiement depuis le menu principal. C'est ici, et non a la connexion, que
+	le joueur entre reellement en partie : il doit d'abord avoir choisi sa
+	nation.
+]]
+local function deployPlayer(player: Player, nationId: number)
+	if slotByPlayer[player] then
+		return -- deja en jeu
+	end
+
+	nationByPlayer[player] = nationId
+	local nation = Nations.get(nationId)
 	local profile = Persistence.load(player.UserId)
 
-	local ps = state:addPlayer(player, player.DisplayName, rng, profile.betrayals)
+	local ps = state:addPlayer(player, nation.name, rng, profile.betrayals)
 	if not ps then
 		warn(`[{Config.GAME_NAME}] aucun emplacement de spawn libre pour {player.Name}`)
 		return
@@ -267,6 +298,16 @@ local function onPlayerAdded(player: Player)
 	spawnCharacterAt(player, ps.capitalTile)
 	broadcastRoster()
 end
+
+joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
+	if typeof(nationId) ~= "number" then
+		return
+	end
+	if typeof(modeId) == "string" then
+		pendingMode = GameModes.get(modeId).id
+	end
+	deployPlayer(player, math.clamp(math.floor(nationId), 1, #Nations.LIST))
+end)
 
 local function onPlayerRemoving(player: Player)
 	local slot = slotByPlayer[player]
@@ -279,6 +320,7 @@ local function onPlayerRemoving(player: Player)
 		slotByPlayer[player] = nil
 		broadcastRoster()
 	end
+	nationByPlayer[player] = nil
 	Persistence.release(player.UserId)
 end
 
@@ -538,11 +580,9 @@ Players.CharacterAutoLoads = false
 
 startMatch()
 
-Players.PlayerAdded:Connect(onPlayerAdded)
+-- Aucun branchement sur PlayerAdded : l'entree en partie passe uniquement par
+-- JoinRequest, c'est-a-dire par le menu principal.
 Players.PlayerRemoving:Connect(onPlayerRemoving)
-for _, player in Players:GetPlayers() do
-	task.spawn(onPlayerAdded, player)
-end
 
 -- Pas fixe : la simulation reste identique quel que soit le FPS serveur, ce qui
 -- est indispensable pour que l'equilibrage soit stable.

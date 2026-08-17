@@ -39,7 +39,7 @@ HUD.__index = HUD
 -- Le fil de notifications ne doit jamais depasser cette hauteur : au-dela il
 -- recouvre la carte, qui est l'element le plus important de l'ecran.
 local MAX_FEED_ENTRIES = 5
-local FEED_ENTRY_HEIGHT = 26
+local FEED_ENTRY_HEIGHT = 21
 local LEADER_ROWS = 10
 
 export type Mode = "attack" | "build" | "boat" | "nuke"
@@ -127,6 +127,7 @@ function HUD.new(parent: ScreenGui): HUD
 	self.ranked = {}
 	self.feedEntries = {}
 	self.feedCounter = 0
+	self.buildClass = BuildingDefs.CLASSES[1].id
 
 	local root = Instance.new("Frame")
 	root.Name = "HUD"
@@ -158,7 +159,7 @@ end
 function HUD.buildIdentity(self: HUD)
 	local card = Theme.panel("Identity", self.root)
 	card.Position = UDim2.fromOffset(S.md, S.md)
-	card.Size = UDim2.fromOffset(232, 62)
+	card.Size = UDim2.fromOffset(198, 50)
 
 	-- Bandeau de couleur : le rappel permanent de "quelle couleur je suis" sur
 	-- la carte. C'est l'information d'orientation la plus fondamentale.
@@ -200,8 +201,8 @@ end
 ]]
 function HUD.buildEraPanel(self: HUD)
 	local panel = Theme.panel("Era", self.root)
-	panel.Position = UDim2.fromOffset(S.md, 62 + S.md * 2)
-	panel.Size = UDim2.fromOffset(232, 92)
+	panel.Position = UDim2.fromOffset(S.md, 50 + S.md * 2)
+	panel.Size = UDim2.fromOffset(198, 76)
 
 	local name = Theme.label(panel, "", T.body, C.text)
 	name.Position = UDim2.fromOffset(S.md, S.sm)
@@ -250,17 +251,17 @@ function HUD.buildMatchBar(self: HUD)
 	local bar = Theme.panel("MatchBar", self.root)
 	bar.AnchorPoint = Vector2.new(0.5, 0)
 	bar.Position = UDim2.new(0.5, 0, 0, S.md)
-	bar.Size = UDim2.fromOffset(196, 46)
+	bar.Size = UDim2.fromOffset(164, 38)
 
-	local timer = Theme.label(bar, "25:00", 22, C.text)
+	local timer = Theme.label(bar, "25:00", 18, C.text)
 	timer.Position = UDim2.fromOffset(0, 6)
-	timer.Size = UDim2.new(1, 0, 0, 24)
+	timer.Size = UDim2.new(1, 0, 0, 20)
 	timer.FontFace = F.display
 	timer.TextXAlignment = Enum.TextXAlignment.Center
 	self.timerLabel = timer
 
 	local phase = Theme.label(bar, "", T.tiny, C.textMuted)
-	phase.Position = UDim2.fromOffset(0, 28)
+	phase.Position = UDim2.fromOffset(0, 23)
 	phase.Size = UDim2.new(1, 0, 0, 14)
 	phase.FontFace = F.medium
 	phase.TextXAlignment = Enum.TextXAlignment.Center
@@ -275,7 +276,7 @@ function HUD.buildLeaderboard(self: HUD)
 	local board = Theme.panel("Leaderboard", self.root)
 	board.AnchorPoint = Vector2.new(1, 0)
 	board.Position = UDim2.new(1, -S.md, 0, S.md)
-	board.Size = UDim2.fromOffset(244, 30 + LEADER_ROWS * 22)
+	board.Size = UDim2.fromOffset(206, 24 + LEADER_ROWS * 17)
 
 	local title = Theme.label(board, "DOMINATION", T.tiny, C.textFaint)
 	title.Position = UDim2.fromOffset(S.md, S.sm)
@@ -292,7 +293,7 @@ function HUD.buildLeaderboard(self: HUD)
 		local row = Instance.new("TextButton")
 		row.LayoutOrder = i
 		row.BackgroundTransparency = 1
-		row.Size = UDim2.new(1, 0, 0, 20)
+		row.Size = UDim2.new(1, 0, 0, 16)
 		row.Text = ""
 		row.AutoButtonColor = false
 		row.Parent = list
@@ -315,7 +316,7 @@ function HUD.buildLeaderboard(self: HUD)
 		local value = Theme.label(row, "", T.small, C.textFaint)
 		value.AnchorPoint = Vector2.new(1, 0)
 		value.Position = UDim2.new(1, -S.sm, 0, 0)
-		value.Size = UDim2.fromOffset(56, 20)
+		value.Size = UDim2.fromOffset(48, 16)
 		value.TextXAlignment = Enum.TextXAlignment.Right
 		value.FontFace = F.medium
 
@@ -344,8 +345,8 @@ end
 function HUD.buildDiplomacyPanel(self: HUD)
 	local p = Theme.panel("Diplomacy", self.root)
 	p.AnchorPoint = Vector2.new(1, 0)
-	p.Position = UDim2.new(1, -S.md, 0, 30 + LEADER_ROWS * 22 + S.md * 2)
-	p.Size = UDim2.fromOffset(244, 186)
+	p.Position = UDim2.new(1, -S.md, 0, 24 + LEADER_ROWS * 17 + S.md * 2)
+	p.Size = UDim2.fromOffset(206, 152)
 	p.Visible = false
 	self.diploPanel = p
 
@@ -379,7 +380,7 @@ function HUD.buildDiplomacyPanel(self: HUD)
 	for _, action in actions do
 		local b = button(list, action.text, T.small)
 		b.LayoutOrder = action.order
-		b.Size = UDim2.new(1, 0, 0, 28)
+		b.Size = UDim2.new(1, 0, 0, 23)
 		b.Visible = false
 		b.Activated:Connect(function()
 			local target = self.selectedSlot
@@ -399,21 +400,21 @@ function HUD.buildCommandBar(self: HUD)
 	local bar = Theme.panel("CommandBar", self.root)
 	bar.AnchorPoint = Vector2.new(0.5, 1)
 	bar.Position = UDim2.new(0.5, 0, 1, -S.md)
-	bar.Size = UDim2.fromOffset(548, 164)
+	bar.Size = UDim2.fromOffset(452, 132)
 
 	-- Ligne 1 : le compteur de troupes est le plus gros chiffre de l'ecran,
 	-- parce que c'est la seule valeur consultee en permanence.
 	local troops = Theme.label(bar, "0", T.hero, C.text)
 	troops.Position = UDim2.fromOffset(S.lg, 6)
-	troops.Size = UDim2.fromOffset(240, 38)
+	troops.Size = UDim2.fromOffset(200, 30)
 	troops.FontFace = F.display
 	self.troopsLabel = troops
 
 	-- Jauge de remplissage : dit d'un coup d'oeil s'il faut attendre que la
 	-- population monte ou si on plafonne et qu'il faut depenser.
 	local track = Instance.new("Frame")
-	track.Size = UDim2.fromOffset(240, 4)
-	track.Position = UDim2.fromOffset(S.lg, 44)
+	track.Size = UDim2.fromOffset(200, 3)
+	track.Position = UDim2.fromOffset(S.lg, 36)
 	track.BackgroundColor3 = C.surfaceRaised
 	track.BorderSizePixel = 0
 	track.Parent = bar
@@ -427,18 +428,18 @@ function HUD.buildCommandBar(self: HUD)
 	Theme.corner(fill, Theme.radius.pill)
 	self.troopsFill = fill
 
-	local gold = Theme.label(bar, "0", 20, C.gold)
+	local gold = Theme.label(bar, "0", 16, C.gold)
 	gold.AnchorPoint = Vector2.new(1, 0)
 	gold.Position = UDim2.new(1, -S.lg, 0, 8)
-	gold.Size = UDim2.fromOffset(180, 24)
+	gold.Size = UDim2.fromOffset(150, 20)
 	gold.TextXAlignment = Enum.TextXAlignment.Right
 	gold.FontFace = F.display
 	self.goldLabel = gold
 
 	local tiles = Theme.label(bar, "0 territoires", T.small, C.textMuted)
 	tiles.AnchorPoint = Vector2.new(1, 0)
-	tiles.Position = UDim2.new(1, -S.lg, 0, 32)
-	tiles.Size = UDim2.fromOffset(180, 18)
+	tiles.Position = UDim2.new(1, -S.lg, 0, 26)
+	tiles.Size = UDim2.fromOffset(150, 14)
 	tiles.TextXAlignment = Enum.TextXAlignment.Right
 	tiles.FontFace = F.medium
 	self.tilesLabel = tiles
@@ -447,7 +448,7 @@ function HUD.buildCommandBar(self: HUD)
 	self:buildModeRow(bar)
 
 	local hint = Theme.label(bar, "", T.tiny, C.textFaint)
-	hint.Position = UDim2.fromOffset(S.lg, 138)
+	hint.Position = UDim2.fromOffset(S.lg, 112)
 	hint.Size = UDim2.new(1, -S.lg * 2, 0, 16)
 	hint.FontFace = F.medium
 	hint.TextTruncate = Enum.TextTruncate.AtEnd
@@ -464,12 +465,12 @@ end
 ]]
 function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
 	local label = Theme.label(parent, "ENGAGEMENT", T.tiny, C.textFaint)
-	label.Position = UDim2.fromOffset(S.lg, 56)
+	label.Position = UDim2.fromOffset(S.lg, 46)
 	label.Size = UDim2.fromOffset(120, 14)
 
 	local readout = Theme.label(parent, "", T.tiny, C.textMuted)
 	readout.AnchorPoint = Vector2.new(1, 0)
-	readout.Position = UDim2.new(1, -S.lg, 0, 56)
+	readout.Position = UDim2.new(1, -S.lg, 0, 46)
 	readout.Size = UDim2.fromOffset(220, 14)
 	readout.TextXAlignment = Enum.TextXAlignment.Right
 	readout.FontFace = F.medium
@@ -479,8 +480,8 @@ function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
 	track.Name = "EngagementTrack"
 	track.Text = ""
 	track.AutoButtonColor = false
-	track.Position = UDim2.fromOffset(S.lg, 74)
-	track.Size = UDim2.new(1, -S.lg * 2, 0, 14)
+	track.Position = UDim2.fromOffset(S.lg, 62)
+	track.Size = UDim2.new(1, -S.lg * 2, 0, 11)
 	track.BackgroundColor3 = C.surfaceRaised
 	track.BorderSizePixel = 0
 	track.Parent = parent
@@ -547,8 +548,8 @@ end
 function HUD.buildModeRow(self: HUD, parent: GuiObject)
 	local row = Instance.new("Frame")
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(S.lg, 98)
-	row.Size = UDim2.new(1, -S.lg * 2, 0, 34)
+	row.Position = UDim2.fromOffset(S.lg, 80)
+	row.Size = UDim2.new(1, -S.lg * 2, 0, 28)
 	row.Parent = parent
 	Theme.list(row, Enum.FillDirection.Horizontal, S.sm)
 
@@ -605,62 +606,145 @@ local function paletteEntry(parent: GuiObject, order: number, symbol: string, na
 	return b
 end
 
+--[[
+	Le menu de construction est organise en onglets par classe : Economie,
+	Militaire, Science.
+
+	Sans classement, les six batiments formaient une liste plate ou un joueur
+	debutant ne pouvait pas deviner lequel servait a quoi. Les onglets forcent
+	une reponse a "je veux quoi maintenant" — de l'argent, de la force, ou de
+	l'avance technologique — avant de choisir un batiment precis.
+]]
 function HUD.buildPalettes(self: HUD)
-	--- Construction ---------------------------------------------------------
 	local build = Theme.panel("BuildPalette", self.root)
 	build.AnchorPoint = Vector2.new(0, 1)
 	build.Position = UDim2.new(0, S.md, 1, -S.md)
-	build.Size = UDim2.fromOffset(208, 34 + #BuildingDefs.BUILDABLE * 42)
+	build.Size = UDim2.fromOffset(196, 190)
 	build.Visible = false
 	self.buildPalette = build
 
-	local buildTitle = Theme.label(build, "CONSTRUIRE", T.tiny, C.textFaint)
-	buildTitle.Position = UDim2.fromOffset(S.md, S.sm)
-	buildTitle.Size = UDim2.new(1, -S.md * 2, 0, 14)
+	-- Onglets de classe
+	local tabs = Instance.new("Frame")
+	tabs.BackgroundTransparency = 1
+	tabs.Position = UDim2.fromOffset(S.sm, S.sm)
+	tabs.Size = UDim2.new(1, -S.sm * 2, 0, 22)
+	tabs.Parent = build
+	Theme.list(tabs, Enum.FillDirection.Horizontal, S.xs)
 
-	local buildList = Instance.new("Frame")
-	buildList.BackgroundTransparency = 1
-	buildList.Position = UDim2.fromOffset(S.sm, 28)
-	buildList.Size = UDim2.new(1, -S.sm * 2, 1, -36)
-	buildList.Parent = build
-	Theme.list(buildList, Enum.FillDirection.Vertical, S.xs)
+	self.classTabs = {}
+	self.classPages = {}
 
-	for i, def in BuildingDefs.BUILDABLE do
-		local b = paletteEntry(buildList, i, def.symbol, def.name, def.cost)
-		b.Activated:Connect(function()
-			self.buildKind = def.id
-			self:setMode("build")
+	local pages = Instance.new("Frame")
+	pages.BackgroundTransparency = 1
+	pages.Position = UDim2.fromOffset(S.sm, 34)
+	pages.Size = UDim2.new(1, -S.sm * 2, 1, -42)
+	pages.Parent = build
+
+	for i, class in BuildingDefs.CLASSES do
+		local tab = button(tabs, class.symbol, T.small)
+		tab.LayoutOrder = i
+		tab.Size = UDim2.new(1 / #BuildingDefs.CLASSES, -2, 1, 0)
+		tab.Activated:Connect(function()
+			self:setBuildClass(class.id)
 		end)
-		self.buildButtons[def.id] = b
+		self.classTabs[class.id] = tab
+
+		local page = Instance.new("Frame")
+		page.Name = class.id
+		page.BackgroundTransparency = 1
+		page.Size = UDim2.fromScale(1, 1)
+		page.Visible = false
+		page.Parent = pages
+		Theme.list(page, Enum.FillDirection.Vertical, S.xs)
+		self.classPages[class.id] = page
+
+		for order, def in BuildingDefs.BY_CLASS[class.id] do
+			local b = button(page, "", T.small)
+			b.LayoutOrder = order
+			b.Size = UDim2.new(1, 0, 0, 34)
+
+			local glyph = Theme.label(b, def.symbol, 15, C.text)
+			glyph.Position = UDim2.fromOffset(S.sm, 0)
+			glyph.Size = UDim2.fromOffset(18, 34)
+			glyph.TextXAlignment = Enum.TextXAlignment.Center
+
+			local title = Theme.label(b, def.name, T.small, C.textMuted)
+			title.Position = UDim2.fromOffset(S.sm + 22, 4)
+			title.Size = UDim2.new(1, -S.sm - 22, 0, 14)
+
+			local price = Theme.label(b, `{def.cost} or`, T.tiny, C.gold)
+			price.Position = UDim2.fromOffset(S.sm + 22, 17)
+			price.Size = UDim2.new(1, -S.sm - 22, 0, 12)
+			price.FontFace = F.medium
+
+			b.Activated:Connect(function()
+				self.buildKind = def.id
+				self:setMode("build")
+				if self.onBuildKindChanged then
+					self.onBuildKindChanged(def.id)
+				end
+			end)
+
+			self.buildButtons[def.id] = b
+		end
 	end
 
 	--- Arsenal --------------------------------------------------------------
 	local nuke = Theme.panel("NukePalette", self.root)
 	nuke.AnchorPoint = Vector2.new(0, 1)
 	nuke.Position = UDim2.new(0, S.md, 1, -S.md)
-	nuke.Size = UDim2.fromOffset(208, 34 + 2 * 42)
+	nuke.Size = UDim2.fromOffset(196, 106)
 	nuke.Visible = false
 	self.nukePalette = nuke
 
 	local nukeTitle = Theme.label(nuke, "ARSENAL", T.tiny, C.textFaint)
 	nukeTitle.Position = UDim2.fromOffset(S.md, S.sm)
-	nukeTitle.Size = UDim2.new(1, -S.md * 2, 0, 14)
+	nukeTitle.Size = UDim2.new(1, -S.md * 2, 0, 12)
 
 	local nukeList = Instance.new("Frame")
 	nukeList.BackgroundTransparency = 1
-	nukeList.Position = UDim2.fromOffset(S.sm, 28)
-	nukeList.Size = UDim2.new(1, -S.sm * 2, 1, -36)
+	nukeList.Position = UDim2.fromOffset(S.sm, 24)
+	nukeList.Size = UDim2.new(1, -S.sm * 2, 1, -32)
 	nukeList.Parent = nuke
 	Theme.list(nukeList, Enum.FillDirection.Vertical, S.xs)
 
 	for kind = 1, 2 do
 		local stats = Config.NUKE_STATS[kind]
-		local b = paletteEntry(nukeList, kind, "\u{2622}", stats.name, stats.cost)
+		local b = button(nukeList, "", T.small)
+		b.LayoutOrder = kind
+		b.Size = UDim2.new(1, 0, 0, 34)
+
+		local glyph = Theme.label(b, "\u{2622}", 15, C.nuclear)
+		glyph.Position = UDim2.fromOffset(S.sm, 0)
+		glyph.Size = UDim2.fromOffset(18, 34)
+		glyph.TextXAlignment = Enum.TextXAlignment.Center
+
+		local title = Theme.label(b, stats.name, T.small, C.textMuted)
+		title.Position = UDim2.fromOffset(S.sm + 22, 4)
+		title.Size = UDim2.new(1, -S.sm - 22, 0, 14)
+
+		local price = Theme.label(b, `{stats.cost} or`, T.tiny, C.gold)
+		price.Position = UDim2.fromOffset(S.sm + 22, 17)
+		price.Size = UDim2.new(1, -S.sm - 22, 0, 12)
+		price.FontFace = F.medium
+
 		b.Activated:Connect(function()
 			self.nukeKind = kind
 			self:setMode("nuke")
 		end)
 		self.nukeButtons[kind] = b
+	end
+
+	self:setBuildClass(BuildingDefs.CLASSES[1].id)
+end
+
+function HUD.setBuildClass(self: HUD, classId: string)
+	self.buildClass = classId
+	for id, tab in self.classTabs do
+		setSelected(tab, id == classId)
+	end
+	for id, page in self.classPages do
+		page.Visible = id == classId
 	end
 end
 
@@ -672,10 +756,10 @@ function HUD.buildFeed(self: HUD)
 	local feed = Instance.new("Frame")
 	feed.Name = "Feed"
 	feed.AnchorPoint = Vector2.new(0.5, 0)
-	feed.Position = UDim2.new(0.5, 0, 0, 66)
+	feed.Position = UDim2.new(0.5, 0, 0, 56)
 	-- Hauteur bornee au nombre maximal de messages, et decoupage actif : le
 	-- fil ne doit jamais pouvoir grandir jusqu'a manger la carte.
-	feed.Size = UDim2.fromOffset(440, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
+	feed.Size = UDim2.fromOffset(380, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
 	feed.BackgroundTransparency = 1
 	feed.ClipsDescendants = true
 	feed.Parent = self.root

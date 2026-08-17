@@ -19,6 +19,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
@@ -187,6 +188,25 @@ local function buildSam(model: Model, color: Color3)
 	light.Material = Enum.Material.Neon
 end
 
+--[[
+	Laboratoire : un dome de verre sur socle, flanque d'une antenne. Le dome est
+	la seule forme courbe du jeu — c'est ce qui le distingue instantanement des
+	batiments militaires, tous anguleux.
+]]
+local function buildLab(model: Model, color: Color3)
+	block(model, Vector3.new(7, 1.2, 7), Vector3.new(0, 0.6, 0), CONCRETE, Enum.Material.Concrete)
+	block(model, Vector3.new(5, 3, 5), Vector3.new(0, 2.7, 0), color)
+
+	local dome = block(model, Vector3.new(5, 5, 5), Vector3.new(0, 5, 0), GLASS, Enum.Material.Glass)
+	dome.Name = "Dome"
+	dome.Shape = Enum.PartType.Ball
+	dome.Transparency = 0.35
+
+	block(model, Vector3.new(0.4, 6, 0.4), Vector3.new(2.8, 6, -2.8), DARK, Enum.Material.Metal)
+	local tip = block(model, Vector3.new(0.9, 0.9, 0.9), Vector3.new(2.8, 9.2, -2.8), Color3.fromRGB(140, 220, 255))
+	tip.Material = Enum.Material.Neon
+end
+
 local BUILDERS: { [number]: (Model, Color3) -> () } = {
 	[B.CAPITAL] = buildCapital,
 	[B.CITY] = buildCity,
@@ -194,6 +214,7 @@ local BUILDERS: { [number]: (Model, Color3) -> () } = {
 	[B.DEFENSE] = buildDefense,
 	[B.SILO] = buildSilo,
 	[B.SAM] = buildSam,
+	[B.LAB] = buildLab,
 }
 
 -- Hauteur approximative de chaque modele : sert a placer l'etiquette juste
@@ -205,6 +226,7 @@ local HEIGHTS: { [number]: number } = {
 	[B.DEFENSE] = 5.5,
 	[B.SILO] = 13,
 	[B.SAM] = 9,
+	[B.LAB] = 10,
 }
 
 --=============================================================================
@@ -235,6 +257,81 @@ function BuildingModels.create(kind: number, color: Color3, position: Vector3): 
 	end
 
 	return model
+end
+
+--[[
+	Animation de construction.
+
+	Le batiment sort de terre en montant, chaque bloc avec un leger decalage :
+	c'est ce decalage qui donne l'impression d'un chantier plutot que d'un
+	objet qui apparait. Une bague de poussiere marque l'emprise au sol pendant
+	toute la duree.
+
+	Duree volontairement courte (~2,5 s) : c'est une recompense, pas une
+	attente. Le batiment est deja fonctionnel cote serveur des l'ordre valide,
+	l'animation n'est que la mise en scene de ce qui a deja eu lieu.
+]]
+function BuildingModels.playConstruction(model: Model, ground: Vector3, duration: number?)
+	local total = duration or 2.5
+
+	local parts: { BasePart } = {}
+	for _, child in model:GetChildren() do
+		if child:IsA("BasePart") then
+			table.insert(parts, child)
+		end
+	end
+
+	-- Trie du plus bas au plus haut : un batiment se construit par le bas.
+	table.sort(parts, function(a, b)
+		return a.Position.Y < b.Position.Y
+	end)
+
+	for i, part in parts do
+		local final = part.CFrame
+		local drop = part.Size.Y + 4
+
+		part.CFrame = final - Vector3.new(0, drop, 0)
+		part.Transparency = 1
+
+		local delay = (i - 1) / #parts * total * 0.55
+		local rise = TweenInfo.new(total * 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delay)
+
+		TweenService:Create(part, rise, { CFrame = final }):Play()
+		-- La transparence revient plus vite que la position : le bloc est
+		-- visible pendant sa montee, sinon il apparait deja en place.
+		TweenService:Create(
+			part,
+			TweenInfo.new(total * 0.2, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, delay),
+			{ Transparency = part.Name == "Dome" and 0.35 or 0 }
+		):Play()
+	end
+
+	-- Bague de chantier au sol
+	local ring = Instance.new("Part")
+	ring.Name = "BuildRing"
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.CastShadow = false
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = Color3.fromRGB(255, 214, 130)
+	ring.Transparency = 0.4
+	ring.Size = Vector3.new(0.4, 3, 3)
+	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = model
+
+	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.4, 16, 16),
+		Transparency = 1,
+	}):Play()
+
+	task.delay(total + 0.2, function()
+		if ring.Parent then
+			ring:Destroy()
+		end
+	end)
 end
 
 function BuildingModels.heightOf(kind: number): number

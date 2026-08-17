@@ -261,20 +261,48 @@ end
 --[[
 	Applique un delta serveur ([u32 index][u8 slot] repete) et marque les chunks
 	concernes pour reconstruction.
+
+	Renvoie aussi les **conquetes**, classees par camp : ce sont elles qui
+	alimentent les effets visuels. On distingue la colonisation de terrain
+	neutre — aucun effet, prendre du vide n'est pas un fait d'armes — d'une
+	prise sur une autre faction.
 ]]
-function WorldRenderer.applyDelta(self: WorldRenderer, delta: buffer): number
+function WorldRenderer.applyDelta(
+	self: WorldRenderer,
+	delta: buffer,
+	mySlot: number
+): (number, { number }, { number }, { number })
 	local count = buffer.len(delta) // 5
+
+	local gains: { number } = {} -- arrachees a une faction par le joueur local
+	local losses: { number } = {} -- perdues par le joueur local
+	local others: { number } = {} -- prises entre tierces factions
 
 	for i = 0, count - 1 do
 		local offset = i * 5
 		local index = buffer.readu32(delta, offset)
-		if index < W * H then
-			buffer.writeu8(self.owner, index, buffer.readu8(delta, offset + 4))
-			self:markTileDirty(index)
+		if index >= W * H then
+			continue
+		end
+
+		local previous = buffer.readu8(self.owner, index)
+		local nextOwner = buffer.readu8(delta, offset + 4)
+
+		buffer.writeu8(self.owner, index, nextOwner)
+		self:markTileDirty(index)
+
+		if previous ~= NEUTRAL then
+			if nextOwner == mySlot then
+				table.insert(gains, index)
+			elseif previous == mySlot then
+				table.insert(losses, index)
+			else
+				table.insert(others, index)
+			end
 		end
 	end
 
-	return count
+	return count, gains, losses, others
 end
 
 function WorldRenderer.ownerAt(self: WorldRenderer, index: number): number

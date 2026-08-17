@@ -50,6 +50,9 @@ s'allient et se trahissent. La partie est jouable et observable sans autre joueu
 | `F` | Basculer vue stratégique ↔ avatar |
 | `G` | Défilement par les bords de l'écran |
 
+Au lancement : **menu principal** (nation + mode) → écran de chargement pendant
+la construction du monde → compte à rebours de 5 s → partie.
+
 ---
 
 ## Tests
@@ -84,6 +87,8 @@ ReplicatedStorage/Shared/
   Audio.luau        Catalogue sonore
   MapGen.luau       Génération de carte déterministe à partir d'une seed
   Eras.luau         Les cinq ères technologiques et leurs conditions
+  Nations.luau      Nations jouables et leurs drapeaux (dessinés, pas importés)
+  GameModes.luau    Classique · Blitz · Marathon
   GreedyMesh.luau   Fusion de tuiles en rectangles (partagée serveur/client)
   WorldSpace.luau   Conversions grille ↔ monde 3D
   Doctrines.luau    Les quatre doctrines et leurs multiplicateurs
@@ -107,7 +112,11 @@ StarterPlayerScripts/Client/
   init.client.luau  Orchestration : saisie des ordres, réseau, avatar
   WorldRenderer.luau Géométrie colorée du monde, par chunks
   WorldCamera.luau  Caméra stratégique et sélection par lancer de rayon
-  BuildingModels.luau Modèles 3D procéduraux des bâtiments
+  BuildingModels.luau Modèles 3D procéduraux et animation de chantier
+  PlacementPreview.luau Fantôme de construction suivant le curseur
+  Effects.luau      Éclats de conquête, ondes, textes flottants
+  MainMenu.luau     Choix de nation et de mode
+  Intro.luau        Écran de chargement et compte à rebours
   Overlay.luau      Bâtiments, navires, missiles, explosions
   Minimap.luau      Vue d'ensemble (facultative)
   HUD.luau          Commandement, construction, diplomatie, classement

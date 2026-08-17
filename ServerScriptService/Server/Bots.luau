@@ -58,9 +58,9 @@ local scratch = table.create(4, 0)
 -- Mise en place
 --=============================================================================
 
-function Bots.spawnAll(state: GameState, rng: Random)
+function Bots.spawnAll(state: GameState, rng: Random, count: number?)
 	table.clear(botSlots)
-	for i = 1, Config.BOT_COUNT do
+	for i = 1, count or Config.BOT_COUNT do
 		local name = BOT_NAMES[((i - 1) % #BOT_NAMES) + 1]
 		local ps = state:addPlayer(nil, name, rng, 0)
 		if ps then

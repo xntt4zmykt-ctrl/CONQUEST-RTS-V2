@@ -21,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Config = require(Shared:WaitForChild("Config"))
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 
@@ -29,6 +30,10 @@ local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local WorldRenderer = require(script.WorldRenderer)
 local WorldCamera = require(script.WorldCamera)
 local Overlay = require(script.Overlay)
+local Effects = require(script.Effects)
+local PlacementPreview = require(script.PlacementPreview)
+local MainMenu = require(script.MainMenu)
+local Intro = require(script.Intro)
 local Minimap = require(script.Minimap)
 local VictoryScreen = require(script.VictoryScreen)
 local SoundManager = require(script.SoundManager)
@@ -50,9 +55,16 @@ screenGui.Parent = playerGui
 
 local hud = HUD.new(screenGui)
 local victory = VictoryScreen.new(screenGui)
+local intro = Intro.new(screenGui)
+local menu = MainMenu.new(screenGui)
+
+-- L'interface de jeu reste masquee tant que le joueur n'est pas deploye.
+hud.root.Visible = false
 
 local world: WorldRenderer.WorldRenderer? = nil
 local overlay: Overlay.Overlay? = nil
+local effects: Effects.Effects? = nil
+local preview: PlacementPreview.PlacementPreview? = nil
 local minimap: Minimap.Minimap? = nil
 local camera = WorldCamera.new()
 
@@ -62,6 +74,9 @@ local myCapital: number? = nil
 local roster = {}
 local stats = {}
 local matchPhase = "playing"
+local myNation = 1
+local deployed = false
+local worldReady = false
 
 --=============================================================================
 -- Ambiance
@@ -190,7 +205,7 @@ UserInputService.InputEnded:Connect(function(input: InputObject, processed: bool
 	end
 
 	local w = world
-	if w and camera.mode == "overview" then
+	if w and deployed and worldReady and camera.mode == "overview" then
 		local index = camera:tileAtScreen(endPos, w.root)
 		if index then
 			onTileClicked(index)
@@ -267,6 +282,32 @@ hud.onResearch = function()
 	Remotes.get("ResearchOrder"):FireServer()
 end
 
+hud.onBuildKindChanged = function(kind: number)
+	local p = preview
+	if p and hud.mode == "build" then
+		p:setKind(kind)
+	end
+end
+
+hud.onModeChanged = function(mode: string)
+	local p = preview
+	if not p then
+		return
+	end
+	if mode == "build" then
+		p:setKind(hud.buildKind)
+	else
+		p:hide()
+	end
+end
+
+menu.onDeploy = function(nationId: number, modeId: string)
+	myNation = nationId
+	deployed = true
+	intro:show(nationId)
+	Remotes.get("JoinRequest"):FireServer(nationId, modeId)
+end
+
 --=============================================================================
 -- Reseau
 --=============================================================================
@@ -286,9 +327,13 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	end
 	victory:hide()
 
+	worldReady = false
+
 	local built = WorldRenderer.new(seed)
 	world = built
 	overlay = Overlay.new(built.root, built.terrain)
+	effects = Effects.new(built.root, built.terrain)
+	preview = PlacementPreview.new(built.root, built.terrain)
 	minimap = Minimap.new(screenGui, built.terrain, function(index: number)
 		camera:focusTile(index)
 	end)
@@ -311,7 +356,6 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 		if entry then entry.betrayals else 0
 	)
 	hud:selectFaction(nil)
-	hud:showDoctrineModal()
 end)
 
 Remotes.get("RosterUpdate").OnClientEvent:Connect(function(newRoster)
@@ -328,11 +372,26 @@ Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStat
 	if delta then
 		local w = world
 		if w then
-			local changed = w:applyDelta(delta)
+			local changed, gains, losses, others = w:applyDelta(delta, mySlot)
 			-- Un seul son par vague de captures, pas un par tuile : le bridage
 			-- du SoundManager fait le reste.
 			if changed > 0 then
 				SoundManager.play("tileCapture")
+			end
+
+			local fx = effects
+			if fx then
+				if #gains > 0 then
+					fx:conquestWave(gains, Theme.factionColor(mySlot), true)
+				end
+				if #losses > 0 then
+					fx:lossWave(losses, #losses)
+				end
+				-- Les prises entre tierces factions restent discretes : elles
+				-- situent le conflit sans voler la vedette aux siennes.
+				if #others > 0 then
+					fx:conquestWave(others, Theme.color.textFaint, false)
+				end
 			end
 		end
 		local m = minimap
@@ -403,6 +462,39 @@ RunService.RenderStepped:Connect(function(dt: number)
 		-- Les reconstructions de terrain sont etalees : pendant une grande
 		-- offensive, des dizaines de chunks changent dans le meme tick.
 		w:stepRebuilds()
+
+		-- Le monde apparait chunk par chunk : on suit cette file pour alimenter
+		-- la barre de chargement, puis on lance le compte a rebours une fois le
+		-- dernier chunk pose.
+		if not worldReady then
+			local total = Config.CHUNKS_X * Config.CHUNKS_Y
+			local remaining = #w.dirtyQueue
+			intro:setProgress(1 - remaining / total)
+
+			if remaining == 0 then
+				worldReady = true
+				intro:hide()
+				intro:runCountdown(Intro.COUNTDOWN_SECONDS, function()
+					hud.root.Visible = true
+					hud:showDoctrineModal()
+				end)
+			end
+		end
+
+		-- Apercu de construction : suit le curseur tant que le mode est arme.
+		local p = preview
+		if p and hud.mode == "build" and camera.mode == "overview" then
+			local mouse = UserInputService:GetMouseLocation()
+			local tile = camera:tileAtScreen(mouse, w.root)
+			if tile then
+				local valid = p:isValid(tile, hud.buildKind, function(index)
+					return w:ownerAt(index)
+				end, mySlot, hud.era, hud.gold)
+				p:update(tile, valid)
+			else
+				p:update(nil, false)
+			end
+		end
 	end
 
 	local o = overlay

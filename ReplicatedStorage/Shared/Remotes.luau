@@ -27,6 +27,7 @@ local NAMES = {
 	"NukeOrder", -- (targetTileIndex, nukeKind)
 	"DiplomacyOrder", -- (action: string, targetSlot: number)
 	"ResearchOrder", -- () : avancer d'une ere
+	"JoinRequest", -- (nationId: number, modeId: string) : deploiement depuis le menu
 }
 
 local Remotes = {}

@@ -149,7 +149,24 @@ Config.BUILDING = {
 	SILO = 4,
 	SAM = 5,
 	CAPITAL = 6,
+	LAB = 7,
 }
+
+-- Classes de batiments. Elles structurent le menu de construction, mais surtout
+-- elles obligent a se demander, pour chaque nouveau batiment, a quelle question
+-- strategique il repond. Un batiment qui n'entre dans aucune classe est un
+-- batiment dont on n'a pas defini le role.
+Config.BUILD_CLASS = {
+	ECONOMY = "economy",
+	MILITARY = "military",
+	SCIENCE = "science",
+}
+
+-- Chaque laboratoire reduit le cout de la prochaine ere. Le plafond est
+-- essentiel : sans lui, un joueur qui empile les laboratoires atteint
+-- l'arme nucleaire gratuitement.
+Config.LAB_ERA_DISCOUNT = 0.07
+Config.LAB_DISCOUNT_CAP = 0.35
 
 -- Perdre sa capitale doit etre un desastre, pas une tuile de plus : c'est ce
 -- qui donne un objectif lisible a une offensive et un enjeu a la defense.

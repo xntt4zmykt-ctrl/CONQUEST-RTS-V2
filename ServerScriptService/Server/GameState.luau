@@ -121,6 +121,7 @@ export type GameState = typeof(setmetatable(
 		nextEntityId: number,
 		capitalEvents: number,
 		sounds: { { name: string, only: number? } },
+		mode: any,
 		events: { { text: string, kind: string, only: number? } },
 	},
 	GameState
@@ -162,6 +163,7 @@ function GameState.new(seed: number): GameState
 	self.capitalEvents = 0
 	self.sounds = {}
 	self.events = {}
+	self.mode = nil
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -805,7 +807,8 @@ function GameState.stepEconomy(self: GameState)
 			+ ps.portCount * Config.GOLD_PER_PORT
 			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
 			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
-		ps.gold += income * doctrine.goldRate * era.gold
+		local modeGold = if self.mode then self.mode.goldMultiplier else 1
+		ps.gold += income * doctrine.goldRate * era.gold * modeGold
 	end
 end
 
