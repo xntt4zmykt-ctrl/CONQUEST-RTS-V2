@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
+local WorldSpace = require(ReplicatedStorage.Shared.WorldSpace)
 
 -- init.server.luau devient le Script "Server" ; les modules voisins en sont
 -- les enfants, pas les freres.
@@ -25,6 +26,7 @@ local Navy = require(script.Navy)
 local Nukes = require(script.Nukes)
 local Diplomacy = require(script.Diplomacy)
 local Persistence = require(script.Persistence)
+local WorldBuilder = require(script.WorldBuilder)
 local Bots = require(script.Bots)
 
 type GameState = GameState.GameState
@@ -88,6 +90,32 @@ local function broadcastRoster()
 	rosterUpdate:FireAllClients(buildRoster())
 end
 
+--[[
+	Fait apparaitre le personnage sur sa capitale.
+
+	Le chargement est manuel (CharacterAutoLoads desactive) : charger a la
+	connexion ferait naitre le joueur a l'origine du monde, c'est-a-dire au
+	milieu de l'ocean, avant meme qu'il ait un territoire.
+]]
+local function spawnCharacterAt(player: Player, tile: number?)
+	if not tile then
+		return
+	end
+
+	task.spawn(function()
+		local character = player.Character
+		if not character then
+			player:LoadCharacter()
+			character = player.Character or player.CharacterAdded:Wait()
+		end
+
+		local root = character:WaitForChild("HumanoidRootPart", 10)
+		if root and root:IsA("BasePart") then
+			root.CFrame = WorldSpace.spawnCFrame(state.terrain, tile)
+		end
+	end)
+end
+
 local function playerForSlot(slot: number): Player?
 	local ps = state.players[slot]
 	return if ps then ps.player else nil
@@ -147,10 +175,16 @@ local function startMatch()
 		end
 	end
 
+	-- Le relief ne change pas de la partie : la collision est batie une fois.
+	WorldBuilder.clearDefaultScene()
+	WorldBuilder.build(state.terrain)
+
 	local roster = buildRoster()
 	for player, slot in slotByPlayer do
 		local ps = state.players[slot]
-		mapInit:FireClient(player, seed, slot, roster, if ps then ps.capitalTile else nil)
+		local capital = if ps then ps.capitalTile else nil
+		mapInit:FireClient(player, seed, slot, roster, capital)
+		spawnCharacterAt(player, capital)
 	end
 
 	print(`[{Config.GAME_NAME}] nouvelle partie — seed {seed}`)
@@ -228,6 +262,7 @@ local function onPlayerAdded(player: Player)
 
 	slotByPlayer[player] = ps.slot
 	mapInit:FireClient(player, state.seed, ps.slot, buildRoster(), ps.capitalTile)
+	spawnCharacterAt(player, ps.capitalTile)
 	broadcastRoster()
 end
 
@@ -484,6 +519,10 @@ end
 --=============================================================================
 -- Demarrage
 --=============================================================================
+
+-- Le personnage n'est jamais charge automatiquement : il doit attendre de
+-- savoir ou est sa capitale.
+Players.CharacterAutoLoads = false
 
 startMatch()
 

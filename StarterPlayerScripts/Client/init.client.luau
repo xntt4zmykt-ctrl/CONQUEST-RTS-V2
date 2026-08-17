@@ -1,27 +1,33 @@
 --!strict
 --[[
-	Point d'entree client : camera 2D, saisie des ordres, branchement reseau.
+	Point d'entree client : monde 3D, camera, saisie des ordres, reseau.
 
 	Le client n'est jamais autoritaire. Chaque clic est traduit en intention et
 	envoyee au serveur, qui repond par une notification en cas de refus. Aucune
 	regle de jeu n'est evaluee ici — au pire l'interface propose une action que
 	le serveur rejettera, jamais l'inverse.
+
+	Le joueur a deux facons d'habiter la carte : la vue strategique en survol
+	(par defaut) et son propre avatar, pose sur sa capitale. La touche F bascule
+	entre les deux.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Theme = require(Shared:WaitForChild("Theme"))
-local MapGen = require(Shared:WaitForChild("MapGen"))
+local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 
 -- Ce fichier est le LocalScript "Client" ; les modules voisins en sont les
 -- enfants, pas les freres.
-local MapRenderer = require(script.MapRenderer)
+local WorldRenderer = require(script.WorldRenderer)
+local WorldCamera = require(script.WorldCamera)
 local Overlay = require(script.Overlay)
 local Minimap = require(script.Minimap)
 local VictoryScreen = require(script.VictoryScreen)
@@ -32,7 +38,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 --=============================================================================
--- Racine de l'interface
+-- Interface
 --=============================================================================
 
 local screenGui = Instance.new("ScreenGui")
@@ -42,111 +48,89 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
-local backdrop = Instance.new("Frame")
-backdrop.Name = "Backdrop"
-backdrop.Size = UDim2.fromScale(1, 1)
-backdrop.BackgroundColor3 = Theme.color.void
-backdrop.BorderSizePixel = 0
-backdrop.Parent = screenGui
-
-local viewport = Instance.new("Frame")
-viewport.Name = "Viewport"
-viewport.Size = UDim2.fromScale(1, 1)
-viewport.BackgroundTransparency = 1
-viewport.ClipsDescendants = true
-viewport.Parent = backdrop
-
-local renderer: MapRenderer.MapRenderer? = nil
-local overlay: Overlay.Overlay? = nil
-local minimap: Minimap.Minimap? = nil
-
 local hud = HUD.new(screenGui)
 local victory = VictoryScreen.new(screenGui)
 
+local world: WorldRenderer.WorldRenderer? = nil
+local overlay: Overlay.Overlay? = nil
+local minimap: Minimap.Minimap? = nil
+local camera = WorldCamera.new()
+
 local mySlot = 0
--- Tuile de sa propre capitale : point de repere pour le recentrage clavier.
+-- Tuile de sa propre capitale : point de repere du recentrage et lieu de spawn.
 local myCapital: number? = nil
 local roster = {}
 local stats = {}
 local matchPhase = "playing"
 
 --=============================================================================
--- Camera 2D
+-- Ambiance
 --=============================================================================
--- Le zoom et le pan visent une cible, et la position affichee la rejoint par
--- interpolation. Un deplacement instantane sur une carte de 40 000 tuiles est
--- desorientant : on perd le fil de ou on etait.
+-- Reglee ici plutot que dans le fichier de projet : le client est le seul a
+-- savoir qu'on regarde une carte vue du ciel et pas un niveau au sol.
 
-local MIN_ZOOM, MAX_ZOOM = 1.5, 26
+Lighting.Ambient = Color3.fromRGB(92, 100, 116)
+Lighting.OutdoorAmbient = Color3.fromRGB(112, 122, 140)
+Lighting.Brightness = 2.4
+Lighting.ClockTime = 15.2
+Lighting.GeographicLatitude = 20
+Lighting.FogEnd = 4000
 
-local zoom = 4
-local targetZoom = 4
-local panOffset = Vector2.zero
-local targetPan = Vector2.zero
+--=============================================================================
+-- Avatar
+--=============================================================================
 
-local dragging = false
-local dragStart = Vector2.zero
-local panStart = Vector2.zero
+--[[
+	Pose le personnage sur sa capitale.
 
-local function applyCamera()
-	local r = renderer
-	if not r then
-		return
-	end
-	r.label.Size = UDim2.fromOffset(Config.MAP_WIDTH * zoom, Config.MAP_HEIGHT * zoom)
-	r.label.Position = UDim2.new(0.5, panOffset.X, 0.5, panOffset.Y)
-end
-
-local function zoomAt(delta: number, focus: Vector2)
-	local r = renderer
-	if not r then
-		return
-	end
-
-	local previous = targetZoom
-	targetZoom = math.clamp(targetZoom * (1 + delta * 0.2), MIN_ZOOM, MAX_ZOOM)
-	if targetZoom == previous then
+	Le serveur decide ou, mais c'est le client qui doit le faire au bon moment :
+	le personnage peut apparaitre avant ou apres la construction du monde, et le
+	deposer avant que le sol existe le fait tomber dans le vide.
+]]
+local function placeCharacterAtCapital()
+	local w = world
+	local capital = myCapital
+	if not w or not capital then
 		return
 	end
 
-	-- Zoom centre sur le curseur : on corrige le pan pour que la tuile sous la
-	-- souris reste sous la souris. Sans ca, naviguer sur une grande carte est
-	-- insupportable.
-	local center = r.label.AbsolutePosition + r.label.AbsoluteSize / 2
-	local toFocus = focus - center
-	targetPan += toFocus - toFocus * (targetZoom / previous)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return
+	end
+
+	root.CFrame = WorldSpace.spawnCFrame(w.terrain, capital)
 end
 
--- Centre la vue sur une tuile : utilise par la minimap et au spawn.
-local function focusTile(index: number, instant: boolean?)
-	local x, y = MapGen.fromIndex(index)
-	local centreX = (x + 0.5 - Config.MAP_WIDTH / 2) * targetZoom
-	local centreY = (y + 0.5 - Config.MAP_HEIGHT / 2) * targetZoom
-	targetPan = Vector2.new(-centreX, -centreY)
-	if instant then
-		panOffset = targetPan
-		zoom = targetZoom
-		applyCamera()
-	end
-end
+player.CharacterAdded:Connect(function(character)
+	character:WaitForChild("HumanoidRootPart", 10)
+	task.wait(0.2)
+	placeCharacterAtCapital()
+end)
 
 --=============================================================================
 -- Saisie
 --=============================================================================
 
-local CLICK_DRAG_THRESHOLD = 6 -- px : au-dela, c'est un pan, pas un clic
+local CLICK_DRAG_THRESHOLD = 8 -- px : au-dela, c'etait un deplacement de vue
+local pressOrigin: Vector2? = nil
 
 --[[
-	Un clic sur la carte n'a pas de sens en soi : son effet depend entierement
+	Un clic sur le monde n'a pas de sens en soi : son effet depend entierement
 	du mode arme dans le HUD. C'est le seul endroit ou cette traduction a lieu.
 ]]
 local function onTileClicked(index: number)
-	local r = renderer
-	if not r then
+	local w = world
+	if not w then
 		return
 	end
 
-	local targetSlot = r:ownerAt(index)
+	local targetSlot = w:ownerAt(index)
 	local mode = hud.mode
 
 	if mode == "build" then
@@ -165,8 +149,8 @@ local function onTileClicked(index: number)
 	end
 
 	-- Mode attaque : le clic sert aussi a designer l'interlocuteur
-	-- diplomatique, pour qu'on puisse negocier avec un voisin sans le chercher
-	-- dans le classement.
+	-- diplomatique, pour negocier avec un voisin sans le chercher dans le
+	-- classement.
 	if targetSlot ~= 0 and targetSlot ~= mySlot then
 		hud:selectFaction(targetSlot)
 	end
@@ -185,41 +169,29 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = Vector2.new(input.Position.X, input.Position.Y)
-		panStart = targetPan
+		pressOrigin = Vector2.new(input.Position.X, input.Position.Y)
 	end
 end)
 
-UserInputService.InputChanged:Connect(function(input: InputObject, processed: boolean)
-	if input.UserInputType == Enum.UserInputType.MouseWheel and not processed then
-		zoomAt(input.Position.Z, UserInputService:GetMouseLocation())
-	elseif
-		dragging
-		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
-	then
-		local current = Vector2.new(input.Position.X, input.Position.Y)
-		targetPan = panStart + (current - dragStart)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input: InputObject)
+UserInputService.InputEnded:Connect(function(input: InputObject, processed: boolean)
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
 		return
 	end
-	if not dragging then
+
+	local origin = pressOrigin
+	pressOrigin = nil
+	if not origin or processed then
 		return
 	end
-	dragging = false
 
 	local endPos = Vector2.new(input.Position.X, input.Position.Y)
-	if (endPos - dragStart).Magnitude > CLICK_DRAG_THRESHOLD then
-		return -- c'etait un deplacement de camera
+	if (endPos - origin).Magnitude > CLICK_DRAG_THRESHOLD then
+		return
 	end
 
-	local r = renderer
-	if r then
-		local index = r:tileAtScreen(endPos)
+	local w = world
+	if w and camera.mode == "overview" then
+		local index = camera:tileAtScreen(endPos, w.root)
 		if index then
 			onTileClicked(index)
 		end
@@ -246,10 +218,32 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 
-	-- Espace : retour a sa capitale. Sur une grande carte, se reperer est la
-	-- premiere friction, et c'est celle qui fatigue le plus.
+	-- Retour a sa capitale. Sur un monde de 1024 studs, se reperer est la
+	-- premiere friction, et celle qui fatigue le plus.
 	if input.KeyCode == Enum.KeyCode.Space and myCapital then
-		focusTile(myCapital)
+		camera:focusTile(myCapital)
+		return
+	end
+
+	-- Bascule survol / avatar.
+	if input.KeyCode == Enum.KeyCode.F then
+		camera:toggleMode()
+		if camera.mode == "avatar" then
+			placeCharacterAtCapital()
+			hud:notify("Vue avatar — F pour revenir au survol.", "info")
+		else
+			hud:notify("Vue strategique.", "info")
+		end
+		return
+	end
+
+	-- Defilement par les bords : pratique a la souris, genant au clavier.
+	if input.KeyCode == Enum.KeyCode.G then
+		camera.edgePan = not camera.edgePan
+		hud:notify(
+			if camera.edgePan then "Defilement par les bords active." else "Defilement par les bords desactive.",
+			"info"
+		)
 	end
 end)
 
@@ -279,11 +273,8 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	myCapital = capital
 	matchPhase = "playing"
 
-	if renderer then
-		renderer.label:Destroy()
-	end
-	if overlay then
-		overlay:clear()
+	if world then
+		world:destroy()
 	end
 	if minimap then
 		minimap:destroy()
@@ -291,28 +282,22 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	end
 	victory:hide()
 
-	-- Le rendu peut echouer si le moteur ne fournit pas les EditableImage : il
-	-- affiche alors sa propre banniere d'erreur, et on evite simplement de
-	-- construire les calques par dessus.
-	local created = MapRenderer.new(seed, viewport)
-	renderer = created
+	local built = WorldRenderer.new(seed)
+	world = built
+	overlay = Overlay.new(built.root, built.terrain)
+	minimap = Minimap.new(screenGui, built.terrain, function(index: number)
+		camera:focusTile(index)
+	end)
 
-	if created then
-		overlay = Overlay.new(created.label)
-		minimap = Minimap.new(screenGui, created.label, function(index: number)
-			focusTile(index)
-		end)
-
-		targetZoom = 6
-		zoom = 6
-		if capital then
-			focusTile(capital, true)
-		else
-			applyCamera()
-		end
-	else
-		overlay = nil
+	camera:setMode("overview")
+	camera:setDistance(260, true)
+	if capital then
+		camera:focusTile(capital, true)
 	end
+
+	-- Le monde se construit sur quelques dizaines de frames : on repose
+	-- l'avatar une fois le sol susceptible d'exister sous lui.
+	task.delay(1.5, placeCharacterAtCapital)
 
 	local entry = roster[slot]
 	hud:setIdentity(
@@ -335,26 +320,37 @@ end)
 
 Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStats)
 	stats = newStats
-	if delta and renderer then
-		local changed = (renderer :: MapRenderer.MapRenderer):applyDelta(delta)
-		-- Un seul son par vague de captures, pas un par tuile : le bridage du
-		-- SoundManager fait le reste.
-		if changed > 0 then
-			SoundManager.play("tileCapture")
+
+	if delta then
+		local w = world
+		if w then
+			local changed = w:applyDelta(delta)
+			-- Un seul son par vague de captures, pas un par tuile : le bridage
+			-- du SoundManager fait le reste.
+			if changed > 0 then
+				SoundManager.play("tileCapture")
+			end
+		end
+		local m = minimap
+		if m then
+			m:applyDelta(delta)
 		end
 	end
+
 	hud:update(stats, roster)
 end)
 
 Remotes.get("BuildingDelta").OnClientEvent:Connect(function(deltas)
-	if overlay then
-		(overlay :: Overlay.Overlay):applyBuildingDelta(deltas)
+	local o = overlay
+	if o then
+		o:applyBuildingDelta(deltas)
 	end
 end)
 
 Remotes.get("UnitSnapshot").OnClientEvent:Connect(function(boats, missiles)
-	if overlay then
-		(overlay :: Overlay.Overlay):applyUnits(boats, missiles)
+	local o = overlay
+	if o then
+		o:applyUnits(boats, missiles)
 	end
 end)
 
@@ -380,8 +376,9 @@ Remotes.get("Notify").OnClientEvent:Connect(function(text: string, kind: string)
 end)
 
 Remotes.get("Explosion").OnClientEvent:Connect(function(x: number, y: number, radius: number)
-	if overlay then
-		(overlay :: Overlay.Overlay):explosion(x, y, radius)
+	local o = overlay
+	if o then
+		o:explosion(x, y, radius)
 	end
 	SoundManager.play("nukeImpact")
 end)
@@ -395,28 +392,13 @@ end)
 --=============================================================================
 
 RunService.RenderStepped:Connect(function(dt: number)
-	-- Lissage exponentiel encadre : `1 - e^(-k*dt)` reste correct quel que
-	-- soit le framerate, contrairement a un simple `dt * k` qui devient
-	-- instable en dessous de 30 FPS.
-	local alpha = 1 - math.exp(-14 * dt)
-	local moved = false
+	camera:step(dt)
 
-	if math.abs(targetZoom - zoom) > 0.001 then
-		zoom += (targetZoom - zoom) * alpha
-		moved = true
-	end
-	if (targetPan - panOffset).Magnitude > 0.5 then
-		panOffset += (targetPan - panOffset) * alpha
-		moved = true
-	end
-	if moved then
-		applyCamera()
-	end
-
-	local r = renderer
-	if r then
-		r:stepHeat(dt)
-		r:flush()
+	local w = world
+	if w then
+		-- Les reconstructions de terrain sont etalees : pendant une grande
+		-- offensive, des dizaines de chunks changent dans le meme tick.
+		w:stepRebuilds()
 	end
 
 	local o = overlay
@@ -425,7 +407,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 	end
 
 	local m = minimap
-	if m and r then
-		m:sync(r.label, viewport)
+	if m then
+		m:flush()
+		m:setFocus(camera.focus)
 	end
 end)

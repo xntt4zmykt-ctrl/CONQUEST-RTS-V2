@@ -2,39 +2,71 @@
 --[[
 	Minimap.
 
-	Astuce centrale : elle ne redessine rien. Une EditableImage peut alimenter
-	plusieurs ImageLabel a la fois, donc la minimap affiche exactement le meme
-	contenu que la grande carte, mis a jour par le meme unique upload GPU. Son
-	cout de rendu est donc nul — seul le rectangle de visee est calcule.
+	Le monde est desormais de la geometrie 3D, donc la minimap ne peut plus se
+	contenter de reafficher la texture de la carte : elle peint sa propre image,
+	un pixel par tuile, a partir des memes donnees de propriete.
 
-	Sans minimap, une carte de 256x160 zoomee a 8x oblige a naviguer a l'aveugle
-	pour retrouver son propre territoire.
+	Elle est **facultative**. Si le moteur ne fournit pas les EditableImage, elle
+	ne s'affiche simplement pas — le jeu reste entierement jouable. C'est
+	deliberé : la lecon de la version precedente est qu'aucune fonction de
+	confort ne doit pouvoir emporter l'ecran entier avec elle.
 ]]
 
+local AssetService = game:GetService("AssetService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
-local Theme = require(Shared:WaitForChild("Theme"))
 local MapGen = require(Shared:WaitForChild("MapGen"))
+local Theme = require(Shared:WaitForChild("Theme"))
 
 local W = Config.MAP_WIDTH
 local H = Config.MAP_HEIGHT
+local OCEAN = Config.TERRAIN.OCEAN
+local NEUTRAL = Config.NEUTRAL_SLOT
 
 local Minimap = {}
 Minimap.__index = Minimap
 
 export type Minimap = typeof(setmetatable({} :: any, Minimap))
 
-local WIDTH = 232
+local WIDTH = 224
 local HEIGHT = math.floor(WIDTH * H / W)
 
+local function toBytes(color: Color3): { number }
+	return { math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255) }
+end
+
+local terrainBytes: { { number } } = {}
+for id, color in Config.TERRAIN_COLORS do
+	terrainBytes[id] = toBytes(color)
+end
+
+local factionBytes: { { number } } = {}
+for i = 1, Config.MAX_PLAYERS do
+	factionBytes[i] = toBytes(Theme.factionColor(i))
+end
+
 --[[
-	`onJump` est appele avec un index de tuile quand le joueur clique la
-	minimap : c'est init.client qui decide comment y deplacer la camera.
+	`onJump` recoit un index de tuile quand le joueur clique : c'est
+	init.client qui decide comment y deplacer la camera.
+	Renvoie nil si le rendu d'image n'est pas disponible.
 ]]
-function Minimap.new(parent: GuiObject, mapLabel: ImageLabel, onJump: (number) -> ()): Minimap
+function Minimap.new(parent: GuiObject, terrain: buffer, onJump: (number) -> ()): Minimap?
+	local created, image = pcall(function()
+		return AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+	end)
+
+	if not created or not image then
+		warn(`[CONQUEST RTS] minimap indisponible (EditableImage) : {tostring(image)}`)
+		return nil
+	end
+
 	local self = setmetatable({}, Minimap) :: any
+	self.terrain = terrain
+	self.image = image
+	self.pixels = buffer.create(W * H * 4)
+	self.needsUpload = true
 
 	local panel = Theme.panel("Minimap", parent)
 	panel.AnchorPoint = Vector2.new(1, 1)
@@ -50,24 +82,33 @@ function Minimap.new(parent: GuiObject, mapLabel: ImageLabel, onJump: (number) -
 	view.BorderSizePixel = 0
 	view.ResampleMode = Enum.ResamplerMode.Pixelated
 	view.ScaleType = Enum.ScaleType.Stretch
-	-- Meme contenu que la grande carte : aucune peinture supplementaire.
-	view.ImageContent = mapLabel.ImageContent
 	view.Parent = panel
 	Theme.corner(view, Theme.radius.sm)
 	self.view = view
 
-	-- Rectangle de visee : montre quelle portion de la carte est a l'ecran.
-	local frame = Instance.new("Frame")
-	frame.Name = "Viewport"
-	frame.BackgroundTransparency = 1
-	frame.BorderSizePixel = 0
-	frame.Parent = view
+	local attached = pcall(function()
+		view.ImageContent = (Content :: any).fromObject(image)
+	end)
+	if not attached then
+		pcall(function()
+			image.Parent = view
+		end)
+	end
+
+	-- Marqueur de camera : montre ou on regarde sur la carte.
+	local marker = Instance.new("Frame")
+	marker.Name = "Focus"
+	marker.AnchorPoint = Vector2.new(0.5, 0.5)
+	marker.Size = UDim2.fromOffset(10, 10)
+	marker.BackgroundTransparency = 1
+	marker.Parent = view
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Theme.color.text
 	stroke.Thickness = 1.5
-	stroke.Transparency = 0.25
-	stroke.Parent = frame
-	self.frame = frame
+	stroke.Transparency = 0.2
+	stroke.Parent = marker
+	Theme.corner(marker, Theme.radius.sm)
+	self.marker = marker
 
 	local hit = Instance.new("TextButton")
 	hit.BackgroundTransparency = 1
@@ -87,36 +128,62 @@ function Minimap.new(parent: GuiObject, mapLabel: ImageLabel, onJump: (number) -
 		onJump(MapGen.toIndex(math.floor(u * W), math.floor(v * H)))
 	end)
 
+	-- Peinture initiale : tout le terrain, aucun proprietaire.
+	for index = 0, W * H - 1 do
+		self:paint(index, NEUTRAL)
+	end
+	self:flush()
+
 	return self
 end
 
---[[
-	Recalcule le rectangle de visee a partir de la geometrie reelle de la
-	grande carte : on projette la fenetre visible dans l'espace normalise de la
-	carte. Passer par les positions absolues evite de dupliquer ici la logique
-	de camera de init.client.
-]]
-function Minimap.sync(self: Minimap, mapLabel: ImageLabel, viewport: GuiObject)
-	local mapPos = mapLabel.AbsolutePosition
-	local mapSize = mapLabel.AbsoluteSize
-	if mapSize.X <= 0 or mapSize.Y <= 0 then
-		return
+function Minimap.paint(self: Minimap, index: number, slot: number)
+	local terrain = buffer.readu8(self.terrain, index)
+	local rgb
+
+	if terrain == OCEAN then
+		rgb = { 20, 34, 56 }
+	elseif slot == NEUTRAL then
+		rgb = terrainBytes[terrain]
+	else
+		rgb = factionBytes[((slot - 1) % Config.MAX_PLAYERS) + 1]
 	end
 
-	local screenPos = viewport.AbsolutePosition
-	local screenSize = viewport.AbsoluteSize
-
-	local u0 = math.clamp((screenPos.X - mapPos.X) / mapSize.X, 0, 1)
-	local v0 = math.clamp((screenPos.Y - mapPos.Y) / mapSize.Y, 0, 1)
-	local u1 = math.clamp((screenPos.X + screenSize.X - mapPos.X) / mapSize.X, 0, 1)
-	local v1 = math.clamp((screenPos.Y + screenSize.Y - mapPos.Y) / mapSize.Y, 0, 1)
-
-	self.frame.Position = UDim2.fromScale(u0, v0)
-	self.frame.Size = UDim2.fromScale(math.max(u1 - u0, 0.01), math.max(v1 - v0, 0.01))
+	local offset = index * 4
+	buffer.writeu8(self.pixels, offset, rgb[1])
+	buffer.writeu8(self.pixels, offset + 1, rgb[2])
+	buffer.writeu8(self.pixels, offset + 2, rgb[3])
+	buffer.writeu8(self.pixels, offset + 3, 255)
 end
 
-function Minimap.setContent(self: Minimap, mapLabel: ImageLabel)
-	self.view.ImageContent = mapLabel.ImageContent
+function Minimap.applyDelta(self: Minimap, delta: buffer)
+	local count = buffer.len(delta) // 5
+	for i = 0, count - 1 do
+		local offset = i * 5
+		local index = buffer.readu32(delta, offset)
+		if index < W * H then
+			self:paint(index, buffer.readu8(delta, offset + 4))
+		end
+	end
+	self.needsUpload = true
+end
+
+-- Un seul upload par frame, quel que soit le nombre de tuiles changees.
+function Minimap.flush(self: Minimap)
+	if not self.needsUpload then
+		return
+	end
+	self.needsUpload = false
+	pcall(function()
+		self.image:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), self.pixels)
+	end)
+end
+
+-- Repositionne le marqueur sur le point de mire courant de la camera.
+function Minimap.setFocus(self: Minimap, worldPosition: Vector3)
+	local u = math.clamp((worldPosition.X + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
+	local v = math.clamp((worldPosition.Z + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
+	self.marker.Position = UDim2.fromScale(u, v)
 end
 
 function Minimap.destroy(self: Minimap)

@@ -19,6 +19,8 @@ local Navy = __require("Navy")
 local Nukes = __require("Nukes")
 local Diplomacy = __require("Diplomacy")
 local Bots = __require("Bots")
+local GreedyMesh = __require("GreedyMesh")
+local WorldBuilder = __require("WorldBuilder")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -291,6 +293,55 @@ print("classement :")
 for i = 1, math.min(6, #ranked) do
 	local r = ranked[i]
 	print(`  {i}. {r.name}  {r.tiles} tuiles  {r.troops} troupes`)
+end
+
+print("")
+--=============================================================================
+-- Cout du monde 3D
+--=============================================================================
+-- Le vrai risque de la version 3D n'est pas la logique mais le nombre de Parts.
+-- On le mesure sur l'etat reel de fin de partie plutot que de l'esperer.
+
+local serverBlocks = #WorldBuilder.blocksFor(state.terrain)
+
+local clientParts = 0
+local worstChunk = 0
+local chunkScratch = {}
+for chunk = 0, Config.CHUNKS_X * Config.CHUNKS_Y - 1 do
+	local cx = (chunk % Config.CHUNKS_X) * Config.CHUNK_SIZE
+	local cy = (chunk // Config.CHUNKS_X) * Config.CHUNK_SIZE
+	local x1 = math.min(cx + Config.CHUNK_SIZE - 1, Config.MAP_WIDTH - 1)
+	local y1 = math.min(cy + Config.CHUNK_SIZE - 1, Config.MAP_HEIGHT - 1)
+
+	local rects = GreedyMesh.rectangles(function(x, y)
+		local index = MapGen.toIndex(x, y)
+		local terrain = buffer.readu8(state.terrain, index)
+		if terrain == Config.TERRAIN.OCEAN then
+			return nil
+		end
+		return buffer.readu8(state.owner, index) * 8 + terrain
+	end, cx, cy, x1, y1, chunkScratch)
+
+	clientParts += #rects
+	if #rects > worstChunk then
+		worstChunk = #rects
+	end
+end
+
+local landTiles = state.landCount
+print("")
+print("--- cout du monde 3D ---")
+print(`collision serveur : {serverBlocks} blocs (statique, repliquee une fois)`)
+print(`visuel client     : {clientParts} parts pour {landTiles} tuiles de terre`)
+print(`  compression     : {string.format("%.1f", landTiles / math.max(1, clientParts))}x`)
+print(`  pire chunk      : {worstChunk} parts`)
+
+-- Seuils au-dela desquels le rendu devient un probleme sur mobile.
+if clientParts > 12000 then
+	fail(`{clientParts} parts cote client : trop pour tenir sur mobile`)
+end
+if serverBlocks > 6000 then
+	fail(`{serverBlocks} blocs de collision : replication initiale trop lourde`)
 end
 
 print("")

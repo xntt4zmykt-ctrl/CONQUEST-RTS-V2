@@ -1,17 +1,16 @@
 --!strict
 --[[
-	Calque des entites : batiments, navires, missiles, explosions.
+	Calque des entites dans le monde 3D : batiments, navires, missiles,
+	explosions.
 
-	La carte elle-meme est peinte au pixel (voir MapRenderer). Tout ce qui doit
-	rester lisible quel que soit le zoom vit ici, sous forme de petits GuiObjects
-	enfants de l'image : leur position est en Scale (donc suit le zoom et le
-	pan automatiquement) mais leur taille est en Offset (donc reste constante a
-	l'ecran). Un port reste identifiable aussi bien de loin que de pres.
+	Le terrain est de la geometrie fusionnee (voir WorldRenderer) et ne peut
+	donc pas porter d'information ponctuelle : un bloc couvre parfois cinquante
+	tuiles. Tout ce qui est localise vit donc ici, sous forme de vrais objets
+	poses dans le monde.
 
-	Le nombre d'elements est volontairement petit — quelques centaines de
-	batiments et quelques dizaines de navires — ce qui rend l'approche par
-	instances viable ici, alors qu'elle serait catastrophique pour les 40 000
-	tuiles du terrain.
+	Le nombre d'elements reste petit — quelques centaines de batiments, quelques
+	dizaines de navires — ce qui rend l'approche par instances viable ici, alors
+	qu'elle serait catastrophique pour les 40 000 tuiles du terrain.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,81 +18,44 @@ local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
-local MapGen = require(Shared:WaitForChild("MapGen"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
 local Theme = require(Shared:WaitForChild("Theme"))
+local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local Types = require(Shared:WaitForChild("Types"))
-
-local W = Config.MAP_WIDTH
-local H = Config.MAP_HEIGHT
 
 local Overlay = {}
 Overlay.__index = Overlay
 
-type UnitVisual = {
-	frame: Frame,
-	targetX: number,
-	targetY: number,
-	currentX: number,
-	currentY: number,
-}
-
-export type Overlay = typeof(setmetatable(
-	{} :: {
-		root: Frame,
-		buildingLayer: Frame,
-		unitLayer: Frame,
-		effectLayer: Frame,
-		buildings: { [number]: TextLabel },
-		units: { [number]: UnitVisual },
-		seen: { [number]: boolean },
-	},
-	Overlay
-))
+export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
 local colorFor = Theme.factionColor
 
--- Position en Scale d'une tuile, centre de la case.
-local function scalePosition(x: number, y: number): UDim2
-	return UDim2.fromScale((x + 0.5) / W, (y + 0.5) / H)
-end
+--=============================================================================
+-- Construction
+--=============================================================================
 
-local function makeLayer(name: string, parent: GuiObject): Frame
-	local layer = Instance.new("Frame")
-	layer.Name = name
-	layer.Size = UDim2.fromScale(1, 1)
-	layer.BackgroundTransparency = 1
-	layer.Parent = parent
-	return layer
-end
+function Overlay.new(parent: Instance, terrain: buffer): Overlay
+	local self = setmetatable({}, Overlay) :: any
 
-function Overlay.new(mapLabel: ImageLabel): Overlay
-	local self = setmetatable({}, Overlay) :: Overlay
-
-	local root = Instance.new("Frame")
-	root.Name = "Overlay"
-	root.Size = UDim2.fromScale(1, 1)
-	root.BackgroundTransparency = 1
-	root.Parent = mapLabel
-	self.root = root
-
-	self.buildingLayer = makeLayer("Buildings", root)
-	self.unitLayer = makeLayer("Units", root)
-	self.effectLayer = makeLayer("Effects", root)
-
+	self.terrain = terrain
 	self.buildings = {}
 	self.units = {}
 	self.seen = {}
+
+	local root = Instance.new("Folder")
+	root.Name = "Entities"
+	root.Parent = parent
+	self.root = root
 
 	return self
 end
 
 function Overlay.clear(self: Overlay)
-	for _, label in self.buildings do
-		label:Destroy()
+	for _, part in self.buildings do
+		part:Destroy()
 	end
 	for _, unit in self.units do
-		unit.frame:Destroy()
+		unit.part:Destroy()
 	end
 	table.clear(self.buildings)
 	table.clear(self.units)
@@ -103,6 +65,66 @@ end
 --=============================================================================
 -- Batiments
 --=============================================================================
+
+--[[
+	Un batiment est un pilier pose sur le relief, surmonte d'une etiquette
+	toujours face camera.
+
+	Le pilier donne la presence physique et la couleur de faction ; l'etiquette
+	garantit qu'on identifie le batiment meme completement dezoome, ou le pilier
+	ne ferait plus qu'un pixel.
+]]
+local function makeBuilding(parent: Instance, index: number, kind: number, slot: number, terrain: buffer): Part
+	local def = BuildingDefs.get(kind)
+	local isCapital = kind == Config.BUILDING.CAPITAL
+
+	local base = WorldSpace.indexToWorld(index)
+	local ground = WorldSpace.surfaceHeight(terrain, index)
+	local height = if isCapital then 15 else 8
+	local width = if isCapital then 3.4 else 2.2
+
+	local part = Instance.new("Part")
+	part.Name = `Building{index}`
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	-- Ne doit jamais intercepter le clic destine au sol : sinon viser une tuile
+	-- occupee par un batiment devient impossible.
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Metal
+	part.Size = Vector3.new(width, height, width)
+	part.CFrame = CFrame.new(base.X, ground + height / 2, base.Z)
+	part.Color = colorFor(slot)
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Marker"
+	billboard.Size = UDim2.fromOffset(if isCapital then 34 else 24, if isCapital then 34 else 24)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, height / 2 + 3, 0)
+	billboard.AlwaysOnTop = true
+	billboard.MaxDistance = 1400
+	billboard.Parent = part
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Symbol"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.FontFace = Theme.font.bold
+	label.TextScaled = true
+	label.Text = if def then def.symbol else "?"
+	label.TextColor3 = colorFor(slot)
+	label.Parent = billboard
+
+	local outline = Instance.new("UIStroke")
+	outline.Color = Color3.fromRGB(8, 10, 16)
+	outline.Thickness = 2
+	outline.Parent = label
+
+	part.Parent = parent
+	return part
+end
 
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
 	for _, entry in deltas do
@@ -116,41 +138,25 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			continue
 		end
 
-		local def = BuildingDefs.get(entry.kind)
-		if not def then
+		-- Un batiment capture change de couleur, pas de forme : on evite de le
+		-- detruire et de le recreer a chaque prise.
+		if existing and existing:GetAttribute("Kind") == entry.kind then
+			existing.Color = colorFor(entry.slot)
+			local marker = existing:FindFirstChild("Marker")
+			local label = marker and marker:FindFirstChild("Symbol")
+			if label and label:IsA("TextLabel") then
+				label.TextColor3 = colorFor(entry.slot)
+			end
 			continue
 		end
 
-		-- La capitale est le seul batiment qu'on doit reperer en un coup d'oeil
-		-- depuis n'importe quel niveau de zoom : elle est nettement plus grosse.
-		local isCapital = entry.kind == Config.BUILDING.CAPITAL
-		local glyphSize = if isCapital then 26 else 18
-
-		local label = existing
-		if not label then
-			label = Instance.new("TextLabel")
-			label.Name = `B{entry.index}`
-			label.AnchorPoint = Vector2.new(0.5, 0.5)
-			label.Size = UDim2.fromOffset(glyphSize, glyphSize)
-			label.BackgroundTransparency = 1
-			label.FontFace = Font.fromEnum(Enum.Font.GothamBold)
-			label.TextScaled = true
-			-- Contour sombre : sans lui, un symbole de faction claire disparait
-			-- sur un territoire de teinte proche.
-			local outline = Instance.new("UIStroke")
-			outline.Color = Color3.fromRGB(10, 12, 18)
-			outline.Thickness = 2
-			outline.Parent = label
-
-			local x, y = MapGen.fromIndex(entry.index)
-			label.Position = scalePosition(x, y)
-			label.Parent = self.buildingLayer
-			self.buildings[entry.index] = label
+		if existing then
+			existing:Destroy()
 		end
 
-		label.Size = UDim2.fromOffset(glyphSize, glyphSize)
-		label.Text = def.symbol
-		label.TextColor3 = colorFor(entry.slot)
+		local part = makeBuilding(self.root, entry.index, entry.kind, entry.slot, self.terrain)
+		part:SetAttribute("Kind", entry.kind)
+		self.buildings[entry.index] = part
 	end
 end
 
@@ -158,50 +164,34 @@ end
 -- Unites
 --=============================================================================
 
-local function makeBoatVisual(parent: Frame, slot: number, kind: number): Frame
-	local frame = Instance.new("Frame")
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.BorderSizePixel = 0
-	frame.BackgroundColor3 = colorFor(slot)
+local function makeUnit(parent: Instance, slot: number, kind: number, isMissile: boolean): Part
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
 
-	if kind == 2 then
-		-- Navire marchand : petit losange dore, visuellement inoffensif.
-		frame.Size = UDim2.fromOffset(7, 7)
-		frame.BackgroundColor3 = Theme.color.gold
-		frame.Rotation = 45
+	if isMissile then
+		part.Material = Enum.Material.Neon
+		part.Color = Color3.fromRGB(255, 230, 140)
+		part.Size = Vector3.new(1.6, 1.6, 5)
+	elseif kind == 2 then
+		-- Navire marchand : petit, dore, visuellement inoffensif.
+		part.Material = Enum.Material.SmoothPlastic
+		part.Color = Theme.color.gold
+		part.Size = Vector3.new(2.2, 1.2, 4)
 	else
 		-- Transport de troupes : plus gros, aux couleurs de la faction.
-		frame.Size = UDim2.fromOffset(11, 11)
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 3)
-		corner.Parent = frame
+		part.Material = Enum.Material.SmoothPlastic
+		part.Color = colorFor(slot)
+		part.Size = Vector3.new(3.2, 1.8, 6)
 	end
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Thickness = 1
-	stroke.Transparency = 0.35
-	stroke.Parent = frame
-
-	frame.Parent = parent
-	return frame
-end
-
-local function makeMissileVisual(parent: Frame, slot: number, kind: number): Frame
-	local frame = Instance.new("Frame")
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.Size = UDim2.fromOffset(if kind == 2 then 14 else 10, if kind == 2 then 14 else 10)
-	frame.BackgroundColor3 = Color3.fromRGB(255, 230, 120)
-	frame.BorderSizePixel = 0
-	frame.Rotation = 45
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = colorFor(slot)
-	stroke.Thickness = 2
-	stroke.Parent = frame
-
-	frame.Parent = parent
-	return frame
+	part.Parent = parent
+	return part
 end
 
 --[[
@@ -211,55 +201,77 @@ end
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	for _, boat in boats do
-		local unit = self.units[boat.id]
+	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
+		local unit = self.units[id]
 		if not unit then
 			unit = {
-				frame = makeBoatVisual(self.unitLayer, boat.slot, boat.kind),
-				targetX = boat.x,
-				targetY = boat.y,
-				currentX = boat.x,
-				currentY = boat.y,
+				part = makeUnit(self.root, slot, kind, isMissile),
+				current = Vector2.new(x, y),
+				target = Vector2.new(x, y),
+				isMissile = isMissile,
+				extra = extra,
 			}
-			self.units[boat.id] = unit
+			self.units[id] = unit
 		end
-		unit.targetX = boat.x
-		unit.targetY = boat.y
-		self.seen[boat.id] = true
+		unit.target = Vector2.new(x, y)
+		unit.extra = extra
+		self.seen[id] = true
+	end
+
+	for _, boat in boats do
+		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
 	end
 
 	for _, missile in missiles do
-		local unit = self.units[missile.id]
-		if not unit then
-			unit = {
-				frame = makeMissileVisual(self.unitLayer, missile.slot, missile.kind),
-				targetX = missile.x,
-				targetY = missile.y,
-				currentX = missile.x,
-				currentY = missile.y,
-			}
-			self.units[missile.id] = unit
-		end
-		unit.targetX = missile.x
-		unit.targetY = missile.y
-		self.seen[missile.id] = true
+		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
+			tx = missile.tx,
+			ty = missile.ty,
+		})
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.
 	for id, unit in self.units do
 		if not self.seen[id] then
-			unit.frame:Destroy()
+			unit.part:Destroy()
 			self.units[id] = nil
 		end
 	end
 end
 
 function Overlay.stepInterpolation(self: Overlay, dt: number)
-	local alpha = math.min(1, dt * 10)
+	local alpha = math.min(1, dt * 9)
+
 	for _, unit in self.units do
-		unit.currentX += (unit.targetX - unit.currentX) * alpha
-		unit.currentY += (unit.targetY - unit.currentY) * alpha
-		unit.frame.Position = scalePosition(unit.currentX, unit.currentY)
+		unit.current += (unit.target - unit.current) * alpha
+
+		local x, y = unit.current.X, unit.current.Y
+		local ground = WorldSpace.tileToWorld(x, y)
+
+		local height
+		if unit.isMissile then
+			-- Trajectoire en cloche : un missile qui rase le sol ne se lit pas,
+			-- alors que c'est l'evenement le plus spectaculaire de la partie.
+			-- L'altitude se deduit de la distance restante, donc elle retombe
+			-- naturellement a zero au point d'impact.
+			local remaining = 80
+			if unit.extra then
+				remaining = math.sqrt((unit.extra.tx - x) ^ 2 + (unit.extra.ty - y) ^ 2)
+			end
+			local approach = math.clamp(remaining / 60, 0, 1)
+			height = 25 + math.sin(approach * math.pi * 0.5) * 95
+		else
+			height = Config.OCEAN_LEVEL + 1
+		end
+
+		local position = Vector3.new(ground.X, height, ground.Z)
+		local direction = unit.target - unit.current
+
+		if direction.Magnitude > 0.01 then
+			local look = Vector3.new(direction.X, 0, direction.Y).Unit
+			unit.part.CFrame = CFrame.lookAt(position, position + look)
+		else
+			unit.part.CFrame = CFrame.new(position)
+		end
 	end
 end
 
@@ -268,42 +280,42 @@ end
 --=============================================================================
 
 --[[
-	Onde de choc nucleaire. Elle est dimensionnee en Scale sur le rayon reel de
-	la frappe, donc elle couvre exactement les tuiles reellement touchees — un
-	joueur peut juger de la zone d'effet a l'oeil.
+	Onde de choc nucleaire : une sphere qui se dilate jusqu'au rayon reel de la
+	frappe, donc le joueur juge la zone d'effet a l'oeil.
 ]]
 function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
-	local ring = Instance.new("Frame")
-	ring.AnchorPoint = Vector2.new(0.5, 0.5)
-	ring.Position = scalePosition(x, y)
-	ring.Size = UDim2.fromScale(0, 0)
-	ring.BackgroundColor3 = Color3.fromRGB(255, 180, 90)
-	ring.BackgroundTransparency = 0.25
-	ring.BorderSizePixel = 0
+	local ground = WorldSpace.tileToWorld(x, y)
+	local worldRadius = radius * Config.TILE_SIZE
 
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(1, 0)
-	corner.Parent = ring
+	local sphere = Instance.new("Part")
+	sphere.Name = "Blast"
+	sphere.Shape = Enum.PartType.Ball
+	sphere.Anchored = true
+	sphere.CanCollide = false
+	sphere.CanTouch = false
+	sphere.CanQuery = false
+	sphere.CastShadow = false
+	sphere.Material = Enum.Material.Neon
+	sphere.Color = Color3.fromRGB(255, 190, 110)
+	sphere.Transparency = 0.15
+	sphere.Size = Vector3.new(4, 4, 4)
+	sphere.CFrame = CFrame.new(ground.X, 14, ground.Z)
+	sphere.Parent = self.root
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 240, 200)
-	stroke.Thickness = 3
-	stroke.Parent = ring
+	TweenService:Create(sphere, TweenInfo.new(1.1, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+		Size = Vector3.new(worldRadius * 2, worldRadius * 2, worldRadius * 2),
+		Transparency = 1,
+	}):Play()
 
-	ring.Parent = self.effectLayer
+	local light = Instance.new("PointLight")
+	light.Brightness = 8
+	light.Range = math.min(worldRadius * 2, 60)
+	light.Color = Color3.fromRGB(255, 200, 120)
+	light.Parent = sphere
+	TweenService:Create(light, TweenInfo.new(1.1), { Brightness = 0 }):Play()
 
-	local finalSize = UDim2.fromScale((radius * 2) / W, (radius * 2) / H)
-	local tween = TweenService:Create(
-		ring,
-		TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-		{ Size = finalSize, BackgroundTransparency = 1 }
-	)
-	tween:Play()
-
-	TweenService:Create(stroke, TweenInfo.new(0.9), { Transparency = 1 }):Play()
-
-	task.delay(1.1, function()
-		ring:Destroy()
+	task.delay(1.3, function()
+		sphere:Destroy()
 	end)
 end
 

@@ -37,6 +37,19 @@ répercutée immédiatement dans le DataModel.
 Teste avec **Play Solo** : 12 bots peuplent la carte, construisent, débarquent,
 s'allient et se trahissent. La partie est jouable et observable sans autre joueur.
 
+### Commandes
+
+| Touche | Action |
+|---|---|
+| `ZQSD` / `WASD` / flèches | Déplacer la vue |
+| Molette | Zoom |
+| `A` / `E` | Pivoter la caméra |
+| Clic | Agir sur la tuile, selon le mode armé |
+| `1` `2` `3` `4` | Attaquer · Débarquer · Construire · Nucléaire |
+| `Espace` | Recentrer sur ta capitale |
+| `F` | Basculer vue stratégique ↔ avatar |
+| `G` | Défilement par les bords de l'écran |
+
 ---
 
 ## Tests
@@ -70,6 +83,8 @@ ReplicatedStorage/Shared/
   Theme.luau        Jetons de design : couleurs, espacements, typographie, animation
   Audio.luau        Catalogue sonore
   MapGen.luau       Génération de carte déterministe à partir d'une seed
+  GreedyMesh.luau   Fusion de tuiles en rectangles (partagée serveur/client)
+  WorldSpace.luau   Conversions grille ↔ monde 3D
   Doctrines.luau    Les quatre doctrines et leurs multiplicateurs
   BuildingDefs.luau Définitions et coûts des bâtiments
   Remotes.luau      Création/récupération des RemoteEvents
@@ -83,13 +98,15 @@ ServerScriptService/Server/
   Nukes.luau        Tirs, interception SAM, détonation
   Diplomacy.luau    Alliances, trahisons, embargos
   Persistence.luau  Réputation persistante (DataStore)
+  WorldBuilder.luau Collision statique du monde
   Bots.luau         IA de remplissage
 
 StarterPlayerScripts/Client/
-  init.client.luau  Caméra 2D lissée, saisie des ordres, réseau
-  MapRenderer.luau  Peinture de la carte via EditableImage
+  init.client.luau  Orchestration : saisie des ordres, réseau, avatar
+  WorldRenderer.luau Géométrie colorée du monde, par chunks
+  WorldCamera.luau  Caméra stratégique et sélection par lancer de rayon
   Overlay.luau      Bâtiments, navires, missiles, explosions
-  Minimap.luau      Vue d'ensemble et rectangle de visée
+  Minimap.luau      Vue d'ensemble (facultative)
   HUD.luau          Commandement, construction, diplomatie, classement
   VictoryScreen.luau Écran de fin de partie
   SoundManager.luau Lecture sonore : bridage, variation, recyclage
@@ -111,19 +128,35 @@ changé de main au format `[u32 index][u8 slot]`.
 ensembles `border` et `coast` de chaque joueur sont maintenus à l'incrémentale.
 C'est ce qui permet de tenir 40 000 tuiles à 10 ticks/seconde.
 
-**Le rendu est isolé.** `MapRenderer` et `Overlay` ne connaissent rien de la
-simulation. Le passage au 3D ne touche qu'eux.
+**Le monde est de la vraie géométrie.** 256×160 tuiles sur 4 studs donnent un
+monde de 1024×640 studs, posé dans le Workspace. On y navigue en caméra
+stratégique, et on peut y descendre avec son avatar (touche F).
 
-**Quatre couches composent chaque pixel de carte** : relief (variation
-déterministe par tuile), profondeur océanique (BFS depuis les côtes, calculé une
-fois), liseré de frontière, et « chaleur » — les tuiles récemment prises
-rougeoient puis refroidissent. Cette dernière couche est purement client : elle
-ne coûte aucune bande passante et montre pourtant exactement où la partie se
-joue.
+**40 960 tuiles ne peuvent pas être 40 960 Parts.** Les tuiles voisines de même
+couleur et même relief sont fusionnées en rectangles par
+[GreedyMesh.luau](ReplicatedStorage/Shared/GreedyMesh.luau). Mesuré sur une
+partie de fin de match : **1 337 Parts pour 17 319 tuiles de terre**, soit une
+compression de 13×.
 
-**La minimap ne redessine rien.** Une EditableImage peut alimenter plusieurs
-ImageLabel, donc elle affiche le même contenu que la grande carte, mis à jour
-par le même unique upload GPU.
+**Le relief ne change jamais, seule la couleur change.** C'est ce qui permet de
+séparer les responsabilités :
+
+| | Contenu | Coût |
+|---|---|---|
+| Serveur | Collision invisible, fusionnée par relief seul | 311 blocs, répliqués une fois |
+| Client | Géométrie colorée, fusionnée par relief + propriétaire | 1 337 Parts, locale |
+
+Sans collision serveur, un avatar posé sur sa capitale tomberait indéfiniment :
+le rendu du client est local, le serveur n'en voit rien.
+
+**Les reconstructions sont locales et étalées.** Une conquête ne salit que les
+chunks concernés, et le budget est de 3 chunks par frame — parce qu'une grande
+offensive en salit des dizaines dans le même tick, exactement quand le joueur
+regarde l'écran.
+
+**Le rendu reste isolé de la simulation.** `WorldRenderer` et `Overlay` ne
+connaissent rien du jeu : le passage du 2D au 3D n'a touché aucune ligne de
+`GameState`, `Navy`, `Nukes` ou `Diplomacy`.
 
 **Simulation à pas fixe.** 10 ticks/seconde avec accumulateur : l'équilibrage ne
 dépend pas du FPS serveur.
@@ -163,12 +196,11 @@ victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
 
 **Pas encore fait**, par ordre de priorité :
 
-1. **Rendu 3D** — remplacer le calque 2D par du terrain low-poly avec bâtiments.
-2. **Avatar-commandeur** — le joueur physiquement présent dans sa capitale.
-3. **Chat vocal de proximité** pour les négociations.
-4. **Navires de guerre** — actuellement les transports sont inarrêtables en mer.
-5. **Brouillard de guerre.**
-6. **Saisons et classement de clans.**
+1. **Chat vocal de proximité** pour les négociations.
+2. **Navires de guerre** — actuellement les transports sont inarrêtables en mer.
+3. **Modèles de bâtiments** — ce sont pour l'instant des piliers colorés.
+4. **Brouillard de guerre.**
+5. **Saisons et classement de clans.**
 
 ### Limites connues
 
@@ -179,6 +211,10 @@ premiers paramètres à revoir : `ATTACK_SPEND_RATE`, `GROWTH_RATE`,
 
 ⚠️ **Les parties contre des bots seuls se terminent en 5 à 10 minutes**, bien
 avant les 25 minutes prévues — les bots ne se coalisent pas contre le leader.
+
+⚠️ **Le coût de rendu n'a été mesuré qu'en simulation**, pas sur un vrai
+appareil. `./tests/run.sh` reporte le nombre de Parts en fin de rapport ; si tu
+changes `TILE_SIZE` ou `CHUNK_SIZE`, relance-le pour vérifier que ça tient.
 
 ⚠️ **Les symboles de bâtiments sont des caractères Unicode.** S'ils ne
 s'affichent pas correctement dans Studio, remplacer `symbol` dans

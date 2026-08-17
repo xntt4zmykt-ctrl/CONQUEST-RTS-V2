@@ -36,6 +36,40 @@ Config.TERRAIN_COST = {
 }
 
 --=============================================================================
+-- Monde 3D
+--=============================================================================
+-- La carte est batie en vraie geometrie sur la baseplate. Une tuile fait
+-- TILE_SIZE studs de cote, donc le monde mesure 1024 x 640 studs : assez grand
+-- pour qu'un avatar s'y sente petit, assez compact pour le traverser.
+
+Config.TILE_SIZE = 4
+Config.WORLD_WIDTH = Config.MAP_WIDTH * Config.TILE_SIZE
+Config.WORLD_DEPTH = Config.MAP_HEIGHT * Config.TILE_SIZE
+
+-- Hauteur du sol par type de terrain. Le relief est franc et etage : c'est ce
+-- qui donne la lecture "carte en relief" plutot que "tapis colore".
+Config.TERRAIN_HEIGHT = {
+	[0] = 0, -- ocean : pas de bloc, seulement le plan d'eau
+	[1] = 3, -- plaines
+	[2] = 7, -- collines
+	[3] = 13, -- montagnes
+}
+
+Config.OCEAN_LEVEL = 1.5
+
+-- La carte est decoupee en chunks reconstruits independamment. Plus petit =
+-- reconstruction moins couteuse mais moins de fusion possible entre blocs ;
+-- 16x16 est le compromis retenu.
+Config.CHUNK_SIZE = 16
+Config.CHUNKS_X = Config.MAP_WIDTH // Config.CHUNK_SIZE
+Config.CHUNKS_Y = Config.MAP_HEIGHT // Config.CHUNK_SIZE
+
+-- Nombre maximal de chunks reconstruits par frame. Pendant une grande
+-- offensive, des dizaines de chunks changent en un tick : les etaler evite de
+-- faire chuter le framerate au pire moment de la partie.
+Config.CHUNK_REBUILDS_PER_FRAME = 3
+
+--=============================================================================
 -- Boucle de simulation
 --=============================================================================
 
@@ -152,6 +186,23 @@ Config.NUKE_STATS = {
 Config.ALLIANCE_REQUEST_TIMEOUT = 300 -- ticks avant expiration d'une demande
 Config.BETRAYAL_REPUTATION_COST = 1
 Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est affichee
+
+--=============================================================================
+-- Coalition anti-leader (bots)
+--=============================================================================
+-- Sans contrepoids collectif, le premier empire qui decroche gagne en 5 a 10
+-- minutes : chacun grignote son voisin plus faible et personne ne s'attaque au
+-- leader. Les bots detectent donc une faction dominante et se comportent comme
+-- une coalition improvisee : embargos, alliances entre menaces, offensives
+-- preferees contre le leader — exactement ce que font les joueurs humains sur
+-- Territorial.io.
+
+Config.COALITION_LEADER_RATIO = 1.7 -- tuiles du leader / tuiles moyennes pour etre "dominant"
+Config.COALITION_MIN_LEADER_TILES = 250 -- en dessous, c'est juste un bon depart, pas une menace
+Config.COALITION_ATTACK_BONUS = 350 -- bonus de score pour attaquer le leader
+Config.COALITION_NON_LEADER_DAMPING = 0.4 -- reluctance a se battre entre menaces tant que le leader domine
+Config.COALITION_EMBARGO_CHANCE = 0.5 -- par decision, tant que l'embargo n'est pas pose
+Config.COALITION_ALLY_CHANCE = 0.6 -- chance de proposer un pacte a un autre menace
 
 --=============================================================================
 -- Partie

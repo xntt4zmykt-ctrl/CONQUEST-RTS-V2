@@ -169,3 +169,26 @@ Color3.fromHSV = function(h, s, v)
 	else r, g, b = v, p, q end
 	return { R = r, G = g, B = b }
 end
+
+-- Vector3 / CFrame : suffisants pour que les modules se chargent. Le banc
+-- d'essai ne mesure que de la geometrie logique, jamais des transformations.
+Vector3 = {}
+Vector3.new = function(x, y, z)
+	return { X = x or 0, Y = y or 0, Z = z or 0 }
+end
+Vector3.zero = { X = 0, Y = 0, Z = 0 }
+
+CFrame = {}
+CFrame.new = function(x, y, z)
+	return { X = x or 0, Y = y or 0, Z = z or 0 }
+end
+
+Instance = {}
+Instance.new = function()
+	return setmetatable({}, {
+		__index = function()
+			return function() end
+		end,
+		__newindex = function() end,
+	})
+end
