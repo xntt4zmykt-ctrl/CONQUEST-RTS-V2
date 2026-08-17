@@ -467,11 +467,10 @@ RunService.RenderStepped:Connect(function(dt: number)
 		-- la barre de chargement, puis on lance le compte a rebours une fois le
 		-- dernier chunk pose.
 		if not worldReady then
-			local total = Config.CHUNKS_X * Config.CHUNKS_Y
-			local remaining = #w.dirtyQueue
-			intro:setProgress(1 - remaining / total)
+			local progress = w:initialProgress()
+			intro:setProgress(progress)
 
-			if remaining == 0 then
+			if progress >= 1 then
 				worldReady = true
 				intro:hide()
 				intro:runCountdown(Intro.COUNTDOWN_SECONDS, function()

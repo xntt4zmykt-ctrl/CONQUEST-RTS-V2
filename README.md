@@ -140,6 +140,30 @@ changé de main au format `[u32 index][u8 slot]`.
 ensembles `border` et `coast` de chaque joueur sont maintenus à l'incrémentale.
 C'est ce qui permet de tenir 40 000 tuiles à 10 ticks/seconde.
 
+### Génération de terrain
+
+Quatre mécanismes se combinent, chacun corrigeant un défaut précis :
+
+- **Déformation du domaine** — on perturbe les coordonnées avant de tirer le
+  bruit. Un bruit fractal brut donne des côtes molles et arrondies ; la
+  déformation les étire en péninsules, golfes et fjords.
+- **Masque continental** — décide où la terre a le droit d'exister. Sans lui,
+  l'atténuation radiale produisait une seule masse centrale à chaque partie.
+- **Bruit de crête** (`1 - |bruit|`) — produit des lignes au lieu de taches,
+  donc de vraies chaînes de montagnes orientées.
+- **Humidité** — un champ indépendant du relief qui répartit plaines, savanes et
+  forêts à altitude égale.
+
+Huit types de terrain (plage → sommet enneigé), chacun avec sa hauteur, sa
+couleur et son **coût de conquête** : une armée traverse une plaine, elle s'use
+en montagne.
+
+Niveau de la mer **et** limites de bandes sont calibrés par percentile. Répartir
+les bandes linéairement entre mer et sommet ne marche pas : la somme de
+plusieurs bruits concentre les altitudes autour de la moyenne et le point
+culminant est une valeur aberrante — presque toute la terre tombait dans la
+première bande, produisant des continents plats.
+
 **Le monde est de la vraie géométrie.** 256×160 tuiles sur 4 studs donnent un
 monde de 1024×640 studs, posé dans le Workspace. On y navigue en caméra
 stratégique, et on peut y descendre avec son avatar (touche F).
@@ -147,16 +171,17 @@ stratégique, et on peut y descendre avec son avatar (touche F).
 **40 960 tuiles ne peuvent pas être 40 960 Parts.** Les tuiles voisines de même
 couleur et même relief sont fusionnées en rectangles par
 [GreedyMesh.luau](ReplicatedStorage/Shared/GreedyMesh.luau). Mesuré sur une
-partie de fin de match : **1 337 Parts pour 17 319 tuiles de terre**, soit une
-compression de 13×.
+partie de fin de match : **3 957 Parts pour 15 568 tuiles de terre**. La compression
+est tombée de 17× à 3,9× en passant de 3 à 8 types de terrain — c'est le prix du
+relief, et il reste largement dans le budget.
 
 **Le relief ne change jamais, seule la couleur change.** C'est ce qui permet de
 séparer les responsabilités :
 
 | | Contenu | Coût |
 |---|---|---|
-| Serveur | Collision invisible, fusionnée par relief seul | 311 blocs, répliqués une fois |
-| Client | Géométrie colorée, fusionnée par relief + propriétaire | 1 337 Parts, locale |
+| Serveur | Collision invisible, fusionnée par relief seul | ~600 blocs, répliqués une fois |
+| Client | Géométrie colorée, fusionnée par relief + propriétaire | ~3 950 Parts, locale |
 
 Sans collision serveur, un avatar posé sur sa capitale tomberait indéfiniment :
 le rendu du client est local, le serveur n'en voit rien.

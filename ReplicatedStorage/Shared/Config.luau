@@ -16,23 +16,53 @@ Config.MAP_WIDTH = 256
 Config.MAP_HEIGHT = 160
 Config.TILE_COUNT = Config.MAP_WIDTH * Config.MAP_HEIGHT
 
-Config.LAND_RATIO = 0.42
-Config.HILL_RATIO = 0.28 -- part des terres qui devient colline
-Config.MOUNTAIN_RATIO = 0.10 -- part des terres qui devient montagne
+Config.LAND_RATIO = 0.38
 
+--[[
+	Types de terrain.
+
+	Huit paliers de relief au lieu de trois : c'est ce qui fait la difference
+	entre une carte en escalier et un paysage. Les identifiants restent sous 16
+	parce que la cle de fusion du rendu encode le proprietaire et le terrain
+	dans un seul entier (voir WorldRenderer.chunkKeyAt).
+]]
 Config.TERRAIN = {
 	OCEAN = 0,
-	PLAINS = 1,
-	HILLS = 2,
-	MOUNTAIN = 3,
+	BEACH = 1,
+	PLAINS = 2,
+	SAVANNA = 3,
+	FOREST = 4,
+	HILLS = 5,
+	HIGHLAND = 6,
+	MOUNTAIN = 7,
+	PEAK = 8,
 }
 
--- Multiplicateur de cout de conquete par terrain.
+-- Repartition des terres par altitude, du niveau de la mer vers les sommets.
+-- Les plages sont fines, les sommets rares : c'est ce qui rend une chaine de
+-- montagnes remarquable plutot que banale.
+Config.TERRAIN_BANDS = {
+	{ upTo = 0.06, kind = Config.TERRAIN.BEACH },
+	{ upTo = 0.44, kind = Config.TERRAIN.PLAINS }, -- module par l'humidite
+	{ upTo = 0.64, kind = Config.TERRAIN.HILLS },
+	{ upTo = 0.82, kind = Config.TERRAIN.HIGHLAND },
+	{ upTo = 0.95, kind = Config.TERRAIN.MOUNTAIN },
+	{ upTo = 1.01, kind = Config.TERRAIN.PEAK },
+}
+
+-- Multiplicateur de cout de conquete par terrain. Une armee traverse une
+-- plaine, elle s'use en montagne : c'est ce qui donne une valeur strategique au
+-- relief au lieu d'en faire une simple decoration.
 Config.TERRAIN_COST = {
 	[0] = math.huge, -- ocean : uniquement par debarquement
-	[1] = 1.0,
-	[2] = 1.6,
-	[3] = 2.8,
+	[1] = 0.85, -- plage : indefendable
+	[2] = 1.0, -- plaines
+	[3] = 1.05, -- savane
+	[4] = 1.35, -- foret
+	[5] = 1.7, -- collines
+	[6] = 2.2, -- hautes terres
+	[7] = 3.0, -- montagne
+	[8] = 4.0, -- sommet
 }
 
 --=============================================================================
@@ -50,9 +80,14 @@ Config.WORLD_DEPTH = Config.MAP_HEIGHT * Config.TILE_SIZE
 -- qui donne la lecture "carte en relief" plutot que "tapis colore".
 Config.TERRAIN_HEIGHT = {
 	[0] = 0, -- ocean : pas de bloc, seulement le plan d'eau
-	[1] = 3, -- plaines
-	[2] = 7, -- collines
-	[3] = 13, -- montagnes
+	[1] = 2,
+	[2] = 4,
+	[3] = 4,
+	[4] = 6,
+	[5] = 9,
+	[6] = 13,
+	[7] = 18,
+	[8] = 24,
 }
 
 Config.OCEAN_LEVEL = 1.5
@@ -294,11 +329,18 @@ do
 	end
 end
 
+-- Palette du terrain neutre. Volontairement desaturee : les couleurs vives
+-- sont reservees aux factions, sinon la carte politique devient illisible.
 Config.TERRAIN_COLORS = {
 	[0] = Color3.fromRGB(22, 38, 62), -- ocean
-	[1] = Color3.fromRGB(122, 133, 96), -- plaines
-	[2] = Color3.fromRGB(104, 110, 84), -- collines
-	[3] = Color3.fromRGB(88, 88, 88), -- montagnes
+	[1] = Color3.fromRGB(206, 190, 148), -- plage
+	[2] = Color3.fromRGB(122, 148, 92), -- plaines
+	[3] = Color3.fromRGB(164, 160, 104), -- savane
+	[4] = Color3.fromRGB(76, 106, 72), -- foret
+	[5] = Color3.fromRGB(114, 118, 84), -- collines
+	[6] = Color3.fromRGB(124, 114, 98), -- hautes terres
+	[7] = Color3.fromRGB(122, 120, 120), -- montagne
+	[8] = Color3.fromRGB(226, 230, 236), -- sommet enneige
 }
 
 -- Les jetons visuels (couleurs d'interface, espacements, typographie) vivent

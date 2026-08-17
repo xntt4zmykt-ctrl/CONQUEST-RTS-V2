@@ -69,11 +69,21 @@ end
 -- meme continuite spatiale — suffisant pour valider que le generateur de carte
 -- produit des continents coherents.
 
+--[[
+	Hash entier 2D.
+
+	Ecrit avec bit32 et non en arithmetique flottante : la version precedente
+	calculait n^3 * 15731, ce qui depasse largement les 53 bits de mantisse d'un
+	double. Le modulo d'un nombre deja fausse ne renvoyait qu'une poignee de
+	valeurs distinctes, et le terrain genere dans les tests n'avait plus rien a
+	voir avec celui de Roblox — au point de produire des cartes a 3 % de terre.
+]]
 local function hash2(x, y)
-	local n = x * 374761393 + y * 668265263
-	n = (n % 2147483648)
-	n = ((n * (n * n * 15731 + 789221) + 1376312589) % 2147483648)
-	return n / 2147483648 - 0.5
+	local h = bit32.bxor(bit32.band(x * 73856093, 0xFFFFFFFF), bit32.band(y * 19349663, 0xFFFFFFFF))
+	h = bit32.bxor(h, bit32.rshift(h, 13))
+	h = bit32.band(h * 1274126177, 0xFFFFFFFF)
+	h = bit32.bxor(h, bit32.rshift(h, 16))
+	return h / 4294967296 - 0.5
 end
 
 local function smooth(t)

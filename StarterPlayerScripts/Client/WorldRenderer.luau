@@ -41,13 +41,29 @@ WorldRenderer.__index = WorldRenderer
 
 export type WorldRenderer = typeof(setmetatable({} :: any, WorldRenderer))
 
--- Assombrissement par relief : sans lui, un plateau et une montagne de la meme
--- faction forment une masse illisible malgre leur difference de hauteur.
+--[[
+	Assombrissement par relief.
+
+	Sans lui, un plateau et une montagne de la meme faction forment une masse
+	illisible malgre leur difference de hauteur. La plage est au contraire
+	eclaircie : un littoral doit se lire meme sous une couleur de faction
+	sombre.
+]]
 local TERRAIN_SHADE = {
-	[1] = 1.0,
-	[2] = 0.88,
-	[3] = 0.74,
+	[1] = 1.12, -- plage
+	[2] = 1.0, -- plaines
+	[3] = 1.02, -- savane
+	[4] = 0.9, -- foret
+	[5] = 0.85, -- collines
+	[6] = 0.78, -- hautes terres
+	[7] = 0.7, -- montagne
+	[8] = 0.64, -- sommet
 }
+
+-- Facteur d'encodage de la cle de fusion. Il doit rester strictement superieur
+-- au plus grand identifiant de terrain, sinon le terrain deborde sur le
+-- proprietaire et deux factions fusionnent en un seul bloc.
+local KEY_STRIDE = 16
 
 --=============================================================================
 -- Construction
@@ -65,6 +81,14 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une
 	-- allocation par reconstruction.
 	self.meshScratch = {}
+
+	-- Suivi de la construction initiale, distinct de la file de reconstruction.
+	-- Attendre que la file soit vide ne marche pas : la simulation tourne
+	-- pendant le chargement et resalit des chunks en continu, donc la file
+	-- n'atteint jamais zero et l'ecran de chargement reste bloque.
+	self.everBuilt = {} :: { [number]: boolean }
+	self.builtCount = 0
+	self.totalChunks = Config.CHUNKS_X * Config.CHUNKS_Y
 
 	local root = Workspace:FindFirstChild("ConquestWorld")
 	if root then
@@ -163,9 +187,28 @@ function WorldRenderer.markTileDirty(self: WorldRenderer, index: number)
 end
 
 local function colorFor(slot: number, terrain: number): Color3
-	local base = if slot == NEUTRAL then Config.TERRAIN_COLORS[terrain] else Theme.factionColor(slot)
 	local shade = TERRAIN_SHADE[terrain] or 1
-	return Color3.new(base.R * shade, base.G * shade, base.B * shade)
+
+	if slot == NEUTRAL then
+		local base = Config.TERRAIN_COLORS[terrain]
+		return Color3.new(
+			math.clamp(base.R * shade, 0, 1),
+			math.clamp(base.G * shade, 0, 1),
+			math.clamp(base.B * shade, 0, 1)
+		)
+	end
+
+	-- Territoire possede : la couleur de faction domine, mais on melange un peu
+	-- de terrain pour que le relief reste lisible a l'interieur d'un empire.
+	local faction = Theme.factionColor(slot)
+	local terrainColor = Config.TERRAIN_COLORS[terrain]
+	local blended = faction:Lerp(terrainColor, 0.22)
+
+	return Color3.new(
+		math.clamp(blended.R * shade, 0, 1),
+		math.clamp(blended.G * shade, 0, 1),
+		math.clamp(blended.B * shade, 0, 1)
+	)
 end
 
 --[[
@@ -179,7 +222,7 @@ function WorldRenderer.chunkKeyAt(self: WorldRenderer, x: number, y: number): nu
 	if terrain == OCEAN then
 		return nil -- l'ocean n'a pas de bloc, c'est un plan unique
 	end
-	return buffer.readu8(self.owner, index) * 8 + terrain
+	return buffer.readu8(self.owner, index) * KEY_STRIDE + terrain
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
@@ -193,6 +236,11 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	folder.Name = `Chunk{chunk}`
 	self.chunkFolders[chunk] = folder
 
+	if not self.everBuilt[chunk] then
+		self.everBuilt[chunk] = true
+		self.builtCount += 1
+	end
+
 	local cx = (chunk % Config.CHUNKS_X) * CHUNK
 	local cy = (chunk // Config.CHUNKS_X) * CHUNK
 	local x1 = math.min(cx + CHUNK - 1, W - 1)
@@ -203,8 +251,8 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	end, cx, cy, x1, y1, self.meshScratch)
 
 	for _, rect in rects do
-		local terrain = rect.key % 8
-		local slot = (rect.key - terrain) // 8
+		local terrain = rect.key % KEY_STRIDE
+		local slot = (rect.key - terrain) // KEY_STRIDE
 		local blockHeight = Config.TERRAIN_HEIGHT[terrain]
 
 		local origin = WorldSpace.tileToWorld(rect.x, rect.y)
@@ -303,6 +351,11 @@ function WorldRenderer.applyDelta(
 	end
 
 	return count, gains, losses, others
+end
+
+-- Avancement de la construction initiale, entre 0 et 1.
+function WorldRenderer.initialProgress(self: WorldRenderer): number
+	return self.builtCount / math.max(1, self.totalChunks)
 end
 
 function WorldRenderer.ownerAt(self: WorldRenderer, index: number): number

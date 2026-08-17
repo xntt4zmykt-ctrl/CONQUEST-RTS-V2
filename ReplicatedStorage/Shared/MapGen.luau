@@ -1,13 +1,37 @@
 --!strict
--- Generation de carte deterministe.
---
--- Le serveur et le client appellent tous les deux generate(seed) et obtiennent
--- un resultat identique, donc on ne replique que la seed (4 octets) au lieu
--- des 40 Ko du terrain.
---
--- math.noise est du Perlin deterministe cote Roblox, et les seuils terre/mer
--- sont calibres par histogramme : quelle que soit la seed, on retombe sur le
--- LAND_RATIO demande. Sans ca, certaines seeds donnent une carte 100 % ocean.
+--[[
+	Generation de carte deterministe.
+
+	Le serveur et le client appellent tous les deux generate(seed) et obtiennent
+	un resultat identique, donc on ne replique que la seed (4 octets) au lieu
+	des 40 Ko du terrain.
+
+	Quatre mecanismes se combinent, chacun corrigeant un defaut precis de la
+	version precedente :
+
+	  **Deformation du domaine** — on perturbe les coordonnees avant de tirer le
+	  bruit. Un bruit fractal brut produit des cotes molles et arrondies, toutes
+	  semblables ; la deformation les etire et les replie, ce qui donne des
+	  peninsules, des golfes et des fjords.
+
+	  **Masque continental** — un bruit tres basse frequence decide ou la terre
+	  a le droit d'exister. Sans lui, l'attenuation radiale produisait une seule
+	  masse centrale a chaque partie. Avec, on obtient plusieurs continents et
+	  des archipels, donc une vraie geographie a jouer.
+
+	  **Bruit de crete** — `1 - |bruit|` produit des lignes au lieu de taches.
+	  Eleve au cube et ajoute a l'altitude, il forme des chaines de montagnes
+	  orientees, la ou un simple seuil d'altitude donnait des patés isoles.
+
+	  **Humidite** — un second champ, independant du relief, qui repartit
+	  plaines, savanes et forets a altitude egale. C'est ce qui empeche toutes
+	  les basses terres d'avoir la meme couleur.
+
+	Les seuils sont calibres par histogramme : quelle que soit la seed, on
+	retombe sur le LAND_RATIO demande et sur la meme repartition par bande. Sans
+	cette calibration, certaines seeds donnent une carte sans montagnes et
+	d'autres une carte sans plaines.
+]]
 
 local Config = require(script.Parent.Config)
 
@@ -15,38 +39,66 @@ local MapGen = {}
 
 local W = Config.MAP_WIDTH
 local H = Config.MAP_HEIGHT
+local T = Config.TERRAIN
 
-local OCEAN = Config.TERRAIN.OCEAN
-local PLAINS = Config.TERRAIN.PLAINS
-local HILLS = Config.TERRAIN.HILLS
-local MOUNTAIN = Config.TERRAIN.MOUNTAIN
+--[[
+	Resolution de l'histogramme de calibration.
 
-local HIST_BUCKETS = 512
+	Elle doit rester bien superieure au nombre de tuiles concentrees dans une
+	meme tranche d'altitude : si un seul seau contient une grosse part de la
+	carte, le seuil du niveau de la mer devient instable d'une seed a l'autre.
+]]
+local HIST_BUCKETS = 1024
 
--- Bruit fractal (fBm) sur 5 octaves.
-local function fbm(x: number, y: number, ox: number, oy: number): number
+--=============================================================================
+-- Bruits
+--=============================================================================
+
+local function fbm(x: number, y: number, ox: number, oy: number, octaves: number, frequency: number): number
 	local total = 0
-	local amp = 1
-	local freq = 2.4
+	local amplitude = 1
+	local freq = frequency
 	local norm = 0
-	for _ = 1, 5 do
-		total += amp * math.noise(x * freq + ox, y * freq + oy)
-		norm += amp
-		amp *= 0.5
-		freq *= 2.07
+	for _ = 1, octaves do
+		total += amplitude * math.noise(x * freq + ox, y * freq + oy)
+		norm += amplitude
+		amplitude *= 0.5
+		freq *= 2.03
 	end
 	return total / norm
 end
+
+-- Bruit de crete : produit des lignes marquees au lieu de taches douces.
+local function ridge(x: number, y: number, ox: number, oy: number, frequency: number): number
+	local n = math.noise(x * frequency + ox, y * frequency + oy)
+	local r = 1 - math.abs(n) * 2
+	return math.clamp(r, 0, 1)
+end
+
+--=============================================================================
+-- Generation
+--=============================================================================
 
 --[[
 	Renvoie un buffer de W*H octets, un par tuile, contenant un TERRAIN.
 	L'index d'une tuile est toujours y * W + x.
 ]]
 function MapGen.generate(seed: number): buffer
+	-- Decalages derives de la seed. Chaque champ a les siens, sinon relief,
+	-- humidite et cretes seraient correles et produiraient des motifs visibles.
 	local ox = (seed % 4096) * 0.1373 + 11.5
 	local oy = (math.floor(seed / 4096) % 4096) * 0.1907 + 7.25
+	local wx = ox * 0.61 + 53.1
+	local wy = oy * 0.77 + 19.4
+	local cx = ox * 1.31 + 131.7
+	local cy = oy * 1.09 + 87.3
+	local rx = ox * 0.43 + 211.2
+	local ry = oy * 0.87 + 167.9
+	local mx = ox * 1.77 + 301.4
+	local my = oy * 1.23 + 259.8
 
 	local elevation = table.create(W * H, 0)
+	local moisture = table.create(W * H, 0)
 	local minE, maxE = math.huge, -math.huge
 
 	for y = 0, H - 1 do
@@ -54,17 +106,37 @@ function MapGen.generate(seed: number): buffer
 			local nx = x / W
 			local ny = y / H
 
-			local e = fbm(nx, ny, ox, oy)
+			-- Deformation du domaine : on decale le point d'echantillonnage.
+			local dx = fbm(nx, ny, wx, wy, 2, 7.0)
+			local dy = fbm(nx, ny, wx + 41.7, wy + 29.3, 2, 7.0)
+			local sx = nx + dx * 0.16
+			local sy = ny + dy * 0.16
 
-			-- Attenuation radiale : force les bords de carte a etre de l'ocean,
-			-- sinon les joueurs qui spawnent au bord ont un flanc invulnerable.
-			local dx = (nx - 0.5) * 2.0
-			local dy = (ny - 0.5) * 2.0
-			local d2 = dx * dx * 0.85 + dy * dy
-			e -= d2 * 0.55
+			local base = fbm(sx, sy, ox, oy, 5, 6.5)
 
-			local i = y * W + x
-			elevation[i + 1] = e
+			-- Masque continental : basse frequence *relativement* au relief,
+			-- mais assez elevee pour couvrir plusieurs cellules de bruit et
+			-- decouper reellement plusieurs continents.
+			local mask = fbm(nx, ny, cx, cy, 2, 3.2)
+
+			-- Attenuation aux bords, plus douce qu'avant : le masque fait
+			-- desormais l'essentiel du travail de decoupe des continents.
+			local ex = (nx - 0.5) * 2
+			local ey = (ny - 0.5) * 2
+			local edge = math.max(math.abs(ex) * 0.92, math.abs(ey))
+			local falloff = math.max(0, edge - 0.62) ^ 2 * 3.4
+
+			local e = base * 0.62 + mask * 0.52 - falloff
+
+			-- Chaines de montagnes : la crete ne s'applique qu'aux zones deja
+			-- hautes, sinon des aretes apparaissent au milieu de l'ocean.
+			local r = ridge(sx, sy, rx, ry, 12.0)
+			e += r * r * r * 0.34 * math.clamp(base * 2 + 0.4, 0, 1)
+
+			local index = y * W + x
+			elevation[index + 1] = e
+			moisture[index + 1] = fbm(nx, ny, mx, my, 3, 8.0)
+
 			if e < minE then
 				minE = e
 			end
@@ -74,52 +146,99 @@ function MapGen.generate(seed: number): buffer
 		end
 	end
 
-	-- Calibration par histogramme : on cherche les seuils d'elevation qui
-	-- decoupent la carte selon les ratios voulus.
+	--=========================================================================
+	-- Calibration
+	--=========================================================================
+
 	local span = math.max(maxE - minE, 1e-6)
 	local hist = table.create(HIST_BUCKETS, 0)
 	for i = 1, W * H do
-		local b = math.clamp(math.floor((elevation[i] - minE) / span * (HIST_BUCKETS - 1)), 0, HIST_BUCKETS - 1)
-		hist[b + 1] += 1
+		local bucket = math.clamp(math.floor((elevation[i] - minE) / span * (HIST_BUCKETS - 1)), 0, HIST_BUCKETS - 1)
+		hist[bucket + 1] += 1
 	end
 
-	local function thresholdAtFractionFromTop(fraction: number): number
-		-- Renvoie l'elevation au-dessus de laquelle se trouve `fraction` de la carte.
+--[[
+		Elevation au-dessus de laquelle se trouve `fraction` de la carte.
+
+		On interpole a l'interieur du seau qui fait basculer le compte. Renvoyer
+		sa borne basse, comme le faisait la version precedente, comptait tout le
+		seau comme terre : le ratio reel depassait de six points celui demande.
+	]]
+	local function thresholdFromTop(fraction: number): number
 		local target = fraction * (W * H)
 		local acc = 0
 		for b = HIST_BUCKETS, 1, -1 do
-			acc += hist[b]
-			if acc >= target then
-				return minE + ((b - 1) / (HIST_BUCKETS - 1)) * span
+			local count = hist[b]
+			if acc + count >= target then
+				local within = if count > 0 then (target - acc) / count else 0
+				local position = (b - 1) + (1 - within)
+				return minE + (position / (HIST_BUCKETS - 1)) * span
 			end
+			acc += count
 		end
 		return minE
 	end
 
-	local seaLevel = thresholdAtFractionFromTop(Config.LAND_RATIO)
-	local hillLevel = thresholdAtFractionFromTop(Config.LAND_RATIO * Config.HILL_RATIO)
-	local mountainLevel = thresholdAtFractionFromTop(Config.LAND_RATIO * Config.MOUNTAIN_RATIO)
+	local seaLevel = thresholdFromTop(Config.LAND_RATIO)
+
+	--[[
+		Seuils de bande, eux aussi calibres par percentile.
+
+		Repartir les bandes lineairement entre le niveau de la mer et le sommet
+		ne marche pas : la somme de plusieurs bruits concentre les altitudes
+		autour de la moyenne, et le point culminant est une valeur aberrante.
+		Presque toute la terre tombait alors dans la premiere bande, produisant
+		des continents d'un seul tenant sans le moindre relief.
+	]]
+	local bandLevels = table.create(#Config.TERRAIN_BANDS, 0)
+	for i, band in Config.TERRAIN_BANDS do
+		-- `upTo` est une part cumulee des terres depuis le rivage ; le seuil
+		-- correspondant se lit donc depuis le haut de la distribution.
+		bandLevels[i] = thresholdFromTop(Config.LAND_RATIO * (1 - band.upTo))
+	end
+
+	--=========================================================================
+	-- Classification
+	--=========================================================================
 
 	local terrain = buffer.create(W * H)
+
 	for i = 0, W * H - 1 do
 		local e = elevation[i + 1]
-		local t
+
 		if e < seaLevel then
-			t = OCEAN
-		elseif e < hillLevel then
-			t = PLAINS
-		elseif e < mountainLevel then
-			t = HILLS
-		else
-			t = MOUNTAIN
+			buffer.writeu8(terrain, i, T.OCEAN)
+			continue
 		end
-		buffer.writeu8(terrain, i, t)
+
+		local kind = T.PEAK
+		for i, band in Config.TERRAIN_BANDS do
+			if e < bandLevels[i] then
+				kind = band.kind
+				break
+			end
+		end
+
+		-- A basse altitude, c'est l'humidite qui decide du biome. Le relief
+		-- seul donnerait des continents monochromes.
+		if kind == T.PLAINS then
+			local m = moisture[i + 1]
+			if m > 0.12 then
+				kind = T.FOREST
+			elseif m < -0.12 then
+				kind = T.SAVANNA
+			end
+		end
+
+		buffer.writeu8(terrain, i, kind)
 	end
 
 	return terrain
 end
 
--- Helpers d'index partages par le serveur et le client.
+--=============================================================================
+-- Helpers d'index
+--=============================================================================
 
 function MapGen.toIndex(x: number, y: number): number
 	return y * W + x
@@ -164,18 +283,19 @@ function MapGen.neighbors(index: number, out: { number }): number
 	return n
 end
 
+local coastScratch = table.create(4, 0)
+
 --[[
 	Une tuile est cotiere si c'est de la terre touchant l'ocean. C'est la
 	condition d'implantation d'un port et le seul point de debarquement valide.
 ]]
 function MapGen.isCoastal(terrain: buffer, index: number): boolean
-	if buffer.readu8(terrain, index) == Config.TERRAIN.OCEAN then
+	if buffer.readu8(terrain, index) == T.OCEAN then
 		return false
 	end
-	local scratch = table.create(4, 0)
-	local n = MapGen.neighbors(index, scratch)
+	local n = MapGen.neighbors(index, coastScratch)
 	for i = 1, n do
-		if buffer.readu8(terrain, scratch[i]) == Config.TERRAIN.OCEAN then
+		if buffer.readu8(terrain, coastScratch[i]) == T.OCEAN then
 			return true
 		end
 	end
@@ -187,7 +307,7 @@ end
 function MapGen.countLand(terrain: buffer): number
 	local count = 0
 	for i = 0, W * H - 1 do
-		if buffer.readu8(terrain, i) ~= Config.TERRAIN.OCEAN then
+		if buffer.readu8(terrain, i) ~= T.OCEAN then
 			count += 1
 		end
 	end
