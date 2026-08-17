@@ -247,9 +247,16 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 		overlay:clear()
 	end
 
-	renderer = MapRenderer.new(seed, viewport)
-	overlay = Overlay.new((renderer :: MapRenderer.MapRenderer).label)
-	applyCamera()
+	-- Le rendu peut echouer si le moteur ne fournit pas les EditableImage : il
+	-- affiche alors sa propre banniere d'erreur, et on evite simplement de
+	-- construire le calque par dessus.
+	local created = MapRenderer.new(seed, viewport)
+	renderer = created
+	overlay = if created then Overlay.new(created.label) else nil
+
+	if created then
+		applyCamera()
+	end
 
 	local entry = roster[slot]
 	hud:setIdentity(slot, if entry then entry.name else player.DisplayName)

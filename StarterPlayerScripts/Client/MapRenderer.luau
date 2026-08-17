@@ -34,6 +34,7 @@ export type MapRenderer = typeof(setmetatable(
 		image: EditableImage,
 		label: ImageLabel,
 		needsUpload: boolean,
+		warnedWriteFailure: boolean,
 	},
 	MapRenderer
 ))
@@ -60,15 +61,85 @@ end
 
 local scratch = table.create(4, 0)
 
-function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer
+--[[
+	Rattache l'EditableImage a l'ImageLabel.
+
+	L'API a change au fil des versions de Roblox : la forme actuelle passe par
+	`ImageLabel.ImageContent = Content.fromObject(image)`, l'ancienne consistait
+	a parenter l'EditableImage directement. On essaie les deux plutot que de
+	supposer la version du moteur, et on renvoie le message d'erreur si aucune
+	ne marche — un echec silencieux ici donne un ecran vide sans explication,
+	qui est le pire symptome possible a diagnostiquer.
+]]
+local function attachImage(label: ImageLabel, image: any): (boolean, string?)
+	local modern = (Content :: any)
+	if modern and modern.fromObject then
+		local ok, err = pcall(function()
+			label.ImageContent = modern.fromObject(image)
+		end)
+		if ok then
+			return true, nil
+		end
+		local legacyOk = pcall(function()
+			image.Parent = label
+		end)
+		if legacyOk then
+			return true, nil
+		end
+		return false, tostring(err)
+	end
+
+	local ok, err = pcall(function()
+		image.Parent = label
+	end)
+	return ok, if ok then nil else tostring(err)
+end
+
+-- Banniere d'erreur plein ecran : sans elle, toute panne de rendu se presente
+-- au joueur comme un fond bleu sans le moindre indice.
+local function showFailure(parent: GuiObject, message: string)
+	local box = Instance.new("TextLabel")
+	box.Name = "RendererFailure"
+	box.AnchorPoint = Vector2.new(0.5, 0.5)
+	box.Position = UDim2.fromScale(0.5, 0.5)
+	box.Size = UDim2.fromOffset(560, 120)
+	box.BackgroundColor3 = Color3.fromRGB(60, 20, 24)
+	box.BorderSizePixel = 0
+	box.FontFace = Font.fromEnum(Enum.Font.GothamBold)
+	box.TextSize = 15
+	box.TextColor3 = Color3.fromRGB(255, 200, 200)
+	box.TextWrapped = true
+	box.Text = `Le rendu de la carte a echoue.\n\n{message}\n\n(details complets dans la fenetre Output)`
+	box.Parent = parent
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = box
+
+	warn(`[CONQUEST RTS] rendu de la carte indisponible : {message}`)
+end
+
+function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer?
 	local self = setmetatable({}, MapRenderer) :: MapRenderer
 
 	self.terrain = MapGen.generate(seed)
 	self.owner = buffer.create(W * H)
 	self.pixels = buffer.create(W * H * 4)
 	self.needsUpload = true
+	self.warnedWriteFailure = false
 
-	self.image = AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+	local created, image = pcall(function()
+		return AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+	end)
+
+	if not created or not image then
+		showFailure(
+			parent,
+			`AssetService:CreateEditableImage a echoue — {tostring(image)}`
+		)
+		return nil
+	end
+	self.image = image
 
 	local label = Instance.new("ImageLabel")
 	label.Name = "MapImage"
@@ -78,14 +149,21 @@ function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer
 	label.Size = UDim2.fromOffset(W * 4, H * 4)
 	label.Position = UDim2.fromScale(0.5, 0.5)
 	label.AnchorPoint = Vector2.new(0.5, 0.5)
-	label.ImageContent = Content.fromObject(self.image)
 	label.Parent = parent
 	self.label = label
+
+	local attached, attachError = attachImage(label, image)
+	if not attached then
+		label:Destroy()
+		showFailure(parent, `Impossible d'afficher l'EditableImage — {attachError}`)
+		return nil
+	end
 
 	-- Peinture initiale : tout le terrain, aucun proprietaire.
 	for index = 0, W * H - 1 do
 		self:paint(index)
 	end
+	self:flush()
 
 	return self
 end
@@ -154,7 +232,16 @@ function MapRenderer.flush(self: MapRenderer)
 		return
 	end
 	self.needsUpload = false
-	self.image:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), self.pixels)
+
+	-- Un echec d'ecriture ne doit pas tuer la boucle de rendu : on previent une
+	-- fois et on laisse le reste de l'interface fonctionner.
+	local ok, err = pcall(function()
+		self.image:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), self.pixels)
+	end)
+	if not ok and not self.warnedWriteFailure then
+		self.warnedWriteFailure = true
+		warn(`[CONQUEST RTS] ecriture de l'EditableImage impossible : {tostring(err)}`)
+	end
 end
 
 function MapRenderer.ownerAt(self: MapRenderer, index: number): number

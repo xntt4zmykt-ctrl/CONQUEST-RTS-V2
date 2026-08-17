@@ -25,6 +25,11 @@ local HUD = {}
 HUD.__index = HUD
 
 local RATIOS = { 0.1, 0.25, 0.5, 1.0 }
+
+-- Le fil de notifications ne doit jamais depasser cette hauteur : au-dela il
+-- recouvre la carte, qui est l'element le plus important de l'ecran.
+local MAX_FEED_ENTRIES = 5
+local FEED_ENTRY_HEIGHT = 24
 local BOLD = Font.fromEnum(Enum.Font.GothamBold)
 local REGULAR = Font.fromEnum(Enum.Font.Gotham)
 local UI = Config.UI
@@ -60,6 +65,8 @@ export type HUD = typeof(setmetatable(
 		diploTitle: TextLabel,
 		diploButtons: { [string]: TextButton },
 		feed: Frame,
+		feedEntries: { TextLabel },
+		feedCounter: number,
 		doctrineModal: Frame,
 
 		diplomacy: Types.Diplomacy,
@@ -158,6 +165,8 @@ function HUD.new(parent: ScreenGui): HUD
 	self.diplomacy = { allies = {}, incoming = {}, outgoing = {}, embargoes = {}, traitors = {} }
 	self.roster = {}
 	self.ranked = {}
+	self.feedEntries = {}
+	self.feedCounter = 0
 
 	local root = Instance.new("Frame")
 	root.Name = "HUD"
@@ -467,10 +476,14 @@ function HUD.buildFeed(self: HUD)
 	feed.Name = "Feed"
 	feed.AnchorPoint = Vector2.new(0.5, 0)
 	feed.Position = UDim2.new(0.5, 0, 0, 72)
-	feed.Size = UDim2.fromOffset(420, 200)
+	-- Hauteur bornee au nombre maximal de messages, et decoupage actif : le
+	-- fil ne doit jamais pouvoir grandir jusqu'a manger la carte.
+	feed.Size = UDim2.fromOffset(420, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + 4))
 	feed.BackgroundTransparency = 1
+	feed.ClipsDescendants = true
 	feed.Parent = self.root
 	self.feed = feed
+	self.feedEntries = {}
 
 	local layout = Instance.new("UIListLayout")
 	layout.Padding = UDim.new(0, 4)
@@ -642,9 +655,28 @@ local FEED_COLORS: { [string]: Color3 } = {
 	info = Color3.fromRGB(180, 200, 230),
 }
 
+--[[
+	Ajoute un message au fil.
+
+	Le fil est plafonne en nombre d'entrees, pas seulement en duree : pendant
+	une phase agitee (offensives multiples, frappes nucleaires), les messages
+	arrivent bien plus vite qu'ils n'expirent, et un simple minuteur laissait le
+	fil recouvrir tout l'ecran. Au-dela du plafond, le plus ancien saute
+	immediatement.
+]]
 function HUD.notify(self: HUD, text: string, kind: string)
+	-- Un meme message repete (une offensive relancee en boucle) remonte au lieu
+	-- de s'empiler a l'identique.
+	local last = self.feedEntries[#self.feedEntries]
+	if last and last.Parent and last:GetAttribute("Body") == text then
+		local repeats = (last:GetAttribute("Repeats") or 1) + 1
+		last:SetAttribute("Repeats", repeats)
+		last.Text = `{text}  x{repeats}`
+		return
+	end
+
 	local entry = Instance.new("TextLabel")
-	entry.Size = UDim2.new(1, 0, 0, 24)
+	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
 	entry.BackgroundColor3 = UI.PANEL
 	entry.BackgroundTransparency = 0.15
 	entry.BorderSizePixel = 0
@@ -653,15 +685,28 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	entry.TextColor3 = FEED_COLORS[kind] or UI.TEXT
 	entry.Text = text
 	entry.TextTruncate = Enum.TextTruncate.AtEnd
-	entry.LayoutOrder = -os.clock() // 1
+	entry.LayoutOrder = self.feedCounter
+	entry:SetAttribute("Body", text)
 	entry.Parent = self.feed
 	corner(entry, 6)
 
-	-- Les messages disparaissent seuls : un flux qui s'accumule finit par
-	-- masquer la carte, qui est l'element le plus important de l'ecran.
+	self.feedCounter += 1
+	table.insert(self.feedEntries, entry)
+
+	while #self.feedEntries > MAX_FEED_ENTRIES do
+		local oldest = table.remove(self.feedEntries, 1)
+		if oldest then
+			oldest:Destroy()
+		end
+	end
+
 	task.delay(4.5, function()
 		if not entry.Parent then
 			return
+		end
+		local index = table.find(self.feedEntries, entry)
+		if index then
+			table.remove(self.feedEntries, index)
 		end
 		local tween = TweenService:Create(
 			entry,

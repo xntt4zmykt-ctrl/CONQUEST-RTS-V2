@@ -174,6 +174,29 @@ function GameState.notify(self: GameState, text: string, kind: string, only: num
 	table.insert(self.events, { text = text, kind = kind, only = only })
 end
 
+--[[
+	Message concernant deux factions.
+
+	Diffuse a tout le monde uniquement si un humain est implique. Sinon le
+	message n'est envoye qu'aux deux parties — c'est-a-dire a personne, puisque
+	ce sont des bots.
+
+	Sans cette regle, douze bots qui s'allient et se trahissent en continu
+	noient l'ecran du joueur sous des dizaines de notifications par minute qui
+	ne le concernent pas.
+]]
+function GameState.notifyBetween(self: GameState, text: string, kind: string, a: number, b: number)
+	local pa, pb = self.players[a], self.players[b]
+	local humanInvolved = (pa ~= nil and not pa.isBot) or (pb ~= nil and not pb.isBot)
+
+	if humanInvolved then
+		self:notify(text, kind)
+	else
+		self:notify(text, kind, a)
+		self:notify(text, kind, b)
+	end
+end
+
 function GameState.doctrineOf(self: GameState, slot: number): Doctrines.Doctrine
 	local ps = self.players[slot]
 	return Doctrines.get(if ps then ps.doctrine else nil)
@@ -833,7 +856,11 @@ function GameState.stepElimination(self: GameState): { number }
 	for _, slot in doomed do
 		local ps = self.players[slot]
 		if ps then
-			self:notify(`\u{1F480} {ps.name} a ete elimine.`, "alert")
+			-- Seules les eliminations de joueurs humains sont publiques : voir
+			-- douze bots mourir un par un n'apprend rien et sature le fil.
+			if not ps.isBot then
+				self:notify(`\u{1F480} {ps.name} a ete elimine.`, "alert")
+			end
 			self:removePlayer(slot)
 		end
 	end
