@@ -44,6 +44,8 @@ s'allient et se trahissent. La partie est jouable et observable sans autre joueu
 | `ZQSD` / `WASD` / flèches | Déplacer la vue |
 | Molette | Zoom |
 | `A` / `E` | Pivoter la caméra |
+| Clic droit maintenu | Orbiter (rotation + inclinaison) |
+| `R` / `T` | Incliner la caméra |
 | Clic | Agir sur la tuile, selon le mode armé |
 | `1` `2` `3` `4` | Attaquer · Débarquer · Construire · Nucléaire |
 | `Espace` | Recentrer sur ta capitale |
@@ -63,10 +65,20 @@ La simulation serveur tourne **hors de Studio**, dans le Luau standard :
 brew install luau && ./tests/run.sh
 ```
 
-`tests/bundle.js` assemble les modules partagés et serveur en un seul fichier
-exécutable (les `require` de Roblox désignent des Instances, pas des chemins :
-ils sont réécrits), `tests/stubs.luau` bouchonne les API Roblox utilisées, et
-`tests/simulate.luau` joue cinq parties complètes en vérifiant des invariants.
+Deux bancs d'essai tournent :
+
+**Serveur** — `tests/simulate.luau` joue cinq parties complètes en vérifiant des
+invariants, et mesure le rythme des ères et le coût en Parts.
+
+**Client** — `tests/client.luau` construit chaque écran et rejoue le parcours
+complet (menu → chargement → jeu → fin de partie). Il ne vérifie pas
+l'apparence : il vérifie que **rien ne lève d'erreur**. C'est la classe de bug
+qui a le plus coûté — une propriété mal nommée dans un module d'interface se
+présente au joueur comme un écran noir muet, et n'apparaît nulle part ailleurs.
+
+`tests/bundle.js` assemble les modules en un fichier exécutable (les `require`
+de Roblox désignent des Instances, pas des chemins : ils sont réécrits),
+`tests/stubs.luau` et `tests/guistubs.luau` bouchonnent les API utilisées.
 
 Les invariants ciblent la classe de bug la plus dangereuse ici : **la
 comptabilité incrémentale**. `tiles`, `border`, `coast`, `portCount` sont

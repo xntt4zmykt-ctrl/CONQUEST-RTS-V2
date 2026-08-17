@@ -17,11 +17,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
-local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
-local Config = require(Shared:WaitForChild("Config"))
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 
@@ -326,6 +324,13 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 		minimap = nil
 	end
 	victory:hide()
+
+	-- Relance de partie : on remontre l'ecran de chargement. Sans lui, le
+	-- joueur voit le monde se reconstruire par morceaux sous le compte a
+	-- rebours, ce qui ressemble a un bug.
+	if deployed then
+		intro:show(myNation)
+	end
 
 	worldReady = false
 

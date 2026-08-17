@@ -584,27 +584,6 @@ end
 -- Palettes contextuelles (bas gauche)
 --=============================================================================
 
-local function paletteEntry(parent: GuiObject, order: number, symbol: string, name: string, cost: number): TextButton
-	local b = button(parent, "", T.small)
-	b.LayoutOrder = order
-	b.Size = UDim2.new(1, 0, 0, 38)
-
-	local glyph = Theme.label(b, symbol, 18, C.text)
-	glyph.Position = UDim2.fromOffset(S.sm, 0)
-	glyph.Size = UDim2.fromOffset(22, 38)
-	glyph.TextXAlignment = Enum.TextXAlignment.Center
-
-	local title = Theme.label(b, name, T.small, C.textMuted)
-	title.Position = UDim2.fromOffset(S.sm + 26, 4)
-	title.Size = UDim2.new(1, -S.sm - 26, 0, 16)
-
-	local price = Theme.label(b, `{cost} or`, T.tiny, C.gold)
-	price.Position = UDim2.fromOffset(S.sm + 26, 19)
-	price.Size = UDim2.new(1, -S.sm - 26, 0, 14)
-	price.FontFace = F.medium
-
-	return b
-end
 
 --[[
 	Le menu de construction est organise en onglets par classe : Economie,

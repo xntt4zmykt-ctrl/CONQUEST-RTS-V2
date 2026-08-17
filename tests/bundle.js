@@ -15,14 +15,18 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
 
-const MODULE_DIRS = [
-  "ReplicatedStorage/Shared",
-  "ServerScriptService/Server",
-];
+// Deux bancs d'essai : le serveur (simulation) et le client (interface).
+// Ils n'ont ni les memes modules ni les memes bouchons.
+const TARGET = process.argv[2] === "client" ? "client" : "server";
+
+const MODULE_DIRS =
+  TARGET === "client"
+    ? ["ReplicatedStorage/Shared", "StarterPlayerScripts/Client"]
+    : ["ReplicatedStorage/Shared", "ServerScriptService/Server"];
 
 // Modules exclus : ils dependent d'API que le banc d'essai ne simule pas et ne
-// participent pas a la logique de jeu testee.
-const EXCLUDE = new Set(["Persistence", "init.server"]);
+// participent pas a la logique testee.
+const EXCLUDE = new Set(["Persistence", "init.server", "init.client"]);
 
 function rewriteRequires(source) {
   return source.replace(/require\(([^()]*(?:\([^()]*\))?[^()]*)\)/g, (match, inner) => {
@@ -47,7 +51,9 @@ function prepareModule(source) {
 
 const parts = [];
 
-parts.push(fs.readFileSync(path.join(ROOT, "tests/stubs.luau"), "utf8"));
+parts.push(
+  fs.readFileSync(path.join(ROOT, TARGET === "client" ? "tests/guistubs.luau" : "tests/stubs.luau"), "utf8")
+);
 
 parts.push(`
 local __modules = {}
@@ -82,10 +88,13 @@ for (const dir of MODULE_DIRS) {
   }
 }
 
-const driver = fs.readFileSync(path.join(ROOT, "tests/simulate.luau"), "utf8");
+const driver = fs.readFileSync(
+  path.join(ROOT, TARGET === "client" ? "tests/client.luau" : "tests/simulate.luau"),
+  "utf8"
+);
 parts.push(driver);
 
-const outPath = path.join(ROOT, "tests/.bundle.luau");
+const outPath = path.join(ROOT, `tests/.bundle-${TARGET}.luau`);
 fs.writeFileSync(outPath, parts.join("\n"));
 
-console.error(`bundle : ${count} modules -> ${path.relative(ROOT, outPath)}`);
+console.error(`bundle ${TARGET} : ${count} modules -> ${path.relative(ROOT, outPath)}`);

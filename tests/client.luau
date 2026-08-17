@@ -1,0 +1,331 @@
+--[[
+	Banc d'essai client.
+
+	Construit chaque module d'interface et rejoue le parcours complet d'une
+	partie : menu, deploiement, chargement, jeu, fin de partie. Il ne verifie
+	pas l'apparence — il verifie que **rien ne leve d'erreur**.
+
+	C'est la classe de bug qui a le plus coute jusqu'ici : une propriete mal
+	nommee ou une methode absente dans un module d'interface se presente au
+	joueur comme un ecran noir muet, et n'apparait nulle part ailleurs.
+]]
+
+local Config = __require("Config")
+local MapGen = __require("MapGen")
+local Nations = __require("Nations")
+local GameModes = __require("GameModes")
+local BuildingDefs = __require("BuildingDefs")
+
+local failures = 0
+
+local function check(label, fn)
+	local ok, err = pcall(fn)
+	if ok then
+		print(`  \27[32mOK\27[0m    {label}`)
+	else
+		failures += 1
+		print(`  \27[31mECHEC\27[0m {label}`)
+		print(`         {err}`)
+	end
+end
+
+print("=== CONQUEST RTS — banc d'essai client ===")
+
+--=============================================================================
+-- Chargement des modules
+--=============================================================================
+
+local SoundManager, HUD, MainMenu, Intro, VictoryScreen
+local Effects, PlacementPreview, BuildingModels, Overlay
+local WorldRenderer, WorldCamera, Minimap
+
+check("chargement des modules", function()
+	SoundManager = __require("SoundManager")
+	BuildingModels = __require("BuildingModels")
+	HUD = __require("HUD")
+	MainMenu = __require("MainMenu")
+	Intro = __require("Intro")
+	VictoryScreen = __require("VictoryScreen")
+	Effects = __require("Effects")
+	PlacementPreview = __require("PlacementPreview")
+	Overlay = __require("Overlay")
+	WorldRenderer = __require("WorldRenderer")
+	WorldCamera = __require("WorldCamera")
+	Minimap = __require("Minimap")
+end)
+
+if failures > 0 then
+	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
+	return
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = testPlayerGui
+
+local terrain = MapGen.generate(4242)
+
+--=============================================================================
+-- Ecrans
+--=============================================================================
+
+local menu, intro, hud, victory
+
+check("construction du menu principal", function()
+	menu = MainMenu.new(screenGui)
+end)
+
+check("selection de chaque nation et de chaque mode", function()
+	for _, nation in Nations.LIST do
+		menu:selectNation(nation.id)
+	end
+	for _, mode in GameModes.LIST do
+		menu:selectMode(mode.id)
+	end
+end)
+
+check("fermeture puis reouverture du menu", function()
+	menu:close()
+	menu:open()
+	-- Le fondu ne doit jamais laisser le contenu definitivement invisible :
+	-- c'est le bug qui produisait un ecran noir avec le menu par-dessus.
+	assert(menu.root.GroupTransparency == 0, "le menu reste transparent apres reouverture")
+	assert(menu.root.Visible ~= false, "le menu reste masque apres reouverture")
+end)
+
+check("construction de l'ecran de chargement", function()
+	intro = Intro.new(screenGui)
+end)
+
+check("cycle complet de l'ecran de chargement", function()
+	for _, nation in Nations.LIST do
+		intro:show(nation.id)
+		intro:setProgress(0)
+		intro:setProgress(0.5)
+		intro:setProgress(1)
+		intro:hide()
+	end
+	-- Deuxieme partie : l'ecran doit se rallumer intact.
+	intro:show(1)
+	assert(intro.root.GroupTransparency == 0, "l'ecran de chargement reste transparent au reaffichage")
+	intro:hide()
+end)
+
+check("construction du HUD", function()
+	hud = HUD.new(screenGui)
+end)
+
+check("tous les modes et toutes les classes de construction", function()
+	for _, mode in { "attack", "boat", "build", "nuke" } do
+		hud:setMode(mode)
+	end
+	for _, class in BuildingDefs.CLASSES do
+		hud:setBuildClass(class.id)
+	end
+	for _, def in BuildingDefs.BUILDABLE do
+		hud.buildKind = def.id
+		hud:refreshPalettes()
+	end
+end)
+
+check("identite, ere, diplomatie et classement", function()
+	hud:setIdentity(1, "Valoria", 2, 3)
+
+	local stats = {}
+	local roster = {}
+	for slot = 1, 12 do
+		stats[slot] = {
+			troops = 1000 + slot,
+			tiles = 500 - slot * 10,
+			gold = 2000,
+			maxTroops = 5000,
+			era = math.min(5, 1 + slot % 5),
+			eraProgress = slot / 12,
+		}
+		roster[slot] = { name = `Nation{slot}`, isBot = slot > 1, doctrine = 1, betrayals = slot % 3 }
+	end
+
+	hud:update(stats, roster)
+	hud:setDiplomacy({
+		allies = { [2] = true },
+		incoming = { [3] = true },
+		outgoing = { [4] = true },
+		embargoes = { [5] = true },
+		traitors = { [6] = true },
+	})
+	hud:selectFaction(2)
+	hud:selectFaction(nil)
+
+	for era = 1, 5 do
+		hud.era = era
+		hud:refreshEraPanel()
+		hud:setMatch({ phase = "playing", timeLeft = 600, restartIn = 0 })
+	end
+end)
+
+check("fil de notifications sature", function()
+	for i = 1, 40 do
+		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
+	end
+	-- Le meme message repete doit se regrouper, pas s'empiler.
+	for _ = 1, 5 do
+		hud:notify("repetition", "info")
+	end
+end)
+
+check("curseur d'engagement et doctrines", function()
+	for _, ratio in { 0.05, 0.25, 0.5, 1 } do
+		hud:setRatio(ratio)
+	end
+	hud:showDoctrineModal()
+end)
+
+check("ecran de victoire", function()
+	victory = VictoryScreen.new(screenGui)
+	local ranked = {}
+	for slot = 1, 8 do
+		table.insert(ranked, { slot = slot, tiles = 900 - slot * 50, troops = 1000 })
+	end
+	local roster = {}
+	for slot = 1, 8 do
+		roster[slot] = { name = `Nation{slot}`, isBot = false, doctrine = 1, betrayals = 0 }
+	end
+	-- Appele deux fois : une relance de partie ne doit pas dupliquer les lignes.
+	victory:show(1, "Valoria", ranked, roster, 1)
+	victory:hide()
+	victory:show(2, "Kerensk", ranked, roster, 1)
+	victory:setCountdown(12)
+	victory:hide()
+end)
+
+--=============================================================================
+-- Monde
+--=============================================================================
+
+local world, overlay, effects, preview
+
+check("construction du monde 3D", function()
+	world = WorldRenderer.new(4242)
+	-- Vide toute la file de reconstruction, comme le ferait le chargement.
+	local guard = 0
+	while world:initialProgress() < 1 and guard < 5000 do
+		world:stepRebuilds()
+		guard += 1
+	end
+	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+end)
+
+check("calques d'entites, effets et apercu", function()
+	overlay = Overlay.new(world.root, terrain)
+	effects = Effects.new(world.root, terrain)
+	preview = PlacementPreview.new(world.root, terrain)
+end)
+
+check("pose et capture de chaque type de batiment", function()
+	local deltas = {}
+	local index = 0
+	for _, def in BuildingDefs.LIST do
+		index += 137
+		table.insert(deltas, { index = index, kind = def.id, slot = 1 })
+	end
+	overlay:applyBuildingDelta(deltas)
+
+	-- Recapture : le modele doit etre recolore, pas reconstruit.
+	for _, entry in deltas do
+		entry.slot = 2
+	end
+	overlay:applyBuildingDelta(deltas)
+
+	-- Destruction
+	for _, entry in deltas do
+		entry.kind = 0
+	end
+	overlay:applyBuildingDelta(deltas)
+end)
+
+check("apercu de placement pour chaque batiment", function()
+	for _, def in BuildingDefs.BUILDABLE do
+		preview:setKind(def.id)
+		preview:update(1000, true)
+		preview:update(1200, false)
+		preview:update(nil, false)
+	end
+	preview:hide()
+end)
+
+check("navires, missiles et interpolation", function()
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 60, ty = 60, kind = 1 },
+	})
+	overlay:stepInterpolation(1 / 60)
+	overlay:applyUnits({}, {})
+	overlay:explosion(50, 50, 9)
+end)
+
+check("vagues de conquete", function()
+	local wave = {}
+	for i = 1, 200 do
+		wave[i] = 1000 + i
+	end
+	effects:conquestWave(wave, Color3.fromRGB(255, 0, 0), true)
+	effects:lossWave(wave, #wave)
+	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
+end)
+
+check("deltas de terrain et conquetes classees", function()
+	local delta = buffer.create(4 * 5)
+	for i = 0, 3 do
+		buffer.writeu32(delta, i * 5, 2000 + i)
+		buffer.writeu8(delta, i * 5 + 4, 1)
+	end
+	local changed, gains, losses, others = world:applyDelta(delta, 1)
+	assert(changed == 4, "le nombre de tuiles modifiees est faux")
+	assert(gains ~= nil and losses ~= nil and others ~= nil, "conquetes non classees")
+	world:stepRebuilds()
+end)
+
+check("camera strategique", function()
+	local camera = WorldCamera.new()
+	camera:setMode("overview")
+	camera:setDistance(300, true)
+	camera:focusTile(5000, true)
+	camera:step(1 / 60)
+	camera:toggleMode()
+	camera:step(1 / 60)
+	camera:toggleMode()
+	camera:tileAtScreen(Vector2.new(100, 100), world.root)
+end)
+
+check("minimap", function()
+	local minimap = Minimap.new(screenGui, terrain, function() end)
+	if minimap then
+		local delta = buffer.create(5)
+		buffer.writeu32(delta, 0, 1234)
+		buffer.writeu8(delta, 4, 3)
+		minimap:applyDelta(delta)
+		minimap:flush()
+		minimap:setFocus(Vector3.new(0, 0, 0))
+		minimap:destroy()
+	end
+end)
+
+check("sons du catalogue", function()
+	local Audio = __require("Audio")
+	for name in Audio.SOUNDS do
+		SoundManager.play(name)
+	end
+	SoundManager.playAt("nukeImpact", 40)
+end)
+
+--=============================================================================
+-- Rapport
+--=============================================================================
+
+print("")
+if failures == 0 then
+	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
+else
+	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+end

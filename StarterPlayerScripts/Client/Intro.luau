@@ -15,7 +15,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-local Config = require(Shared:WaitForChild("Config"))
 local Theme = require(Shared:WaitForChild("Theme"))
 local Nations = require(Shared:WaitForChild("Nations"))
 local SoundManager = require(script.Parent.SoundManager)
@@ -43,7 +42,9 @@ local TIPS = {
 function Intro.new(parent: ScreenGui): Intro
 	local self = setmetatable({}, Intro) :: any
 
-	local root = Instance.new("Frame")
+	-- CanvasGroup : voir MainMenu. Le fondu par enfant laissait l'ecran de
+	-- chargement noir et vide a la deuxieme partie.
+	local root = Instance.new("CanvasGroup")
 	root.Name = "Intro"
 	root.Size = UDim2.fromScale(1, 1)
 	root.BackgroundColor3 = C.void
@@ -133,7 +134,7 @@ end
 function Intro.show(self: Intro, nationId: number)
 	local nation = Nations.get(nationId)
 	self.root.Visible = true
-	self.root.BackgroundTransparency = 0
+	self.root.GroupTransparency = 0
 	self.nationLabel.Text = string.upper(nation.name)
 	self.tip.Text = TIPS[math.random(1, #TIPS)]
 	self.fill.Size = UDim2.fromScale(0, 1)
@@ -156,15 +157,8 @@ function Intro.hide(self: Intro)
 	if not self.root.Visible then
 		return
 	end
-	local tween = TweenService:Create(self.root, Theme.motion.dramatic, { BackgroundTransparency = 1 })
+	local tween = TweenService:Create(self.root, Theme.motion.dramatic, { GroupTransparency = 1 })
 	tween:Play()
-	for _, child in self.root:GetDescendants() do
-		if child:IsA("TextLabel") then
-			TweenService:Create(child, Theme.motion.smooth, { TextTransparency = 1 }):Play()
-		elseif child:IsA("Frame") then
-			TweenService:Create(child, Theme.motion.smooth, { BackgroundTransparency = 1 }):Play()
-		end
-	end
 	tween.Completed:Once(function()
 		self.root.Visible = false
 	end)
@@ -211,6 +205,5 @@ function Intro.runCountdown(self: Intro, seconds: number, onFinished: () -> ())
 end
 
 Intro.COUNTDOWN_SECONDS = 5
-local _ = Config
 
 return Intro

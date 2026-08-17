@@ -52,6 +52,7 @@ function WorldCamera.new(): WorldCamera
 	self.targetPitch = math.rad(58)
 	self.mode = "overview"
 	self.edgePan = false
+	self.orbiting = false
 
 	self.camera.CameraType = Enum.CameraType.Scriptable
 	self.camera.FieldOfView = 60
@@ -80,6 +81,42 @@ function WorldCamera.bindActions(self: WorldCamera)
 		)
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.UserInputType.MouseWheel)
+
+	--[[
+		Orbite au clic droit maintenu.
+
+		Les bornes d'inclinaison existaient depuis le debut sans aucun controle
+		pour les atteindre : la camera restait figee a 58 degres. Pouvoir se
+		rapprocher de l'horizon change completement la lecture du relief, qui
+		n'a d'interet que vu de biais.
+	]]
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or self.mode ~= "overview" then
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			self.orbiting = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			self.orbiting = false
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		if not self.orbiting or self.mode ~= "overview" then
+			return
+		end
+		if input.UserInputType ~= Enum.UserInputType.MouseMovement then
+			return
+		end
+		self.targetYaw += input.Delta.X * 0.006
+		self.targetPitch = math.clamp(self.targetPitch - input.Delta.Y * 0.005, MIN_PITCH, MAX_PITCH)
+	end)
 end
 
 function WorldCamera.setMode(self: WorldCamera, mode: string)
@@ -87,6 +124,7 @@ function WorldCamera.setMode(self: WorldCamera, mode: string)
 
 	if mode == "overview" then
 		self.camera.CameraType = Enum.CameraType.Scriptable
+		self.orbiting = false
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	else
 		-- On rend la camera a Roblox : le controle du personnage, la collision
@@ -177,6 +215,14 @@ function WorldCamera.stepInput(self: WorldCamera, dt: number)
 	end
 	if UserInputService:IsKeyDown(Enum.KeyCode.E) then
 		self.targetYaw += dt * 1.6
+	end
+
+	-- Inclinaison au clavier, en complement du clic droit.
+	if UserInputService:IsKeyDown(Enum.KeyCode.R) then
+		self.targetPitch = math.clamp(self.targetPitch + dt * 1.1, MIN_PITCH, MAX_PITCH)
+	end
+	if UserInputService:IsKeyDown(Enum.KeyCode.T) then
+		self.targetPitch = math.clamp(self.targetPitch - dt * 1.1, MIN_PITCH, MAX_PITCH)
 	end
 
 	if move.Magnitude > 0 then

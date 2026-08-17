@@ -3,9 +3,22 @@
 #
 # Prerequis : node (assemblage du bundle) et luau (execution).
 #   brew install luau
-set -euo pipefail
+# Pas de `set -e` : on veut executer les deux bancs meme si le premier echoue,
+# et rapporter les deux resultats.
+set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-node tests/bundle.js
-exec luau tests/.bundle.luau
+# Banc serveur : simulation et invariants.
+node tests/bundle.js server
+luau tests/.bundle-server.luau
+server_status=$?
+
+echo
+
+# Banc client : construction et execution de toute l'interface.
+node tests/bundle.js client
+luau tests/.bundle-client.luau
+client_status=$?
+
+exit $(( server_status | client_status ))

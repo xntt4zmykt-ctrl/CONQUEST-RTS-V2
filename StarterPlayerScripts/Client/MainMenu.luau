@@ -99,7 +99,11 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	self.nationButtons = {}
 	self.modeButtons = {}
 
-	local root = Instance.new("Frame")
+	-- CanvasGroup et non Frame : le fondu se fait par GroupTransparency, une
+	-- seule propriete sur le conteneur. La version precedente tweenait la
+	-- transparence de chaque enfant, ce qui les laissait definitivement
+	-- invisibles — rouvrir le menu affichait alors un rectangle noir vide.
+	local root = Instance.new("CanvasGroup")
 	root.Name = "MainMenu"
 	root.Size = UDim2.fromScale(1, 1)
 	root.BackgroundColor3 = C.void
@@ -331,19 +335,16 @@ function MainMenu.selectMode(self: MainMenu, id: string)
 end
 
 function MainMenu.close(self: MainMenu)
-	local tween = TweenService:Create(self.root, Theme.motion.smooth, { BackgroundTransparency = 1 })
+	local tween = TweenService:Create(self.root, Theme.motion.smooth, { GroupTransparency = 1 })
 	tween:Play()
 	tween.Completed:Once(function()
 		self.root.Visible = false
 	end)
-	for _, child in self.root:GetDescendants() do
-		if child:IsA("GuiObject") then
-			TweenService:Create(child, Theme.motion.smooth, { BackgroundTransparency = 1 }):Play()
-		end
-		if child:IsA("TextLabel") or child:IsA("TextButton") then
-			TweenService:Create(child, Theme.motion.smooth, { TextTransparency = 1 }):Play()
-		end
-	end
+end
+
+function MainMenu.open(self: MainMenu)
+	self.root.GroupTransparency = 0
+	self.root.Visible = true
 end
 
 return MainMenu

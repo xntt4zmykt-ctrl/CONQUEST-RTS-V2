@@ -38,12 +38,21 @@ local WorldBuilder = {}
 	beaucoup moins de blocs que la version visuelle du client.
 ]]
 function WorldBuilder.blocksFor(terrain: buffer): { GreedyMesh.Rect }
+	--[[
+		La cle est la **hauteur**, pas le type de terrain.
+
+		Une collision invisible n'a ni couleur ni matiere : deux terrains de
+		meme altitude sont interchangeables. Fusionner par type separait
+		inutilement plaines et savane, qui sont a la meme hauteur — la
+		replication initiale passait de quelques centaines de blocs a plus de
+		trois mille.
+	]]
 	local function keyAt(x: number, y: number): number?
 		local kind = buffer.readu8(terrain, MapGen.toIndex(x, y))
 		if kind == OCEAN then
 			return nil
 		end
-		return kind
+		return Config.TERRAIN_HEIGHT[kind]
 	end
 
 	-- Pas de decoupage en chunks ici : la geometrie n'etant jamais
@@ -63,7 +72,8 @@ function WorldBuilder.build(terrain: buffer): Folder
 	local blocks = WorldBuilder.blocksFor(terrain)
 
 	for _, rect in blocks do
-		local height = Config.TERRAIN_HEIGHT[rect.key]
+		-- La cle EST la hauteur.
+		local height = rect.key
 		local origin = WorldSpace.tileToWorld(rect.x, rect.y)
 
 		local part = Instance.new("Part")
