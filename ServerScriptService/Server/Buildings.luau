@@ -43,6 +43,12 @@ function Buildings.canBuild(state: GameState, slot: number, index: number, kind:
 		return false, "Batiment inconnu."
 	end
 
+	-- La capitale est posee par le moteur au spawn : elle ne doit jamais etre
+	-- accessible depuis un ordre client, meme forge a la main.
+	if not def.buildable then
+		return false, "Ce batiment ne se construit pas."
+	end
+
 	if index < 0 or index >= Config.TILE_COUNT then
 		return false, "Position hors carte."
 	end
@@ -108,6 +114,7 @@ function Buildings.build(state: GameState, slot: number, index: number, kind: nu
 
 	ps.gold -= Buildings.priceFor(state, slot, kind)
 	state:placeBuilding(index, kind, slot)
+	state:sound("buildPlace", slot)
 
 	local def = BuildingDefs.get(kind)
 	return true, if def then `{def.name} construit.` else nil

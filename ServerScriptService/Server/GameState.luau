@@ -46,6 +46,8 @@ export type PlayerState = {
 	portCount: number,
 	siloCount: number,
 	samCount: number,
+	capitalCount: number,
+	capitalTile: number?,
 	betrayals: number,
 	traitorUntil: number,
 }
@@ -112,6 +114,8 @@ export type GameState = typeof(setmetatable(
 		buildingDirty: { [number]: true },
 		freeSlots: { number },
 		nextEntityId: number,
+		capitalEvents: number,
+		sounds: { { name: string, only: number? } },
 		events: { { text: string, kind: string, only: number? } },
 	},
 	GameState
@@ -150,6 +154,8 @@ function GameState.new(seed: number): GameState
 	self.dirty = {}
 	self.buildingDirty = {}
 	self.nextEntityId = 1
+	self.capitalEvents = 0
+	self.sounds = {}
 	self.events = {}
 
 	self.freeSlots = {}
@@ -185,6 +191,14 @@ end
 	noient l'ecran du joueur sous des dizaines de notifications par minute qui
 	ne le concernent pas.
 ]]
+--[[
+	File un effet sonore. `only` le restreint a un joueur ; sinon tout le monde
+	l'entend, avec l'attenuation par distance geree cote client.
+]]
+function GameState.sound(self: GameState, name: string, only: number?)
+	table.insert(self.sounds, { name = name, only = only })
+end
+
 function GameState.notifyBetween(self: GameState, text: string, kind: string, a: number, b: number)
 	local pa, pb = self.players[a], self.players[b]
 	local humanInvolved = (pa ~= nil and not pa.isBot) or (pb ~= nil and not pb.isBot)
@@ -277,7 +291,12 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 	-- port ou un silo ennemi est un objectif en soi.
 	local building = self.buildings[index]
 	if building and building.slot ~= slot then
+		local wasCapital = building.kind == B.CAPITAL
+		local formerOwner = building.slot
 		self:transferBuilding(index, slot)
+		if wasCapital then
+			self:onCapitalCaptured(formerOwner, slot)
+		end
 	end
 
 	self:refreshBorder(index)
@@ -319,9 +338,12 @@ function GameState.countBuilding(self: GameState, slot: number, kind: number, si
 	if not ps then
 		return
 	end
-	if kind == B.CITY then
-		local def = BuildingDefs.get(B.CITY)
+	if kind == B.CITY or kind == B.CAPITAL then
+		local def = BuildingDefs.get(kind)
 		ps.cityPopBonus += sign * (if def then def.popCapBonus else 0)
+		if kind == B.CAPITAL then
+			ps.capitalCount += sign
+		end
 	elseif kind == B.PORT then
 		ps.portCount += sign
 	elseif kind == B.SILO then
@@ -329,6 +351,32 @@ function GameState.countBuilding(self: GameState, slot: number, kind: number, si
 	elseif kind == B.SAM then
 		ps.samCount += sign
 	end
+end
+
+--[[
+	Chute d'une capitale.
+
+	L'effet est volontairement brutal et immediat : c'est le seul evenement du
+	jeu qui retourne un rapport de force en un instant, et donc le seul objectif
+	qui justifie une offensive couteuse et ciblee plutot qu'un grignotage de
+	frontiere.
+]]
+function GameState.onCapitalCaptured(self: GameState, formerOwner: number, captor: number)
+	local victim = self.players[formerOwner]
+	local winner = self.players[captor]
+
+	if victim then
+		victim.troops = math.max(0, victim.troops * (1 - Config.CAPITAL_TROOP_LOSS))
+	end
+	if winner then
+		winner.gold += Config.CAPITAL_PLUNDER
+	end
+
+	local victimName = if victim then victim.name else "Une faction"
+	local captorName = if winner then winner.name else "un assaillant"
+	self:notify(`\u{1F3F1} La capitale de {victimName} est tombee aux mains de {captorName} !`, "alert")
+	self:sound("capitalFallen")
+	self.capitalEvents += 1
 end
 
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
@@ -438,6 +486,8 @@ function GameState.addPlayer(
 		portCount = 0,
 		siloCount = 0,
 		samCount = 0,
+		capitalCount = 0,
+		capitalTile = nil,
 		betrayals = betrayals,
 		traitorUntil = 0,
 	}
@@ -468,6 +518,10 @@ function GameState.addPlayer(
 			end
 		end
 	end
+
+	-- La capitale est posee par le moteur, jamais achetee.
+	self:placeBuilding(center, B.CAPITAL, slot)
+	state.capitalTile = center
 
 	return state
 end
@@ -738,6 +792,7 @@ function GameState.stepEconomy(self: GameState)
 		local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
 		local income = territorial
 			+ ps.portCount * Config.GOLD_PER_PORT
+			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
 			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
 		ps.gold += income * doctrine.goldRate
 	end

@@ -3,6 +3,7 @@
 	Definitions des batiments.
 
 	Chaque batiment doit repondre a une question strategique distincte :
+	  Capitale -> "voici mon coeur, et sa perte me ruine"
 	  Ville    -> "je veux plus d'armee"
 	  Port     -> "je veux sortir de mon continent et gagner de l'or"
 	  Bunker   -> "je veux tenir cette frontiere"
@@ -21,6 +22,8 @@ export type BuildingDef = {
 	cost: number,
 	description: string,
 	coastalOnly: boolean,
+	-- Une capitale est posee par le moteur au spawn et ne s'achete jamais.
+	buildable: boolean,
 	-- Effets
 	popCapBonus: number,
 	goldBonus: number,
@@ -32,12 +35,24 @@ local B = Config.BUILDING
 
 BuildingDefs.LIST = {
 	{
+		id = B.CAPITAL,
+		name = "Capitale",
+		symbol = "\u{2605}",
+		cost = 0,
+		description = "Ton coeur. Sa chute te coute la moitie de ton armee.",
+		coastalOnly = false,
+		buildable = false,
+		popCapBonus = 1500,
+		goldBonus = 0.35,
+	},
+	{
 		id = B.CITY,
 		name = "Ville",
 		symbol = "\u{25C6}",
 		cost = 180,
 		description = "+900 de population maximum",
 		coastalOnly = false,
+		buildable = true,
 		popCapBonus = 900,
 		goldBonus = 0,
 	},
@@ -48,6 +63,7 @@ BuildingDefs.LIST = {
 		cost = 240,
 		description = "Debarquements et routes commerciales",
 		coastalOnly = true,
+		buildable = true,
 		popCapBonus = 0,
 		goldBonus = Config.GOLD_PER_PORT,
 	},
@@ -58,6 +74,7 @@ BuildingDefs.LIST = {
 		cost = 200,
 		description = "Renforce la defense sur 6 tuiles",
 		coastalOnly = false,
+		buildable = true,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -68,6 +85,7 @@ BuildingDefs.LIST = {
 		cost = 700,
 		description = "Lance des frappes nucleaires",
 		coastalOnly = false,
+		buildable = true,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -78,6 +96,7 @@ BuildingDefs.LIST = {
 		cost = 450,
 		description = "Intercepte les missiles dans un rayon de 34",
 		coastalOnly = false,
+		buildable = true,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -86,6 +105,15 @@ BuildingDefs.LIST = {
 local byId: { [number]: BuildingDef } = {}
 for _, def in BuildingDefs.LIST do
 	byId[def.id] = def
+end
+
+-- Uniquement ce que le joueur peut acheter : c'est cette liste que l'interface
+-- affiche, la capitale n'y figure jamais.
+BuildingDefs.BUILDABLE = {}
+for _, def in BuildingDefs.LIST do
+	if def.buildable then
+		table.insert(BuildingDefs.BUILDABLE, def)
+	end
 end
 
 function BuildingDefs.get(id: number): BuildingDef?

@@ -70,6 +70,7 @@ Config.GOLD_TILE_EXPONENT = 0.8
 Config.GOLD_TILE_SCALE = 0.0045 -- par tick
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
+Config.GOLD_PER_CAPITAL = 0.35 -- par tick, tant qu'on tient sa capitale
 Config.TRADE_GOLD_PER_PARTNER = 0.14 -- par tick, par partenaire commercial
 Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux navires marchands (visuel)
 
@@ -110,7 +111,13 @@ Config.BUILDING = {
 	DEFENSE = 3,
 	SILO = 4,
 	SAM = 5,
+	CAPITAL = 6,
 }
+
+-- Perdre sa capitale doit etre un desastre, pas une tuile de plus : c'est ce
+-- qui donne un objectif lisible a une offensive et un enjeu a la defense.
+Config.CAPITAL_TROOP_LOSS = 0.45 -- part de la reserve perdue par l'ancien proprietaire
+Config.CAPITAL_PLUNDER = 400 -- or pris par l'assaillant
 
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
@@ -214,15 +221,7 @@ Config.TERRAIN_COLORS = {
 	[3] = Color3.fromRGB(88, 88, 88), -- montagnes
 }
 
-Config.UI = {
-	PANEL = Color3.fromRGB(18, 22, 32),
-	PANEL_LIGHT = Color3.fromRGB(38, 46, 62),
-	STROKE = Color3.fromRGB(90, 110, 140),
-	TEXT = Color3.fromRGB(255, 255, 255),
-	TEXT_DIM = Color3.fromRGB(150, 170, 200),
-	ACCENT = Color3.fromRGB(210, 70, 60),
-	GOLD = Color3.fromRGB(240, 190, 70),
-	ALLY = Color3.fromRGB(90, 210, 140),
-}
+-- Les jetons visuels (couleurs d'interface, espacements, typographie) vivent
+-- dans Theme.luau : une seule source de verite pour toute la presentation.
 
 return Config

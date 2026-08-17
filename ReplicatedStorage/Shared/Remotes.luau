@@ -16,6 +16,7 @@ local NAMES = {
 	"MatchUpdate", -- (MatchInfo)
 	"Notify", -- (text, kind)
 	"Explosion", -- (x, y, radius)
+	"Sfx", -- (soundName)
 
 	-- Client -> serveur
 	"AttackOrder", -- (targetSlot)

@@ -88,6 +88,7 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	end
 
 	state:notifyBetween(`\u{1F91D} {a.name} et {b.name} ont signe une alliance.`, "info", from, to)
+	state:sound("allianceFormed", to)
 	return true, nil
 end
 
@@ -121,6 +122,7 @@ function Diplomacy.breakAlliance(state: GameState, from: number, to: number): (b
 	a.traitorUntil = state.tick + Config.TRAITOR_MARK_DURATION
 
 	state:notifyBetween(`\u{26A0} {a.name} a TRAHI {b.name} !`, "alert", from, to)
+	state:sound("betrayal", to)
 
 	return true, "Alliance rompue. Ta reputation en portera la marque."
 end

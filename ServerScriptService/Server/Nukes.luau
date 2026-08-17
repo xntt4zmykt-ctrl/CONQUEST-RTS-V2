@@ -101,6 +101,7 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 	-- Une frappe nucleaire est un evenement public : tout le monde voit le
 	-- depart, c'est ce qui declenche la panique diplomatique.
 	state:notify(`\u{2622} {ps.name} a lance {stats.name} !`, "alert")
+	state:sound("nukeLaunch")
 
 	return true, "Missile en vol."
 end
@@ -142,6 +143,7 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 				`\u{1F6E1} {if owner then owner.name else "Une batterie"} a intercepte un missile !`,
 				"good"
 			)
+			state:sound("samIntercept")
 			return true
 		end
 	end

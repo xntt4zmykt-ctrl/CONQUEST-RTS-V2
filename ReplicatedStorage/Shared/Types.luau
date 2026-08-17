@@ -61,6 +61,7 @@ export type MatchInfo = {
 	nukesUnlocked: boolean,
 	winner: number?,
 	winnerName: string?,
+	restartIn: number?,
 }
 
 return {}

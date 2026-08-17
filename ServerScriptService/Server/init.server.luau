@@ -42,6 +42,7 @@ local diplomacyUpdate = Remotes.get("DiplomacyUpdate")
 local matchUpdate = Remotes.get("MatchUpdate")
 local notify = Remotes.get("Notify")
 local explosion = Remotes.get("Explosion")
+local sfx = Remotes.get("Sfx")
 
 local attackOrder = Remotes.get("AttackOrder")
 local setAttackRatio = Remotes.get("SetAttackRatio")
@@ -63,6 +64,8 @@ local matchPhase = "playing"
 local matchEndsAt = 0
 local restartAt = 0
 local doctrineLockAt = 0
+local winnerSlot: number? = nil
+local winnerName: string? = nil
 
 --=============================================================================
 -- Helpers de replication
@@ -103,6 +106,18 @@ local function flushEvents()
 		end
 	end
 	table.clear(state.events)
+
+	for _, event in state.sounds do
+		if event.only then
+			local target = playerForSlot(event.only)
+			if target then
+				sfx:FireClient(target, event.name)
+			end
+		else
+			sfx:FireAllClients(event.name)
+		end
+	end
+	table.clear(state.sounds)
 end
 
 --=============================================================================
@@ -115,6 +130,8 @@ local function startMatch()
 	rng = Random.new(seed)
 
 	matchPhase = "playing"
+	winnerSlot = nil
+	winnerName = nil
 	matchEndsAt = os.clock() + Config.MATCH_DURATION
 	doctrineLockAt = os.clock() + 90
 
@@ -132,17 +149,19 @@ local function startMatch()
 
 	local roster = buildRoster()
 	for player, slot in slotByPlayer do
-		mapInit:FireClient(player, seed, slot, roster)
+		local ps = state.players[slot]
+		mapInit:FireClient(player, seed, slot, roster, if ps then ps.capitalTile else nil)
 	end
 
 	print(`[{Config.GAME_NAME}] nouvelle partie — seed {seed}`)
 end
 
-local function endMatch(winnerSlot: number?)
+local function endMatch(slot: number?)
+	winnerSlot = slot
 	matchPhase = "ended"
 	restartAt = os.clock() + Config.POST_MATCH_DELAY
 
-	local winnerName = if winnerSlot and state.players[winnerSlot]
+	winnerName = if winnerSlot and state.players[winnerSlot]
 		then state.players[winnerSlot].name
 		else nil
 
@@ -208,7 +227,7 @@ local function onPlayerAdded(player: Player)
 	end
 
 	slotByPlayer[player] = ps.slot
-	mapInit:FireClient(player, state.seed, ps.slot, buildRoster())
+	mapInit:FireClient(player, state.seed, ps.slot, buildRoster(), ps.capitalTile)
 	broadcastRoster()
 end
 
@@ -428,6 +447,9 @@ local function replicate()
 			phase = matchPhase,
 			timeLeft = math.max(0, matchEndsAt - os.clock()),
 			nukesUnlocked = Buildings.nukesUnlocked(state),
+			winner = winnerSlot,
+			winnerName = winnerName,
+			restartIn = math.max(0, restartAt - os.clock()),
 		})
 	end
 

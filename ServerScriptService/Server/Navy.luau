@@ -210,6 +210,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 		targetTile = targetTile,
 	})
 
+	state:sound("boatLaunch", slot)
 	return true, `Debarquement en route — {troops} troupes.`
 end
 
@@ -253,6 +254,7 @@ local function resolveLanding(state: GameState, boat: GameState.Boat)
 	state:setOwner(tile, boat.slot)
 	state:seedBeachhead(boat.slot, targetOwner, remaining, tile)
 	state:notify(`Tete de pont etablie.`, "good", boat.slot)
+	state:sound("boatLand")
 end
 
 --=============================================================================

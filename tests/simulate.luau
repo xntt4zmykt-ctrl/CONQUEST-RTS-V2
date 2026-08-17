@@ -109,12 +109,14 @@ local function checkInvariants(state, tick)
 	end
 
 	-- 5. Comptage des batiments coherent avec la table reelle.
-	local realPorts, realSilos = {}, {}
+	local realPorts, realSilos, realCapitals = {}, {}, {}
 	for _, building in state.buildings do
 		if building.kind == Config.BUILDING.PORT then
 			realPorts[building.slot] = (realPorts[building.slot] or 0) + 1
 		elseif building.kind == Config.BUILDING.SILO then
 			realSilos[building.slot] = (realSilos[building.slot] or 0) + 1
+		elseif building.kind == Config.BUILDING.CAPITAL then
+			realCapitals[building.slot] = (realCapitals[building.slot] or 0) + 1
 		end
 	end
 	for slot, ps in state.players do
@@ -123,6 +125,9 @@ local function checkInvariants(state, tick)
 		end
 		if (realSilos[slot] or 0) ~= ps.siloCount then
 			fail(`tick {tick} — slot {slot} : siloCount={ps.siloCount} mais {realSilos[slot] or 0} reels`)
+		end
+		if (realCapitals[slot] or 0) ~= ps.capitalCount then
+			fail(`tick {tick} — slot {slot} : capitalCount={ps.capitalCount} mais {realCapitals[slot] or 0} reels`)
 		end
 	end
 
@@ -186,6 +191,7 @@ local function runMatch(seed, ticks)
 		state:flushOwnerDelta()
 		state:flushBuildingDelta()
 		table.clear(state.events)
+		table.clear(state.sounds)
 
 		if tick % CHECK_EVERY == 0 then
 			checkInvariants(state, tick)
@@ -272,12 +278,13 @@ print(`--- apres {TICKS} ticks ({string.format("%.1f", TICKS / Config.TICK_RATE)
 print(`temps de calcul   : {string.format("%.2f", elapsed)} s`)
 print(`colonisation      : {string.format("%.1f", state:colonizedRatio() * 100)} % des terres`)
 print(`nucleaire debloque: {tostring(Buildings.nukesUnlocked(state))}`)
-print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0}`)
+print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} capitale={buildingCounts[6] or 0}`)
 print(`navires en mer    : {#state.boats}`)
 print(`offensives actives: {#state.attacks}`)
 print(`alliances         : {allianceCount}`)
 print(`trahisons         : {betrayalCount}`)
 print(`explosions        : {explosions}`)
+print(`capitales prises  : {state.capitalEvents}`)
 print(`or total          : {math.floor(totalGold)}`)
 print("")
 print("classement :")

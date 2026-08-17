@@ -21,6 +21,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local MapGen = require(Shared:WaitForChild("MapGen"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
+local Theme = require(Shared:WaitForChild("Theme"))
 local Types = require(Shared:WaitForChild("Types"))
 
 local W = Config.MAP_WIDTH
@@ -50,12 +51,7 @@ export type Overlay = typeof(setmetatable(
 	Overlay
 ))
 
-local function colorFor(slot: number): Color3
-	if slot <= 0 then
-		return Color3.fromRGB(200, 200, 200)
-	end
-	return Config.PLAYER_COLORS[((slot - 1) % #Config.PLAYER_COLORS) + 1]
-end
+local colorFor = Theme.factionColor
 
 -- Position en Scale d'une tuile, centre de la case.
 local function scalePosition(x: number, y: number): UDim2
@@ -125,12 +121,17 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			continue
 		end
 
+		-- La capitale est le seul batiment qu'on doit reperer en un coup d'oeil
+		-- depuis n'importe quel niveau de zoom : elle est nettement plus grosse.
+		local isCapital = entry.kind == Config.BUILDING.CAPITAL
+		local glyphSize = if isCapital then 26 else 18
+
 		local label = existing
 		if not label then
 			label = Instance.new("TextLabel")
 			label.Name = `B{entry.index}`
 			label.AnchorPoint = Vector2.new(0.5, 0.5)
-			label.Size = UDim2.fromOffset(18, 18)
+			label.Size = UDim2.fromOffset(glyphSize, glyphSize)
 			label.BackgroundTransparency = 1
 			label.FontFace = Font.fromEnum(Enum.Font.GothamBold)
 			label.TextScaled = true
@@ -147,6 +148,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			self.buildings[entry.index] = label
 		end
 
+		label.Size = UDim2.fromOffset(glyphSize, glyphSize)
 		label.Text = def.symbol
 		label.TextColor3 = colorFor(entry.slot)
 	end
@@ -165,7 +167,7 @@ local function makeBoatVisual(parent: Frame, slot: number, kind: number): Frame
 	if kind == 2 then
 		-- Navire marchand : petit losange dore, visuellement inoffensif.
 		frame.Size = UDim2.fromOffset(7, 7)
-		frame.BackgroundColor3 = Config.UI.GOLD
+		frame.BackgroundColor3 = Theme.color.gold
 		frame.Rotation = 45
 	else
 		-- Transport de troupes : plus gros, aux couleurs de la faction.

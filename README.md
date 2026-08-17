@@ -67,6 +67,8 @@ Le dossier `tests/` n'est pas monté dans `default.project.json` : rien de tout
 ```
 ReplicatedStorage/Shared/
   Config.luau       Toutes les constantes d'équilibrage (le seul fichier à tuner)
+  Theme.luau        Jetons de design : couleurs, espacements, typographie, animation
+  Audio.luau        Catalogue sonore
   MapGen.luau       Génération de carte déterministe à partir d'une seed
   Doctrines.luau    Les quatre doctrines et leurs multiplicateurs
   BuildingDefs.luau Définitions et coûts des bâtiments
@@ -84,10 +86,13 @@ ServerScriptService/Server/
   Bots.luau         IA de remplissage
 
 StarterPlayerScripts/Client/
-  init.client.luau  Caméra 2D, saisie des ordres, réseau
+  init.client.luau  Caméra 2D lissée, saisie des ordres, réseau
   MapRenderer.luau  Peinture de la carte via EditableImage
   Overlay.luau      Bâtiments, navires, missiles, explosions
+  Minimap.luau      Vue d'ensemble et rectangle de visée
   HUD.luau          Commandement, construction, diplomatie, classement
+  VictoryScreen.luau Écran de fin de partie
+  SoundManager.luau Lecture sonore : bridage, variation, recyclage
 ```
 
 ### Décisions structurantes
@@ -108,6 +113,17 @@ C'est ce qui permet de tenir 40 000 tuiles à 10 ticks/seconde.
 
 **Le rendu est isolé.** `MapRenderer` et `Overlay` ne connaissent rien de la
 simulation. Le passage au 3D ne touche qu'eux.
+
+**Quatre couches composent chaque pixel de carte** : relief (variation
+déterministe par tuile), profondeur océanique (BFS depuis les côtes, calculé une
+fois), liseré de frontière, et « chaleur » — les tuiles récemment prises
+rougeoient puis refroidissent. Cette dernière couche est purement client : elle
+ne coûte aucune bande passante et montre pourtant exactement où la partie se
+joue.
+
+**La minimap ne redessine rien.** Une EditableImage peut alimenter plusieurs
+ImageLabel, donc elle affiche le même contenu que la grande carte, mis à jour
+par le même unique upload GPU.
 
 **Simulation à pas fixe.** 10 ticks/seconde avec accumulateur : l'équilibrage ne
 dépend pas du FPS serveur.
@@ -139,10 +155,11 @@ commerciales d'un rival lui retire de l'or à chaque tick.
 ## État actuel
 
 **Fait** : génération de carte · spawn · population · offensives · marine et
-débarquements avec pathfinding maritime · économie et commerce · 5 bâtiments ·
-4 doctrines · alliances, trahisons, embargos · réputation persistante · phase
-nucléaire avec interception · élimination · condition de victoire et relance
-automatique · bots complets · rendu, HUD, classement, notifications.
+débarquements avec pathfinding maritime · économie et commerce · capitales ·
+5 bâtiments · 4 doctrines · alliances, trahisons, embargos · réputation
+persistante · phase nucléaire avec interception · élimination · condition de
+victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
+écran de victoire, sons, classement, notifications.
 
 **Pas encore fait**, par ordre de priorité :
 
@@ -169,3 +186,10 @@ s'affichent pas correctement dans Studio, remplacer `symbol` dans
 
 ⚠️ **DataStore désactivé en Studio** tant que l'accès API n'est pas activé. La
 réputation est alors conservée en mémoire pour la session, sans erreur bloquante.
+
+⚠️ **Les sons sont des doublures.** `Audio.luau` référence les sons intégrés au
+moteur (`rbxasset://sounds/...`) : aucun upload nécessaire, retour audible
+immédiat, mais ce sont des sons utilitaires génériques, pas du design sonore.
+Pour du vrai son, remplacer les `id` par des `rbxassetid://` du Creator Store —
+rien d'autre à changer. Un identifiant absent du client est désactivé
+automatiquement au premier échec, sans casser le jeu.

@@ -16,11 +16,16 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
 local Remotes = require(Shared:WaitForChild("Remotes"))
+local Theme = require(Shared:WaitForChild("Theme"))
+local MapGen = require(Shared:WaitForChild("MapGen"))
 
 -- Ce fichier est le LocalScript "Client" ; les modules voisins en sont les
 -- enfants, pas les freres.
 local MapRenderer = require(script.MapRenderer)
 local Overlay = require(script.Overlay)
+local Minimap = require(script.Minimap)
+local VictoryScreen = require(script.VictoryScreen)
+local SoundManager = require(script.SoundManager)
 local HUD = require(script.HUD)
 
 local player = Players.LocalPlayer
@@ -37,11 +42,10 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
--- Fond opaque : la carte est du pur 2D, le monde 3D derriere n'a rien a montrer.
 local backdrop = Instance.new("Frame")
 backdrop.Name = "Backdrop"
 backdrop.Size = UDim2.fromScale(1, 1)
-backdrop.BackgroundColor3 = Color3.fromRGB(10, 14, 22)
+backdrop.BackgroundColor3 = Theme.color.void
 backdrop.BorderSizePixel = 0
 backdrop.Parent = screenGui
 
@@ -54,18 +58,32 @@ viewport.Parent = backdrop
 
 local renderer: MapRenderer.MapRenderer? = nil
 local overlay: Overlay.Overlay? = nil
+local minimap: Minimap.Minimap? = nil
+
 local hud = HUD.new(screenGui)
+local victory = VictoryScreen.new(screenGui)
 
 local mySlot = 0
+-- Tuile de sa propre capitale : point de repere pour le recentrage clavier.
+local myCapital: number? = nil
 local roster = {}
+local stats = {}
+local matchPhase = "playing"
 
 --=============================================================================
 -- Camera 2D
 --=============================================================================
+-- Le zoom et le pan visent une cible, et la position affichee la rejoint par
+-- interpolation. Un deplacement instantane sur une carte de 40 000 tuiles est
+-- desorientant : on perd le fil de ou on etait.
 
-local MIN_ZOOM, MAX_ZOOM = 1.5, 24
+local MIN_ZOOM, MAX_ZOOM = 1.5, 26
+
 local zoom = 4
+local targetZoom = 4
 local panOffset = Vector2.zero
+local targetPan = Vector2.zero
+
 local dragging = false
 local dragStart = Vector2.zero
 local panStart = Vector2.zero
@@ -85,9 +103,9 @@ local function zoomAt(delta: number, focus: Vector2)
 		return
 	end
 
-	local oldZoom = zoom
-	zoom = math.clamp(zoom * (1 + delta * 0.18), MIN_ZOOM, MAX_ZOOM)
-	if zoom == oldZoom then
+	local previous = targetZoom
+	targetZoom = math.clamp(targetZoom * (1 + delta * 0.2), MIN_ZOOM, MAX_ZOOM)
+	if targetZoom == previous then
 		return
 	end
 
@@ -96,9 +114,20 @@ local function zoomAt(delta: number, focus: Vector2)
 	-- insupportable.
 	local center = r.label.AbsolutePosition + r.label.AbsoluteSize / 2
 	local toFocus = focus - center
-	panOffset += toFocus - toFocus * (zoom / oldZoom)
+	targetPan += toFocus - toFocus * (targetZoom / previous)
+end
 
-	applyCamera()
+-- Centre la vue sur une tuile : utilise par la minimap et au spawn.
+local function focusTile(index: number, instant: boolean?)
+	local x, y = MapGen.fromIndex(index)
+	local centreX = (x + 0.5 - Config.MAP_WIDTH / 2) * targetZoom
+	local centreY = (y + 0.5 - Config.MAP_HEIGHT / 2) * targetZoom
+	targetPan = Vector2.new(-centreX, -centreY)
+	if instant then
+		panOffset = targetPan
+		zoom = targetZoom
+		applyCamera()
+	end
 end
 
 --=============================================================================
@@ -147,6 +176,7 @@ local function onTileClicked(index: number)
 		return
 	end
 
+	SoundManager.play("attackLaunch")
 	Remotes.get("AttackOrder"):FireServer(targetSlot)
 end
 
@@ -157,7 +187,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = Vector2.new(input.Position.X, input.Position.Y)
-		panStart = panOffset
+		panStart = targetPan
 	end
 end)
 
@@ -169,8 +199,7 @@ UserInputService.InputChanged:Connect(function(input: InputObject, processed: bo
 		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
 	then
 		local current = Vector2.new(input.Position.X, input.Position.Y)
-		panOffset = panStart + (current - dragStart)
-		applyCamera()
+		targetPan = panStart + (current - dragStart)
 	end
 end)
 
@@ -210,9 +239,17 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	if processed then
 		return
 	end
+
 	local mode = MODE_KEYS[input.KeyCode]
 	if mode then
 		hud:setMode(mode)
+		return
+	end
+
+	-- Espace : retour a sa capitale. Sur une grande carte, se reperer est la
+	-- premiere friction, et c'est celle qui fatigue le plus.
+	if input.KeyCode == Enum.KeyCode.Space and myCapital then
+		focusTile(myCapital)
 	end
 end)
 
@@ -236,9 +273,11 @@ end
 -- Reseau
 --=============================================================================
 
-Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number, initialRoster)
+Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number, initialRoster, capital: number?)
 	mySlot = slot
 	roster = initialRoster
+	myCapital = capital
+	matchPhase = "playing"
 
 	if renderer then
 		renderer.label:Destroy()
@@ -246,31 +285,63 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	if overlay then
 		overlay:clear()
 	end
+	if minimap then
+		minimap:destroy()
+		minimap = nil
+	end
+	victory:hide()
 
 	-- Le rendu peut echouer si le moteur ne fournit pas les EditableImage : il
 	-- affiche alors sa propre banniere d'erreur, et on evite simplement de
-	-- construire le calque par dessus.
+	-- construire les calques par dessus.
 	local created = MapRenderer.new(seed, viewport)
 	renderer = created
-	overlay = if created then Overlay.new(created.label) else nil
 
 	if created then
-		applyCamera()
+		overlay = Overlay.new(created.label)
+		minimap = Minimap.new(screenGui, created.label, function(index: number)
+			focusTile(index)
+		end)
+
+		targetZoom = 6
+		zoom = 6
+		if capital then
+			focusTile(capital, true)
+		else
+			applyCamera()
+		end
+	else
+		overlay = nil
 	end
 
 	local entry = roster[slot]
-	hud:setIdentity(slot, if entry then entry.name else player.DisplayName)
+	hud:setIdentity(
+		slot,
+		if entry then entry.name else player.DisplayName,
+		if entry then entry.doctrine else 1,
+		if entry then entry.betrayals else 0
+	)
 	hud:selectFaction(nil)
 	hud:showDoctrineModal()
 end)
 
 Remotes.get("RosterUpdate").OnClientEvent:Connect(function(newRoster)
 	roster = newRoster
+	local entry = roster[mySlot]
+	if entry then
+		hud:setIdentity(mySlot, entry.name, entry.doctrine, entry.betrayals)
+	end
 end)
 
-Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, stats)
+Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStats)
+	stats = newStats
 	if delta and renderer then
-		(renderer :: MapRenderer.MapRenderer):applyDelta(delta)
+		local changed = (renderer :: MapRenderer.MapRenderer):applyDelta(delta)
+		-- Un seul son par vague de captures, pas un par tuile : le bridage du
+		-- SoundManager fait le reste.
+		if changed > 0 then
+			SoundManager.play("tileCapture")
+		end
 	end
 	hud:update(stats, roster)
 end)
@@ -293,6 +364,15 @@ end)
 
 Remotes.get("MatchUpdate").OnClientEvent:Connect(function(match)
 	hud:setMatch(match)
+
+	if match.phase == "ended" then
+		matchPhase = "ended"
+		victory:show(match.winner, match.winnerName, hud.ranked, roster, mySlot)
+		victory:setCountdown(match.restartIn or 0)
+	elseif matchPhase == "ended" then
+		matchPhase = "playing"
+		victory:hide()
+	end
 end)
 
 Remotes.get("Notify").OnClientEvent:Connect(function(text: string, kind: string)
@@ -303,6 +383,11 @@ Remotes.get("Explosion").OnClientEvent:Connect(function(x: number, y: number, ra
 	if overlay then
 		(overlay :: Overlay.Overlay):explosion(x, y, radius)
 	end
+	SoundManager.play("nukeImpact")
+end)
+
+Remotes.get("Sfx").OnClientEvent:Connect(function(name: string)
+	SoundManager.play(name)
 end)
 
 --=============================================================================
@@ -310,12 +395,37 @@ end)
 --=============================================================================
 
 RunService.RenderStepped:Connect(function(dt: number)
+	-- Lissage exponentiel encadre : `1 - e^(-k*dt)` reste correct quel que
+	-- soit le framerate, contrairement a un simple `dt * k` qui devient
+	-- instable en dessous de 30 FPS.
+	local alpha = 1 - math.exp(-14 * dt)
+	local moved = false
+
+	if math.abs(targetZoom - zoom) > 0.001 then
+		zoom += (targetZoom - zoom) * alpha
+		moved = true
+	end
+	if (targetPan - panOffset).Magnitude > 0.5 then
+		panOffset += (targetPan - panOffset) * alpha
+		moved = true
+	end
+	if moved then
+		applyCamera()
+	end
+
 	local r = renderer
 	if r then
+		r:stepHeat(dt)
 		r:flush()
 	end
+
 	local o = overlay
 	if o then
 		o:stepInterpolation(dt)
+	end
+
+	local m = minimap
+	if m and r then
+		m:sync(r.label, viewport)
 	end
 end)

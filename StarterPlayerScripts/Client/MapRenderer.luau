@@ -7,9 +7,22 @@
 	coute quelques ecritures memoire au lieu de toucher a des milliers
 	d'instances : c'est la seule approche qui tient 40 000 tuiles sur mobile.
 
+	Quatre couches se combinent dans chaque pixel :
+
+	  1. **Relief**      — variation deterministe par tuile, pour que la terre
+	                       ait une texture au lieu d'un aplat mort.
+	  2. **Profondeur**  — l'ocean fonce en s'eloignant des cotes, ce qui donne
+	                       instantanement la lecture d'une carte marine.
+	  3. **Frontieres**  — un liseré sombre entre deux factions. C'est lui qui
+	                       rend la carte lisible d'un coup d'oeil ; sans lui,
+	                       deux territoires voisins bavent l'un dans l'autre.
+	  4. **Chaleur**     — les tuiles recemment prises rougeoient puis
+	                       refroidissent. Cet effet est purement client : il ne
+	                       coute aucune bande passante et montre pourtant
+	                       exactement ou la partie se joue.
+
 	Note d'architecture : ce module ne connait rien de la simulation. Quand on
-	passera au rendu 3D (terrain, batiments, unites qui marchent), c'est le seul
-	fichier a remplacer — GameState et le reseau ne bougent pas.
+	passera au rendu 3D, c'est le seul fichier a remplacer.
 ]]
 
 local AssetService = game:GetService("AssetService")
@@ -22,6 +35,7 @@ local MapGen = require(Shared:WaitForChild("MapGen"))
 local W = Config.MAP_WIDTH
 local H = Config.MAP_HEIGHT
 local NEUTRAL = Config.NEUTRAL_SLOT
+local OCEAN = Config.TERRAIN.OCEAN
 
 local MapRenderer = {}
 MapRenderer.__index = MapRenderer
@@ -31,29 +45,53 @@ export type MapRenderer = typeof(setmetatable(
 		terrain: buffer,
 		owner: buffer,
 		pixels: buffer,
+		shade: buffer, -- variation de relief, 0..255
+		depth: buffer, -- distance a la terre pour l'ocean, 0..MAX_DEPTH
 		image: EditableImage,
 		label: ImageLabel,
 		needsUpload: boolean,
 		warnedWriteFailure: boolean,
+		hot: { [number]: number }, -- tuiles recemment prises -> chaleur 0..1
+		hotCount: number,
 	},
 	MapRenderer
 ))
 
--- Couleurs pre-converties en octets, pour ne pas refaire le calcul par pixel.
+--=============================================================================
+-- Palettes precalculees
+--=============================================================================
+
+local MAX_DEPTH = 14
+
+-- Bleu cotier -> bleu abyssal.
+local SHALLOW = Color3.fromRGB(38, 68, 104)
+local DEEP = Color3.fromRGB(12, 22, 42)
+
+-- Couleur du liseré entre factions et de la chaleur de conquete.
+local BORDER_INK = Color3.fromRGB(10, 12, 18)
+local HEAT = Color3.fromRGB(255, 214, 140)
+
+local function toBytes(color: Color3): { number }
+	return { math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255) }
+end
+
 local terrainBytes: { { number } } = {}
 for id, color in Config.TERRAIN_COLORS do
-	terrainBytes[id] = { math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255) }
+	terrainBytes[id] = toBytes(color)
 end
 
 local playerBytes: { { number } } = {}
-local playerBorderBytes: { { number } } = {}
 for i, color in Config.PLAYER_COLORS do
-	playerBytes[i] = { math.floor(color.R * 255), math.floor(color.G * 255), math.floor(color.B * 255) }
-	-- Les tuiles frontieres sont eclaircies : c'est ce liseré qui rend les
-	-- fronts lisibles d'un coup d'oeil quand on est dezoome.
-	local lighter = color:Lerp(Color3.new(1, 1, 1), 0.45)
-	playerBorderBytes[i] = { math.floor(lighter.R * 255), math.floor(lighter.G * 255), math.floor(lighter.B * 255) }
+	playerBytes[i] = toBytes(color)
 end
+
+local oceanBytes: { { number } } = {}
+for d = 0, MAX_DEPTH do
+	oceanBytes[d] = toBytes(SHALLOW:Lerp(DEEP, d / MAX_DEPTH))
+end
+
+local BORDER_BYTES = toBytes(BORDER_INK)
+local HEAT_BYTES = toBytes(HEAT)
 
 local function colorIndex(slot: number): number
 	return ((slot - 1) % #Config.PLAYER_COLORS) + 1
@@ -61,15 +99,83 @@ end
 
 local scratch = table.create(4, 0)
 
---[[
-	Rattache l'EditableImage a l'ImageLabel.
+--=============================================================================
+-- Precalculs de terrain
+--=============================================================================
 
+--[[
+	Variation de relief par tuile : un hash entier, donc identique chez tous les
+	clients et stable d'une frame a l'autre. Un bruit aleatoire non
+	deterministe ferait scintiller la carte a chaque repeint.
+]]
+local function buildShade(): buffer
+	local shade = buffer.create(W * H)
+	for index = 0, W * H - 1 do
+		local n = (index * 374761393 + 668265263) % 2147483647
+		n = (n * (n % 97 + 3)) % 251
+		buffer.writeu8(shade, index, n)
+	end
+	return shade
+end
+
+--[[
+	Distance de chaque tuile d'ocean a la terre la plus proche, par BFS
+	multi-source depuis toutes les cotes a la fois. Un seul balayage de la carte
+	au chargement, jamais recalcule : le relief ne change pas de la partie.
+]]
+local function buildDepth(terrain: buffer): buffer
+	local depth = buffer.create(W * H)
+	local queue = table.create(4096)
+	local head = 1
+
+	for index = 0, W * H - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(depth, index, 0)
+			table.insert(queue, index)
+		else
+			buffer.writeu8(depth, index, 255) -- non visite
+		end
+	end
+
+	while head <= #queue do
+		local current = queue[head]
+		head += 1
+		local currentDepth = buffer.readu8(depth, current)
+		if currentDepth >= MAX_DEPTH then
+			continue
+		end
+
+		local n = MapGen.neighbors(current, scratch)
+		for i = 1, n do
+			local nb = scratch[i]
+			if buffer.readu8(depth, nb) == 255 then
+				buffer.writeu8(depth, nb, currentDepth + 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
+	-- Les poches d'ocean jamais atteintes (isolees au-dela de MAX_DEPTH)
+	-- prennent la teinte la plus profonde.
+	for index = 0, W * H - 1 do
+		if buffer.readu8(depth, index) == 255 then
+			buffer.writeu8(depth, index, MAX_DEPTH)
+		end
+	end
+
+	return depth
+end
+
+--=============================================================================
+-- Rattachement de l'image
+--=============================================================================
+
+--[[
 	L'API a change au fil des versions de Roblox : la forme actuelle passe par
 	`ImageLabel.ImageContent = Content.fromObject(image)`, l'ancienne consistait
 	a parenter l'EditableImage directement. On essaie les deux plutot que de
-	supposer la version du moteur, et on renvoie le message d'erreur si aucune
-	ne marche — un echec silencieux ici donne un ecran vide sans explication,
-	qui est le pire symptome possible a diagnostiquer.
+	supposer la version du moteur — un echec silencieux ici donne un ecran vide
+	sans explication, le pire symptome possible a diagnostiquer.
 ]]
 local function attachImage(label: ImageLabel, image: any): (boolean, string?)
 	local modern = (Content :: any)
@@ -80,10 +186,9 @@ local function attachImage(label: ImageLabel, image: any): (boolean, string?)
 		if ok then
 			return true, nil
 		end
-		local legacyOk = pcall(function()
+		if pcall(function()
 			image.Parent = label
-		end)
-		if legacyOk then
+		end) then
 			return true, nil
 		end
 		return false, tostring(err)
@@ -95,14 +200,12 @@ local function attachImage(label: ImageLabel, image: any): (boolean, string?)
 	return ok, if ok then nil else tostring(err)
 end
 
--- Banniere d'erreur plein ecran : sans elle, toute panne de rendu se presente
--- au joueur comme un fond bleu sans le moindre indice.
 local function showFailure(parent: GuiObject, message: string)
 	local box = Instance.new("TextLabel")
 	box.Name = "RendererFailure"
 	box.AnchorPoint = Vector2.new(0.5, 0.5)
 	box.Position = UDim2.fromScale(0.5, 0.5)
-	box.Size = UDim2.fromOffset(560, 120)
+	box.Size = UDim2.fromOffset(580, 140)
 	box.BackgroundColor3 = Color3.fromRGB(60, 20, 24)
 	box.BorderSizePixel = 0
 	box.FontFace = Font.fromEnum(Enum.Font.GothamBold)
@@ -119,24 +222,29 @@ local function showFailure(parent: GuiObject, message: string)
 	warn(`[CONQUEST RTS] rendu de la carte indisponible : {message}`)
 end
 
+--=============================================================================
+-- Construction
+--=============================================================================
+
 function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer?
 	local self = setmetatable({}, MapRenderer) :: MapRenderer
 
 	self.terrain = MapGen.generate(seed)
 	self.owner = buffer.create(W * H)
 	self.pixels = buffer.create(W * H * 4)
+	self.shade = buildShade()
+	self.depth = buildDepth(self.terrain)
 	self.needsUpload = true
 	self.warnedWriteFailure = false
+	self.hot = {}
+	self.hotCount = 0
 
 	local created, image = pcall(function()
 		return AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
 	end)
 
 	if not created or not image then
-		showFailure(
-			parent,
-			`AssetService:CreateEditableImage a echoue — {tostring(image)}`
-		)
+		showFailure(parent, `AssetService:CreateEditableImage a echoue — {tostring(image)}`)
 		return nil
 	end
 	self.image = image
@@ -159,7 +267,6 @@ function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer?
 		return nil
 	end
 
-	-- Peinture initiale : tout le terrain, aucun proprietaire.
 	for index = 0, W * H - 1 do
 		self:paint(index)
 	end
@@ -168,25 +275,70 @@ function MapRenderer.new(seed: number, parent: GuiObject): MapRenderer?
 	return self
 end
 
--- Recalcule la couleur d'un pixel a partir de l'etat courant de la tuile.
+--=============================================================================
+-- Peinture
+--=============================================================================
+
+--[[
+	Recalcule la couleur d'un pixel a partir de l'etat courant de la tuile.
+
+	C'est la fonction la plus appelee du client — plusieurs milliers de fois par
+	seconde pendant une offensive. Elle travaille donc en octets bruts, sans
+	allocation ni construction de Color3.
+]]
 function MapRenderer.paint(self: MapRenderer, index: number)
 	local slot = buffer.readu8(self.owner, index)
+	local terrain = buffer.readu8(self.terrain, index)
 	local r, g, b
 
-	if slot == NEUTRAL then
-		local rgb = terrainBytes[buffer.readu8(self.terrain, index)]
+	if terrain == OCEAN then
+		local rgb = oceanBytes[buffer.readu8(self.depth, index)]
 		r, g, b = rgb[1], rgb[2], rgb[3]
+		-- Legere houle : la meme variation de relief, mais tres attenuee.
+		local wobble = (buffer.readu8(self.shade, index) - 128) / 255 * 8
+		r = math.clamp(r + wobble, 0, 255)
+		g = math.clamp(g + wobble, 0, 255)
+		b = math.clamp(b + wobble, 0, 255)
 	else
-		local isBorder = false
+		local rgb
+		if slot == NEUTRAL then
+			rgb = terrainBytes[terrain]
+		else
+			rgb = playerBytes[colorIndex(slot)]
+		end
+
+		-- Relief : +/- 9 % de luminosite selon la tuile.
+		local factor = 0.91 + (buffer.readu8(self.shade, index) / 255) * 0.18
+		r = math.clamp(rgb[1] * factor, 0, 255)
+		g = math.clamp(rgb[2] * factor, 0, 255)
+		b = math.clamp(rgb[3] * factor, 0, 255)
+
+		-- Liseré de frontiere : on assombrit la tuile qui touche un
+		-- proprietaire different. Assombrir plutot qu'eclaircir garde la
+		-- couleur de faction identifiable tout en tracant un trait net.
 		local n = MapGen.neighbors(index, scratch)
+		local foreign = false
 		for i = 1, n do
-			if buffer.readu8(self.owner, scratch[i]) ~= slot then
-				isBorder = true
+			local nb = scratch[i]
+			if buffer.readu8(self.terrain, nb) ~= OCEAN and buffer.readu8(self.owner, nb) ~= slot then
+				foreign = true
 				break
 			end
 		end
-		local rgb = if isBorder then playerBorderBytes[colorIndex(slot)] else playerBytes[colorIndex(slot)]
-		r, g, b = rgb[1], rgb[2], rgb[3]
+
+		if foreign and slot ~= NEUTRAL then
+			r += (BORDER_BYTES[1] - r) * 0.45
+			g += (BORDER_BYTES[2] - g) * 0.45
+			b += (BORDER_BYTES[3] - b) * 0.45
+		end
+	end
+
+	-- Chaleur de conquete : la tuile vient de changer de main.
+	local heat = self.hot[index]
+	if heat then
+		r += (HEAT_BYTES[1] - r) * heat
+		g += (HEAT_BYTES[2] - g) * heat
+		b += (HEAT_BYTES[3] - b) * heat
 	end
 
 	local offset = index * 4
@@ -201,7 +353,7 @@ end
 	Chaque tuile modifiee force aussi le repeint de ses voisins : leur statut
 	frontiere a pu changer meme si leur proprietaire, lui, n'a pas bouge.
 ]]
-function MapRenderer.applyDelta(self: MapRenderer, delta: buffer)
+function MapRenderer.applyDelta(self: MapRenderer, delta: buffer): number
 	local count = buffer.len(delta) // 5
 
 	for i = 0, count - 1 do
@@ -209,6 +361,10 @@ function MapRenderer.applyDelta(self: MapRenderer, delta: buffer)
 		local index = buffer.readu32(delta, offset)
 		if index < W * H then
 			buffer.writeu8(self.owner, index, buffer.readu8(delta, offset + 4))
+			if self.hot[index] == nil then
+				self.hotCount += 1
+			end
+			self.hot[index] = 1
 		end
 	end
 
@@ -221,6 +377,46 @@ function MapRenderer.applyDelta(self: MapRenderer, delta: buffer)
 				self:paint(scratch[k])
 			end
 		end
+	end
+
+	self.needsUpload = true
+	return count
+end
+
+--[[
+	Refroidit les tuiles recemment prises. Appele une fois par frame.
+
+	Le cout est proportionnel au nombre de tuiles chaudes, donc nul quand la
+	carte est calme et borne pendant les offensives : une tuile ne reste chaude
+	qu'environ une demi-seconde.
+]]
+function MapRenderer.stepHeat(self: MapRenderer, dt: number)
+	if self.hotCount == 0 then
+		return
+	end
+
+	local decay = math.min(1, dt * 2.2)
+	local cooled = {}
+
+	for index, heat in self.hot do
+		local next = heat - decay
+		if next <= 0.02 then
+			table.insert(cooled, index)
+		else
+			self.hot[index] = next
+		end
+	end
+
+	for _, index in cooled do
+		self.hot[index] = nil
+		self.hotCount -= 1
+	end
+
+	for index in self.hot do
+		self:paint(index)
+	end
+	for _, index in cooled do
+		self:paint(index)
 	end
 
 	self.needsUpload = true
@@ -244,13 +440,19 @@ function MapRenderer.flush(self: MapRenderer)
 	end
 end
 
+--=============================================================================
+-- Requetes
+--=============================================================================
+
 function MapRenderer.ownerAt(self: MapRenderer, index: number): number
 	return buffer.readu8(self.owner, index)
 end
 
---[[
-	Convertit une position ecran en index de tuile, ou nil hors carte.
-]]
+function MapRenderer.isLand(self: MapRenderer, index: number): boolean
+	return buffer.readu8(self.terrain, index) ~= OCEAN
+end
+
+-- Convertit une position ecran en index de tuile, ou nil hors carte.
 function MapRenderer.tileAtScreen(self: MapRenderer, screenPos: Vector2): number?
 	local origin = self.label.AbsolutePosition
 	local size = self.label.AbsoluteSize
