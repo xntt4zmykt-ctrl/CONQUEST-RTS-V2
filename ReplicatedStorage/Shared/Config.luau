@@ -1,6 +1,6 @@
 --!strict
--- Toutes les constantes de gameplay au meme endroit.
--- C'est ici qu'on tune l'equilibrage : ne pas eparpiller ces valeurs ailleurs.
+-- Toutes les constantes d'equilibrage au meme endroit.
+-- C'est ici qu'on tune le jeu : ne pas eparpiller ces valeurs ailleurs.
 
 local Config = {}
 
@@ -8,19 +8,18 @@ local Config = {}
 Config.GAME_NAME = "CONQUEST RTS"
 Config.STUDIO_NAME = "Blackline Studio"
 
--- Carte (en tuiles). 256x160 = 40 960 tuiles : assez grand pour ~30 joueurs,
--- assez petit pour tenir dans une EditableImage sans compromis de perf.
+--=============================================================================
+-- Carte
+--=============================================================================
+
 Config.MAP_WIDTH = 256
 Config.MAP_HEIGHT = 160
 Config.TILE_COUNT = Config.MAP_WIDTH * Config.MAP_HEIGHT
 
--- Fraction de la carte qui doit etre de la terre. Le generateur calibre
--- ses seuils pour atteindre ce ratio quelle que soit la seed.
 Config.LAND_RATIO = 0.42
 Config.HILL_RATIO = 0.28 -- part des terres qui devient colline
 Config.MOUNTAIN_RATIO = 0.10 -- part des terres qui devient montagne
 
--- Terrains
 Config.TERRAIN = {
 	OCEAN = 0,
 	PLAINS = 1,
@@ -30,42 +29,141 @@ Config.TERRAIN = {
 
 -- Multiplicateur de cout de conquete par terrain.
 Config.TERRAIN_COST = {
-	[0] = math.huge, -- ocean : infranchissable sans bateau (phase 2)
+	[0] = math.huge, -- ocean : uniquement par debarquement
 	[1] = 1.0,
 	[2] = 1.6,
 	[3] = 2.8,
 }
 
+--=============================================================================
 -- Boucle de simulation
-Config.TICK_RATE = 10 -- ticks serveur par seconde
+--=============================================================================
+
+Config.TICK_RATE = 10
 Config.TICK_DT = 1 / Config.TICK_RATE
 
+--=============================================================================
 -- Population
-Config.START_TROOPS = 120
-Config.BASE_MAX_TROOPS = 200 -- plafond meme sans territoire
+--=============================================================================
+
+Config.START_TROOPS = 150
+Config.BASE_MAX_TROOPS = 250
 Config.MAX_TROOPS_PER_TILE = 28
 Config.GROWTH_RATE = 0.012 -- fraction de l'ecart au plafond, comblee par tick
-Config.MIN_GROWTH = 0.5 -- croissance plancher, evite de rester bloque a 0
+Config.MIN_GROWTH = 0.6
 
+--=============================================================================
+-- Economie
+--=============================================================================
+-- L'or achete les batiments. Il vient du territoire et surtout du commerce
+-- maritime : c'est ce qui donne un poids economique a la diplomatie, puisqu'un
+-- embargo coupe litteralement les revenus de l'autre.
+
+Config.START_GOLD = 120
+
+-- Le revenu territorial est volontairement sous-lineaire (tiles^0.8) : un
+-- empire deux fois plus grand ne gagne pas deux fois plus. Sans cet
+-- amortissement, le leader s'auto-finance a l'infini et la fin de partie
+-- devient une formalite — mesure en simulation, un revenu lineaire produisait
+-- 4,4 millions d'or morts en dix minutes.
+Config.GOLD_TILE_EXPONENT = 0.8
+Config.GOLD_TILE_SCALE = 0.0045 -- par tick
+
+Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
+Config.TRADE_GOLD_PER_PARTNER = 0.14 -- par tick, par partenaire commercial
+Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux navires marchands (visuel)
+
+--=============================================================================
 -- Attaque
+--=============================================================================
+
 Config.DEFAULT_ATTACK_RATIO = 0.25
 Config.MIN_ATTACK_TROOPS = 20
 Config.ATTACK_SPEND_RATE = 0.035 -- part du corps expeditionnaire depensee par tick
-Config.TILE_BASE_COST = 1.4 -- cout de base pour prendre une tuile
-Config.NEUTRAL_COST_MULT = 0.75 -- le terrain vierge est plus facile a prendre
+Config.TILE_BASE_COST = 1.4
+Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
-Config.DEFENDER_LOSS_RATIO = 0.55 -- part du cout qui est aussi retiree au defenseur
-Config.MAX_TILES_PER_TICK = 400 -- garde-fou anti-freeze
+Config.DEFENDER_LOSS_RATIO = 0.55
+Config.MAX_TILES_PER_TICK = 400
 
--- Spawn
-Config.SPAWN_RADIUS = 3 -- rayon (en tuiles) du territoire de depart
+--=============================================================================
+-- Marine
+--=============================================================================
+-- Sans debarquements, un joueur insulaire est en prison et un continent est
+-- imprenable. C'est la mecanique qui ouvre la carte.
 
--- Reseau
+Config.BOAT_SPEED = 0.85 -- tuiles par tick
+Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
+Config.MIN_BOAT_TROOPS = 30
+Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
+Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
+Config.MAX_BOATS_PER_PLAYER = 6
+
+--=============================================================================
+-- Batiments
+--=============================================================================
+
+Config.BUILDING = {
+	NONE = 0,
+	CITY = 1,
+	PORT = 2,
+	DEFENSE = 3,
+	SILO = 4,
+	SAM = 5,
+}
+
+Config.DEFENSE_RADIUS = 6
+Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
+Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
+
+--=============================================================================
+-- Nucleaire
+--=============================================================================
+-- La phase finale. Elle ne s'ouvre qu'une fois la carte largement partagee,
+-- pour qu'elle soit un climax et pas une strategie d'ouverture.
+
+Config.NUKE_UNLOCK_LAND_RATIO = 0.55 -- part des terres colonisees avant deblocage
+Config.MISSILE_SPEED = 1.6 -- tuiles par tick
+Config.SAM_RANGE = 34
+Config.SAM_INTERCEPT_CHANCE = 0.55
+Config.SAM_COOLDOWN = 90 -- ticks
+
+Config.NUKE = {
+	ATOM = 1,
+	HYDROGEN = 2,
+}
+
+Config.NUKE_STATS = {
+	[1] = { radius = 9, troopKill = 0.30, cost = 550, name = "Bombe atomique" },
+	[2] = { radius = 20, troopKill = 0.55, cost = 1400, name = "Bombe H" },
+}
+
+--=============================================================================
+-- Diplomatie
+--=============================================================================
+
+Config.ALLIANCE_REQUEST_TIMEOUT = 300 -- ticks avant expiration d'une demande
+Config.BETRAYAL_REPUTATION_COST = 1
+Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est affichee
+
+--=============================================================================
+-- Partie
+--=============================================================================
+
+Config.SPAWN_RADIUS = 3
 Config.NEUTRAL_SLOT = 0
 Config.MAX_PLAYERS = 48
+Config.BOT_COUNT = 12
 
--- Palette des factions. Choisies pour rester distinctes une fois cote a cote
--- et lisibles sur le fond ocean/terrain desature.
+Config.VICTORY_LAND_RATIO = 0.65 -- part des terres a controler pour gagner
+Config.MATCH_DURATION = 25 * 60 -- secondes
+Config.POST_MATCH_DELAY = 20 -- secondes avant relance
+
+--=============================================================================
+-- Presentation
+--=============================================================================
+
+-- Palette des factions, choisies pour rester distinctes cote a cote.
 Config.PLAYER_COLORS = {
 	Color3.fromRGB(231, 76, 60),
 	Color3.fromRGB(52, 152, 219),
@@ -85,12 +183,46 @@ Config.PLAYER_COLORS = {
 	Color3.fromRGB(38, 198, 218),
 }
 
--- Couleurs du terrain neutre
+--[[
+	La palette est completee jusqu'a MAX_PLAYERS par rotation d'angle d'or.
+
+	Les 16 teintes ci-dessus sont choisies a la main et restent les plus
+	lisibles, donc elles sont attribuees en premier. Au-dela, un simple modulo
+	ferait partager la meme couleur a deux factions — sur une carte ou la
+	couleur *est* l'identite, deux empires rouges rendent la partie illisible.
+	L'angle d'or (137,5 degres) garantit que chaque nouvelle teinte tombe aussi
+	loin que possible de toutes les precedentes.
+]]
+do
+	local GOLDEN_ANGLE = 137.507764
+	local extra = 0
+	while #Config.PLAYER_COLORS < Config.MAX_PLAYERS do
+		local hue = ((#Config.PLAYER_COLORS * GOLDEN_ANGLE) % 360) / 360
+		-- On alterne saturation et luminosite pour separer aussi les teintes
+		-- voisines une fois le cercle chromatique parcouru.
+		local saturation = if extra % 2 == 0 then 0.72 else 0.52
+		local value = if extra % 3 == 0 then 0.95 else 0.78
+		table.insert(Config.PLAYER_COLORS, Color3.fromHSV(hue, saturation, value))
+		extra += 1
+	end
+end
+
 Config.TERRAIN_COLORS = {
-	[0] = Color3.fromRGB(28, 44, 68), -- ocean
+	[0] = Color3.fromRGB(22, 38, 62), -- ocean
 	[1] = Color3.fromRGB(122, 133, 96), -- plaines
 	[2] = Color3.fromRGB(104, 110, 84), -- collines
 	[3] = Color3.fromRGB(88, 88, 88), -- montagnes
+}
+
+Config.UI = {
+	PANEL = Color3.fromRGB(18, 22, 32),
+	PANEL_LIGHT = Color3.fromRGB(38, 46, 62),
+	STROKE = Color3.fromRGB(90, 110, 140),
+	TEXT = Color3.fromRGB(255, 255, 255),
+	TEXT_DIM = Color3.fromRGB(150, 170, 200),
+	ACCENT = Color3.fromRGB(210, 70, 60),
+	GOLD = Color3.fromRGB(240, 190, 70),
+	ALLY = Color3.fromRGB(90, 210, 140),
 }
 
 return Config

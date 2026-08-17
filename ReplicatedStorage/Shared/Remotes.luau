@@ -7,12 +7,24 @@ local RunService = game:GetService("RunService")
 
 local NAMES = {
 	-- Serveur -> client
-	"MapInit", -- (seed: number, slot: number, roster: {[number]: {name, color}})
-	"StateDelta", -- (ownerDelta: buffer, stats: {[number]: {troops, tiles}})
+	"MapInit", -- (seed, slot, roster)
+	"StateDelta", -- (ownerDelta: buffer?, stats)
 	"RosterUpdate", -- (roster)
+	"BuildingDelta", -- ({BuildingSnapshot})
+	"UnitSnapshot", -- ({BoatSnapshot}, {MissileSnapshot})
+	"DiplomacyUpdate", -- (Diplomacy)
+	"MatchUpdate", -- (MatchInfo)
+	"Notify", -- (text, kind)
+	"Explosion", -- (x, y, radius)
+
 	-- Client -> serveur
-	"AttackOrder", -- (targetSlot: number)
-	"SetAttackRatio", -- (ratio: number)
+	"AttackOrder", -- (targetSlot)
+	"SetAttackRatio", -- (ratio)
+	"ChooseDoctrine", -- (doctrineId)
+	"BuildOrder", -- (tileIndex, buildingKind)
+	"BoatOrder", -- (targetTileIndex)
+	"NukeOrder", -- (targetTileIndex, nukeKind)
+	"DiplomacyOrder", -- (action: string, targetSlot: number)
 }
 
 local Remotes = {}

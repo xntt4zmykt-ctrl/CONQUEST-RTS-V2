@@ -2,40 +2,91 @@
 --[[
 	Etat autoritaire de la partie.
 
-	Le coeur du jeu tient dans deux buffers plats indexes par tuile
-	(terrain, owner) plus, par joueur, un ensemble de tuiles frontieres.
-	Tout est en O(tuiles capturees) par tick, jamais en O(carte) : c'est ce qui
-	permet de tenir 40 000 tuiles a 10 ticks/seconde.
+	La carte tient dans trois buffers plats indexes par tuile (terrain, owner,
+	defense) et tout le travail par tick est en O(tuiles modifiees), jamais en
+	O(carte). C'est ce qui permet de tenir 40 000 tuiles a 10 ticks/seconde avec
+	48 joueurs.
 
-	Modele d'attaque (repris d'OpenFront) : on n'ordonne pas des unites, on
-	engage un corps expeditionnaire contre une faction. Chaque tick, ce corps
-	depense des troupes pour absorber les tuiles ennemies au contact. Quand il
-	est epuise, l'offensive s'arrete la ou elle en est.
+	Ce module ne contient que le noyau : territoire, population, economie,
+	offensives. La marine, le nucleaire et la diplomatie sont des systemes
+	separes qui operent sur cet etat — pour qu'on puisse en ajouter un sans
+	toucher au reste.
 ]]
 
-local Config = require(game.ReplicatedStorage.Shared.Config)
-local MapGen = require(game.ReplicatedStorage.Shared.MapGen)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local MapGen = require(ReplicatedStorage.Shared.MapGen)
+local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
+local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 
 local NEUTRAL = Config.NEUTRAL_SLOT
-local TERRAIN_COST = Config.TERRAIN_COST
 local OCEAN = Config.TERRAIN.OCEAN
+local B = Config.BUILDING
 
 export type PlayerState = {
 	slot: number,
 	player: Player?,
 	name: string,
+	isBot: boolean,
+	doctrine: number,
 	troops: number,
+	gold: number,
 	tiles: number,
 	attackRatio: number,
-	border: { [number]: true }, -- tuiles possedees ayant au moins un voisin etranger
+	border: { [number]: true },
+	-- Tuiles possedees touchant l'ocean. Distinct de `border`, qui ne retient
+	-- que les tuiles au contact d'une terre etrangere : une cote entouree de
+	-- son propre territoire n'est pas une frontiere mais reste le seul endroit
+	-- ou poser un port et embarquer des troupes.
+	coast: { [number]: true },
 	alive: boolean,
+	-- Agregats maintenus a l'incrementale plutot que recalcules
+	cityPopBonus: number,
+	portCount: number,
+	siloCount: number,
+	samCount: number,
+	betrayals: number,
+	traitorUntil: number,
 }
 
 export type Attack = {
 	attacker: number,
 	target: number,
 	troops: number,
-	frontier: { [number]: true }, -- tuiles ennemies au contact, candidates a la capture
+	frontier: { [number]: true },
+}
+
+export type Boat = {
+	id: number,
+	slot: number,
+	kind: number, -- 1 = transport, 2 = marchand
+	troops: number,
+	x: number,
+	y: number,
+	path: { number },
+	step: number,
+	targetTile: number,
+}
+
+export type Missile = {
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	sx: number,
+	sy: number,
+	tx: number,
+	ty: number,
+	progress: number,
+	speed: number,
+}
+
+export type Building = {
+	kind: number,
+	slot: number,
+	cooldown: number, -- utilise par les batteries SAM
 }
 
 local GameState = {}
@@ -44,27 +95,62 @@ GameState.__index = GameState
 export type GameState = typeof(setmetatable(
 	{} :: {
 		seed: number,
+		tick: number,
 		terrain: buffer,
 		owner: buffer,
+		defense: buffer,
+		landCount: number,
 		players: { [number]: PlayerState },
 		attacks: { Attack },
-		dirty: { [number]: true }, -- tuiles dont le proprietaire a change depuis le dernier envoi
+		boats: { Boat },
+		missiles: { Missile },
+		buildings: { [number]: Building },
+		alliances: { [number]: { [number]: true } },
+		requests: { [number]: { [number]: number } }, -- from -> to -> expiry tick
+		embargoes: { [number]: { [number]: true } },
+		dirty: { [number]: true },
+		buildingDirty: { [number]: true },
 		freeSlots: { number },
+		nextEntityId: number,
+		events: { { text: string, kind: string, only: number? } },
 	},
 	GameState
 ))
 
-local scratch = table.create(4, 0) -- tampon de voisins reutilise
+-- Tampons de voisins reutilises pour eviter des milliers d'allocations par
+-- tick. Il en faut deux distincts : refreshBorder est appele *pendant* que
+-- setOwner itere sur le sien, et un tampon partage serait ecrase en cours de
+-- boucle. Toute nouvelle fonction qui appelle refreshBorder en iterant sur des
+-- voisins doit utiliser son propre tampon.
+local scratch = table.create(4, 0)
+local borderScratch = table.create(4, 0)
+
+--=============================================================================
+-- Construction
+--=============================================================================
 
 function GameState.new(seed: number): GameState
 	local self = setmetatable({}, GameState) :: GameState
 
 	self.seed = seed
+	self.tick = 0
 	self.terrain = MapGen.generate(seed)
-	self.owner = buffer.create(Config.TILE_COUNT) -- 0 = neutre partout
+	self.owner = buffer.create(Config.TILE_COUNT)
+	self.defense = buffer.create(Config.TILE_COUNT)
+	self.landCount = MapGen.countLand(self.terrain)
+
 	self.players = {}
 	self.attacks = {}
+	self.boats = {}
+	self.missiles = {}
+	self.buildings = {}
+	self.alliances = {}
+	self.requests = {}
+	self.embargoes = {}
 	self.dirty = {}
+	self.buildingDirty = {}
+	self.nextEntityId = 1
+	self.events = {}
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -74,13 +160,37 @@ function GameState.new(seed: number): GameState
 	return self
 end
 
+function GameState.nextId(self: GameState): number
+	local id = self.nextEntityId
+	self.nextEntityId += 1
+	return id
+end
+
+--[[
+	File un message a destination des clients. `only` restreint a un slot, sinon
+	c'est diffuse a tout le monde.
+]]
+function GameState.notify(self: GameState, text: string, kind: string, only: number?)
+	table.insert(self.events, { text = text, kind = kind, only = only })
+end
+
+function GameState.doctrineOf(self: GameState, slot: number): Doctrines.Doctrine
+	local ps = self.players[slot]
+	return Doctrines.get(if ps then ps.doctrine else nil)
+end
+
+--=============================================================================
+-- Territoire
+--=============================================================================
+
 function GameState.isLand(self: GameState, index: number): boolean
 	return buffer.readu8(self.terrain, index) ~= OCEAN
 end
 
 --[[
 	Recalcule le statut "frontiere" d'une tuile pour son proprietaire.
-	Appele apres chaque capture, sur la tuile prise et ses voisins.
+	Une tuile est frontiere si elle touche une terre qui ne lui appartient pas :
+	c'est l'ensemble depuis lequel toutes les offensives partent.
 ]]
 function GameState.refreshBorder(self: GameState, index: number)
 	local slot = buffer.readu8(self.owner, index)
@@ -92,10 +202,10 @@ function GameState.refreshBorder(self: GameState, index: number)
 		return
 	end
 
-	local n = MapGen.neighbors(index, scratch)
+	local n = MapGen.neighbors(index, borderScratch)
 	local isBorder = false
 	for i = 1, n do
-		local nb = scratch[i]
+		local nb = borderScratch[i]
 		if buffer.readu8(self.owner, nb) ~= slot and self:isLand(nb) then
 			isBorder = true
 			break
@@ -120,6 +230,7 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 		if old then
 			old.tiles -= 1
 			old.border[index] = nil
+			old.coast[index] = nil
 		end
 	end
 
@@ -130,10 +241,22 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 		local new = self.players[slot]
 		if new then
 			new.tiles += 1
+			-- Le relief est fige pour toute la partie : le caractere cotier
+			-- d'une tuile ne change jamais, il suffit de le calculer a la
+			-- capture.
+			if MapGen.isCoastal(self.terrain, index) then
+				new.coast[index] = true
+			end
 		end
 	end
 
-	-- La capture peut rendre des tuiles voisines interieures ou frontieres.
+	-- Un batiment capture change de camp avec sa tuile : prendre une ville, un
+	-- port ou un silo ennemi est un objectif en soi.
+	local building = self.buildings[index]
+	if building and building.slot ~= slot then
+		self:transferBuilding(index, slot)
+	end
+
 	self:refreshBorder(index)
 	local n = MapGen.neighbors(index, scratch)
 	for i = 1, n do
@@ -141,21 +264,106 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 	end
 end
 
+--=============================================================================
+-- Batiments
+--=============================================================================
+
+-- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
+	local cx, cy = MapGen.fromIndex(index)
+	local radius = Config.DEFENSE_RADIUS
+
+	for dy = -radius, radius do
+		for dx = -radius, radius do
+			local dist2 = dx * dx + dy * dy
+			if dist2 <= radius * radius then
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local i = MapGen.toIndex(nx, ny)
+					-- Degressif du centre vers le bord.
+					local falloff = 1 - math.sqrt(dist2) / radius
+					local amount = math.floor(Config.DEFENSE_STRENGTH * falloff)
+					local current = buffer.readu8(self.defense, i)
+					buffer.writeu8(self.defense, i, math.clamp(current + sign * amount, 0, 255))
+				end
+			end
+		end
+	end
+end
+
+function GameState.countBuilding(self: GameState, slot: number, kind: number, sign: number)
+	local ps = self.players[slot]
+	if not ps then
+		return
+	end
+	if kind == B.CITY then
+		local def = BuildingDefs.get(B.CITY)
+		ps.cityPopBonus += sign * (if def then def.popCapBonus else 0)
+	elseif kind == B.PORT then
+		ps.portCount += sign
+	elseif kind == B.SILO then
+		ps.siloCount += sign
+	elseif kind == B.SAM then
+		ps.samCount += sign
+	end
+end
+
+function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
+	if self.buildings[index] then
+		return
+	end
+	self.buildings[index] = { kind = kind, slot = slot, cooldown = 0 }
+	self.buildingDirty[index] = true
+	self:countBuilding(slot, kind, 1)
+
+	if kind == B.DEFENSE then
+		self:applyDefenseAura(index, 1)
+	end
+end
+
+function GameState.transferBuilding(self: GameState, index: number, newSlot: number)
+	local building = self.buildings[index]
+	if not building then
+		return
+	end
+	self:countBuilding(building.slot, building.kind, -1)
+	building.slot = newSlot
+	self:countBuilding(newSlot, building.kind, 1)
+	self.buildingDirty[index] = true
+end
+
+function GameState.destroyBuilding(self: GameState, index: number)
+	local building = self.buildings[index]
+	if not building then
+		return
+	end
+	if building.kind == B.DEFENSE then
+		self:applyDefenseAura(index, -1)
+	end
+	self:countBuilding(building.slot, building.kind, -1)
+	self.buildings[index] = nil
+	self.buildingDirty[index] = true
+end
+
+--=============================================================================
+-- Cycle de vie des joueurs
+--=============================================================================
+
 --[[
-	Cherche une zone de spawn : une tuile de terre dont le disque de rayon
-	SPAWN_RADIUS est entierement libre, pour ne pas coller deux joueurs.
+	Cherche une zone de spawn : une tuile de terre dont le disque alentour est
+	entierement libre, pour ne jamais coller deux joueurs au demarrage.
 ]]
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
-	for _ = 1, 4000 do
-		local x = rng:NextInteger(radius, Config.MAP_WIDTH - radius - 1)
-		local y = rng:NextInteger(radius, Config.MAP_HEIGHT - radius - 1)
+	local check = radius + 3
+
+	for _ = 1, 6000 do
+		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
+		local y = rng:NextInteger(check, Config.MAP_HEIGHT - check - 1)
 		local center = MapGen.toIndex(x, y)
 
 		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
 			local ok = true
-			-- Marge de 2 tuiles au-dela du rayon : evite les spawns au contact.
-			local check = radius + 2
 			for dy = -check, check do
 				for dx = -check, check do
 					local nx, ny = x + dx, y + dy
@@ -178,7 +386,13 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 	return nil
 end
 
-function GameState.addPlayer(self: GameState, player: Player?, name: string, rng: Random): PlayerState?
+function GameState.addPlayer(
+	self: GameState,
+	player: Player?,
+	name: string,
+	rng: Random,
+	betrayals: number
+): PlayerState?
 	local slot = table.remove(self.freeSlots)
 	if not slot then
 		return nil
@@ -188,13 +402,26 @@ function GameState.addPlayer(self: GameState, player: Player?, name: string, rng
 		slot = slot,
 		player = player,
 		name = name,
+		isBot = player == nil,
+		doctrine = Doctrines.DEFAULT_ID,
 		troops = Config.START_TROOPS,
+		gold = Config.START_GOLD,
 		tiles = 0,
 		attackRatio = Config.DEFAULT_ATTACK_RATIO,
 		border = {},
+		coast = {},
 		alive = true,
+		cityPopBonus = 0,
+		portCount = 0,
+		siloCount = 0,
+		samCount = 0,
+		betrayals = betrayals,
+		traitorUntil = 0,
 	}
 	self.players[slot] = state
+	self.alliances[slot] = {}
+	self.requests[slot] = {}
+	self.embargoes[slot] = {}
 
 	local center = self:findSpawn(rng)
 	if not center then
@@ -228,15 +455,18 @@ function GameState.removePlayer(self: GameState, slot: number)
 		return
 	end
 
-	for index in state.border do
-		self.dirty[index] = true
-	end
-	-- Le territoire redevient neutre : balayage complet, mais uniquement au
-	-- depart d'un joueur (rare), pas dans la boucle de tick.
+	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
+	-- dans la boucle de tick.
 	for index = 0, Config.TILE_COUNT - 1 do
 		if buffer.readu8(self.owner, index) == slot then
 			buffer.writeu8(self.owner, index, NEUTRAL)
 			self.dirty[index] = true
+		end
+	end
+
+	for index, building in self.buildings do
+		if building.slot == slot then
+			self:destroyBuilding(index)
 		end
 	end
 
@@ -246,9 +476,61 @@ function GameState.removePlayer(self: GameState, slot: number)
 			table.remove(self.attacks, i)
 		end
 	end
+	for i = #self.boats, 1, -1 do
+		if self.boats[i].slot == slot then
+			table.remove(self.boats, i)
+		end
+	end
+	for i = #self.missiles, 1, -1 do
+		if self.missiles[i].slot == slot then
+			table.remove(self.missiles, i)
+		end
+	end
+
+	for other, set in self.alliances do
+		set[slot] = nil
+		if other == slot then
+			self.alliances[other] = {}
+		end
+	end
+	self.alliances[slot] = nil
+	self.requests[slot] = nil
+	self.embargoes[slot] = nil
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
+end
+
+--=============================================================================
+-- Offensives
+--=============================================================================
+
+function GameState.areAllied(self: GameState, a: number, b: number): boolean
+	local set = self.alliances[a]
+	return set ~= nil and set[b] == true
+end
+
+-- Cout en troupes pour absorber une tuile donnee.
+function GameState.tileCost(self: GameState, index: number, attackerSlot: number, defender: PlayerState?): number
+	local terrain = buffer.readu8(self.terrain, index)
+	local cost = Config.TILE_BASE_COST * Config.TERRAIN_COST[terrain]
+
+	if defender then
+		-- Un defenseur concentre sur peu de tuiles est bien plus dur a percer
+		-- qu'un empire etale : c'est ce qui punit l'expansion incontrolee.
+		local density = defender.troops / math.max(1, defender.tiles)
+		cost *= 1 + density * Config.DEFENSE_DENSITY_K
+		cost *= Doctrines.get(defender.doctrine).defense
+	else
+		cost *= Config.NEUTRAL_COST_MULT
+	end
+
+	-- Aura des bunkers.
+	cost *= 1 + buffer.readu8(self.defense, index) / 100
+
+	cost /= self:doctrineOf(attackerSlot).attack
+
+	return cost
 end
 
 --[[
@@ -256,26 +538,29 @@ end
 	la reserve : les troupes engagees ne defendent plus. C'est la decision
 	tactique centrale du jeu.
 ]]
-function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlot: number): boolean
+function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
 	local attacker = self.players[attackerSlot]
 	if not attacker or attackerSlot == targetSlot then
-		return false
+		return false, "Cible invalide."
 	end
 	if targetSlot ~= NEUTRAL and not self.players[targetSlot] then
-		return false
+		return false, "Cette faction n'existe plus."
+	end
+	if targetSlot ~= NEUTRAL and self:areAllied(attackerSlot, targetSlot) then
+		return false, "Tu es allie a cette faction. Romps le pacte d'abord."
 	end
 
 	local committed = math.floor(attacker.troops * attacker.attackRatio)
 	if committed < Config.MIN_ATTACK_TROOPS then
-		return false
+		return false, "Pas assez de troupes engagees."
 	end
 
-	-- Une seule offensive par couple attaquant/cible : relancer renforce.
+	-- Une seule offensive par couple attaquant/cible : relancer la renforce.
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			attacker.troops -= committed
 			atk.troops += committed
-			return true
+			return true, nil
 		end
 	end
 
@@ -293,7 +578,7 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 	end
 
 	if not any then
-		return false -- pas de contact terrestre avec cette faction
+		return false, "Aucun contact terrestre. Passe par la mer."
 	end
 
 	attacker.troops -= committed
@@ -303,24 +588,30 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		troops = committed,
 		frontier = frontier,
 	})
-	return true
+	return true, nil
 end
 
--- Cout en troupes pour absorber une tuile donnee.
-function GameState.tileCost(self: GameState, index: number, defender: PlayerState?): number
-	local terrain = buffer.readu8(self.terrain, index)
-	local cost = Config.TILE_BASE_COST * TERRAIN_COST[terrain]
+--[[
+	Cree une tete de pont apres un debarquement : l'offensive demarre depuis une
+	tuile isolee, sans contact terrestre prealable.
+]]
+function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSlot: number, troops: number, tile: number)
+	local frontier: { [number]: true } = { [tile] = true }
 
-	if defender then
-		-- Un defenseur concentre sur peu de tuiles est bien plus dur a percer
-		-- qu'un empire etale : c'est ce qui punit l'expansion incontrolee.
-		local density = defender.troops / math.max(1, defender.tiles)
-		cost *= 1 + density * Config.DEFENSE_DENSITY_K
-	else
-		cost *= Config.NEUTRAL_COST_MULT
+	for _, atk in self.attacks do
+		if atk.attacker == attackerSlot and atk.target == targetSlot then
+			atk.troops += troops
+			atk.frontier[tile] = true
+			return
+		end
 	end
 
-	return cost
+	table.insert(self.attacks, {
+		attacker = attackerSlot,
+		target = targetSlot,
+		troops = troops,
+		frontier = frontier,
+	})
 end
 
 function GameState.stepAttacks(self: GameState)
@@ -338,7 +629,6 @@ function GameState.stepAttacks(self: GameState)
 		local captured = 0
 		local spent = 0
 
-		-- On absorbe des tuiles tant que le budget du tick le permet.
 		while spent < budget and captured < Config.MAX_TILES_PER_TICK do
 			local index = next(atk.frontier)
 			if not index then
@@ -351,7 +641,7 @@ function GameState.stepAttacks(self: GameState)
 				continue
 			end
 
-			local cost = self:tileCost(index, defender)
+			local cost = self:tileCost(index, atk.attacker, defender)
 			if cost > atk.troops then
 				-- Trop cher pour ce qu'il reste : l'offensive est brisee ici.
 				atk.troops = 0
@@ -368,7 +658,6 @@ function GameState.stepAttacks(self: GameState)
 
 			self:setOwner(index, atk.attacker)
 
-			-- La tuile prise ouvre de nouveaux contacts avec la meme cible.
 			local n = MapGen.neighbors(index, scratch)
 			for k = 1, n do
 				local nb = scratch[k]
@@ -379,35 +668,88 @@ function GameState.stepAttacks(self: GameState)
 		end
 
 		if atk.troops <= 0 or next(atk.frontier) == nil then
-			-- Les survivants rentrent dans la reserve.
-			attacker.troops += math.max(0, atk.troops)
+			attacker.troops += math.max(0, atk.troops) -- les survivants rentrent
 			table.remove(self.attacks, i)
 		end
 	end
 end
 
-function GameState.stepGrowth(self: GameState)
-	for _, state in self.players do
-		local maxTroops = Config.BASE_MAX_TROOPS + state.tiles * Config.MAX_TROOPS_PER_TILE
-		if state.troops < maxTroops then
-			local gain = math.max(Config.MIN_GROWTH, (maxTroops - state.troops) * Config.GROWTH_RATE)
-			state.troops = math.min(maxTroops, state.troops + gain)
+--=============================================================================
+-- Population et economie
+--=============================================================================
+
+function GameState.maxTroops(self: GameState, ps: PlayerState): number
+	return Config.BASE_MAX_TROOPS + ps.tiles * Config.MAX_TROOPS_PER_TILE + ps.cityPopBonus
+end
+
+-- Nombre de factions avec qui le commerce maritime est effectivement ouvert.
+function GameState.tradePartners(self: GameState, ps: PlayerState): number
+	if ps.portCount == 0 then
+		return 0
+	end
+	local myEmbargoes = self.embargoes[ps.slot]
+	local count = 0
+	for slot, other in self.players do
+		if slot ~= ps.slot and other.portCount > 0 then
+			local blockedByMe = myEmbargoes and myEmbargoes[slot]
+			local theirEmbargoes = self.embargoes[slot]
+			local blockedByThem = theirEmbargoes and theirEmbargoes[ps.slot]
+			if not blockedByMe and not blockedByThem then
+				count += 1
+			end
 		end
+	end
+	return count
+end
+
+function GameState.stepEconomy(self: GameState)
+	for _, ps in self.players do
+		local doctrine = Doctrines.get(ps.doctrine)
+
+		local maxTroops = self:maxTroops(ps)
+		if ps.troops < maxTroops then
+			local gain = math.max(Config.MIN_GROWTH, (maxTroops - ps.troops) * Config.GROWTH_RATE)
+			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth)
+		end
+
+		local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
+		local income = territorial
+			+ ps.portCount * Config.GOLD_PER_PORT
+			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
+		ps.gold += income * doctrine.goldRate
 	end
 end
 
-function GameState.step(self: GameState)
-	self:stepGrowth()
-	self:stepAttacks()
+function GameState.landControlled(self: GameState, slot: number): number
+	local ps = self.players[slot]
+	if not ps or self.landCount == 0 then
+		return 0
+	end
+	return ps.tiles / self.landCount
 end
+
+-- Part des terres deja colonisee, toutes factions confondues. Sert de horloge
+-- naturelle a la partie : c'est elle qui debloque le nucleaire.
+function GameState.colonizedRatio(self: GameState): number
+	if self.landCount == 0 then
+		return 0
+	end
+	local owned = 0
+	for _, ps in self.players do
+		owned += ps.tiles
+	end
+	return owned / self.landCount
+end
+
+--=============================================================================
+-- Replication
+--=============================================================================
 
 --[[
 	Serialise les changements de proprietaire depuis le dernier appel, au format
-	[u32 index][u8 slot] repete. On n'envoie jamais la carte entiere : sur une
-	partie calme c'est quelques dizaines d'octets par tick.
-	Renvoie nil s'il n'y a rien a envoyer.
+	[u32 index][u8 slot] repete. On n'envoie jamais la carte entiere.
 ]]
-function GameState.flushDelta(self: GameState): buffer?
+function GameState.flushOwnerDelta(self: GameState): buffer?
 	local indices = {}
 	for index in self.dirty do
 		table.insert(indices, index)
@@ -426,6 +768,84 @@ function GameState.flushDelta(self: GameState): buffer?
 		buffer.writeu8(buf, offset + 4, buffer.readu8(self.owner, index))
 	end
 	return buf
+end
+
+function GameState.flushBuildingDelta(self: GameState): { any }?
+	local out = {}
+	for index in self.buildingDirty do
+		local building = self.buildings[index]
+		table.insert(out, {
+			index = index,
+			kind = if building then building.kind else 0,
+			slot = if building then building.slot else 0,
+		})
+	end
+	table.clear(self.buildingDirty)
+	return if #out > 0 then out else nil
+end
+
+--[[
+	Elimination des factions sans territoire.
+
+	Une faction n'est vaincue que si elle n'a plus rien *et* plus rien en cours :
+	un joueur dont toutes les troupes sont dans une offensive ou sur un
+	transport en mer a encore une chance de reprendre pied, et l'eliminer a cet
+	instant supprimerait le retournement le plus spectaculaire du jeu.
+
+	Renvoie la liste des slots elimines pour que l'appelant previenne les
+	joueurs concernes.
+]]
+function GameState.stepElimination(self: GameState): { number }
+	local doomed: { number } = {}
+
+	for slot, ps in self.players do
+		if ps.tiles > 0 then
+			continue
+		end
+
+		local hasPendingAttack = false
+		for _, atk in self.attacks do
+			if atk.attacker == slot then
+				hasPendingAttack = true
+				break
+			end
+		end
+		if hasPendingAttack then
+			continue
+		end
+
+		local hasBoat = false
+		for _, boat in self.boats do
+			if boat.slot == slot then
+				hasBoat = true
+				break
+			end
+		end
+		if hasBoat then
+			continue
+		end
+
+		table.insert(doomed, slot)
+	end
+
+	-- On collecte avant de supprimer : removePlayer mute self.players, et le
+	-- muter en cours d'iteration est un comportement indefini.
+	for _, slot in doomed do
+		local ps = self.players[slot]
+		if ps then
+			self:notify(`\u{1F480} {ps.name} a ete elimine.`, "alert")
+			self:removePlayer(slot)
+		end
+	end
+
+	return doomed
+end
+
+function GameState.step(self: GameState): { number }
+	self.tick += 1
+	self:stepEconomy()
+	self:stepAttacks()
+	return self:stepElimination()
 end
 
 return GameState

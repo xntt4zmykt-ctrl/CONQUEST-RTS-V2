@@ -3,7 +3,8 @@
 Jeu de conquête territoriale temps réel sur Roblox, par **Blackline Studio**.
 
 Inspiré du genre `.io` de conquête de territoire (OpenFront, Territorial.io), poussé
-plus loin : rendu 3D, avatar-commandeur, diplomatie vocale et réputation persistante.
+plus loin : économie maritime, diplomatie mécanique, réputation persistante et
+phase nucléaire.
 
 ---
 
@@ -11,11 +12,11 @@ plus loin : rendu 3D, avatar-commandeur, diplomatie vocale et réputation persis
 
 > **Conquiers le monde. Trahis tes alliés.**
 > Commence avec une seule province. Fais croître ta population, lance des offensives,
-> construis des ports et des silos nucléaires. Négocie des traités en vocal — puis
+> construis des ports et des silos nucléaires. Négocie des traités — puis
 > brise-les au pire moment.
 >
 > 🌍 48 joueurs par carte · ⚔️ Parties de 25 minutes · 🤝 Alliances réelles
-> ☢️ Fin de partie nucléaire · 🏆 Saisons de clans
+> ☢️ Fin de partie nucléaire · 🏆 Réputation persistante
 >
 > Ta réputation te suit d'une partie à l'autre. Choisis bien.
 
@@ -23,24 +24,41 @@ plus loin : rendu 3D, avatar-commandeur, diplomatie vocale et réputation persis
 
 ## Lancer le projet
 
-Prérequis : [Aftman](https://github.com/LPGhatguy/aftman) (déjà installé) et le
-plugin **Rojo** dans Roblox Studio.
+Prérequis : [Aftman](https://github.com/LPGhatguy/aftman) et le plugin **Rojo**
+dans Roblox Studio.
 
 ```bash
 cd "/Users/billy/Documents/CONQUEST RTS" && aftman install && rojo serve
 ```
 
-Puis, dans Studio : onglet Rojo → **Connect**. Le code se synchronise en direct ;
-chaque sauvegarde de fichier est répercutée immédiatement dans le DataModel.
+Puis, dans Studio : onglet Rojo → **Connect**. Chaque sauvegarde de fichier est
+répercutée immédiatement dans le DataModel.
 
-Pour générer un fichier `.rbxlx` autonome à la place :
+Teste avec **Play Solo** : 12 bots peuplent la carte, construisent, débarquent,
+s'allient et se trahissent. La partie est jouable et observable sans autre joueur.
+
+---
+
+## Tests
+
+La simulation serveur tourne **hors de Studio**, dans le Luau standard :
 
 ```bash
-cd "/Users/billy/Documents/CONQUEST RTS" && rojo build -o CONQUEST_RTS.rbxlx
+brew install luau && ./tests/run.sh
 ```
 
-Teste avec **Play Solo** : 10 bots peuplent la carte automatiquement, donc la
-partie est jouable et observable sans autre joueur.
+`tests/bundle.js` assemble les modules partagés et serveur en un seul fichier
+exécutable (les `require` de Roblox désignent des Instances, pas des chemins :
+ils sont réécrits), `tests/stubs.luau` bouchonne les API Roblox utilisées, et
+`tests/simulate.luau` joue cinq parties complètes en vérifiant des invariants.
+
+Les invariants ciblent la classe de bug la plus dangereuse ici : **la
+comptabilité incrémentale**. `tiles`, `border`, `coast`, `portCount` sont
+maintenus à la main à chaque capture ; s'ils dérivent de la réalité du buffer
+`owner`, l'équilibrage se fausse silencieusement sans jamais lever d'erreur.
+
+Le dossier `tests/` n'est pas monté dans `default.project.json` : rien de tout
+ça n'est synchronisé vers Roblox.
 
 ---
 
@@ -48,37 +66,48 @@ partie est jouable et observable sans autre joueur.
 
 ```
 ReplicatedStorage/Shared/
-  Config.luau      Toutes les constantes d'équilibrage (le seul fichier à tuner)
-  MapGen.luau      Génération de carte déterministe à partir d'une seed
-  Remotes.luau     Création/récupération des RemoteEvents
-  Types.luau       Types partagés serveur ↔ client
+  Config.luau       Toutes les constantes d'équilibrage (le seul fichier à tuner)
+  MapGen.luau       Génération de carte déterministe à partir d'une seed
+  Doctrines.luau    Les quatre doctrines et leurs multiplicateurs
+  BuildingDefs.luau Définitions et coûts des bâtiments
+  Remotes.luau      Création/récupération des RemoteEvents
+  Types.luau        Types partagés serveur ↔ client
 
 ServerScriptService/Server/
-  init.server.luau Cycle de vie des joueurs, boucle de tick, réplication
-  GameState.luau   État autoritaire : territoires, troupes, offensives
-  Bots.luau        IA de remplissage (temporaire, pour le playtest solo)
+  init.server.luau  Orchestration : ordres, boucle de tick, réplication, match
+  GameState.luau    État autoritaire : territoire, population, économie, offensives
+  Buildings.luau    Validation et pose des bâtiments
+  Navy.luau         Débarquements, pathfinding maritime, commerce
+  Nukes.luau        Tirs, interception SAM, détonation
+  Diplomacy.luau    Alliances, trahisons, embargos
+  Persistence.luau  Réputation persistante (DataStore)
+  Bots.luau         IA de remplissage
 
 StarterPlayerScripts/Client/
-  init.client.luau Caméra 2D (pan/zoom), saisie des ordres, réseau
-  MapRenderer.luau Peinture de la carte via EditableImage
-  HUD.luau         Barre de commandement, classement, statut
+  init.client.luau  Caméra 2D, saisie des ordres, réseau
+  MapRenderer.luau  Peinture de la carte via EditableImage
+  Overlay.luau      Bâtiments, navires, missiles, explosions
+  HUD.luau          Commandement, construction, diplomatie, classement
 ```
 
 ### Décisions structurantes
 
 **La carte est un buffer plat, pas des instances.** 256×160 = 40 960 tuiles.
-`terrain` et `owner` sont deux `buffer` d'un octet par tuile. Aucune Part, aucun
-Instance par tuile — c'est la seule approche qui tient sur mobile.
+`terrain`, `owner` et `defense` sont trois `buffer` d'un octet par tuile. Aucune
+Part, aucun Instance par tuile.
 
 **On réplique la seed, pas la carte.** Serveur et client appellent
 `MapGen.generate(seed)` et obtiennent un résultat identique. 4 octets au lieu de 40 Ko.
 
-**On ne réplique que les deltas de propriété.** Chaque tick, le serveur envoie les
-tuiles ayant changé de main au format `[u32 index][u8 slot]`. Une partie calme
-coûte quelques dizaines d'octets par tick.
+**On ne réplique que les deltas.** Chaque tick, le serveur envoie les tuiles ayant
+changé de main au format `[u32 index][u8 slot]`.
 
-**Le rendu est isolé.** `MapRenderer` ne connaît rien de la simulation. Quand on
-passera au rendu 3D, c'est le seul fichier à remplacer.
+**Tout le travail par tick est en O(tuiles modifiées), jamais en O(carte).** Les
+ensembles `border` et `coast` de chaque joueur sont maintenus à l'incrémentale.
+C'est ce qui permet de tenir 40 000 tuiles à 10 ticks/seconde.
+
+**Le rendu est isolé.** `MapRenderer` et `Overlay` ne connaissent rien de la
+simulation. Le passage au 3D ne touche qu'eux.
 
 **Simulation à pas fixe.** 10 ticks/seconde avec accumulateur : l'équilibrage ne
 dépend pas du FPS serveur.
@@ -89,33 +118,54 @@ On n'ordonne pas des unités, on engage un **corps expéditionnaire** contre une
 faction. Les troupes engagées quittent immédiatement la réserve — elles ne
 défendent plus. C'est la décision tactique centrale du jeu.
 
-Chaque tick, ce corps dépense des troupes pour absorber les tuiles ennemies au
-contact. Le coût d'une tuile dépend du terrain et de la **densité de troupes** du
-défenseur (`troupes / territoires`) — ce qui punit l'expansion incontrôlée et
-récompense l'empire compact.
+Le coût d'une tuile dépend du terrain, des bunkers alentour, de la doctrine des
+deux camps, et surtout de la **densité de troupes** du défenseur
+(`troupes / territoires`) — ce qui punit l'expansion incontrôlée et récompense
+l'empire compact.
 
-Quand le corps est épuisé, l'offensive s'arrête là où elle en est et les
-survivants rentrent.
+### Diplomatie
+
+Les traités sont **mécaniques**, pas déclaratifs. Une alliance empêche
+réellement l'attaque au niveau du moteur ; pour frapper un allié il faut rompre
+le pacte publiquement, ce qui laisse à la victime le temps de réagir et inscrit
+la trahison au compteur permanent du traître (DataStore, visible dans le
+classement de toutes les parties suivantes).
+
+L'embargo donne à la diplomatie un poids économique : couper les routes
+commerciales d'un rival lui retire de l'or à chaque tick.
 
 ---
 
 ## État actuel
 
-**Fait** — boucle de base jouable :
-génération de carte · spawn · croissance de population · offensives et capture ·
-front qui progresse · bots · rendu carte · pan/zoom · HUD · classement.
+**Fait** : génération de carte · spawn · population · offensives · marine et
+débarquements avec pathfinding maritime · économie et commerce · 5 bâtiments ·
+4 doctrines · alliances, trahisons, embargos · réputation persistante · phase
+nucléaire avec interception · élimination · condition de victoire et relance
+automatique · bots complets · rendu, HUD, classement, notifications.
 
-**Pas encore fait** — dans l'ordre de priorité :
+**Pas encore fait**, par ordre de priorité :
 
-1. **Bateaux et débarquements** — l'océan est actuellement infranchissable, ce qui
-   enferme les joueurs insulaires.
-2. **Bâtiments** — villes (plafond de population), ports, défenses côtières.
-3. **Alliances** — pactes de non-agression, partage de vision, et le score de
-   réputation persistant qui rend la trahison coûteuse.
-4. **Phase nucléaire** — silos, interception, hiver nucléaire.
-5. **Rendu 3D** — remplacer `MapRenderer` par du terrain low-poly avec bâtiments.
-6. **Condition de victoire et fin de partie.**
+1. **Rendu 3D** — remplacer le calque 2D par du terrain low-poly avec bâtiments.
+2. **Avatar-commandeur** — le joueur physiquement présent dans sa capitale.
+3. **Chat vocal de proximité** pour les négociations.
+4. **Navires de guerre** — actuellement les transports sont inarrêtables en mer.
+5. **Brouillard de guerre.**
+6. **Saisons et classement de clans.**
 
-⚠️ Les valeurs de `Config.luau` sont des estimations de départ : elles n'ont pas
-encore été soumises à un vrai playtest. Attends-toi à devoir tuner
-`ATTACK_SPEND_RATE`, `GROWTH_RATE` et `DEFENSE_DENSITY_K` en priorité.
+### Limites connues
+
+⚠️ **L'équilibrage n'a pas été playtesté par des humains.** Les valeurs de
+`Config.luau` ont été réglées contre la simulation headless uniquement. Les
+premiers paramètres à revoir : `ATTACK_SPEND_RATE`, `GROWTH_RATE`,
+`DEFENSE_DENSITY_K` et `GOLD_TILE_SCALE`.
+
+⚠️ **Les parties contre des bots seuls se terminent en 5 à 10 minutes**, bien
+avant les 25 minutes prévues — les bots ne se coalisent pas contre le leader.
+
+⚠️ **Les symboles de bâtiments sont des caractères Unicode.** S'ils ne
+s'affichent pas correctement dans Studio, remplacer `symbol` dans
+`BuildingDefs.luau` par des images.
+
+⚠️ **DataStore désactivé en Studio** tant que l'accès API n'est pas activé. La
+réputation est alors conservée en mémoire pour la session, sans erreur bloquante.

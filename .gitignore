@@ -3,3 +3,4 @@
 *.rbxlx.lock
 /build/
 .DS_Store
+tests/.bundle.luau

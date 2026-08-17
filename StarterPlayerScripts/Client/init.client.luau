@@ -1,20 +1,34 @@
 --!strict
--- Point d'entree client : interface, camera 2D (pan/zoom) et saisie des ordres.
+--[[
+	Point d'entree client : camera 2D, saisie des ordres, branchement reseau.
+
+	Le client n'est jamais autoritaire. Chaque clic est traduit en intention et
+	envoyee au serveur, qui repond par une notification en cas de refus. Aucune
+	regle de jeu n'est evaluee ici — au pire l'interface propose une action que
+	le serveur rejettera, jamais l'inverse.
+]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
-local Config = require(ReplicatedStorage.Shared.Config)
-local Remotes = require(ReplicatedStorage.Shared.Remotes)
--- Meme logique que cote serveur : ce fichier est le LocalScript "Client", les
--- modules voisins en sont les enfants.
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+-- Ce fichier est le LocalScript "Client" ; les modules voisins en sont les
+-- enfants, pas les freres.
 local MapRenderer = require(script.MapRenderer)
+local Overlay = require(script.Overlay)
 local HUD = require(script.HUD)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+--=============================================================================
+-- Racine de l'interface
+--=============================================================================
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "ConquestRTS"
@@ -23,12 +37,11 @@ screenGui.IgnoreGuiInset = true
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
--- Fond opaque : la carte est du pur 2D pour l'instant, le monde 3D derriere
--- n'a rien a montrer.
+-- Fond opaque : la carte est du pur 2D, le monde 3D derriere n'a rien a montrer.
 local backdrop = Instance.new("Frame")
 backdrop.Name = "Backdrop"
 backdrop.Size = UDim2.fromScale(1, 1)
-backdrop.BackgroundColor3 = Color3.fromRGB(12, 16, 24)
+backdrop.BackgroundColor3 = Color3.fromRGB(10, 14, 22)
 backdrop.BorderSizePixel = 0
 backdrop.Parent = screenGui
 
@@ -40,11 +53,11 @@ viewport.ClipsDescendants = true
 viewport.Parent = backdrop
 
 local renderer: MapRenderer.MapRenderer? = nil
-local mySlot = 0
-local roster: { [number]: { name: string, isBot: boolean } } = {}
-local stats: { [number]: { troops: number, tiles: number } } = {}
-
+local overlay: Overlay.Overlay? = nil
 local hud = HUD.new(screenGui)
+
+local mySlot = 0
+local roster = {}
 
 --=============================================================================
 -- Camera 2D
@@ -83,8 +96,7 @@ local function zoomAt(delta: number, focus: Vector2)
 	-- insupportable.
 	local center = r.label.AbsolutePosition + r.label.AbsoluteSize / 2
 	local toFocus = focus - center
-	local scale = zoom / oldZoom
-	panOffset += toFocus - toFocus * scale
+	panOffset += toFocus - toFocus * (zoom / oldZoom)
 
 	applyCamera()
 end
@@ -95,6 +107,10 @@ end
 
 local CLICK_DRAG_THRESHOLD = 6 -- px : au-dela, c'est un pan, pas un clic
 
+--[[
+	Un clic sur la carte n'a pas de sens en soi : son effet depend entierement
+	du mode arme dans le HUD. C'est le seul endroit ou cette traduction a lieu.
+]]
 local function onTileClicked(index: number)
 	local r = renderer
 	if not r then
@@ -102,18 +118,36 @@ local function onTileClicked(index: number)
 	end
 
 	local targetSlot = r:ownerAt(index)
-	if targetSlot == mySlot then
-		hud:setStatus("Ce territoire est deja a toi.")
+	local mode = hud.mode
+
+	if mode == "build" then
+		Remotes.get("BuildOrder"):FireServer(index, hud.buildKind)
 		return
 	end
 
-	-- On n'envoie qu'une intention : le serveur decide si le contact existe.
-	Remotes.get("AttackOrder"):FireServer(targetSlot)
+	if mode == "boat" then
+		Remotes.get("BoatOrder"):FireServer(index)
+		return
+	end
 
-	local name = if targetSlot == Config.NEUTRAL_SLOT
-		then "territoire neutre"
-		else (roster[targetSlot] and roster[targetSlot].name or "faction inconnue")
-	hud:setStatus(`Offensive lancee sur {name}`)
+	if mode == "nuke" then
+		Remotes.get("NukeOrder"):FireServer(index, hud.nukeKind)
+		return
+	end
+
+	-- Mode attaque : le clic sert aussi a designer l'interlocuteur
+	-- diplomatique, pour qu'on puisse negocier avec un voisin sans le chercher
+	-- dans le classement.
+	if targetSlot ~= 0 and targetSlot ~= mySlot then
+		hud:selectFaction(targetSlot)
+	end
+
+	if targetSlot == mySlot then
+		hud:notify("Ce territoire est deja a toi.", "info")
+		return
+	end
+
+	Remotes.get("AttackOrder"):FireServer(targetSlot)
 end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
@@ -129,8 +163,7 @@ end)
 
 UserInputService.InputChanged:Connect(function(input: InputObject, processed: boolean)
 	if input.UserInputType == Enum.UserInputType.MouseWheel and not processed then
-		local mouse = UserInputService:GetMouseLocation()
-		zoomAt(input.Position.Z, mouse)
+		zoomAt(input.Position.Z, UserInputService:GetMouseLocation())
 	elseif
 		dragging
 		and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch)
@@ -164,8 +197,39 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 	end
 end)
 
+-- Raccourcis clavier : les modes sont les actions les plus repetees de la
+-- partie, les atteindre a la souris a chaque fois casse le rythme.
+local MODE_KEYS: { [Enum.KeyCode]: HUD.Mode } = {
+	[Enum.KeyCode.One] = "attack",
+	[Enum.KeyCode.Two] = "boat",
+	[Enum.KeyCode.Three] = "build",
+	[Enum.KeyCode.Four] = "nuke",
+}
+
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed then
+		return
+	end
+	local mode = MODE_KEYS[input.KeyCode]
+	if mode then
+		hud:setMode(mode)
+	end
+end)
+
+--=============================================================================
+-- Callbacks du HUD
+--=============================================================================
+
 hud.onRatioChanged = function(ratio: number)
 	Remotes.get("SetAttackRatio"):FireServer(ratio)
+end
+
+hud.onDoctrineChosen = function(doctrineId: number)
+	Remotes.get("ChooseDoctrine"):FireServer(doctrineId)
+end
+
+hud.onDiplomacyAction = function(action: string, targetSlot: number)
+	Remotes.get("DiplomacyOrder"):FireServer(action, targetSlot)
 end
 
 --=============================================================================
@@ -179,28 +243,72 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	if renderer then
 		renderer.label:Destroy()
 	end
+	if overlay then
+		overlay:clear()
+	end
+
 	renderer = MapRenderer.new(seed, viewport)
+	overlay = Overlay.new((renderer :: MapRenderer.MapRenderer).label)
 	applyCamera()
 
-	hud:setIdentity(slot, roster[slot] and roster[slot].name or player.DisplayName)
-	hud:setStatus("Clique sur un territoire voisin pour l'attaquer.")
+	local entry = roster[slot]
+	hud:setIdentity(slot, if entry then entry.name else player.DisplayName)
+	hud:selectFaction(nil)
+	hud:showDoctrineModal()
 end)
 
 Remotes.get("RosterUpdate").OnClientEvent:Connect(function(newRoster)
 	roster = newRoster
 end)
 
-Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStats)
-	stats = newStats
+Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, stats)
 	if delta and renderer then
-		renderer:applyDelta(delta)
+		(renderer :: MapRenderer.MapRenderer):applyDelta(delta)
+	end
+	hud:update(stats, roster)
+end)
+
+Remotes.get("BuildingDelta").OnClientEvent:Connect(function(deltas)
+	if overlay then
+		(overlay :: Overlay.Overlay):applyBuildingDelta(deltas)
 	end
 end)
 
-RunService.RenderStepped:Connect(function()
+Remotes.get("UnitSnapshot").OnClientEvent:Connect(function(boats, missiles)
+	if overlay then
+		(overlay :: Overlay.Overlay):applyUnits(boats, missiles)
+	end
+end)
+
+Remotes.get("DiplomacyUpdate").OnClientEvent:Connect(function(diplomacy)
+	hud:setDiplomacy(diplomacy)
+end)
+
+Remotes.get("MatchUpdate").OnClientEvent:Connect(function(match)
+	hud:setMatch(match)
+end)
+
+Remotes.get("Notify").OnClientEvent:Connect(function(text: string, kind: string)
+	hud:notify(text, kind)
+end)
+
+Remotes.get("Explosion").OnClientEvent:Connect(function(x: number, y: number, radius: number)
+	if overlay then
+		(overlay :: Overlay.Overlay):explosion(x, y, radius)
+	end
+end)
+
+--=============================================================================
+-- Boucle de rendu
+--=============================================================================
+
+RunService.RenderStepped:Connect(function(dt: number)
 	local r = renderer
 	if r then
 		r:flush()
 	end
-	hud:update(mySlot, stats, roster)
+	local o = overlay
+	if o then
+		o:stepInterpolation(dt)
+	end
 end)

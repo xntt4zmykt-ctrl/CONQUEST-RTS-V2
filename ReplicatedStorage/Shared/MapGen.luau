@@ -164,4 +164,34 @@ function MapGen.neighbors(index: number, out: { number }): number
 	return n
 end
 
+--[[
+	Une tuile est cotiere si c'est de la terre touchant l'ocean. C'est la
+	condition d'implantation d'un port et le seul point de debarquement valide.
+]]
+function MapGen.isCoastal(terrain: buffer, index: number): boolean
+	if buffer.readu8(terrain, index) == Config.TERRAIN.OCEAN then
+		return false
+	end
+	local scratch = table.create(4, 0)
+	local n = MapGen.neighbors(index, scratch)
+	for i = 1, n do
+		if buffer.readu8(terrain, scratch[i]) == Config.TERRAIN.OCEAN then
+			return true
+		end
+	end
+	return false
+end
+
+-- Nombre total de tuiles de terre : denominateur de toutes les conditions de
+-- victoire et du deblocage du nucleaire.
+function MapGen.countLand(terrain: buffer): number
+	local count = 0
+	for i = 0, W * H - 1 do
+		if buffer.readu8(terrain, i) ~= Config.TERRAIN.OCEAN then
+			count += 1
+		end
+	end
+	return count
+end
+
 return MapGen
