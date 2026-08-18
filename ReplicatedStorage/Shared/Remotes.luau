@@ -14,15 +14,17 @@ local NAMES = {
 	"UnitSnapshot", -- ({BoatSnapshot}, {MissileSnapshot})
 	"DiplomacyUpdate", -- (Diplomacy)
 	"MatchUpdate", -- (MatchInfo)
+	"ProfileUpdate", -- (Profile) : niveau, XP et bilan persistant
 	"Notify", -- (text, kind)
 	"Explosion", -- (x, y, radius)
 	"Sfx", -- (soundName)
 
 	-- Client -> serveur
-	"AttackOrder", -- (targetSlot)
+	"AttackOrder", -- (targetTileIndex), le serveur derive la faction
 	"SetAttackRatio", -- (ratio)
 	"ChooseDoctrine", -- (doctrineId)
 	"BuildOrder", -- (tileIndex, buildingKind)
+	"UpgradeBuildingOrder", -- (tileIndex), actuellement reserve aux villes
 	"BoatOrder", -- (targetTileIndex)
 	"NukeOrder", -- (targetTileIndex, nukeKind)
 	"DiplomacyOrder", -- (action: string, targetSlot: number)

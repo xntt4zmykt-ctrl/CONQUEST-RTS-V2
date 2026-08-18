@@ -16,12 +16,25 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local Lighting = game:GetService("Lighting")
+
+-- Protection contre un RunContext stale dans un fichier Studio deja ouvert.
+-- Un LocalScript non-Legacy place dans StarterPlayerScripts peut s'executer
+-- sur place puis etre clone dans PlayerScripts, ce qui cree deux mondes, deux
+-- HUD et deux gestionnaires de clic. Le meta Rojo impose Legacy pour les
+-- nouvelles synchronisations ; ce garde neutralise aussi les anciennes places.
+local localPlayer = Players.LocalPlayer
+if not script:IsDescendantOf(localPlayer) then
+	warn("[CONQUEST UI] copie StarterPlayerScripts ignoree ; seule la copie PlayerScripts peut demarrer.")
+	return
+end
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Remotes = require(Shared:WaitForChild("Remotes"))
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
+local Config = require(Shared:WaitForChild("Config"))
+local MapGen = require(Shared:WaitForChild("MapGen"))
+local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
 
 -- Ce fichier est le LocalScript "Client" ; les modules voisins en sont les
 -- enfants, pas les freres.
@@ -36,9 +49,24 @@ local Minimap = require(script.Minimap)
 local VictoryScreen = require(script.VictoryScreen)
 local SoundManager = require(script.SoundManager)
 local HUD = require(script.HUD)
+local VisualDirector = require(script.VisualDirector)
 
-local player = Players.LocalPlayer
+local player = localPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Rojo/Play Solo peut relancer le LocalScript sans nettoyer immédiatement
+-- l'ancienne interface. Roblox suffixe parfois les doublons (`_1`, `_2`) :
+-- chercher uniquement le nom exact laissait donc un vieux backdrop noir actif.
+for _, child in playerGui:GetChildren() do
+	if not child:IsA("ScreenGui") then
+		continue
+	end
+	local hasOldMenu = child.Name == "ConquestRTS" or child:FindFirstChild("MainMenu", true) ~= nil
+	if hasOldMenu then
+		warn(`[CONQUEST UI] removing stale interface {child:GetFullName()}`)
+		child:Destroy()
+	end
+end
 
 --=============================================================================
 -- Interface
@@ -55,6 +83,7 @@ local hud = HUD.new(screenGui)
 local victory = VictoryScreen.new(screenGui)
 local intro = Intro.new(screenGui)
 local menu = MainMenu.new(screenGui)
+
 
 -- L'interface de jeu reste masquee tant que le joueur n'est pas deploye.
 hud.root.Visible = false
@@ -76,18 +105,38 @@ local myNation = 1
 local deployed = false
 local worldReady = false
 
---=============================================================================
--- Ambiance
---=============================================================================
--- Reglee ici plutot que dans le fichier de projet : le client est le seul a
--- savoir qu'on regarde une carte vue du ciel et pas un niveau au sol.
+local function hideTransientInterfaces()
+	-- Filet de securite : masque aussi les anciennes versions du menu si elles
+	-- viennent d'un ScreenGui suffixe que le nettoyage initial n'a pas vu.
+	for _, gui in playerGui:GetChildren() do
+		for _, node in gui:GetDescendants() do
+			if node.Name == "MainMenu" or node.Name == "Intro" or node.Name == "Countdown" then
+				if node:IsA("CanvasGroup") then
+					node.GroupTransparency = 1
+				end
+				if node:IsA("GuiObject") then
+					node.Visible = false
+				end
+			end
+		end
+	end
+end
 
-Lighting.Ambient = Color3.fromRGB(92, 100, 116)
-Lighting.OutdoorAmbient = Color3.fromRGB(112, 122, 140)
-Lighting.Brightness = 2.4
-Lighting.ClockTime = 15.2
-Lighting.GeographicLatitude = 20
-Lighting.FogEnd = 4000
+local TERRAIN_NAMES = {
+	[Config.TERRAIN.OCEAN] = "Ocean",
+	[Config.TERRAIN.BEACH] = "Littoral",
+	[Config.TERRAIN.PLAINS] = "Plaines",
+	[Config.TERRAIN.SAVANNA] = "Savane",
+	[Config.TERRAIN.FOREST] = "Foret",
+	[Config.TERRAIN.HILLS] = "Collines",
+	[Config.TERRAIN.HIGHLAND] = "Hautes terres",
+	[Config.TERRAIN.MOUNTAIN] = "Montagne",
+	[Config.TERRAIN.PEAK] = "Sommet enneige",
+}
+
+-- La direction visuelle vit cote client : elle reste identique en Play Solo,
+-- sur serveur publie et apres une reconstruction de carte.
+VisualDirector.apply()
 
 --=============================================================================
 -- Avatar
@@ -117,7 +166,41 @@ local function placeCharacterAtCapital()
 		return
 	end
 
-	root.CFrame = WorldSpace.spawnCFrame(w.terrain, capital)
+	-- Ne jamais poser l'avatar au centre exact de la capitale : son modele 3D
+	-- occupe cette position et la camera epaule se retrouverait dans les murs.
+	-- On cherche une tuile libre de la couronne proche, toujours dans le petit
+	-- territoire de depart, puis on retombe sur la capitale en dernier recours.
+	local spawnTile = capital
+	local cx, cy = MapGen.fromIndex(capital)
+	for radius = 3, 7 do
+		local found = false
+		for dy = -radius, radius do
+			for dx = -radius, radius do
+				if math.max(math.abs(dx), math.abs(dy)) ~= radius then
+					continue
+				end
+				local x, y = cx + dx, cy + dy
+				if not MapGen.inBounds(x, y) then
+					continue
+				end
+				local candidate = MapGen.toIndex(x, y)
+				local occupied = overlay and overlay:buildingAt(candidate) ~= nil
+				if w:ownerAt(candidate) == mySlot and not occupied then
+					spawnTile = candidate
+					found = true
+					break
+				end
+			end
+			if found then
+				break
+			end
+		end
+		if found then
+			break
+		end
+	end
+
+	root.CFrame = WorldSpace.spawnCFrame(w.terrain, spawnTile)
 end
 
 player.CharacterAdded:Connect(function(character)
@@ -133,30 +216,41 @@ end)
 local CLICK_DRAG_THRESHOLD = 8 -- px : au-dela, c'etait un deplacement de vue
 local pressOrigin: Vector2? = nil
 
+local function pointerPosition(input: InputObject): Vector2
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		return UserInputService:GetMouseLocation()
+	end
+	return Vector2.new(input.Position.X, input.Position.Y)
+end
+
 --[[
 	Un clic sur le monde n'a pas de sens en soi : son effet depend entierement
 	du mode arme dans le HUD. C'est le seul endroit ou cette traduction a lieu.
 ]]
-local function onTileClicked(index: number)
+local function executeTerritoryAction(action: string, index: number)
 	local w = world
 	if not w then
 		return
 	end
 
 	local targetSlot = w:ownerAt(index)
-	local mode = hud.mode
 
-	if mode == "build" then
+	if action == "build" then
 		Remotes.get("BuildOrder"):FireServer(index, hud.buildKind)
 		return
 	end
 
-	if mode == "boat" then
+	if action == "upgrade" then
+		Remotes.get("UpgradeBuildingOrder"):FireServer(index)
+		return
+	end
+
+	if action == "boat" then
 		Remotes.get("BoatOrder"):FireServer(index)
 		return
 	end
 
-	if mode == "nuke" then
+	if action == "nuke" then
 		Remotes.get("NukeOrder"):FireServer(index, hud.nukeKind)
 		return
 	end
@@ -174,7 +268,58 @@ local function onTileClicked(index: number)
 	end
 
 	SoundManager.play("attackLaunch")
-	Remotes.get("AttackOrder"):FireServer(targetSlot)
+	camera:punch(0.16)
+	-- Le serveur derive lui-meme la faction depuis la tuile exacte. Envoyer un
+	-- slot calcule par le buffer client pouvait cibler une ancienne faction si
+	-- un delta de conquete arrivait au meme moment que le clic.
+	Remotes.get("AttackOrder"):FireServer(index)
+	hud:recordTutorial("attack")
+end
+
+local function inspectTerritory(index: number)
+	local w = world
+	if not w then
+		return
+	end
+
+	local targetSlot = w:ownerAt(index)
+	local terrainKind = buffer.readu8(w.terrain, index)
+	local buildingName: string? = nil
+	local buildingKind: number? = nil
+	local buildingLevel: number? = nil
+	local buildingLink: number? = nil
+	local o = overlay
+	if o then
+		local kind, _, level, link = o:buildingAt(index)
+		buildingKind = kind
+		buildingLevel = level
+		buildingLink = link
+		local def = if kind then BuildingDefs.get(kind) else nil
+		buildingName = if def then def.name else nil
+	end
+
+	hud:selectTerritory(
+		index,
+		targetSlot,
+		TERRAIN_NAMES[terrainKind] or "Terrain",
+		buildingName,
+		buildingKind,
+		buildingLevel,
+		buildingLink
+	)
+	local fx = effects
+	if fx then
+		local color = if targetSlot == 0 then Theme.color.textMuted else Theme.factionColor(targetSlot)
+		fx:selectTile(index, color)
+	end
+end
+
+local function onTileClicked(index: number)
+	inspectTerritory(index)
+	-- Le clic reste l'action principale d'un RTS : la fiche s'ouvre pour donner
+	-- le contexte, mais le mode Attaquer doit lancer l'ordre immédiatement.
+	-- Les boutons de la fiche peuvent ensuite renforcer ou relancer le front.
+	executeTerritoryAction(hud.mode, index)
 end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
@@ -182,7 +327,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		pressOrigin = Vector2.new(input.Position.X, input.Position.Y)
+		pressOrigin = pointerPosition(input)
 	end
 end)
 
@@ -197,7 +342,7 @@ UserInputService.InputEnded:Connect(function(input: InputObject, processed: bool
 		return
 	end
 
-	local endPos = Vector2.new(input.Position.X, input.Position.Y)
+	local endPos = pointerPosition(input)
 	if (endPos - origin).Magnitude > CLICK_DRAG_THRESHOLD then
 		return
 	end
@@ -207,7 +352,11 @@ UserInputService.InputEnded:Connect(function(input: InputObject, processed: bool
 		local index = camera:tileAtScreen(endPos, w.root)
 		if index then
 			onTileClicked(index)
+		else
+			warn(`[CONQUEST ATTACK] aucun terrain sous x={math.floor(endPos.X)} y={math.floor(endPos.Y)}`)
 		end
+	else
+		warn(`[CONQUEST ATTACK] clic bloque world={w ~= nil} deployed={deployed} ready={worldReady} camera={camera.mode}`)
 	end
 end)
 
@@ -299,9 +448,25 @@ hud.onModeChanged = function(mode: string)
 	end
 end
 
+hud.onTerritoryAction = function(action: string, index: number)
+	executeTerritoryAction(action, index)
+end
+
+hud.onTerritoryClosed = function()
+	local fx = effects
+	if fx then
+		fx:clearSelection()
+	end
+end
+
 menu.onDeploy = function(nationId: number, modeId: string)
 	myNation = nationId
 	deployed = true
+	hideTransientInterfaces()
+	-- Verrou de securite : le menu ne doit jamais pouvoir recouvrir la partie,
+	-- meme si un tween ou un callback UI est interrompu.
+	menu.root.Visible = false
+	menu.root.GroupTransparency = 1
 	intro:show(nationId)
 	Remotes.get("JoinRequest"):FireServer(nationId, modeId)
 end
@@ -310,7 +475,16 @@ end
 -- Reseau
 --=============================================================================
 
-Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number, initialRoster, capital: number?)
+Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number, initialRoster, capital: number?, profile)
+	hideTransientInterfaces()
+	menu.root.Visible = false
+	menu.root.GroupTransparency = 1
+	for _, child in screenGui:GetChildren() do
+		if child.Name == "MainMenu" then
+			(child :: any).Visible = false
+			(child :: any).GroupTransparency = 1
+		end
+	end
 	mySlot = slot
 	roster = initialRoster
 	myCapital = capital
@@ -360,7 +534,9 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 		if entry then entry.doctrine else 1,
 		if entry then entry.betrayals else 0
 	)
+	hud:setProfile(profile)
 	hud:selectFaction(nil)
+	hud.territoryPanel.Visible = false
 end)
 
 Remotes.get("RosterUpdate").OnClientEvent:Connect(function(newRoster)
@@ -382,6 +558,9 @@ Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStat
 			-- du SoundManager fait le reste.
 			if changed > 0 then
 				SoundManager.play("tileCapture")
+				if #gains > 0 or #losses > 0 then
+					camera:punch(math.min(0.32, changed / 160))
+				end
 			end
 
 			local fx = effects
@@ -413,6 +592,14 @@ Remotes.get("BuildingDelta").OnClientEvent:Connect(function(deltas)
 	if o then
 		o:applyBuildingDelta(deltas)
 	end
+	for _, entry in deltas do
+		if entry.slot == mySlot and entry.kind == Config.BUILDING.CITY then
+			hud:recordTutorial("build")
+		end
+		if worldReady and entry.slot == mySlot and entry.kind ~= 0 then
+			camera:punch(0.22)
+		end
+	end
 end)
 
 Remotes.get("UnitSnapshot").OnClientEvent:Connect(function(boats, missiles)
@@ -431,12 +618,17 @@ Remotes.get("MatchUpdate").OnClientEvent:Connect(function(match)
 
 	if match.phase == "ended" then
 		matchPhase = "ended"
-		victory:show(match.winner, match.winnerName, hud.ranked, roster, mySlot)
+		victory:show(match.winner, match.winnerName, hud.ranked, roster, mySlot, match.summary, hud.profile)
 		victory:setCountdown(match.restartIn or 0)
 	elseif matchPhase == "ended" then
 		matchPhase = "playing"
 		victory:hide()
 	end
+end)
+
+Remotes.get("ProfileUpdate").OnClientEvent:Connect(function(profile)
+	hud:setProfile(profile)
+	victory:setProfile(profile)
 end)
 
 Remotes.get("Notify").OnClientEvent:Connect(function(text: string, kind: string)
@@ -449,10 +641,38 @@ Remotes.get("Explosion").OnClientEvent:Connect(function(x: number, y: number, ra
 		o:explosion(x, y, radius)
 	end
 	SoundManager.play("nukeImpact")
+	camera:punch(math.clamp(radius / 8, 0.65, 1.35))
 end)
 
 Remotes.get("Sfx").OnClientEvent:Connect(function(name: string)
 	SoundManager.play(name)
+	if name == "boatLaunch" then
+		camera:punch(0.2)
+	elseif name == "buildPlace" then
+		camera:punch(0.14)
+	end
+end)
+
+-- Watchdog temporaire : si le menu et le HUD sont visibles ensemble, le bug
+-- est immediatement identifiable dans Output avec les valeurs reelles de la
+-- scene, au lieu de devoir deviner quel fondu est reste bloque.
+local menuLeakReported = false
+RunService.Heartbeat:Connect(function()
+	local menuVisible = menu.root.Visible
+	local hudVisible = hud.root.Visible
+	if menuVisible and hudVisible then
+		if deployed then
+			hideTransientInterfaces()
+			menu.root.Visible = false
+			menu.root.GroupTransparency = 1
+		end
+		if not menuLeakReported then
+			menuLeakReported = true
+			warn(`[CONQUEST UI] MENU LEAK: menuVisible={menuVisible} group={menu.root.GroupTransparency} background={menu.root.BackgroundTransparency} hudVisible={hudVisible}`)
+		end
+	elseif not menuVisible then
+		menuLeakReported = false
+	end
 end)
 
 --=============================================================================
@@ -467,6 +687,7 @@ RunService.RenderStepped:Connect(function(dt: number)
 		-- Les reconstructions de terrain sont etalees : pendant une grande
 		-- offensive, des dizaines de chunks changent dans le meme tick.
 		w:stepRebuilds()
+		w:step(dt)
 
 		-- Le monde apparait chunk par chunk : on suit cette file pour alimenter
 		-- la barre de chargement, puis on lance le compte a rebours une fois le
@@ -479,7 +700,9 @@ RunService.RenderStepped:Connect(function(dt: number)
 				worldReady = true
 				intro:hide()
 				intro:runCountdown(Intro.COUNTDOWN_SECONDS, function()
+					hideTransientInterfaces()
 					hud.root.Visible = true
+					hud:startOnboarding()
 					hud:showDoctrineModal()
 				end)
 			end
@@ -493,11 +716,50 @@ RunService.RenderStepped:Connect(function(dt: number)
 			if tile then
 				local valid = p:isValid(tile, hud.buildKind, function(index)
 					return w:ownerAt(index)
-				end, mySlot, hud.era, hud.gold)
+					end, mySlot, hud.era, hud.gold, function(index)
+						local currentOverlay = overlay
+						if currentOverlay then
+							return currentOverlay:buildingAt(index)
+						end
+						return nil, nil
+					end, function(index, slot, range)
+						local currentOverlay = overlay
+						return currentOverlay ~= nil and currentOverlay:hasCityNear(index, slot, range)
+					end)
 				p:update(tile, valid)
 			else
 				p:update(nil, false)
 			end
+		end
+
+		-- Le joueur voit la case et la validite AVANT de cliquer. Le serveur
+		-- reste autoritaire sur les regles fines (contact terrestre, budget,
+		-- alliances), mais les erreurs evidentes sont lisibles immediatement.
+		local fx = effects
+		if fx and hud.root.Visible and hud.mode ~= "build" and camera.mode == "overview" then
+			local mouse = UserInputService:GetMouseLocation()
+			local tile = camera:tileAtScreen(mouse, w.root)
+			if tile then
+				local owner = w:ownerAt(tile)
+				local land = w:isLand(tile)
+				local valid = false
+				local color = Theme.color.danger
+				if hud.mode == "attack" then
+					valid = land and owner ~= mySlot
+					color = if owner == 0 then Theme.color.accent else Theme.factionColor(owner)
+				elseif hud.mode == "boat" then
+					valid = land and owner ~= mySlot and MapGen.isCoastal(w.terrain, tile)
+					color = Theme.color.info
+				elseif hud.mode == "nuke" then
+					valid = land and owner ~= 0 and owner ~= mySlot
+					color = Theme.color.nuclear
+				end
+				fx:previewTile(tile, if valid then color else Theme.color.danger, valid)
+			else
+				fx:clearActionPreview()
+			end
+		elseif fx then
+			fx:clearActionPreview()
 		end
 	end
 

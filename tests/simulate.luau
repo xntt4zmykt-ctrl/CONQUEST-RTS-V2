@@ -22,6 +22,7 @@ local Bots = __require("Bots")
 local GreedyMesh = __require("GreedyMesh")
 local WorldBuilder = __require("WorldBuilder")
 local GameModes = __require("GameModes")
+local BuildingDefs = __require("BuildingDefs")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -113,16 +114,47 @@ local function checkInvariants(state, tick)
 
 	-- 5. Comptage des batiments coherent avec la table reelle.
 	local realPorts, realSilos, realCapitals = {}, {}, {}
-	for _, building in state.buildings do
-		if building.kind == Config.BUILDING.PORT then
+	local realBuildingCounts = {}
+	local realCityPop, realCityGold = {}, {}
+	for index, building in state.buildings do
+		realBuildingCounts[building.slot] = realBuildingCounts[building.slot] or {}
+		local slotCounts = realBuildingCounts[building.slot]
+		slotCounts[building.kind] = (slotCounts[building.kind] or 0) + 1
+		if building.kind == Config.BUILDING.CITY then
+			local city = Config.CITY_LEVELS[building.level or 1]
+			realCityPop[building.slot] = (realCityPop[building.slot] or 0) + city.popCapBonus
+			realCityGold[building.slot] = (realCityGold[building.slot] or 0) + city.goldBonus
+		elseif building.kind == Config.BUILDING.PORT then
 			realPorts[building.slot] = (realPorts[building.slot] or 0) + 1
 		elseif building.kind == Config.BUILDING.SILO then
 			realSilos[building.slot] = (realSilos[building.slot] or 0) + 1
 		elseif building.kind == Config.BUILDING.CAPITAL then
 			realCapitals[building.slot] = (realCapitals[building.slot] or 0) + 1
+			local def = BuildingDefs.get(Config.BUILDING.CAPITAL)
+			realCityPop[building.slot] = (realCityPop[building.slot] or 0) + (if def then def.popCapBonus else 0)
+		elseif building.kind == Config.BUILDING.FACTORY and building.link then
+			local city = state.buildings[building.link]
+			if not city or city.kind ~= Config.BUILDING.CITY or city.slot ~= building.slot then
+				fail(`tick {tick} — usine {index} reliee a un batiment invalide`)
+			else
+				local fx, fy = MapGen.fromIndex(index)
+				local cx, cy = MapGen.fromIndex(building.link)
+				local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
+				if distance > Config.FACTORY_ROUTE_RANGE then
+					fail(`tick {tick} — route logistique {index}->{building.link} hors portee ({distance})`)
+				end
+			end
 		end
 	end
 	for slot, ps in state.players do
+		local actualCounts = realBuildingCounts[slot] or {}
+		for _, def in BuildingDefs.LIST do
+			if (actualCounts[def.id] or 0) ~= (ps.buildingCounts[def.id] or 0) then
+				fail(
+					`tick {tick} — slot {slot} : buildingCounts[{def.id}]={ps.buildingCounts[def.id] or 0} mais {actualCounts[def.id] or 0} reels`
+				)
+			end
+		end
 		if (realPorts[slot] or 0) ~= ps.portCount then
 			fail(`tick {tick} — slot {slot} : portCount={ps.portCount} mais {realPorts[slot] or 0} reels`)
 		end
@@ -131,6 +163,12 @@ local function checkInvariants(state, tick)
 		end
 		if (realCapitals[slot] or 0) ~= ps.capitalCount then
 			fail(`tick {tick} — slot {slot} : capitalCount={ps.capitalCount} mais {realCapitals[slot] or 0} reels`)
+		end
+		if (realCityPop[slot] or 0) ~= ps.cityPopBonus then
+			fail(`tick {tick} — slot {slot} : cityPopBonus={ps.cityPopBonus} mais {realCityPop[slot] or 0} reel`)
+		end
+		if math.abs((realCityGold[slot] or 0) - ps.cityGoldBonus) > 0.0001 then
+			fail(`tick {tick} — slot {slot} : cityGoldBonus={ps.cityGoldBonus} mais {realCityGold[slot] or 0} reel`)
 		end
 	end
 
@@ -228,6 +266,88 @@ end
 
 print("=== CONQUEST RTS — simulation headless ===")
 
+-- Accessibilite : un humain commence avec assez de ressources pour agir tout
+-- de suite, tandis que l'IA conserve son economie standard et un engagement
+-- plus prudent. Cela attrape les regressions qui recreeraient le faux depart
+-- ou les renforts bot a 45 % observes dans l'ancien equilibrage.
+do
+	local friendlyState = GameState.new(20260818)
+	local human = friendlyState:addPlayer({ Name = "Commandant" } :: any, "Commandant", Random.new(11), 0)
+	if not human then
+		fail("accessibilite — impossible de creer le joueur humain")
+	else
+		if human.gold ~= Config.HUMAN_START_GOLD or human.troops ~= Config.HUMAN_START_TROOPS then
+			fail("accessibilite — bonus de depart humain absent")
+		end
+		local firstCity = Buildings.priceFor(friendlyState, human.slot, Config.BUILDING.CITY)
+		if human.gold < firstCity then
+			fail("accessibilite — le joueur ne peut toujours pas construire une premiere ville")
+		end
+	end
+
+	Bots.spawnAll(friendlyState, Random.new(12), 2)
+	for _, ps in friendlyState.players do
+		if ps.isBot and (ps.attackRatio < Config.BOT_ATTACK_RATIO_MIN or ps.attackRatio > Config.BOT_ATTACK_RATIO_MAX) then
+			fail(`accessibilite — engagement bot hors limites ({ps.attackRatio})`)
+		end
+	end
+end
+
+-- Parcours joueur explicite : construire une ville, la faire evoluer, puis
+-- brancher une usine dessus. Les bots exercent aussi ces chemins, mais ce test
+-- garantit qu'ils restent couverts meme si leur strategie change plus tard.
+do
+	local cityState = GameState.new(20260817)
+	local ps = cityState:addPlayer(nil, "Urbaniste", Random.new(20260817), 0)
+	if not ps then
+		fail("evolution urbaine — impossible de creer la faction de test")
+	else
+		ps.gold = 100000
+		ps.era = 3
+		local site: number? = nil
+		local factorySite: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(cityState.owner, index) == ps.slot and not cityState.buildings[index] then
+				if not site then
+					site = index
+				else
+					factorySite = index
+					break
+				end
+			end
+		end
+		if not site or not factorySite then
+			fail("evolution urbaine — aucune tuile constructible")
+		else
+			local built = Buildings.build(cityState, ps.slot, site, Config.BUILDING.CITY)
+			local level2 = Buildings.upgradeCity(cityState, ps.slot, site)
+			local level3 = Buildings.upgradeCity(cityState, ps.slot, site)
+			local blocked = Buildings.upgradeCity(cityState, ps.slot, site)
+			if not built or not level2 or not level3 or blocked then
+				fail("evolution urbaine — parcours ville -> metropole -> megapole invalide")
+			end
+			local city = cityState.buildings[site]
+			if not city or city.level ~= Config.CITY_MAX_LEVEL then
+				fail("evolution urbaine — niveau final incorrect")
+			end
+
+			local factoryBuilt = Buildings.build(cityState, ps.slot, factorySite, Config.BUILDING.FACTORY)
+			local factory = cityState.buildings[factorySite]
+			local routes, logisticsIncome = cityState:logisticsFor(ps.slot)
+			if
+				not factoryBuilt
+				or not factory
+				or factory.link ~= site
+				or routes ~= 1
+				or logisticsIncome <= 0
+			then
+				fail("logistique — l'usine ne relie pas correctement la ville et son revenu")
+			end
+			checkInvariants(cityState, 0)
+		end
+	end
+end
+
 -- Seeds secondaires : on ne veut pas un rapport detaille, juste la certitude
 -- qu'aucune carte ne fait planter la simulation ni deriver la comptabilite.
 local EXTRA_SEEDS = { 7, 99991, 31337, 1234567 }
@@ -293,7 +413,7 @@ print("")
 print(`--- apres {TICKS} ticks ({string.format("%.1f", TICKS / Config.TICK_RATE)} s de jeu simule) ---`)
 print(`temps de calcul   : {string.format("%.2f", elapsed)} s`)
 print(`colonisation      : {string.format("%.1f", state:colonizedRatio() * 100)} % des terres`)
-print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} capitale={buildingCounts[6] or 0}`)
+print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} capitale={buildingCounts[6] or 0} labo={buildingCounts[7] or 0} usine={buildingCounts[8] or 0}`)
 print(`navires en mer    : {#state.boats}`)
 print(`offensives actives: {#state.attacks}`)
 print(`alliances         : {allianceCount}`)
@@ -332,8 +452,8 @@ print("")
 --=============================================================================
 -- Cout du monde 3D
 --=============================================================================
--- Le vrai risque de la version 3D n'est pas la logique mais le nombre de Parts.
--- On le mesure sur l'etat reel de fin de partie plutot que de l'esperer.
+-- Le vrai risque du monde en blocs n'est pas la logique mais le nombre de
+-- Parts. On le mesure sur l'etat reel de fin de partie plutot que de l'esperer.
 
 local serverBlocks = #WorldBuilder.blocksFor(state.terrain)
 
@@ -346,13 +466,14 @@ for chunk = 0, Config.CHUNKS_X * Config.CHUNKS_Y - 1 do
 	local x1 = math.min(cx + Config.CHUNK_SIZE - 1, Config.MAP_WIDTH - 1)
 	local y1 = math.min(cy + Config.CHUNK_SIZE - 1, Config.MAP_HEIGHT - 1)
 
+	-- Meme cle que WorldRenderer.chunkKeyAt : proprietaire et relief.
 	local rects = GreedyMesh.rectangles(function(x, y)
 		local index = MapGen.toIndex(x, y)
 		local terrain = buffer.readu8(state.terrain, index)
 		if terrain == Config.TERRAIN.OCEAN then
 			return nil
 		end
-		return buffer.readu8(state.owner, index) * 8 + terrain
+		return buffer.readu8(state.owner, index) * 16 + terrain
 	end, cx, cy, x1, y1, chunkScratch)
 
 	clientParts += #rects
@@ -380,7 +501,17 @@ elseif atomicTick < 2400 then
 end
 
 -- Seuils au-dela desquels le rendu devient un probleme sur mobile.
-if clientParts > 12000 then
+--[[
+	Seuil du visuel client.
+
+	Mesure : le relief en huit paliers coute environ 5 500 Parts en fin de
+	partie, contre 2 800 pour la couche politique plate. C'est le prix du
+	relief, et il est assume — 5 500 Parts ancres, sans collision ni ombre,
+	restent confortables y compris sur mobile. Le seuil laisse de la marge pour
+	une carte plus fragmentee que la moyenne, mais attrapera un changement de
+	generation qui ferait exploser la fragmentation.
+]]
+if clientParts > 8000 then
 	fail(`{clientParts} parts cote client : trop pour tenir sur mobile`)
 end
 if serverBlocks > 6000 then

@@ -77,7 +77,7 @@ Eras.LIST = {
 		cost = 7800,
 		requiredTiles = 900,
 		requiredBuildings = { [B.CITY] = 3, [B.PORT] = 1 },
-		unlocks = { B.LAB },
+		unlocks = { B.LAB, B.FACTORY },
 		goldMultiplier = 1.35,
 		growthMultiplier = 1.12,
 		defenseMultiplier = 1.0,

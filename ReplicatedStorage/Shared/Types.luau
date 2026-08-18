@@ -17,6 +17,16 @@ export type PlayerStats = {
 	gold: number,
 	maxTroops: number,
 	era: number,
+	capturedTiles: number?,
+	lostTiles: number?,
+	capitalsCaptured: number?,
+	buildingsBuilt: number?,
+	attacksLaunched: number?,
+	activeAttacks: number?,
+	committedTroops: number?,
+	buildPrices: { [number]: number }?,
+	logisticsRoutes: number?,
+	logisticsIncome: number?,
 	-- Avancement vers l'ere suivante, 0..1 : c'est le minimum des criteres,
 	-- donc celui qui bloque reellement.
 	eraProgress: number,
@@ -57,14 +67,28 @@ export type BuildingSnapshot = {
 	index: number,
 	kind: number, -- 0 = detruit
 	slot: number,
+	level: number?, -- villes : 1 = ville, 2 = metropole, 3 = megapole
+	linkIndex: number?, -- usine : ville destinataire de la route logistique
 }
 
 export type MatchInfo = {
 	phase: string, -- "playing" | "ended"
+	stage: string?, -- "preparation" | "combat" | "ended"
+	combatIn: number?,
 	timeLeft: number,
 	winner: number?,
 	winnerName: string?,
 	restartIn: number?,
+	summary: Stats?,
+}
+
+export type Profile = {
+	xp: number,
+	level: number,
+	matches: number,
+	wins: number,
+	betrayals: number,
+	lastGain: number?,
 }
 
 return {}

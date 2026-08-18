@@ -31,6 +31,10 @@ local B = Config.BUILDING
 local CONCRETE = Color3.fromRGB(158, 160, 165)
 local DARK = Color3.fromRGB(62, 66, 74)
 local GLASS = Color3.fromRGB(140, 210, 255)
+local PARK = Color3.fromRGB(76, 170, 112)
+local STEEL = Color3.fromRGB(104, 116, 132)
+local WARNING = Color3.fromRGB(255, 190, 60)
+local MISSILE = Color3.fromRGB(226, 232, 238)
 
 --=============================================================================
 -- Helpers
@@ -50,7 +54,9 @@ local function block(
 	-- Ne doit jamais intercepter le clic destine au sol : viser une tuile
 	-- occupee par un batiment doit rester possible.
 	part.CanQuery = false
-	part.CastShadow = false
+	-- Les batiments sont peu nombreux par rapport au terrain fusionne. Garder
+	-- leurs ombres apporte enormement de volume pour un cout encore raisonnable.
+	part.CastShadow = true
 	part.Material = material or Enum.Material.SmoothPlastic
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
@@ -61,7 +67,51 @@ local function block(
 	return part
 end
 
-local function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color3): Part
+local cylinder: (Instance, Vector3, Vector3, Color3) -> Part
+
+-- Usine : hall metallique, toiture en sheds, cheminees et quai de chargement.
+-- La silhouette horizontale la distingue de la ville, tandis que les deux
+-- cheminees restent visibles de loin.
+local function buildFactory(model: Model, color: Color3, _level: number?)
+	block(model, Vector3.new(10, 0.7, 8), Vector3.new(0, 0.35, 0), DARK, Enum.Material.Concrete)
+	block(model, Vector3.new(8.8, 4.2, 6.6), Vector3.new(-0.3, 2.8, 0), color, Enum.Material.Metal)
+
+	-- Toit industriel en dents de scie.
+	for i = -1, 1 do
+		local roof = block(model, Vector3.new(2.7, 0.35, 7), Vector3.new(i * 2.8 - 0.3, 5.25, 0), STEEL, Enum.Material.Metal)
+		roof.CFrame = CFrame.new(i * 2.8 - 0.3, 5.25, 0) * CFrame.Angles(0, 0, math.rad(-12))
+	end
+
+	local chimneyA = cylinder(model, Vector3.new(9, 1.15, 1.15), Vector3.new(2.7, 8.5, -1.8), STEEL)
+	chimneyA.Name = "Chimney"
+	local smoke = Instance.new("Smoke")
+	smoke.Color = Color3.fromRGB(145, 155, 166)
+	smoke.Opacity = 0.18
+	smoke.RiseVelocity = 2.4
+	smoke.Size = 2.6
+	smoke.Parent = chimneyA
+	local chimneyB = cylinder(model, Vector3.new(7, 0.9, 0.9), Vector3.new(4, 7.5, 1.6), DARK)
+	chimneyB.Name = "Chimney"
+
+	-- Quai et convoyeur diriges vers la future route logistique.
+	block(model, Vector3.new(2.5, 2.4, 4.8), Vector3.new(-5, 1.55, 0), CONCRETE, Enum.Material.Concrete)
+	block(model, Vector3.new(3.8, 0.55, 1.4), Vector3.new(-5.8, 1.1, 0), WARNING, Enum.Material.Metal)
+	local output = block(model, Vector3.new(0.3, 1.8, 3.8), Vector3.new(-5.15, 2.1, 0), GLASS)
+	output.Name = "FactoryOutput"
+	output.Material = Enum.Material.Neon
+	local loadingLight = Instance.new("PointLight")
+	loadingLight.Color = WARNING
+	loadingLight.Brightness = 1.4
+	loadingLight.Range = 15
+	loadingLight.Shadows = true
+	loadingLight.Parent = output
+
+	-- Reservoir et conduite : petits details qui evitent l'effet "gros cube".
+	cylinder(model, Vector3.new(3.2, 2.1, 2.1), Vector3.new(3.3, 2, 2.1), CONCRETE)
+	block(model, Vector3.new(0.45, 2.8, 0.45), Vector3.new(3.3, 4.4, 2.1), WARNING, Enum.Material.Metal)
+end
+
+function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color3): Part
 	local part = block(parent, size, offset, color)
 	part.Shape = Enum.PartType.Cylinder
 	-- Le cylindre de Roblox pointe le long de X : on le redresse.
@@ -78,7 +128,7 @@ end
 	drapeau aux couleurs de la faction. C'est le batiment le plus haut du jeu,
 	pour qu'on repere une capitale a l'autre bout de la carte.
 ]]
-local function buildCapital(model: Model, color: Color3)
+local function buildCapital(model: Model, color: Color3, _level: number?)
 	block(model, Vector3.new(7, 12, 7), Vector3.new(0, 6, 0), color)
 	block(model, Vector3.new(3, 16, 3), Vector3.new(-3.5, 8, -3.5), color)
 	block(model, Vector3.new(3, 16, 3), Vector3.new(3.5, 8, 3.5), color)
@@ -87,6 +137,7 @@ local function buildCapital(model: Model, color: Color3)
 	-- Mat et drapeau
 	block(model, Vector3.new(0.5, 9, 0.5), Vector3.new(0, 17.5, 0), DARK, Enum.Material.Metal)
 	local flag = block(model, Vector3.new(0.3, 3, 5), Vector3.new(0, 20, 2.6), color)
+	flag.Name = "CapitalFlag"
 	flag.Material = Enum.Material.Fabric
 
 	-- Base eclairee : rend la capitale visible de nuit et souligne sa couleur.
@@ -99,33 +150,65 @@ end
 	deliberement rythme — quatre volumes suffisent a lire "ville" alors qu'un
 	seul cube lirait "boite".
 ]]
-local function buildCity(model: Model, color: Color3)
-	block(model, Vector3.new(3, 9, 3), Vector3.new(-1.8, 4.5, -1.8), color)
-	block(model, Vector3.new(2.6, 6.5, 2.6), Vector3.new(2, 3.25, -1.4), color)
-	block(model, Vector3.new(2.2, 11, 2.2), Vector3.new(0.4, 5.5, 2.2), color)
+local function buildCity(model: Model, color: Color3, level: number?)
+	local cityLevel = math.clamp(level or 1, 1, Config.CITY_MAX_LEVEL)
+	local towerA = if cityLevel == 1 then 9 elseif cityLevel == 2 then 13 else 17
+	local towerB = if cityLevel == 1 then 6.5 elseif cityLevel == 2 then 9 else 12
+	local towerC = if cityLevel == 1 then 11 elseif cityLevel == 2 then 16 else 22
+
+	-- Un socle et deux axes donnent une vraie lecture de quartier, meme quand
+	-- la ville est vue de tres haut.
+	block(model, Vector3.new(8, 0.35, 8), Vector3.new(0, 0.18, 0), DARK)
+	block(model, Vector3.new(7.2, 0.12, 0.55), Vector3.new(0, 0.42, 0), CONCRETE)
+	block(model, Vector3.new(0.55, 0.12, 7.2), Vector3.new(0, 0.43, 0), CONCRETE)
+
+	block(model, Vector3.new(3, towerA, 3), Vector3.new(-1.8, towerA / 2, -1.8), color)
+	block(model, Vector3.new(2.6, towerB, 2.6), Vector3.new(2, towerB / 2, -1.4), color)
+	block(model, Vector3.new(2.2, towerC, 2.2), Vector3.new(0.4, towerC / 2, 2.2), color)
 	block(model, Vector3.new(2, 4.5, 2), Vector3.new(-2.4, 2.25, 2), CONCRETE)
+	block(model, Vector3.new(1.8, 0.25, 1.8), Vector3.new(2.1, 0.58, 2.1), PARK)
 
-	-- Fenetres : une seule bande lumineuse par grappe, pas par tour.
-	local windows = block(model, Vector3.new(2.4, 0.5, 2.4), Vector3.new(0.4, 8.5, 2.2), GLASS)
+	-- Fenetres : peu nombreuses pour rester lisibles et economes en instances.
+	local windows = block(model, Vector3.new(2.4, 0.5, 2.4), Vector3.new(0.4, towerC * 0.78, 2.2), GLASS)
+	windows.Name = "CityWindows"
 	windows.Material = Enum.Material.Neon
+	local windowsLow = block(model, Vector3.new(2.8, 0.35, 2.8), Vector3.new(-1.8, towerA * 0.62, -1.8), GLASS)
+	windowsLow.Name = "CityWindows"
+	windowsLow.Material = Enum.Material.Neon
 
-	block(model, Vector3.new(8, 0.5, 8), Vector3.new(0, 0.25, 0), DARK)
+	-- Deux balises rendent les villes identifiables dans une bataille dense.
+	local beaconA = block(model, Vector3.new(0.35, 1.4, 0.35), Vector3.new(3.25, 1.1, 3.25), color)
+	beaconA.Name = "CityBeacon"
+	beaconA.Material = Enum.Material.Neon
+	local beaconB = block(model, Vector3.new(0.35, 1.4, 0.35), Vector3.new(-3.25, 1.1, -3.25), color)
+	beaconB.Name = "CityBeacon"
+	beaconB.Material = Enum.Material.Neon
+
+	-- La megapole gagne une fleche reconnaissable de toute la carte. Une seule
+	-- Part suffit : la progression visuelle reste forte sans exploser le budget.
+	if cityLevel >= 3 then
+		local spire = block(model, Vector3.new(0.35, 6, 0.35), Vector3.new(0.4, towerC + 3, 2.2), color)
+		spire.Material = Enum.Material.Neon
+	end
 end
 
 --[[
 	Port : une jetee, un entrepot et une grue. La grue est ce qui distingue
 	instantanement un port d'une ville, meme sans couleur.
 ]]
-local function buildPort(model: Model, color: Color3)
+local function buildPort(model: Model, color: Color3, _level: number?)
 	block(model, Vector3.new(9, 1, 6), Vector3.new(0, 0.5, 0), CONCRETE)
 	block(model, Vector3.new(4, 4, 4), Vector3.new(-2.5, 3, 0), color)
 
 	-- Grue : mat vertical + fleche horizontale + cable
 	block(model, Vector3.new(0.7, 8, 0.7), Vector3.new(2.5, 5, 0), DARK, Enum.Material.Metal)
-	block(model, Vector3.new(6, 0.6, 0.6), Vector3.new(4.2, 8.6, 0), DARK, Enum.Material.Metal)
-	block(model, Vector3.new(0.25, 3, 0.25), Vector3.new(6.5, 6.8, 0), DARK, Enum.Material.Metal)
+	local boom = block(model, Vector3.new(6, 0.6, 0.6), Vector3.new(4.2, 8.6, 0), DARK, Enum.Material.Metal)
+	boom.Name = "PortCraneBoom"
+	local cable = block(model, Vector3.new(0.25, 3, 0.25), Vector3.new(6.5, 6.8, 0), DARK, Enum.Material.Metal)
+	cable.Name = "PortCraneCable"
 
 	local beacon = block(model, Vector3.new(0.8, 0.8, 0.8), Vector3.new(2.5, 9.2, 0), color)
+	beacon.Name = "PortBeacon"
 	beacon.Material = Enum.Material.Neon
 end
 
@@ -133,7 +216,7 @@ end
 	Bunker : une masse basse et large, volontairement ecrasee. Sa silhouette
 	doit dire "on ne passe pas" a l'oppose de la verticalite des villes.
 ]]
-local function buildDefense(model: Model, color: Color3)
+local function buildDefense(model: Model, color: Color3, _level: number?)
 	block(model, Vector3.new(8, 3, 8), Vector3.new(0, 1.5, 0), CONCRETE, Enum.Material.Concrete)
 	block(model, Vector3.new(6, 2, 6), Vector3.new(0, 4, 0), color, Enum.Material.Concrete)
 
@@ -150,42 +233,74 @@ end
 	Silo : un tube vertical ouvert, ogive visible a l'interieur. On doit
 	comprendre au premier regard qu'il y a une bombe dedans.
 ]]
-local function buildSilo(model: Model, color: Color3)
-	block(model, Vector3.new(8, 1.5, 8), Vector3.new(0, 0.75, 0), CONCRETE, Enum.Material.Concrete)
-	cylinder(model, Vector3.new(9, 5, 5), Vector3.new(0, 5, 0), CONCRETE)
+local function buildSilo(model: Model, color: Color3, _level: number?)
+	block(model, Vector3.new(10, 0.8, 10), Vector3.new(0, 0.4, 0), DARK, Enum.Material.Concrete)
+	cylinder(model, Vector3.new(5.5, 6.2, 6.2), Vector3.new(0, 3.2, 0), CONCRETE)
+	cylinder(model, Vector3.new(5.7, 4.9, 4.9), Vector3.new(0, 3.35, 0), DARK)
 
-	-- Ogive depassant du tube
-	local warhead = block(model, Vector3.new(1.6, 4, 1.6), Vector3.new(0, 10, 0), Color3.fromRGB(230, 230, 230))
-	warhead.Material = Enum.Material.Metal
+	-- Missile complet, avec corps, etages, ogive et quatre ailettes.
+	local body = cylinder(model, Vector3.new(9.5, 1.5, 1.5), Vector3.new(0, 8.3, 0), MISSILE)
+	body.Name = "StrategicMissile"
+	local band = cylinder(model, Vector3.new(1.1, 1.75, 1.75), Vector3.new(0, 7.1, 0), color)
+	band.Material = Enum.Material.Neon
+	local tip = block(model, Vector3.new(1.1, 2.4, 1.1), Vector3.new(0, 14.1, 0), Color3.fromRGB(220, 70, 60), Enum.Material.Metal)
+	tip.Name = "Warhead"
+	tip.Shape = Enum.PartType.Ball
+	for i = 0, 3 do
+		local angle = i * math.pi / 2
+		block(
+			model,
+			Vector3.new(0.28, 2.2, 1.7),
+			Vector3.new(math.cos(angle) * 1.05, 4.9, math.sin(angle) * 1.05),
+			color,
+			Enum.Material.Metal
+		)
+	end
 
-	local tip = block(model, Vector3.new(1.2, 1.2, 1.2), Vector3.new(0, 12.2, 0), Color3.fromRGB(220, 70, 60))
-	tip.Material = Enum.Material.Neon
-
-	-- Trappe ouverte, aux couleurs de la faction
-	block(model, Vector3.new(3, 0.4, 5.5), Vector3.new(-3.6, 7.4, 0), color, Enum.Material.Metal)
+	-- Deux portes blindees ouvertes rendent la fonction du silo evidente.
+	local doorA = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(-3.6, 1.3, 0), STEEL, Enum.Material.Metal)
+	doorA.Name = "SiloDoor"
+	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(18))
+	local doorB = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(3.6, 1.3, 0), STEEL, Enum.Material.Metal)
+	doorB.Name = "SiloDoor"
+	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(-18))
+	local warningStrip = block(model, Vector3.new(9, 0.18, 0.35), Vector3.new(0, 0.86, 4.2), WARNING, Enum.Material.Neon)
+	warningStrip.Name = "SiloWarning"
 end
 
 --[[
 	Batterie SAM : un socle, un radar incline et deux rampes. L'inclinaison est
 	ce qui la distingue du silo, strictement vertical.
 ]]
-local function buildSam(model: Model, color: Color3)
-	block(model, Vector3.new(7, 1.5, 7), Vector3.new(0, 0.75, 0), CONCRETE, Enum.Material.Concrete)
-	block(model, Vector3.new(3, 2.5, 3), Vector3.new(0, 2.75, 0), color)
+local function buildSam(model: Model, color: Color3, _level: number?)
+	block(model, Vector3.new(9, 0.8, 8), Vector3.new(0, 0.4, 0), DARK, Enum.Material.Concrete)
+	block(model, Vector3.new(7.4, 1.1, 1.2), Vector3.new(0, 1.2, -2.5), STEEL, Enum.Material.Metal)
+	block(model, Vector3.new(7.4, 1.1, 1.2), Vector3.new(0, 1.2, 2.5), STEEL, Enum.Material.Metal)
+	block(model, Vector3.new(3.8, 2.2, 3.8), Vector3.new(0, 2.15, 0), color, Enum.Material.Metal)
 
-	-- Rampes inclinees
-	local rail1 = block(model, Vector3.new(1, 5.5, 1), Vector3.new(-1.4, 5.4, 0), DARK, Enum.Material.Metal)
-	rail1.CFrame = CFrame.new(-1.4, 5.4, 0) * CFrame.Angles(math.rad(-28), 0, 0)
-	local rail2 = block(model, Vector3.new(1, 5.5, 1), Vector3.new(1.4, 5.4, 0), DARK, Enum.Material.Metal)
-	rail2.CFrame = CFrame.new(1.4, 5.4, 0) * CFrame.Angles(math.rad(-28), 0, 0)
+	-- Quatre missiles sur deux rampes inclinees.
+	for side = -1, 1, 2 do
+		for lane = -1, 1, 2 do
+			local launcher = block(model, Vector3.new(0.72, 5.8, 0.72), Vector3.new(side * 1.45, 5.1, lane * 0.72), MISSILE, Enum.Material.Metal)
+			launcher.Name = "Interceptor"
+			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.Angles(math.rad(-31), 0, 0)
+			local nose = block(model, Vector3.new(0.82, 0.9, 0.82), Vector3.new(side * 1.45, 7.85, lane * 0.72 - 1.65), color)
+			nose.Material = Enum.Material.Neon
+		end
+	end
 
-	-- Antenne radar
-	local dish = block(model, Vector3.new(3.4, 0.4, 2.4), Vector3.new(0, 7.4, -1.4), Color3.fromRGB(210, 215, 220))
-	dish.CFrame = CFrame.new(0, 7.4, -1.4) * CFrame.Angles(math.rad(-40), 0, 0)
-	dish.Material = Enum.Material.Metal
-
-	local light = block(model, Vector3.new(0.6, 0.6, 0.6), Vector3.new(0, 8.4, 0), Color3.fromRGB(120, 255, 160))
+	-- Radar motorise : Overlay fait tourner la barre autour de son axe.
+	block(model, Vector3.new(0.45, 5.5, 0.45), Vector3.new(0, 5.1, 2.5), DARK, Enum.Material.Metal)
+	local radar = block(model, Vector3.new(5.2, 0.35, 1.6), Vector3.new(0, 8, 2.5), MISSILE, Enum.Material.Metal)
+	radar.Name = "Radar"
+	local light = block(model, Vector3.new(0.65, 0.65, 0.65), Vector3.new(0, 8.65, 2.5), Color3.fromRGB(120, 255, 160))
 	light.Material = Enum.Material.Neon
+	local radarLight = Instance.new("PointLight")
+	radarLight.Color = Color3.fromRGB(120, 255, 160)
+	radarLight.Brightness = 1.8
+	radarLight.Range = 18
+	radarLight.Shadows = true
+	radarLight.Parent = light
 end
 
 --[[
@@ -193,7 +308,7 @@ end
 	la seule forme courbe du jeu — c'est ce qui le distingue instantanement des
 	batiments militaires, tous anguleux.
 ]]
-local function buildLab(model: Model, color: Color3)
+local function buildLab(model: Model, color: Color3, _level: number?)
 	block(model, Vector3.new(7, 1.2, 7), Vector3.new(0, 0.6, 0), CONCRETE, Enum.Material.Concrete)
 	block(model, Vector3.new(5, 3, 5), Vector3.new(0, 2.7, 0), color)
 
@@ -204,12 +319,14 @@ local function buildLab(model: Model, color: Color3)
 
 	block(model, Vector3.new(0.4, 6, 0.4), Vector3.new(2.8, 6, -2.8), DARK, Enum.Material.Metal)
 	local tip = block(model, Vector3.new(0.9, 0.9, 0.9), Vector3.new(2.8, 9.2, -2.8), Color3.fromRGB(140, 220, 255))
+	tip.Name = "LabBeacon"
 	tip.Material = Enum.Material.Neon
 end
 
-local BUILDERS: { [number]: (Model, Color3) -> () } = {
+local BUILDERS: { [number]: (Model, Color3, number?) -> () } = {
 	[B.CAPITAL] = buildCapital,
 	[B.CITY] = buildCity,
+	[B.FACTORY] = buildFactory,
 	[B.PORT] = buildPort,
 	[B.DEFENSE] = buildDefense,
 	[B.SILO] = buildSilo,
@@ -222,9 +339,10 @@ local BUILDERS: { [number]: (Model, Color3) -> () } = {
 local HEIGHTS: { [number]: number } = {
 	[B.CAPITAL] = 23,
 	[B.CITY] = 11,
+	[B.FACTORY] = 13,
 	[B.PORT] = 9.5,
 	[B.DEFENSE] = 5.5,
-	[B.SILO] = 13,
+	[B.SILO] = 16,
 	[B.SAM] = 9,
 	[B.LAB] = 10,
 }
@@ -237,13 +355,13 @@ local HEIGHTS: { [number]: number } = {
 	Construit le modele d'un batiment, ancre a `position` (le sol de la tuile).
 	Le modele est renvoye non parente : l'appelant decide ou il vit.
 ]]
-function BuildingModels.create(kind: number, color: Color3, position: Vector3): Model
+function BuildingModels.create(kind: number, color: Color3, position: Vector3, level: number?): Model
 	local model = Instance.new("Model")
 	model.Name = `Building{kind}`
 
 	local builder = BUILDERS[kind]
 	if builder then
-		builder(model, color)
+		builder(model, color, level)
 	else
 		block(model, Vector3.new(3, 6, 3), Vector3.new(0, 3, 0), color)
 	end
@@ -253,9 +371,11 @@ function BuildingModels.create(kind: number, color: Color3, position: Vector3): 
 	for _, part in model:GetChildren() do
 		if part:IsA("BasePart") then
 			part.CFrame = part.CFrame + position
+			part:SetAttribute("RestCFrame", part.CFrame)
 		end
 	end
 
+	model:SetAttribute("Level", level or 1)
 	return model
 end
 
@@ -273,6 +393,7 @@ end
 ]]
 function BuildingModels.playConstruction(model: Model, ground: Vector3, duration: number?)
 	local total = duration or 2.5
+	model:SetAttribute("ConstructionUntil", os.clock() + total)
 
 	local parts: { BasePart } = {}
 	for _, child in model:GetChildren() do
@@ -334,7 +455,49 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	end)
 end
 
-function BuildingModels.heightOf(kind: number): number
+-- Mouvement ambiant des pieces mecaniques et des balises. Les transformations
+-- repartent toujours de RestCFrame : aucune derive numerique apres dix minutes.
+function BuildingModels.animate(model: Model, time: number, _dt: number)
+	local constructionUntil = model:GetAttribute("ConstructionUntil") :: number?
+	if constructionUntil and time < constructionUntil then
+		return
+	end
+
+	for _, child in model:GetChildren() do
+		if not child:IsA("BasePart") then
+			continue
+		end
+		local rest = child:GetAttribute("RestCFrame") :: CFrame?
+		if not rest then
+			continue
+		end
+
+		if child.Name == "Radar" then
+			child.CFrame = rest * CFrame.Angles(0, time * 1.45, 0)
+		elseif child.Name == "CapitalFlag" then
+			child.CFrame = rest * CFrame.Angles(math.sin(time * 2.4) * 0.045, 0, math.sin(time * 1.7) * 0.035)
+		elseif child.Name == "PortCraneBoom" then
+			child.CFrame = rest * CFrame.Angles(0, math.sin(time * 0.35) * 0.12, 0)
+		elseif child.Name == "PortCraneCable" then
+			child.CFrame = rest + Vector3.new(0, math.sin(time * 0.8) * 0.35, 0)
+		elseif child.Name == "CityWindows" then
+			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
+		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
+			child.Transparency = 0.05 + (math.sin(time * 2.8 + child.Position.Z * 0.05) + 1) * 0.18
+		elseif child.Name == "FactoryOutput" then
+			child.Transparency = 0.12 + (math.sin(time * 3.2) + 1) * 0.12
+		elseif child.Name == "SiloWarning" then
+			child.Transparency = if math.sin(time * 4.5) > -0.25 then 0.05 else 0.6
+		end
+	end
+end
+
+
+function BuildingModels.heightOf(kind: number, level: number?): number
+	if kind == B.CITY then
+		local cityLevel = math.clamp(level or 1, 1, Config.CITY_MAX_LEVEL)
+		return if cityLevel == 1 then 11 elseif cityLevel == 2 then 16 else 28
+	end
 	return HEIGHTS[kind] or 8
 end
 

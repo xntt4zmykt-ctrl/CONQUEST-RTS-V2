@@ -64,7 +64,7 @@ function Bots.spawnAll(state: GameState, rng: Random, count: number?)
 		local name = BOT_NAMES[((i - 1) % #BOT_NAMES) + 1]
 		local ps = state:addPlayer(nil, name, rng, 0)
 		if ps then
-			ps.attackRatio = rng:NextNumber(0.2, 0.45)
+			ps.attackRatio = rng:NextNumber(Config.BOT_ATTACK_RATIO_MIN, Config.BOT_ATTACK_RATIO_MAX)
 			ps.doctrine = Doctrines.LIST[rng:NextInteger(1, #Doctrines.LIST)].id
 			table.insert(botSlots, ps.slot)
 		end
@@ -106,6 +106,66 @@ local function strengthOf(state: GameState, slot: number): number
 		return 0
 	end
 	return ps.troops + ps.tiles * 6
+end
+
+-- Pression de l'IA : douce pendant l'apprentissage, complete seulement quand
+-- le joueur a eu le temps de coloniser et de construire un vrai centre.
+local function botPressure(state: GameState): number
+	local elapsed = state.tick / Config.TICK_RATE
+	return math.clamp(elapsed / Config.BOT_FULL_PRESSURE_AFTER, 0, 1)
+end
+
+local function humanTargetProtected(
+	state: GameState,
+	attacker: GameState.PlayerState,
+	target: GameState.PlayerState
+): boolean
+	if target.isBot then
+		return false
+	end
+
+	local elapsed = state.tick / Config.TICK_RATE
+	if elapsed < Config.BOT_HUMAN_GRACE_DURATION then
+		return true
+	end
+
+	-- Apres la grace, on evite encore qu'un empire deja installe efface un
+	-- petit joueur qui termine son onboarding. La protection tombe des que le
+	-- joueur controle un territoire suffisant ou prend lui-meme de l'avance.
+	return target.tiles < Config.BOT_HUMAN_PROTECTION_TILES and attacker.tiles > target.tiles
+end
+
+-- Le leader ne doit pas seulement etre "la meilleure cible" : quand il a
+-- deja pris une avance nette, les factions secondaires doivent comprendre
+-- qu'une guerre entre elles lui laisse la partie. Les constantes de coalition
+-- vivent dans Config pour que le comportement reste reglable sans toucher a
+-- la logique de selection de cible.
+local function dominantLeader(state: GameState): (number?, boolean)
+	local leader: number? = nil
+	local leaderTiles = 0
+	local othersTiles = 0
+	local others = 0
+
+	for slot, ps in state.players do
+		if ps.tiles > leaderTiles then
+			if leader then
+				othersTiles += leaderTiles
+				others += 1
+			end
+			leader = slot
+			leaderTiles = ps.tiles
+		else
+			othersTiles += ps.tiles
+			others += 1
+		end
+	end
+
+	if not leader or leaderTiles < Config.COALITION_MIN_LEADER_TILES or others == 0 then
+		return leader, false
+	end
+
+	local averageOthers = othersTiles / others
+	return leader, averageOthers > 0 and leaderTiles / averageOthers >= Config.COALITION_LEADER_RATIO
 end
 
 --=============================================================================
@@ -154,6 +214,39 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 	return sites
 end
 
+local function tryUpgradeCity(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
+	if ps.era < 2 or rng:NextNumber() > 0.32 then
+		return false
+	end
+
+	-- On ameliore d'abord la ville la moins developpee : les empires bots
+	-- produisent ainsi plusieurs centres regionaux au lieu d'une seule tour
+	-- geante et d'une couronne de villages.
+	local bestIndex: number? = nil
+	local bestLevel = Config.CITY_MAX_LEVEL + 1
+	for index, building in state.buildings do
+		if
+			building.slot == ps.slot
+			and building.kind == B.CITY
+			and building.level < Config.CITY_MAX_LEVEL
+			and building.level < bestLevel
+		then
+			bestIndex = index
+			bestLevel = building.level
+		end
+	end
+	if not bestIndex then
+		return false
+	end
+
+	local price = Buildings.cityUpgradePrice(state, ps.slot, bestIndex)
+	if ps.gold - reserve < price then
+		return false
+	end
+	local ok = Buildings.upgradeCity(state, ps.slot, bestIndex)
+	return ok
+end
+
 local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Random)
 	if ps.tiles < 25 then
 		return
@@ -172,6 +265,12 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 	-- atteint l'atome.
 	reserve = math.max(reserve, Research.goldReserveFor(state, ps.slot))
 
+	local cityCount = ps.buildingCounts[B.CITY] or 0
+	local enoughCitiesForEra = (ps.era == 2 and cityCount >= 3) or (ps.era >= 3 and cityCount >= 6)
+	if enoughCitiesForEra and tryUpgradeCity(state, ps, reserve, rng) then
+		return
+	end
+
 	-- Les compteurs sont plafonnes explicitement : sans plafond, un bot riche
 	-- retire indefiniment le meme batiment (315 batteries pour 8 silos).
 	local wanted: number
@@ -180,6 +279,14 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 	if nukesUp and ps.siloCount < 1 then
 		wanted = B.SILO
 		reserve = 0 -- le silo est lui-meme l'objectif de l'epargne
+	elseif
+		ps.era >= 3
+		and (ps.buildingCounts[B.FACTORY] or 0) < math.min(3, math.max(1, cityCount // 2))
+	then
+		-- L'industrie suit naturellement l'urbanisation : une premiere usine a
+		-- l'ere 3, puis jusqu'a trois reseaux logistiques dans un grand empire.
+		wanted = B.FACTORY
+		reserve = 0
 	elseif ps.buildingCounts[B.CITY] == nil or (ps.buildingCounts[B.CITY] or 0) < 8 then
 		-- Les villes sont la condition d'ere la plus exigeante : les prioriser
 		-- evite que le bot reste bloque a un palier faute d'un seul batiment.
@@ -299,6 +406,10 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 		if owner == ps.slot then
 			continue
 		end
+		local target = if owner ~= NEUTRAL then state.players[owner] else nil
+		if target and humanTargetProtected(state, ps, target) then
+			continue
+		end
 		if owner ~= NEUTRAL and state:areAllied(ps.slot, owner) then
 			continue
 		end
@@ -334,7 +445,12 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 	local bestSlot: number? = nil
 	local bestTiles = 0
 	for slot, other in state.players do
-		if slot ~= ps.slot and not state:areAllied(ps.slot, slot) and other.tiles > bestTiles then
+		if
+			slot ~= ps.slot
+			and not state:areAllied(ps.slot, slot)
+			and not humanTargetProtected(state, ps, other)
+			and other.tiles > bestTiles
+		then
 			bestTiles = other.tiles
 			bestSlot = slot
 		end
@@ -363,9 +479,17 @@ local function decideAttack(state: GameState, ps: GameState.PlayerState, rng: Ra
 		return -- on laisse remonter la reserve
 	end
 
+	local pressure = botPressure(state)
+	local attackChance = Config.BOT_ATTACK_CHANCE_EARLY
+		+ (Config.BOT_ATTACK_CHANCE_LATE - Config.BOT_ATTACK_CHANCE_EARLY) * pressure
+	if rng:NextNumber() > attackChance then
+		return
+	end
+
 	local contacts = neighborFactions(state, ps.slot)
 	local bestTarget: number? = nil
 	local bestScore = -math.huge
+	local leader, coalitionActive = dominantLeader(state)
 
 	for other, contactTiles in contacts do
 		if other ~= NEUTRAL and state:areAllied(ps.slot, other) then
@@ -382,9 +506,24 @@ local function decideAttack(state: GameState, ps: GameState.PlayerState, rng: Ra
 			if not target then
 				continue
 			end
+			if humanTargetProtected(state, ps, target) then
+				continue
+			end
 			-- Cible d'autant plus attirante qu'elle est faible par tuile.
 			local density = target.troops / math.max(1, target.tiles)
 			score = 100 / (1 + density) + contactTiles * 0.5
+
+			if coalitionActive then
+				if other == leader and other ~= ps.slot then
+					-- Une attaque contre le leader devient une decision collective,
+					-- meme si sa densite le rend plus difficile a percer.
+					score += Config.COALITION_ATTACK_BONUS
+				elseif other ~= ps.slot then
+					-- Les puissances secondaires evitent de s'epuiser entre elles
+					-- tant qu'une menace commune domine la carte.
+					score *= Config.COALITION_NON_LEADER_DAMPING
+				end
+			end
 		end
 
 		score += rng:NextNumber(0, 15)

@@ -71,12 +71,17 @@ function Minimap.new(parent: GuiObject, terrain: buffer, onJump: (number) -> ())
 	local panel = Theme.panel("Minimap", parent)
 	panel.AnchorPoint = Vector2.new(1, 1)
 	panel.Position = UDim2.new(1, -Theme.space.md, 1, -Theme.space.md)
-	panel.Size = UDim2.fromOffset(WIDTH + Theme.space.sm * 2, HEIGHT + Theme.space.sm * 2)
+	panel.Size = UDim2.fromOffset(WIDTH + Theme.space.sm * 2, HEIGHT + Theme.space.sm * 2 + 24)
 	self.panel = panel
+
+	local title = Theme.label(panel, "TACTICAL MAP", Theme.textSize.tiny, Theme.color.accent)
+	title.Position = UDim2.fromOffset(Theme.space.sm, 5)
+	title.Size = UDim2.new(1, -Theme.space.sm * 2, 0, 14)
+	title.FontFace = Theme.font.medium
 
 	local view = Instance.new("ImageLabel")
 	view.Name = "View"
-	view.Position = UDim2.fromOffset(Theme.space.sm, Theme.space.sm)
+	view.Position = UDim2.fromOffset(Theme.space.sm, Theme.space.sm + 18)
 	view.Size = UDim2.fromOffset(WIDTH, HEIGHT)
 	view.BackgroundColor3 = Theme.color.void
 	view.BorderSizePixel = 0

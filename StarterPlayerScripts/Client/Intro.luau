@@ -41,6 +41,7 @@ local TIPS = {
 
 function Intro.new(parent: ScreenGui): Intro
 	local self = setmetatable({}, Intro) :: any
+	self.transitionId = 0
 
 	-- CanvasGroup : voir MainMenu. Le fondu par enfant laissait l'ecran de
 	-- chargement noir et vide a la deuxieme partie.
@@ -48,16 +49,42 @@ function Intro.new(parent: ScreenGui): Intro
 	root.Name = "Intro"
 	root.Size = UDim2.fromScale(1, 1)
 	root.BackgroundColor3 = C.void
+	root.BackgroundTransparency = 1
 	root.BorderSizePixel = 0
 	root.Visible = false
+	root.GroupTransparency = 0
 	root.ZIndex = 40
 	root.Parent = parent
 	self.root = root
 
+	local backdrop = Instance.new("Frame")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = C.void
+	backdrop.BackgroundTransparency = 0.08
+	backdrop.BorderSizePixel = 0
+	backdrop.ZIndex = 40
+	backdrop.Parent = root
+
+	local card = Theme.panel("DeploymentCard", root)
+	card.AnchorPoint = Vector2.new(0.5, 0.5)
+	card.Position = UDim2.fromScale(0.5, 0.44)
+	card.Size = UDim2.fromOffset(560, 330)
+	card.BackgroundTransparency = 0.04
+	card.ZIndex = 40
+
+	local eyebrow = Theme.label(root, "BLACKLINE STUDIO  /  THEATRE OF OPERATIONS", T.tiny, C.accent)
+	eyebrow.AnchorPoint = Vector2.new(0.5, 0)
+	eyebrow.Position = UDim2.new(0.5, 0, 0.21, 0)
+	eyebrow.Size = UDim2.fromOffset(560, 14)
+	eyebrow.TextXAlignment = Enum.TextXAlignment.Center
+	eyebrow.FontFace = Theme.font.medium
+	eyebrow.ZIndex = 41
+
 	local flagFrame = Instance.new("Frame")
 	flagFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-	flagFrame.Position = UDim2.fromScale(0.5, 0.38)
-	flagFrame.Size = UDim2.fromOffset(132, 84)
+	flagFrame.Position = UDim2.fromScale(0.5, 0.34)
+	flagFrame.Size = UDim2.fromOffset(150, 94)
 	flagFrame.BackgroundColor3 = C.surface
 	flagFrame.BorderSizePixel = 0
 	flagFrame.ClipsDescendants = true
@@ -68,7 +95,7 @@ function Intro.new(parent: ScreenGui): Intro
 
 	local nation = Theme.label(root, "", 26, C.text)
 	nation.AnchorPoint = Vector2.new(0.5, 0)
-	nation.Position = UDim2.new(0.5, 0, 0.38, 60)
+	nation.Position = UDim2.new(0.5, 0, 0.34, 66)
 	nation.Size = UDim2.fromOffset(500, 32)
 	nation.TextXAlignment = Enum.TextXAlignment.Center
 	nation.FontFace = F.display
@@ -77,7 +104,7 @@ function Intro.new(parent: ScreenGui): Intro
 
 	local status = Theme.label(root, "Construction du monde...", T.body, C.textMuted)
 	status.AnchorPoint = Vector2.new(0.5, 0)
-	status.Position = UDim2.new(0.5, 0, 0.38, 98)
+	status.Position = UDim2.new(0.5, 0, 0.34, 106)
 	status.Size = UDim2.fromOffset(500, 18)
 	status.TextXAlignment = Enum.TextXAlignment.Center
 	status.FontFace = F.medium
@@ -86,8 +113,8 @@ function Intro.new(parent: ScreenGui): Intro
 
 	local track = Instance.new("Frame")
 	track.AnchorPoint = Vector2.new(0.5, 0)
-	track.Position = UDim2.new(0.5, 0, 0.38, 128)
-	track.Size = UDim2.fromOffset(320, 4)
+	track.Position = UDim2.new(0.5, 0, 0.34, 136)
+	track.Size = UDim2.fromOffset(360, 6)
 	track.BackgroundColor3 = C.surfaceRaised
 	track.BorderSizePixel = 0
 	track.ZIndex = 41
@@ -112,6 +139,14 @@ function Intro.new(parent: ScreenGui): Intro
 	tip.ZIndex = 41
 	self.tip = tip
 
+	local footer = Theme.label(root, "SYNCHRONISATION DES FORCES  ·  CARTE PROCEDURALE  ·  SECURE LINK", T.tiny, C.textFaint)
+	footer.AnchorPoint = Vector2.new(0.5, 1)
+	footer.Position = UDim2.new(0.5, 0, 1, -18)
+	footer.Size = UDim2.fromOffset(700, 14)
+	footer.TextXAlignment = Enum.TextXAlignment.Center
+	footer.FontFace = Theme.font.medium
+	footer.ZIndex = 41
+
 	-- Compte a rebours, superpose au meme calque
 	local countdown = Theme.label(root, "", 96, C.text)
 	countdown.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -133,8 +168,14 @@ end
 
 function Intro.show(self: Intro, nationId: number)
 	local nation = Nations.get(nationId)
+	self.transitionId += 1
+	if self.activeTween then
+		self.activeTween:Cancel()
+		self.activeTween = nil
+	end
 	self.root.Visible = true
 	self.root.GroupTransparency = 0
+	self.countdown.Visible = false
 	self.nationLabel.Text = string.upper(nation.name)
 	self.tip.Text = TIPS[math.random(1, #TIPS)]
 	self.fill.Size = UDim2.fromScale(0, 1)
@@ -154,14 +195,17 @@ function Intro.setProgress(self: Intro, ratio: number)
 end
 
 function Intro.hide(self: Intro)
-	if not self.root.Visible then
-		return
+	self.transitionId += 1
+	if self.activeTween then
+		self.activeTween:Cancel()
+		self.activeTween = nil
 	end
-	local tween = TweenService:Create(self.root, Theme.motion.dramatic, { GroupTransparency = 1 })
-	tween:Play()
-	tween.Completed:Once(function()
-		self.root.Visible = false
-	end)
+	-- Cet ecran est un verrou de chargement, pas une decoration : il doit
+	-- disparaitre immediatement, meme si Roblox interrompt un tween ou si une
+	-- nouvelle partie arrive pendant le compte a rebours.
+	self.root.GroupTransparency = 1
+	self.root.Visible = false
+	self.countdown.Visible = false
 end
 
 --=============================================================================
@@ -173,8 +217,13 @@ end
 	retracte : le mouvement fait la difference entre un minuteur et un depart.
 ]]
 function Intro.runCountdown(self: Intro, seconds: number, onFinished: () -> ())
+	local transition = self.transitionId
 	task.spawn(function()
 		for remaining = seconds, 1, -1 do
+			if self.transitionId ~= transition then
+				self.countdown.Visible = false
+				return
+			end
 			self.countdown.Visible = true
 			self.countdown.Text = tostring(remaining)
 			self.countdown.TextColor3 = if remaining <= 3 then C.accent else C.text
@@ -188,6 +237,10 @@ function Intro.runCountdown(self: Intro, seconds: number, onFinished: () -> ())
 
 			task.wait(1)
 		end
+		if self.transitionId ~= transition then
+			self.countdown.Visible = false
+			return
+		end
 
 		self.countdown.Text = "EN GUERRE"
 		self.countdown.TextColor3 = C.accent
@@ -199,6 +252,10 @@ function Intro.runCountdown(self: Intro, seconds: number, onFinished: () -> ())
 		}):Play()
 
 		task.wait(0.9)
+		if self.transitionId ~= transition then
+			self.countdown.Visible = false
+			return
+		end
 		self.countdown.Visible = false
 		onFinished()
 	end)

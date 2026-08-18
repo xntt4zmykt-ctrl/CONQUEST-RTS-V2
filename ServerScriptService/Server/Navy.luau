@@ -170,6 +170,9 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	if targetOwner ~= NEUTRAL and state:areAllied(slot, targetOwner) then
 		return false, "Tu es allie a cette faction."
 	end
+	if targetOwner ~= NEUTRAL and not state.combatUnlocked then
+		return false, "Les flottes ennemies sont protegees pendant la preparation."
+	end
 
 	if Navy.countBoats(state, slot, KIND_TRANSPORT) >= Config.MAX_BOATS_PER_PLAYER then
 		return false, "Tous tes transports sont deja en mer."
@@ -196,6 +199,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	ps.troops -= troops
+	ps.attacksLaunched += 1
 
 	local ox, oy = MapGen.fromIndex(origin)
 	table.insert(state.boats, {

@@ -146,6 +146,13 @@ InstanceMT.__index = function(t, key)
 end
 
 InstanceMT.__newindex = function(t, key, value)
+	-- BasePart n'a pas de propriete Visible. L'accepter ici a masque une erreur
+	-- qui interrompait MapInit dans Studio alors que tout le banc client passait.
+	-- La visibilite 3D se controle avec Transparency.
+	if key == "Visible" and PART_CLASSES[rawget(t, "ClassName")] then
+		error(`Visible is not a valid member of {rawget(t, "ClassName")}`)
+	end
+
 	if key == "Parent" then
 		local previous = rawget(t, "_parent")
 		if previous then
@@ -280,6 +287,9 @@ InstanceMT.methods = {
 		return nil
 	end,
 	ViewportPointToRay = function()
+		return { Origin = Vector3.new(), Direction = Vector3.new(0, -1, 0) }
+	end,
+	ScreenPointToRay = function()
 		return { Origin = Vector3.new(), Direction = Vector3.new(0, -1, 0) }
 	end,
 	FireServer = function() end,

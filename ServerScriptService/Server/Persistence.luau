@@ -13,6 +13,9 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
 
 local Persistence = {}
 
@@ -20,9 +23,11 @@ export type Profile = {
 	betrayals: number,
 	matches: number,
 	wins: number,
+	xp: number,
+	level: number,
 }
 
-local DEFAULT: Profile = { betrayals = 0, matches = 0, wins = 0 }
+local DEFAULT: Profile = { betrayals = 0, matches = 0, wins = 0, xp = 0, level = 1 }
 
 local store: DataStore? = nil
 local available = false
@@ -47,12 +52,18 @@ local function keyFor(userId: number): string
 	return `player_{userId}`
 end
 
+local function levelForXp(xp: number): number
+	-- Courbe douce : les premiers niveaux arrivent vite, puis chaque rang
+	-- demande davantage de campagnes sans devenir un mur artificiel.
+	return math.max(1, math.floor(math.sqrt(math.max(0, xp) / Config.XP_LEVEL_BASE)) + 1)
+end
+
 function Persistence.load(userId: number): Profile
 	if cache[userId] then
 		return cache[userId]
 	end
 
-	local profile: Profile = { betrayals = 0, matches = 0, wins = 0 }
+	local profile: Profile = { betrayals = 0, matches = 0, wins = 0, xp = 0, level = 1 }
 
 	if available and store then
 		local ok, result = pcall(function()
@@ -62,6 +73,8 @@ function Persistence.load(userId: number): Profile
 			profile.betrayals = tonumber(result.betrayals) or 0
 			profile.matches = tonumber(result.matches) or 0
 			profile.wins = tonumber(result.wins) or 0
+			profile.xp = tonumber(result.xp) or 0
+			profile.level = levelForXp(profile.xp)
 		elseif not ok then
 			warn(`[CONQUEST RTS] Lecture de reputation echouee pour {userId}`)
 		end
@@ -86,6 +99,8 @@ function Persistence.save(userId: number)
 					betrayals = math.max(tonumber(old.betrayals) or 0, profile.betrayals),
 					matches = math.max(tonumber(old.matches) or 0, profile.matches),
 					wins = math.max(tonumber(old.wins) or 0, profile.wins),
+					xp = math.max(tonumber(old.xp) or 0, profile.xp),
+					level = math.max(tonumber(old.level) or 1, profile.level),
 				}
 			end
 			return profile
@@ -97,14 +112,18 @@ function Persistence.save(userId: number)
 	end
 end
 
-function Persistence.record(userId: number, betrayals: number, won: boolean)
+function Persistence.record(userId: number, betrayals: number, won: boolean, xpGain: number?): (Profile, number)
 	local profile = Persistence.load(userId)
 	profile.betrayals = math.max(profile.betrayals, betrayals)
 	profile.matches += 1
 	if won then
 		profile.wins += 1
 	end
+	local gain = math.max(0, math.floor(xpGain or 0))
+	profile.xp += gain
+	profile.level = levelForXp(profile.xp)
 	Persistence.save(userId)
+	return profile, gain
 end
 
 function Persistence.release(userId: number)
@@ -121,5 +140,6 @@ game:BindToClose(function()
 end)
 
 Persistence.DEFAULT = DEFAULT
+Persistence.levelForXp = levelForXp
 
 return Persistence

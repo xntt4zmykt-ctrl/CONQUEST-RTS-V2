@@ -53,11 +53,11 @@ BuildingDefs.LIST = {
 		name = "Ville",
 		symbol = "\u{25C6}",
 		cost = 180,
-		description = "+900 de population maximum",
+		description = "+900 population · evolue jusqu'a la megapole",
 		coastalOnly = false,
 		buildable = true,
 		popCapBonus = 900,
-		goldBonus = 0,
+		goldBonus = Config.GOLD_PER_CITY,
 	},
 	{
 		id = B.PORT,
@@ -118,6 +118,18 @@ BuildingDefs.LIST = {
 		buildable = true,
 		popCapBonus = 0,
 		goldBonus = 0,
+	},
+	{
+		id = B.FACTORY,
+		class = Config.BUILD_CLASS.ECONOMY,
+		name = "Usine",
+		symbol = "\u{2699}",
+		cost = 520,
+		description = "Reliee a une ville : produit et livre des marchandises",
+		coastalOnly = false,
+		buildable = true,
+		popCapBonus = 0,
+		goldBonus = Config.GOLD_PER_FACTORY_ROUTE,
 	},
 } :: { BuildingDef }
 

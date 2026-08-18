@@ -55,6 +55,80 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 end
 
 --=============================================================================
+-- Selection tactique
+--=============================================================================
+
+function Effects.selectTile(self: Effects, index: number, color: Color3)
+	if self.selection then
+		self.selection:Destroy()
+	end
+
+	local base = WorldSpace.indexToWorld(index)
+	local height = WorldSpace.surfaceHeight(self.terrain, index)
+	local marker = Instance.new("Part")
+	marker.Name = "SelectedTerritory"
+	marker.Anchored = true
+	marker.CanCollide = false
+	marker.CanTouch = false
+	marker.CanQuery = false
+	marker.CastShadow = false
+	marker.Material = Enum.Material.Neon
+	marker.Color = color
+	marker.Transparency = 0.38
+	marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
+	marker.CFrame = CFrame.new(base.X, height + 0.55, base.Z)
+	marker.Parent = self.root
+	self.selection = marker
+
+	TweenService:Create(marker, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+		Transparency = 0.68,
+		Size = Vector3.new(Config.TILE_SIZE * 0.82, 0.28, Config.TILE_SIZE * 0.82),
+	}):Play()
+end
+
+function Effects.clearSelection(self: Effects)
+	if self.selection then
+		self.selection:Destroy()
+		self.selection = nil
+	end
+end
+
+-- Apercu leger de l'action sous le curseur. Contrairement a `selectTile`, ce
+-- marqueur est reutilise et simplement deplace : le raycast tourne chaque
+-- frame, il ne doit donc jamais creer une Part par mouvement de souris.
+function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
+	local marker = self.actionPreview
+	if not marker then
+		marker = Instance.new("Part")
+		marker.Name = "ActionPreview"
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.CastShadow = false
+		marker.Material = Enum.Material.Neon
+		marker.Size = Vector3.new(Config.TILE_SIZE * 1.04, 0.18, Config.TILE_SIZE * 1.04)
+		marker.Parent = self.root
+		self.actionPreview = marker
+	end
+
+	local base = WorldSpace.indexToWorld(index)
+	local height = WorldSpace.surfaceHeight(self.terrain, index)
+	marker.Color = color
+	marker.Transparency = if valid then 0.5 else 0.72
+	marker.CFrame = CFrame.new(base.X, height + 0.42, base.Z)
+	self.actionPreviewIndex = index
+end
+
+function Effects.clearActionPreview(self: Effects)
+	if self.actionPreview then
+		self.actionPreview:Destroy()
+		self.actionPreview = nil
+		self.actionPreviewIndex = nil
+	end
+end
+
+--=============================================================================
 -- Eclat de tuile
 --=============================================================================
 

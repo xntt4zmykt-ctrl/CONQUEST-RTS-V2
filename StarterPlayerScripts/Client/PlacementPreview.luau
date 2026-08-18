@@ -62,10 +62,9 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	footprint.CastShadow = false
 	footprint.Shape = Enum.PartType.Cylinder
 	footprint.Material = Enum.Material.Neon
-	footprint.Transparency = 0.6
+	footprint.Transparency = 1
 	footprint.Size = Vector3.new(0.3, 10, 10)
 	footprint.Parent = root
-	footprint.Visible = false
 	self.footprint = footprint
 
 	return self
@@ -82,7 +81,9 @@ function PlacementPreview.isValid(
 	ownerAt: (number) -> number,
 	mySlot: number,
 	era: number,
-	gold: number
+	gold: number,
+	buildingAt: ((number) -> (number?, number?))?,
+	hasCityNear: ((number, number, number) -> boolean)?
 ): boolean
 	local def = BuildingDefs.get(kind)
 	if not def or not def.buildable then
@@ -101,6 +102,34 @@ function PlacementPreview.isValid(
 		return false
 	end
 	if gold < def.cost then
+		return false
+	end
+	if buildingAt then
+		local occupied = buildingAt(tile)
+		if occupied ~= nil then
+			return false
+		end
+
+		-- Le serveur applique aussi cette regle. La montrer dans le fantome
+		-- evite le classique "vert puis refuse" quand deux villes sont trop
+		-- proches l'une de l'autre.
+		local cx, cy = MapGen.fromIndex(tile)
+		local spacing = Config.BUILD_MIN_SPACING
+		for dy = -spacing, spacing do
+			for dx = -spacing, spacing do
+				if dx * dx + dy * dy <= spacing * spacing then
+					local nx, ny = cx + dx, cy + dy
+					if MapGen.inBounds(nx, ny) then
+						local otherKind = buildingAt(MapGen.toIndex(nx, ny))
+						if otherKind == kind then
+							return false
+						end
+					end
+				end
+			end
+		end
+	end
+	if kind == Config.BUILDING.FACTORY and hasCityNear and not hasCityNear(tile, mySlot, Config.FACTORY_ROUTE_RANGE) then
 		return false
 	end
 	return true
@@ -123,7 +152,7 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 	end
 
 	if not kind then
-		self.footprint.Visible = false
+		self.footprint.Transparency = 1
 		return
 	end
 
@@ -146,7 +175,7 @@ end
 function PlacementPreview.update(self: PlacementPreview, tile: number?, valid: boolean)
 	local model = self.model
 	if not self.kind or not model or not tile then
-		self.footprint.Visible = false
+		self.footprint.Transparency = 1
 		if model then
 			for _, part in model:GetChildren() do
 				if part:IsA("BasePart") then
@@ -191,7 +220,7 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, valid: b
 		then Config.DEFENSE_RADIUS * Config.TILE_SIZE * 2
 		else Config.TILE_SIZE * 3
 
-	self.footprint.Visible = true
+	self.footprint.Transparency = 0.6
 	self.footprint.Color = color
 	self.footprint.Size = Vector3.new(0.3, radius, radius)
 	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.Angles(0, 0, math.rad(90))

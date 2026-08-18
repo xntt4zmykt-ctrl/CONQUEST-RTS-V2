@@ -41,22 +41,22 @@ Audio.SOUNDS = {
 	-- Interface
 	--=========================================================================
 	uiClick = {
-		id = "rbxasset://sounds/button.wav",
-		volume = 0.35,
+		id = "rbxasset://sounds/volume_slider.ogg",
+		volume = 0.28,
 		pitchRange = 0.5,
 		throttle = 0.04,
 		category = "ui",
 	},
 	uiSelect = {
-		id = "rbxasset://sounds/electronicpingshort.wav",
-		volume = 0.28,
+		id = "rbxasset://sounds/volume_slider.ogg",
+		volume = 0.22,
 		pitchRange = 0.6,
 		throttle = 0.05,
 		category = "ui",
 	},
 	uiError = {
-		id = "rbxasset://sounds/switch3.wav",
-		volume = 0.4,
+		id = "rbxasset://sounds/ouch.ogg",
+		volume = 0.18,
 		pitchRange = 0.2,
 		throttle = 0.15,
 		category = "ui",
@@ -66,7 +66,7 @@ Audio.SOUNDS = {
 	-- Actions de jeu
 	--=========================================================================
 	attackLaunch = {
-		id = "rbxasset://sounds/swoosh.wav",
+		id = "rbxasset://sounds/action_falling.ogg",
 		volume = 0.5,
 		pitchRange = 1.5,
 		throttle = 0.12,
@@ -76,14 +76,14 @@ Audio.SOUNDS = {
 	-- en hauteur : c'est le son le plus frequent du jeu, il doit rester une
 	-- texture de fond et jamais attirer l'attention.
 	tileCapture = {
-		id = "rbxasset://sounds/pop_mid.wav",
+		id = "rbxasset://sounds/action_jump_land.mp3",
 		volume = 0.12,
 		pitchRange = 3.0,
 		throttle = 0.09,
 		category = "game",
 	},
 	buildPlace = {
-		id = "rbxasset://sounds/snap.wav",
+		id = "rbxasset://sounds/action_jump_land.mp3",
 		volume = 0.45,
 		pitchRange = 0.8,
 		throttle = 0.05,
@@ -97,7 +97,7 @@ Audio.SOUNDS = {
 		category = "game",
 	},
 	boatLand = {
-		id = "rbxasset://sounds/metal.ogg",
+		id = "rbxasset://sounds/impact_water.mp3",
 		volume = 0.45,
 		pitchRange = 0.8,
 		throttle = 0.1,
@@ -108,49 +108,49 @@ Audio.SOUNDS = {
 	-- Evenements majeurs
 	--=========================================================================
 	nukeLaunch = {
-		id = "rbxasset://sounds/action_falling.mp3",
+		id = "rbxasset://sounds/action_falling.ogg",
 		volume = 0.75,
 		pitchRange = 0.3,
 		throttle = 0.3,
 		category = "alert",
 	},
 	nukeImpact = {
-		id = "rbxasset://sounds/bass.wav",
+		id = "rbxasset://sounds/impact_explosion_03.mp3",
 		volume = 0.9,
 		pitchRange = 0.4,
 		throttle = 0.2,
 		category = "alert",
 	},
 	samIntercept = {
-		id = "rbxasset://sounds/electronicpingshort.wav",
+		id = "rbxasset://sounds/impact_explosion_03.mp3",
 		volume = 0.55,
 		pitchRange = 1.0,
 		throttle = 0.15,
 		category = "alert",
 	},
 	allianceFormed = {
-		id = "rbxasset://sounds/electronicpingshort.wav",
+		id = "rbxasset://sounds/volume_slider.ogg",
 		volume = 0.5,
 		pitchRange = 0.2,
 		throttle = 0.3,
 		category = "alert",
 	},
 	betrayal = {
-		id = "rbxasset://sounds/uuhhh.mp3",
+		id = "rbxasset://sounds/ouch.ogg",
 		volume = 0.6,
 		pitchRange = 0.2,
 		throttle = 0.3,
 		category = "alert",
 	},
 	capitalFallen = {
-		id = "rbxasset://sounds/bass.wav",
+		id = "rbxasset://sounds/impact_explosion_03.mp3",
 		volume = 0.8,
 		pitchRange = 0.2,
 		throttle = 0.3,
 		category = "alert",
 	},
 	eraAdvance = {
-		id = "rbxasset://sounds/electronicpingshort.wav",
+		id = "rbxasset://sounds/action_get_up.mp3",
 		volume = 0.6,
 		pitchRange = 0,
 		throttle = 0.5,
@@ -164,7 +164,7 @@ Audio.SOUNDS = {
 		category = "alert",
 	},
 	defeat = {
-		id = "rbxasset://sounds/uuhhh.mp3",
+		id = "rbxasset://sounds/oof.ogg",
 		volume = 0.7,
 		pitchRange = 0,
 		throttle = 1,

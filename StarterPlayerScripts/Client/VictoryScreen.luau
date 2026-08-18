@@ -47,12 +47,27 @@ function VictoryScreen.new(parent: GuiObject): VictoryScreen
 	local box = Theme.panel("Box", root)
 	box.AnchorPoint = Vector2.new(0.5, 0.5)
 	box.Position = UDim2.fromScale(0.5, 0.5)
-	box.Size = UDim2.fromOffset(460, 108 + PODIUM * 26)
+	box.Size = UDim2.fromOffset(620, 390)
 	box.ZIndex = 31
 	self.box = box
 
+	local accent = Instance.new("Frame")
+	accent.Position = UDim2.fromOffset(S.xl, 0)
+	accent.Size = UDim2.new(1, -S.xl * 2, 0, 3)
+	accent.BackgroundColor3 = C.gold
+	accent.BorderSizePixel = 0
+	accent.ZIndex = 33
+	accent.Parent = box
+
+	local section = Theme.label(box, "BILAN DE CAMPAGNE", T.tiny, C.gold)
+	section.Position = UDim2.fromOffset(S.xl, S.lg)
+	section.Size = UDim2.new(1, -S.xl * 2, 0, 14)
+	section.TextXAlignment = Enum.TextXAlignment.Center
+	section.FontFace = F.medium
+	section.ZIndex = 32
+
 	local banner = Theme.label(box, "", T.tiny, C.textFaint)
-	banner.Position = UDim2.fromOffset(S.xl, S.lg)
+	banner.Position = UDim2.fromOffset(S.xl, S.lg + 18)
 	banner.Size = UDim2.new(1, -S.xl * 2, 0, 14)
 	banner.TextXAlignment = Enum.TextXAlignment.Center
 	banner.ZIndex = 32
@@ -60,7 +75,7 @@ function VictoryScreen.new(parent: GuiObject): VictoryScreen
 	self.banner = banner
 
 	local winner = Theme.label(box, "", 30, C.text)
-	winner.Position = UDim2.fromOffset(S.xl, S.lg + 18)
+	winner.Position = UDim2.fromOffset(S.xl, S.lg + 34)
 	winner.Size = UDim2.new(1, -S.xl * 2, 0, 36)
 	winner.TextXAlignment = Enum.TextXAlignment.Center
 	winner.FontFace = F.display
@@ -70,8 +85,8 @@ function VictoryScreen.new(parent: GuiObject): VictoryScreen
 
 	local list = Instance.new("Frame")
 	list.BackgroundTransparency = 1
-	list.Position = UDim2.fromOffset(S.xl, 96)
-	list.Size = UDim2.new(1, -S.xl * 2, 0, PODIUM * 26)
+	list.Position = UDim2.fromOffset(S.xl, 112)
+	list.Size = UDim2.fromOffset(260, PODIUM * 24)
 	list.ZIndex = 32
 	list.Parent = box
 	Theme.list(list, Enum.FillDirection.Vertical, S.xs)
@@ -86,9 +101,58 @@ function VictoryScreen.new(parent: GuiObject): VictoryScreen
 		self.rows[i] = row
 	end
 
+	local divider = Instance.new("Frame")
+	divider.Position = UDim2.fromOffset(309, 112)
+	divider.Size = UDim2.fromOffset(1, 124)
+	divider.BackgroundColor3 = C.line
+	divider.BackgroundTransparency = 0.35
+	divider.BorderSizePixel = 0
+	divider.ZIndex = 32
+	divider.Parent = box
+
+	local recapTitle = Theme.label(box, "TA CAMPAGNE", T.tiny, C.accent)
+	recapTitle.Position = UDim2.fromOffset(330, 112)
+	recapTitle.Size = UDim2.fromOffset(250, 14)
+	recapTitle.FontFace = F.bold
+	recapTitle.ZIndex = 32
+
+	self.statLabels = {}
+	local statNames = { "Territoires conquis", "Capitales prises", "Batiments fondes", "Offensives lancees" }
+	for i, statName in statNames do
+		local stat = Theme.label(box, statName, T.small, C.textMuted)
+		stat.Position = UDim2.fromOffset(330, 132 + (i - 1) * 24)
+		stat.Size = UDim2.fromOffset(250, 18)
+		stat.ZIndex = 32
+
+		local value = Theme.label(stat, "0", T.small, C.text)
+		value.AnchorPoint = Vector2.new(1, 0)
+		value.Position = UDim2.new(1, 0, 0, 0)
+		value.Size = UDim2.fromOffset(70, 18)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.FontFace = F.bold
+		value.ZIndex = 33
+		self.statLabels[i] = value
+	end
+
+	local titleEarned = Theme.label(box, "", 20, C.gold)
+	titleEarned.Position = UDim2.fromOffset(S.xl, 258)
+	titleEarned.Size = UDim2.new(1, -S.xl * 2, 0, 24)
+	titleEarned.TextXAlignment = Enum.TextXAlignment.Center
+	titleEarned.FontFace = F.display
+	titleEarned.ZIndex = 32
+	self.titleEarned = titleEarned
+
+	local profile = Theme.label(box, "", T.body, C.textMuted)
+	profile.Position = UDim2.fromOffset(S.xl, 289)
+	profile.Size = UDim2.new(1, -S.xl * 2, 0, 20)
+	profile.TextXAlignment = Enum.TextXAlignment.Center
+	profile.FontFace = F.medium
+	profile.ZIndex = 32
+	self.profileLabel = profile
+
 	local countdown = Theme.label(box, "", T.small, C.textFaint)
 	countdown.AnchorPoint = Vector2.new(0.5, 1)
-	countdown.Position = UDim2.new(0.5, 0, 1, -S.md)
+	countdown.Position = UDim2.new(0.5, 0, 1, -S.lg)
 	countdown.Size = UDim2.new(1, -S.xl * 2, 0, 16)
 	countdown.TextXAlignment = Enum.TextXAlignment.Center
 	countdown.FontFace = F.medium
@@ -108,7 +172,9 @@ function VictoryScreen.show(
 	winnerName: string?,
 	ranked: { { slot: number, tiles: number, troops: number } },
 	roster: Types.Roster,
-	mySlot: number
+	mySlot: number,
+	summary: Types.Stats?,
+	profile: Types.Profile?
 )
 	if self.root.Visible then
 		return
@@ -167,6 +233,40 @@ function VictoryScreen.show(
 		value.TextXAlignment = Enum.TextXAlignment.Right
 		value.ZIndex = 32
 	end
+
+	local mine = if summary then summary[mySlot] else nil
+	local values = {
+		if mine then mine.capturedTiles or 0 else 0,
+		if mine then mine.capitalsCaptured or 0 else 0,
+		if mine then mine.buildingsBuilt or 0 else 0,
+		if mine then mine.attacksLaunched or 0 else 0,
+	}
+	for i, value in values do
+		self.statLabels[i].Text = tostring(value)
+	end
+
+	local title = "Bâtisseur de nation"
+	if won then
+		title = "Souverain du monde"
+	elseif values[2] >= 2 then
+		title = "Briseur de couronnes"
+	elseif values[3] >= 6 then
+		title = "Grand architecte"
+	elseif values[4] >= 5 then
+		title = "Marechal de campagne"
+	elseif values[1] >= 150 then
+		title = "Conquerant"
+	end
+	self.titleEarned.Text = `TITRE  ·  {string.upper(title)}`
+	self:setProfile(profile)
+end
+
+function VictoryScreen.setProfile(self: VictoryScreen, profile: Types.Profile?)
+	if not profile then
+		return
+	end
+	local gain = if profile.lastGain and profile.lastGain > 0 then `  ·  +{profile.lastGain} XP` else ""
+	self.profileLabel.Text = `Niveau {profile.level}  ·  {profile.xp} XP{gain}`
 end
 
 function VictoryScreen.setCountdown(self: VictoryScreen, seconds: number)

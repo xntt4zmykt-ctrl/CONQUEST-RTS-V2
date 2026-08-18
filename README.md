@@ -12,7 +12,8 @@ phase nucléaire.
 
 > **Conquiers le monde. Trahis tes alliés.**
 > Commence avec une seule province. Fais croître ta population, lance des offensives,
-> construis des ports et des silos nucléaires. Négocie des traités — puis
+> fais évoluer tes villes en métropoles puis en mégapoles, connecte des usines par
+> des routes logistiques, construis des ports et des silos nucléaires. Négocie des traités — puis
 > brise-les au pire moment.
 >
 > 🌍 48 joueurs par carte · ⚔️ Parties de 25 minutes · 🤝 Alliances réelles
@@ -34,8 +35,9 @@ cd "/Users/billy/Documents/CONQUEST RTS" && aftman install && rojo serve
 Puis, dans Studio : onglet Rojo → **Connect**. Chaque sauvegarde de fichier est
 répercutée immédiatement dans le DataModel.
 
-Teste avec **Play Solo** : 12 bots peuplent la carte, construisent, débarquent,
-s'allient et se trahissent. La partie est jouable et observable sans autre joueur.
+Teste avec **Play Solo** : la carte reste figée tant que le menu est ouvert,
+puis 11 bots rejoignent le commandant dans le mode Classique. Ils construisent,
+débarquent, s'allient et se trahissent sans obtenir de faux départ.
 
 ### Commandes
 
@@ -54,6 +56,10 @@ s'allient et se trahissent. La partie est jouable et observable sans autre joueu
 
 Au lancement : **menu principal** (nation + mode) → écran de chargement pendant
 la construction du monde → compte à rebours de 5 s → partie.
+
+Le survol tactique colore la case avant l'ordre : couleur d'action si la cible
+est exploitable, rouge si elle est manifestement invalide. Le centre de commande
+affiche aussi le nombre de fronts et les troupes qui ne défendent plus la réserve.
 
 ---
 
@@ -182,21 +188,21 @@ stratégique, et on peut y descendre avec son avatar (touche F).
 
 **40 960 tuiles ne peuvent pas être 40 960 Parts.** Les tuiles voisines de même
 couleur et même relief sont fusionnées en rectangles par
-[GreedyMesh.luau](ReplicatedStorage/Shared/GreedyMesh.luau). Mesuré sur une
-partie de fin de match : **3 957 Parts pour 15 568 tuiles de terre**. La compression
-est tombée de 17× à 3,9× en passant de 3 à 8 types de terrain — c'est le prix du
-relief, et il reste largement dans le budget.
+[GreedyMesh.luau](ReplicatedStorage/Shared/GreedyMesh.luau). Le sol n'est plus
+compose de Parts : le serveur remplit une fois le **SmoothTerrain Roblox** avec
+les materiaux naturels des biomes. Le monde reste plat pour l'avatar, tandis que
+les cotes et les transitions ne ressemblent plus a des blocs Minecraft.
 
-**Le relief ne change jamais, seule la couleur change.** C'est ce qui permet de
-séparer les responsabilités :
+**Le terrain ne change jamais, seule la souverainete change.** C'est ce qui
+permet de separer les responsabilites :
 
 | | Contenu | Coût |
 |---|---|---|
-| Serveur | Collision invisible, fusionnée par relief seul | ~600 blocs, répliqués une fois |
-| Client | Géométrie colorée, fusionnée par relief + propriétaire | ~3 950 Parts, locale |
+| Serveur | SmoothTerrain naturel, eau et collision | Zones de biomes remplies une fois |
+| Client | Voile politique transparent, fusionné par propriétaire | Parts très fines et locales |
 
-Sans collision serveur, un avatar posé sur sa capitale tomberait indéfiniment :
-le rendu du client est local, le serveur n'en voit rien.
+Le Terrain serveur porte directement la collision : un avatar marche sur le
+sol naturel et nage dans une vraie eau Roblox.
 
 **Les reconstructions sont locales et étalées.** Une conquête ne salit que les
 chunks concernés, et le budget est de 3 chunks par frame — parce qu'une grande
@@ -247,6 +253,29 @@ jamais — cette régression ne peut donc plus passer inaperçue.
 
 Le coût des bâtiments croît avec le nombre déjà possédé (`BUILD_COST_SCALING`) :
 sans cette inflation, un empire riche empilait 357 villes en dix minutes.
+Les prix affichés dans le HUD viennent désormais du calcul serveur réel, doctrine
+et inflation comprises.
+
+Les villes ont trois niveaux : **Ville → Métropole → Mégapole**. Chaque évolution
+augmente simultanément le plafond de population, le revenu et la silhouette 3D.
+Le niveau survit aux captures : prendre une mégapole ennemie est donc un objectif
+économique concret, pas seulement une case colorée supplémentaire.
+
+### Industrie et logistique
+
+L'ère **Industrie** débloque l'usine. Elle doit être construite à moins de 56
+cases d'une ville et se relie automatiquement au centre urbain allié le plus
+proche. La liaison crée une vraie route 3D, parcourue par un camion de fret, et
+produit un revenu continu dont le rendement baisse légèrement avec la distance.
+
+Capturer ou détruire une ville recalcule immédiatement les réseaux de sa faction :
+les usines se reconnectent si une autre ville est à portée, sinon leur production
+s'arrête. Le HUD affiche le nombre de routes et leur revenu en or par seconde.
+
+Les modèles sont procéduraux et sans asset externe : villes à trois silhouettes,
+usine animée avec quai et fumée, silo ouvert avec missile complet, batterie SAM à
+quatre intercepteurs et radar motorisé. Les matériaux, ombres, vitrages et lumières
+restent lisibles aussi bien depuis la vue stratégique qu'en avatar.
 
 ### Diplomatie
 
@@ -265,7 +294,7 @@ commerciales d'un rival lui retire de l'or à chaque tick.
 
 **Fait** : génération de carte · spawn · population · offensives · marine et
 débarquements avec pathfinding maritime · économie et commerce · capitales ·
-5 bâtiments · 4 doctrines · alliances, trahisons, embargos · réputation
+8 bâtiments · villes évolutives · industrie et routes logistiques · 4 doctrines · alliances, trahisons, embargos · réputation
 persistante · phase nucléaire avec interception · élimination · condition de
 victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
 écran de victoire, sons, classement, notifications.
@@ -279,21 +308,23 @@ victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
 
 ### Limites connues
 
-⚠️ **L'équilibrage n'a pas été playtesté par des humains.** Les valeurs de
-`Config.luau` et `Eras.luau` ont été réglées contre la simulation headless
-uniquement. Les premiers paramètres à revoir : `GOLD_TILE_SCALE`, les `cost` des
-ères, `ATTACK_SPEND_RATE` et `DEFENSE_DENSITY_K`.
+⚠️ **L'équilibrage humain reste à playtester à plusieurs.** Le mode solo possède
+maintenant un départ assisté (320 or, 230 troupes), 75 secondes de préparation,
+3 minutes de grâce contre l'IA et une pression bot progressive sur 6 minutes.
+Les leviers sont regroupés dans la section `Accessibilite de l'IA` de
+`Config.luau`.
 
 ⚠️ **Les bots construisent peu** (une trentaine de villes pour 12 factions sur
 10 minutes) parce qu'ils épargnent pour l'ère suivante. C'est cohérent avec la
 progression voulue, mais à revérifier quand des humains joueront à côté d'eux.
 
-⚠️ **Les parties contre des bots seuls se terminent en 5 à 10 minutes**, bien
-avant les 25 minutes prévues — les bots ne se coalisent pas contre le leader.
+⚠️ **Les simulations 100 % bots restent plus brutales qu'une partie solo** :
+elles n'utilisent volontairement ni la grâce humaine ni son bonus économique.
+Elles servent de stress test de fin de partie, pas de référence de difficulté.
 
 ⚠️ **Le coût de rendu n'a été mesuré qu'en simulation**, pas sur un vrai
-appareil. `./tests/run.sh` reporte le nombre de Parts en fin de rapport ; si tu
-changes `TILE_SIZE` ou `CHUNK_SIZE`, relance-le pour vérifier que ça tient.
+appareil. `./tests/run.sh` reporte les zones SmoothTerrain et les Parts de la
+couche politique ; si tu changes `TILE_SIZE` ou `CHUNK_SIZE`, relance-le.
 
 ⚠️ **Les symboles de bâtiments sont des caractères Unicode.** S'ils ne
 s'affichent pas correctement dans Studio, remplacer `symbol` dans

@@ -76,19 +76,36 @@ Config.TILE_SIZE = 4
 Config.WORLD_WIDTH = Config.MAP_WIDTH * Config.TILE_SIZE
 Config.WORLD_DEPTH = Config.MAP_HEIGHT * Config.TILE_SIZE
 
--- Hauteur du sol par type de terrain. Le relief est franc et etage : c'est ce
--- qui donne la lecture "carte en relief" plutot que "tapis colore".
+-- Bordures invisibles cote serveur : l'avatar ne peut pas sortir du monde 3D
+-- et tomber sous la carte. Elles sont hors de la derniere tuile pour ne pas
+-- reduire la surface jouable.
+Config.WORLD_BORDER_THICKNESS = 4
+Config.WORLD_BORDER_HEIGHT = 80
+
+--[[
+	Altitude du sommet de chaque type de terrain, en studs.
+
+	Le monde est bati en blocs et non en SmoothTerrain : la carte est une grille
+	de tuiles, et un terrain voxel lisse se bat en permanence contre cette
+	grille — les frontieres politiques suivent des cases, pas des courbes.
+	Le relief etage donne en plus une lecture immediate du cout de conquete, qui
+	varie deja par terrain dans la simulation.
+]]
 Config.TERRAIN_HEIGHT = {
 	[0] = 0, -- ocean : pas de bloc, seulement le plan d'eau
-	[1] = 2,
-	[2] = 4,
-	[3] = 4,
-	[4] = 6,
-	[5] = 9,
-	[6] = 13,
-	[7] = 18,
-	[8] = 24,
+	[1] = 2, -- plage
+	[2] = 4, -- plaines
+	[3] = 4, -- savane
+	[4] = 6, -- foret
+	[5] = 9, -- collines
+	[6] = 13, -- hautes terres
+	[7] = 18, -- montagne
+	[8] = 24, -- sommet
 }
+
+-- Altitude de reference des basses terres, utilisee par tout ce qui doit se
+-- poser "au niveau du sol" sans connaitre la tuile exacte.
+Config.BASE_LAND_HEIGHT = Config.TERRAIN_HEIGHT[2]
 
 Config.OCEAN_LEVEL = 1.5
 
@@ -121,6 +138,13 @@ Config.MAX_TROOPS_PER_TILE = 28
 Config.GROWTH_RATE = 0.012 -- fraction de l'ecart au plafond, comblee par tick
 Config.MIN_GROWTH = 0.6
 
+-- Un joueur humain doit pouvoir prendre une premiere decision interessante
+-- immediatement. Les bots savent optimiser chaque tick ; ce petit avantage de
+-- depart compense l'apprentissage de l'interface sans rendre les combats
+-- gratuits une fois la partie installee.
+Config.HUMAN_START_TROOPS = 230
+Config.HUMAN_GROWTH_MULTIPLIER = 1.18
+
 --=============================================================================
 -- Economie
 --=============================================================================
@@ -129,6 +153,8 @@ Config.MIN_GROWTH = 0.6
 -- embargo coupe litteralement les revenus de l'autre.
 
 Config.START_GOLD = 120
+Config.HUMAN_START_GOLD = 320 -- permet de construire une ville des le deploiement
+Config.HUMAN_GOLD_MULTIPLIER = 1.12
 
 -- Le revenu territorial est volontairement sous-lineaire (tiles^0.8) : un
 -- empire deux fois plus grand ne gagne pas deux fois plus. Sans cet
@@ -139,6 +165,8 @@ Config.GOLD_TILE_EXPONENT = 0.8
 Config.GOLD_TILE_SCALE = 0.0042 -- par tick
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
+Config.GOLD_PER_CITY = 0.08 -- par tick, par ville possedee
+Config.GOLD_PER_FACTORY_ROUTE = 0.48 -- par tick, uniquement si une ville est reliee
 -- Volontairement faible : un joueur qui accumule les capitales conquises en
 -- tenait douze en simulation, soit l'equivalent de plusieurs milliers de
 -- territoires en revenu. La capitale est un objectif militaire, pas une rente.
@@ -158,6 +186,38 @@ Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
 Config.DEFENDER_LOSS_RATIO = 0.55
 Config.MAX_TILES_PER_TICK = 400
+
+-- Ouverture lisible : on peut coloniser et construire immediatement, mais les
+-- guerres entre nations attendent quelques secondes. Deux fronts simultanes
+-- restent possibles ; au-dela le jeu devient une suite d'ordres illisibles.
+Config.PREPARATION_DURATION = 75
+Config.DOCTRINE_CHOICE_DURATION = 120
+Config.MAX_ACTIVE_ATTACKS_PER_PLAYER = 2
+
+--=============================================================================
+-- Accessibilite de l'IA
+--=============================================================================
+-- Les bots ne doivent pas jouer comme douze speedrunners contre un debutant.
+-- Ils colonisent encore et savent finir une partie, mais leur pression monte
+-- progressivement. La grace ne bloque que les attaques IA -> humain : le
+-- joueur reste libre d'ouvrir lui-meme une guerre quand il se sent pret.
+
+Config.BOT_ATTACK_RATIO_MIN = 0.12
+Config.BOT_ATTACK_RATIO_MAX = 0.25
+Config.BOT_ATTACK_CHANCE_EARLY = 0.35
+Config.BOT_ATTACK_CHANCE_LATE = 0.78
+Config.BOT_FULL_PRESSURE_AFTER = 6 * 60 -- secondes apres le premier deploiement
+Config.BOT_HUMAN_GRACE_DURATION = 3 * 60
+Config.BOT_HUMAN_PROTECTION_TILES = 120
+
+-- Progression persistante du commandant. Elle recompense surtout le fait de
+-- terminer une partie et de prendre des objectifs, pas le grind de tuiles.
+Config.XP_PER_MATCH = 50
+Config.XP_PER_WIN = 150
+Config.XP_PER_CAPITAL = 40
+Config.XP_PER_BUILDING = 8
+Config.XP_TILE_DIVISOR = 12
+Config.XP_LEVEL_BASE = 220
 
 --=============================================================================
 -- Marine
@@ -185,6 +245,7 @@ Config.BUILDING = {
 	SAM = 5,
 	CAPITAL = 6,
 	LAB = 7,
+	FACTORY = 8,
 }
 
 -- Classes de batiments. Elles structurent le menu de construction, mais surtout
@@ -215,12 +276,42 @@ Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
 Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
+Config.FACTORY_ROUTE_RANGE = 56 -- distance maximale usine -> ville, en tuiles
 
 -- Chaque batiment supplementaire du meme type coute plus cher. Sans cette
 -- inflation, un empire riche empile trois cents villes et le jeu se resume a
 -- cliquer partout : la simulation en produisait 357 en dix minutes. Avec un
 -- facteur de 0.35, la cinquieme ville coute deja 2,4 fois la premiere.
 Config.BUILD_COST_SCALING = 0.35
+
+-- Une ville n'est plus un achat que l'on oublie : elle peut devenir une
+-- metropole puis une megapole. Les bonus sont des valeurs TOTALES par niveau
+-- (et non des gains incrementaux), ce qui simplifie captures et destructions.
+-- `upgradeCost` est le prix pour atteindre le niveau suivant.
+Config.CITY_MAX_LEVEL = 3
+Config.CITY_LEVELS = {
+	[1] = {
+		name = "Ville",
+		popCapBonus = 900,
+		goldBonus = Config.GOLD_PER_CITY,
+		upgradeCost = 480,
+		requiredEra = 1,
+	},
+	[2] = {
+		name = "Metropole",
+		popCapBonus = 2200,
+		goldBonus = 0.18,
+		upgradeCost = 1250,
+		requiredEra = 2,
+	},
+	[3] = {
+		name = "Megapole",
+		popCapBonus = 4200,
+		goldBonus = 0.38,
+		upgradeCost = nil,
+		requiredEra = 3,
+	},
+}
 
 --=============================================================================
 -- Nucleaire

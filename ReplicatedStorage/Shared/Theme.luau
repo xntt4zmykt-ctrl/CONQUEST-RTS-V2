@@ -19,28 +19,31 @@ local Theme = {}
 
 Theme.color = {
 	-- Fonds, du plus profond au plus clair
-	void = Color3.fromRGB(8, 11, 18), -- derriere la carte
-	surface = Color3.fromRGB(13, 17, 25), -- panneaux
-	surfaceRaised = Color3.fromRGB(26, 32, 45), -- boutons, lignes
-	surfaceHover = Color3.fromRGB(38, 46, 63),
+	void = Color3.fromRGB(5, 9, 16), -- derriere la carte
+	surface = Color3.fromRGB(10, 17, 28), -- panneaux
+	surfaceRaised = Color3.fromRGB(18, 29, 45), -- boutons, lignes
+	surfaceHover = Color3.fromRGB(28, 48, 68),
+	surfaceBright = Color3.fromRGB(36, 58, 77),
+	glass = Color3.fromRGB(8, 15, 25),
 
 	-- Bordures
-	line = Color3.fromRGB(52, 63, 84),
-	lineStrong = Color3.fromRGB(84, 102, 133),
+	line = Color3.fromRGB(47, 72, 93),
+	lineStrong = Color3.fromRGB(92, 136, 155),
 
 	-- Texte
-	text = Color3.fromRGB(240, 245, 255),
-	textMuted = Color3.fromRGB(150, 166, 192),
-	textFaint = Color3.fromRGB(98, 112, 136),
+	text = Color3.fromRGB(239, 247, 250),
+	textMuted = Color3.fromRGB(156, 183, 194),
+	textFaint = Color3.fromRGB(101, 132, 146),
 
 	-- Accents semantiques
-	accent = Color3.fromRGB(228, 84, 66), -- action offensive
-	gold = Color3.fromRGB(245, 196, 84), -- ressource
-	ally = Color3.fromRGB(94, 214, 148), -- diplomatie positive
-	danger = Color3.fromRGB(255, 106, 96),
-	warning = Color3.fromRGB(255, 190, 84),
-	info = Color3.fromRGB(122, 172, 255),
-	nuclear = Color3.fromRGB(180, 255, 120),
+	accent = Color3.fromRGB(45, 194, 177), -- identite Blackline / action active
+	accentSoft = Color3.fromRGB(24, 92, 93),
+	gold = Color3.fromRGB(246, 193, 77), -- ressource
+	ally = Color3.fromRGB(86, 218, 153), -- diplomatie positive
+	danger = Color3.fromRGB(255, 94, 91),
+	warning = Color3.fromRGB(255, 180, 69),
+	info = Color3.fromRGB(102, 178, 242),
+	nuclear = Color3.fromRGB(195, 255, 119),
 }
 
 --=============================================================================
@@ -49,19 +52,19 @@ Theme.color = {
 -- Echelle de 4 px. Utiliser exclusivement ces valeurs.
 
 Theme.space = {
-	xs = 3,
-	sm = 6,
-	md = 9,
-	lg = 14,
-	xl = 20,
+	xs = 4,
+	sm = 8,
+	md = 12,
+	lg = 16,
+	xl = 24,
 }
 
 -- Rayons plus serres : un grand arrondi sur un petit panneau fait "application
 -- mobile gratuite". Les interfaces de strategie sont anguleuses.
 Theme.radius = {
-	sm = 4,
-	md = 6,
-	lg = 8,
+	sm = 6,
+	md = 8,
+	lg = 12,
 	pill = 999,
 }
 
@@ -86,9 +89,9 @@ Theme.font = {
 	la taille.
 ]]
 Theme.textSize = {
-	hero = 24, -- compteur de troupes
-	title = 14,
-	body = 12,
+	hero = 28, -- compteur de troupes
+	title = 15,
+	body = 13,
 	small = 11,
 	tiny = 10,
 }
@@ -121,7 +124,7 @@ function Theme.stroke(parent: GuiObject, color: Color3?, thickness: number?): UI
 	local s = Instance.new("UIStroke")
 	s.Color = color or Theme.color.line
 	s.Thickness = thickness or 1
-	s.Transparency = 0.35
+	s.Transparency = 0.18
 	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	s.Parent = parent
 	return s
@@ -154,13 +157,13 @@ function Theme.panel(name: string, parent: GuiObject): Frame
 	local frame = Instance.new("Frame")
 	frame.Name = name
 	frame.BackgroundColor3 = Theme.color.surface
-	-- Panneaux nettement plus translucides : la carte doit rester lisible
-	-- derriere l'interface, sinon elle devient un cadre au lieu d'un jeu.
-	frame.BackgroundTransparency = 0.18
+	frame.BackgroundTransparency = 0.08
 	frame.BorderSizePixel = 0
 	frame.Parent = parent
 	Theme.corner(frame, Theme.radius.md)
-	Theme.stroke(frame, Theme.color.line, 1)
+	local stroke = Theme.stroke(frame, Theme.color.line, 1)
+	frame:SetAttribute("PanelStroke", true)
+	stroke.Transparency = 0.22
 	return frame
 end
 

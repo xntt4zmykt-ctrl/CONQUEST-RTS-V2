@@ -44,6 +44,7 @@ export type PlayerState = {
 	alive: boolean,
 	-- Agregats maintenus a l'incrementale plutot que recalcules
 	cityPopBonus: number,
+	cityGoldBonus: number,
 	portCount: number,
 	siloCount: number,
 	samCount: number,
@@ -55,6 +56,11 @@ export type PlayerState = {
 	buildingCounts: { [number]: number },
 	betrayals: number,
 	traitorUntil: number,
+	capturedTiles: number,
+	lostTiles: number,
+	capitalsCaptured: number,
+	buildingsBuilt: number,
+	attacksLaunched: number,
 }
 
 export type Attack = {
@@ -93,6 +99,8 @@ export type Missile = {
 export type Building = {
 	kind: number,
 	slot: number,
+	level: number,
+	link: number?, -- usine -> ville qui recoit les marchandises
 	cooldown: number, -- utilise par les batteries SAM
 }
 
@@ -123,6 +131,7 @@ export type GameState = typeof(setmetatable(
 		sounds: { { name: string, only: number? } },
 		mode: any,
 		events: { { text: string, kind: string, only: number? } },
+		combatUnlocked: boolean,
 	},
 	GameState
 ))
@@ -164,6 +173,10 @@ function GameState.new(seed: number): GameState
 	self.sounds = {}
 	self.events = {}
 	self.mode = nil
+	-- L'etat brut reste immediatement jouable pour les simulations et les
+	-- tests. Le serveur de match le passe explicitement a false pendant son
+	-- compte a rebours de preparation.
+	self.combatUnlocked = true
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -275,6 +288,9 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 			old.tiles -= 1
 			old.border[index] = nil
 			old.coast[index] = nil
+			if self.tick > 0 then
+				old.lostTiles += 1
+			end
 		end
 	end
 
@@ -285,6 +301,9 @@ function GameState.setOwner(self: GameState, index: number, slot: number)
 		local new = self.players[slot]
 		if new then
 			new.tiles += 1
+			if self.tick > 0 then
+				new.capturedTiles += 1
+			end
 			-- Le relief est fige pour toute la partie : le caractere cotier
 			-- d'une tuile ne change jamais, il suffit de le calculer a la
 			-- capture.
@@ -340,19 +359,21 @@ function GameState.applyDefenseAura(self: GameState, index: number, sign: number
 	end
 end
 
-function GameState.countBuilding(self: GameState, slot: number, kind: number, sign: number)
+function GameState.countBuilding(self: GameState, slot: number, kind: number, sign: number, level: number?)
 	local ps = self.players[slot]
 	if not ps then
 		return
 	end
 
 	ps.buildingCounts[kind] = (ps.buildingCounts[kind] or 0) + sign
-	if kind == B.CITY or kind == B.CAPITAL then
+	if kind == B.CITY then
+		local city = Config.CITY_LEVELS[level or 1] or Config.CITY_LEVELS[1]
+		ps.cityPopBonus += sign * city.popCapBonus
+		ps.cityGoldBonus += sign * city.goldBonus
+	elseif kind == B.CAPITAL then
 		local def = BuildingDefs.get(kind)
 		ps.cityPopBonus += sign * (if def then def.popCapBonus else 0)
-		if kind == B.CAPITAL then
-			ps.capitalCount += sign
-		end
+		ps.capitalCount += sign
 	elseif kind == B.PORT then
 		ps.portCount += sign
 	elseif kind == B.SILO then
@@ -379,26 +400,115 @@ function GameState.onCapitalCaptured(self: GameState, formerOwner: number, capto
 	end
 	if winner then
 		winner.gold += Config.CAPITAL_PLUNDER
+		winner.capitalsCaptured += 1
 	end
 
 	local victimName = if victim then victim.name else "Une faction"
 	local captorName = if winner then winner.name else "un assaillant"
-	self:notify(`\u{1F3F1} La capitale de {victimName} est tombee aux mains de {captorName} !`, "alert")
-	self:sound("capitalFallen")
+	self:notifyBetween(
+		`\u{1F3F1} La capitale de {victimName} est tombee aux mains de {captorName} !`,
+		"alert",
+		formerOwner,
+		captor
+	)
+	local humanInvolved = (victim ~= nil and not victim.isBot) or (winner ~= nil and not winner.isBot)
+	if humanInvolved then
+		self:sound("capitalFallen")
+	end
 	self.capitalEvents += 1
+end
+
+-- Reconnecte toutes les usines d'une faction a leur ville la plus proche.
+-- Cette operation n'arrive qu'a la construction/capture/destruction d'un
+-- batiment : aucun balayage de la carte n'est effectue a chaque tick.
+function GameState.refreshFactoryLinks(self: GameState, slot: number)
+	if not self.players[slot] then
+		return
+	end
+
+	local cities = {}
+	local factories = {}
+	for index, building in self.buildings do
+		if building.slot == slot then
+			if building.kind == B.CITY then
+				table.insert(cities, index)
+			elseif building.kind == B.FACTORY then
+				table.insert(factories, index)
+			end
+		end
+	end
+
+	local maxDistance2 = Config.FACTORY_ROUTE_RANGE * Config.FACTORY_ROUTE_RANGE
+	for _, factoryIndex in factories do
+		local fx, fy = MapGen.fromIndex(factoryIndex)
+		local best: number? = nil
+		local bestDistance2 = maxDistance2 + 1
+		for _, cityIndex in cities do
+			local cx, cy = MapGen.fromIndex(cityIndex)
+			local dx, dy = cx - fx, cy - fy
+			local distance2 = dx * dx + dy * dy
+			if distance2 <= maxDistance2 and distance2 < bestDistance2 then
+				best = cityIndex
+				bestDistance2 = distance2
+			end
+		end
+
+		local factory = self.buildings[factoryIndex]
+		if factory and factory.link ~= best then
+			factory.link = best
+			self.buildingDirty[factoryIndex] = true
+		end
+	end
+end
+
+function GameState.logisticsFor(self: GameState, slot: number): (number, number)
+	local routes = 0
+	local income = 0
+	for index, building in self.buildings do
+		if building.slot ~= slot or building.kind ~= B.FACTORY or not building.link then
+			continue
+		end
+		local city = self.buildings[building.link]
+		if not city or city.slot ~= slot or city.kind ~= B.CITY then
+			continue
+		end
+		local fx, fy = MapGen.fromIndex(index)
+		local cx, cy = MapGen.fromIndex(building.link)
+		local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
+		local efficiency = 0.7 + 0.3 * (1 - math.clamp(distance / Config.FACTORY_ROUTE_RANGE, 0, 1))
+		routes += 1
+		income += Config.GOLD_PER_FACTORY_ROUTE * efficiency
+	end
+	return routes, income
 end
 
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
 	end
-	self.buildings[index] = { kind = kind, slot = slot, cooldown = 0 }
+	self.buildings[index] = { kind = kind, slot = slot, level = 1, link = nil, cooldown = 0 }
 	self.buildingDirty[index] = true
-	self:countBuilding(slot, kind, 1)
+	self:countBuilding(slot, kind, 1, 1)
 
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
 	end
+	if kind == B.CITY or kind == B.FACTORY then
+		self:refreshFactoryLinks(slot)
+	end
+end
+
+function GameState.upgradeCity(self: GameState, index: number): number?
+	local building = self.buildings[index]
+	if not building or building.kind ~= B.CITY or building.level >= Config.CITY_MAX_LEVEL then
+		return nil
+	end
+
+	self:countBuilding(building.slot, building.kind, -1, building.level)
+	building.level += 1
+	self:countBuilding(building.slot, building.kind, 1, building.level)
+	self.buildingDirty[index] = true
+	return building.level
 end
 
 function GameState.transferBuilding(self: GameState, index: number, newSlot: number)
@@ -406,10 +516,15 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	if not building then
 		return
 	end
-	self:countBuilding(building.slot, building.kind, -1)
+	local previousSlot = building.slot
+	self:countBuilding(previousSlot, building.kind, -1, building.level)
 	building.slot = newSlot
-	self:countBuilding(newSlot, building.kind, 1)
+	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.CITY or building.kind == B.FACTORY then
+		self:refreshFactoryLinks(previousSlot)
+		self:refreshFactoryLinks(newSlot)
+	end
 end
 
 function GameState.destroyBuilding(self: GameState, index: number)
@@ -417,12 +532,17 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	if not building then
 		return
 	end
+	local previousSlot = building.slot
+	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
 		self:applyDefenseAura(index, -1)
 	end
-	self:countBuilding(building.slot, building.kind, -1)
+	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
+	if previousKind == B.CITY or previousKind == B.FACTORY then
+		self:refreshFactoryLinks(previousSlot)
+	end
 end
 
 --=============================================================================
@@ -477,21 +597,23 @@ function GameState.addPlayer(
 	if not slot then
 		return nil
 	end
+	local isBot = player == nil
 
 	local state: PlayerState = {
 		slot = slot,
 		player = player,
 		name = name,
-		isBot = player == nil,
+		isBot = isBot,
 		doctrine = Doctrines.DEFAULT_ID,
-		troops = Config.START_TROOPS,
-		gold = Config.START_GOLD,
+		troops = if isBot then Config.START_TROOPS else Config.HUMAN_START_TROOPS,
+		gold = if isBot then Config.START_GOLD else Config.HUMAN_START_GOLD,
 		tiles = 0,
 		attackRatio = Config.DEFAULT_ATTACK_RATIO,
 		border = {},
 		coast = {},
 		alive = true,
 		cityPopBonus = 0,
+		cityGoldBonus = 0,
 		portCount = 0,
 		siloCount = 0,
 		samCount = 0,
@@ -501,6 +623,11 @@ function GameState.addPlayer(
 		buildingCounts = {},
 		betrayals = betrayals,
 		traitorUntil = 0,
+		capturedTiles = 0,
+		lostTiles = 0,
+		capitalsCaptured = 0,
+		buildingsBuilt = 0,
+		attacksLaunched = 0,
 	}
 	self.players[slot] = state
 	self.alliances[slot] = {}
@@ -638,6 +765,9 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 	if targetSlot ~= NEUTRAL and self:areAllied(attackerSlot, targetSlot) then
 		return false, "Tu es allie a cette faction. Romps le pacte d'abord."
 	end
+	if targetSlot ~= NEUTRAL and not self.combatUnlocked then
+		return false, "Les frontieres sont protegees pendant la preparation. Colonise ou construis d'abord."
+	end
 
 	local committed = math.floor(attacker.troops * attacker.attackRatio)
 	if committed < Config.MIN_ATTACK_TROOPS then
@@ -649,8 +779,18 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			attacker.troops -= committed
 			atk.troops += committed
-			return true, nil
+			return true, `Front renforce : {committed} troupes supplementaires.`
 		end
+	end
+
+	local active = 0
+	for _, atk in self.attacks do
+		if atk.attacker == attackerSlot then
+			active += 1
+		end
+	end
+	if active >= Config.MAX_ACTIVE_ATTACKS_PER_PLAYER then
+		return false, `Tu diriges deja {active} offensives. Termine ou renforce un front existant.`
 	end
 
 	local frontier: { [number]: true } = {}
@@ -677,7 +817,17 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		troops = committed,
 		frontier = frontier,
 	})
-	return true, nil
+	attacker.attacksLaunched += 1
+
+	-- L'assaillant voit la confirmation via la reponse a son ordre. La victime
+	-- humaine, elle, doit etre avertie immediatement : attendre la premiere
+	-- perte de tuile rendait les guerres impossibles a anticiper.
+	local defender = self.players[targetSlot]
+	if targetSlot ~= NEUTRAL and defender and not defender.isBot then
+		self:notify(`⚔ {attacker.name} ouvre un front contre toi !`, "bad", targetSlot)
+		self:sound("attackLaunch", targetSlot)
+	end
+	return true, `Offensive lancee : {committed} troupes engagees.`
 end
 
 --[[
@@ -799,16 +949,21 @@ function GameState.stepEconomy(self: GameState)
 		local maxTroops = self:maxTroops(ps)
 		if ps.troops < maxTroops then
 			local gain = math.max(Config.MIN_GROWTH, (maxTroops - ps.troops) * Config.GROWTH_RATE)
-			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth * era.growth)
+			local humanGrowth = if ps.isBot then 1 else Config.HUMAN_GROWTH_MULTIPLIER
+			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth * era.growth * humanGrowth)
 		end
 
+		local _, logisticsIncome = self:logisticsFor(ps.slot)
 		local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
 		local income = territorial
+			+ ps.cityGoldBonus
+			+ logisticsIncome
 			+ ps.portCount * Config.GOLD_PER_PORT
 			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
 			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
 		local modeGold = if self.mode then self.mode.goldMultiplier else 1
-		ps.gold += income * doctrine.goldRate * era.gold * modeGold
+		local humanGold = if ps.isBot then 1 else Config.HUMAN_GOLD_MULTIPLIER
+		ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold
 	end
 end
 
@@ -870,6 +1025,8 @@ function GameState.flushBuildingDelta(self: GameState): { any }?
 			index = index,
 			kind = if building then building.kind else 0,
 			slot = if building then building.slot else 0,
+			level = if building then building.level else 0,
+			linkIndex = if building then building.link else nil,
 		})
 	end
 	table.clear(self.buildingDirty)

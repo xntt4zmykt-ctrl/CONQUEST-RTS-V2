@@ -140,11 +140,20 @@ check("identite, ere, diplomatie et classement", function()
 			maxTroops = 5000,
 			era = math.min(5, 1 + slot % 5),
 			eraProgress = slot / 12,
+			activeAttacks = if slot == 1 then 2 else 0,
+			committedTroops = if slot == 1 then 640 else 0,
+			logisticsRoutes = if slot == 1 then 3 else 0,
+			logisticsIncome = if slot == 1 then 1.2 else 0,
+			buildPrices = { [Config.BUILDING.CITY] = 243 },
 		}
 		roster[slot] = { name = `Nation{slot}`, isBot = slot > 1, doctrine = 1, betrayals = slot % 3 }
 	end
 
 	hud:update(stats, roster)
+	assert(string.find(hud.frontStatus.Text, "2 FRONTS") ~= nil, "les fronts actifs ne sont pas affiches")
+	assert(string.find(hud.tilesLabel.Text, "3") ~= nil, "les routes logistiques ne sont pas affichees")
+	assert(string.find(hud.goldLabel.Text, "+12.0/s") ~= nil, "le revenu logistique n'est pas affiche")
+	assert(hud.buildPriceLabels[Config.BUILDING.CITY].Text == "243 or", "le vrai prix de construction n'est pas affiche")
 	hud:setDiplomacy({
 		allies = { [2] = true },
 		incoming = { [3] = true },
@@ -172,6 +181,23 @@ check("fil de notifications sature", function()
 	end
 end)
 
+check("onboarding, profil et inspecteur de territoire", function()
+	hud:setProfile({ xp = 640, level = 2, matches = 4, wins = 1, betrayals = 0 })
+	hud:startOnboarding()
+	for _, action in { "doctrine", "colonize", "build", "attack", "era" } do
+		hud:recordTutorial(action)
+	end
+	assert(hud.missionCounter.Text == "5 / 5", "le briefing ne se termine pas")
+
+	hud:selectTerritory(4242, 0, "Plaines", nil)
+	hud:selectTerritory(4243, 1, "Foret", "Ville", Config.BUILDING.CITY, 1)
+	assert(hud.territoryButtons.build.Text == "Ameliorer", "une ville ne propose pas son evolution")
+	hud:selectTerritory(4243, 1, "Foret", "Ville", Config.BUILDING.CITY, 3)
+	assert(hud.territoryButtons.build.Text == "Niveau max", "une megapole peut encore etre amelioree")
+	hud:selectTerritory(4244, 2, "Littoral", "Port")
+	assert(hud.territoryPanel.Visible, "la fiche de territoire ne s'affiche pas")
+end)
+
 check("curseur d'engagement et doctrines", function()
 	for _, ratio in { 0.05, 0.25, 0.5, 1 } do
 		hud:setRatio(ratio)
@@ -190,7 +216,11 @@ check("ecran de victoire", function()
 		roster[slot] = { name = `Nation{slot}`, isBot = false, doctrine = 1, betrayals = 0 }
 	end
 	-- Appele deux fois : une relance de partie ne doit pas dupliquer les lignes.
-	victory:show(1, "Valoria", ranked, roster, 1)
+	local summary = {
+		[1] = { troops = 1000, tiles = 850, gold = 200, maxTroops = 2000, era = 3, eraProgress = 0.5,
+			capturedTiles = 240, lostTiles = 20, capitalsCaptured = 2, buildingsBuilt = 7, attacksLaunched = 8 },
+	}
+	victory:show(1, "Valoria", ranked, roster, 1, summary, { xp = 900, level = 3, matches = 8, wins = 2, betrayals = 0, lastGain = 180 })
 	victory:hide()
 	victory:show(2, "Kerensk", ranked, roster, 1)
 	victory:setCountdown(12)
@@ -218,6 +248,11 @@ check("calques d'entites, effets et apercu", function()
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
+	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
+	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
+	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
+	effects:clearActionPreview()
+	effects:clearSelection()
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -225,9 +260,42 @@ check("pose et capture de chaque type de batiment", function()
 	local index = 0
 	for _, def in BuildingDefs.LIST do
 		index += 137
-		table.insert(deltas, { index = index, kind = def.id, slot = 1 })
+		table.insert(deltas, { index = index, kind = def.id, slot = 1, level = 1 })
 	end
 	overlay:applyBuildingDelta(deltas)
+	local firstKind, firstSlot = overlay:buildingAt(deltas[1].index)
+	assert(firstKind == deltas[1].kind and firstSlot == 1, "l'inspection du batiment est fausse")
+
+	-- Une usine connectee cree une route monde et expose sa destination dans
+	-- l'inspecteur. Le camion est ensuite anime par la boucle de frame.
+	local cityIndex: number? = nil
+	local factoryEntry = nil
+	for _, entry in deltas do
+		if entry.kind == Config.BUILDING.CITY then
+			cityIndex = entry.index
+		elseif entry.kind == Config.BUILDING.FACTORY then
+			factoryEntry = entry
+		end
+	end
+	assert(cityIndex ~= nil and factoryEntry ~= nil, "ville ou usine absente du catalogue")
+	factoryEntry.linkIndex = cityIndex
+	overlay:applyBuildingDelta({ factoryEntry })
+	local _, _, _, linkedCity = overlay:buildingAt(factoryEntry.index)
+	assert(linkedCity == cityIndex and overlay.routes[factoryEntry.index] ~= nil, "route logistique non creee")
+	assert(#overlay.routes[factoryEntry.index].path == 6, "la route logistique n'est pas courbee en segments")
+	overlay:stepInterpolation(1 / 60)
+
+	-- Une ville qui evolue change reellement de silhouette et conserve son
+	-- niveau dans l'inspecteur client.
+	for _, entry in deltas do
+		if entry.kind == Config.BUILDING.CITY then
+			entry.level = 3
+			overlay:applyBuildingDelta({ entry })
+			local _, _, level = overlay:buildingAt(entry.index)
+			assert(level == 3, "le niveau de ville n'est pas replique")
+			break
+		end
+	end
 
 	-- Recapture : le modele doit etre recolore, pas reconstruit.
 	for _, entry in deltas do
@@ -240,6 +308,7 @@ check("pose et capture de chaque type de batiment", function()
 		entry.kind = 0
 	end
 	overlay:applyBuildingDelta(deltas)
+	assert(next(overlay.routes) == nil, "une route detruite reste affichee")
 end)
 
 check("apercu de placement pour chaque batiment", function()
@@ -259,6 +328,11 @@ check("navires, missiles et interpolation", function()
 	}, {
 		{ id = 3, slot = 1, x = 40, y = 40, tx = 60, ty = 60, kind = 1 },
 	})
+	assert(#overlay.units[1].visual.pieces >= 15, "le navire de debarquement est encore un placeholder")
+	assert(#overlay.units[2].visual.pieces >= 15, "le cargo est encore un placeholder")
+	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
+	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
+	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
 	overlay:stepInterpolation(1 / 60)
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)

@@ -17,6 +17,7 @@
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
@@ -53,6 +54,9 @@ function WorldCamera.new(): WorldCamera
 	self.mode = "overview"
 	self.edgePan = false
 	self.orbiting = false
+	self.shake = 0
+	self.fovKick = 0
+	self.clock = 0
 
 	self.camera.CameraType = Enum.CameraType.Scriptable
 	self.camera.FieldOfView = 60
@@ -124,12 +128,22 @@ function WorldCamera.setMode(self: WorldCamera, mode: string)
 
 	if mode == "overview" then
 		self.camera.CameraType = Enum.CameraType.Scriptable
+		self.camera.FieldOfView = 60
 		self.orbiting = false
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	else
 		-- On rend la camera a Roblox : le controle du personnage, la collision
 		-- et le zoom epaule sont deja resolus, inutile de les reimplementer.
+		-- CameraSubject doit etre repose explicitement : apres plusieurs minutes
+		-- en Scriptable, Roblox peut conserver un sujet nul et laisser la camera
+		-- au ras de la geometrie au lieu de suivre l'avatar.
+		local character = Players.LocalPlayer.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			self.camera.CameraSubject = humanoid
+		end
 		self.camera.CameraType = Enum.CameraType.Custom
+		self.camera.FieldOfView = 70
 	end
 end
 
@@ -155,6 +169,16 @@ function WorldCamera.setDistance(self: WorldCamera, distance: number, instant: b
 	if instant then
 		self.distance = self.targetDistance
 	end
+end
+
+-- Impulsion courte utilisee par les ordres et explosions. Elle ne deplace pas
+-- le point vise : le joueur garde le controle et ne perd jamais son front.
+function WorldCamera.punch(self: WorldCamera, intensity: number)
+	if self.mode ~= "overview" then
+		return
+	end
+	self.shake = math.max(self.shake, math.clamp(intensity, 0, 1.5))
+	self.fovKick = math.max(self.fovKick, intensity * 2.2)
 end
 
 -- Le point de mire ne quitte jamais la carte, avec une marge de tolerance.
@@ -239,6 +263,7 @@ end
 
 function WorldCamera.step(self: WorldCamera, dt: number)
 	self:stepInput(dt)
+	self.clock += dt
 
 	if self.mode ~= "overview" then
 		return
@@ -251,10 +276,20 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
+	self.shake = math.max(0, self.shake - dt * 2.8)
+	self.fovKick += (0 - self.fovKick) * (1 - math.exp(-7 * dt))
 
 	local rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)
 	local offset = rotation:VectorToWorldSpace(Vector3.new(0, 0, self.distance))
-	self.camera.CFrame = CFrame.lookAt(self.focus + offset, self.focus)
+	local shake = Vector3.new(
+		math.sin(self.clock * 31) * self.shake * 0.65,
+		math.cos(self.clock * 37) * self.shake * 0.42,
+		math.sin(self.clock * 23) * self.shake * 0.5
+	)
+	self.camera.CFrame = CFrame.lookAt(self.focus + offset + shake, self.focus + shake * 0.18)
+	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
+	local targetFov = 56 + zoomRatio * 7 + self.fovKick
+	self.camera.FieldOfView += (targetFov - self.camera.FieldOfView) * (1 - math.exp(-8 * dt))
 end
 
 --=============================================================================
@@ -269,11 +304,20 @@ end
 	propre tuile au lieu de la cible visee.
 ]]
 function WorldCamera.tileAtScreen(self: WorldCamera, screenPos: Vector2, worldRoot: Instance): number?
-	local ray = self.camera:ViewportPointToRay(screenPos.X, screenPos.Y)
+	-- `screenPos` vient de UserInputService:GetMouseLocation/InputObject.Position :
+	-- ce sont des coordonnees ecran qui incluent la safe-area du CoreGui.
+	-- ViewportPointToRay emploie un autre repere et decalait donc le ciblage,
+	-- surtout avec IgnoreGuiInset et la barre Roblox visible.
+	local ray = self.camera:ScreenPointToRay(screenPos.X, screenPos.Y)
 
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = { worldRoot }
+	local included = { worldRoot }
+	local terrain = Workspace:FindFirstChild("Terrain")
+	if terrain then
+		table.insert(included, terrain)
+	end
+	params.FilterDescendantsInstances = included
 
 	local result = Workspace:Raycast(ray.Origin, ray.Direction * 5000, params)
 	if not result then

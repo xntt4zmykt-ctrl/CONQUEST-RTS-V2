@@ -1,20 +1,20 @@
 --!strict
 --[[
-	Geometrie de collision du monde, cote serveur.
+	Collision du monde, cote serveur.
 
 	Pourquoi elle existe alors que le client construit deja le monde visible :
 	le rendu du client est **local**, le serveur n'en voit rien. Sans sol cote
 	serveur, un avatar depose sur sa capitale tombe indefiniment.
 
 	L'observation qui rend la chose economique : **le relief ne change jamais**.
-	Une conquete change la couleur d'une tuile, pas sa hauteur. Le serveur peut
-	donc poser une collision statique une seule fois, fusionnee par relief
-	uniquement — ce qui donne beaucoup moins de blocs que la version coloree du
-	client, puisqu'on ne decoupe pas par proprietaire.
+	Une conquete change la couleur d'une tuile, pas sa hauteur. Le serveur pose
+	donc une collision statique une seule fois, fusionnee par altitude
+	uniquement — une collision invisible n'a ni couleur ni matiere, donc deux
+	terrains de meme hauteur sont interchangeables.
 
 	Repartition finale :
-	  serveur -> collision invisible, statique, repliquee une fois
-	  client  -> geometrie coloree, locale, reconstruite a volonte
+	  serveur -> collision invisible et bordures, statiques, repliquees une fois
+	  client  -> geometrie coloree en blocs, locale, reconstruite a volonte
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -66,6 +66,10 @@ function WorldBuilder.build(terrain: buffer): Folder
 		existing:Destroy()
 	end
 
+	-- Le SmoothTerrain d'une partie precedente doit disparaitre, sinon il
+	-- flotte au milieu des blocs.
+	Workspace.Terrain:Clear()
+
 	local folder = Instance.new("Folder")
 	folder.Name = "ConquestCollision"
 
@@ -95,23 +99,66 @@ function WorldBuilder.build(terrain: buffer): Folder
 		part.Parent = folder
 	end
 
-	-- Plan d'eau : un avatar tombe a la mer doit flotter quelque part plutot
-	-- que de sombrer sans fin.
-	local water = Instance.new("Part")
-	water.Name = "OceanFloor"
-	water.Anchored = true
-	water.CanCollide = true
-	water.CanTouch = false
-	water.CanQuery = false
-	water.CastShadow = false
-	water.Transparency = 1
-	water.Size = Vector3.new(Config.WORLD_WIDTH, 1, Config.WORLD_DEPTH)
-	water.CFrame = CFrame.new(0, Config.OCEAN_LEVEL - 0.5, 0)
-	water.Parent = folder
+	-- Plancher oceanique : un avatar tombe a la mer doit s'arreter quelque part
+	-- plutot que de sombrer sans fin.
+	local seabed = Instance.new("Part")
+	seabed.Name = "Seabed"
+	seabed.Anchored = true
+	seabed.CanCollide = true
+	seabed.CanTouch = false
+	seabed.CanQuery = false
+	seabed.CastShadow = false
+	seabed.Transparency = 1
+	seabed.Size = Vector3.new(Config.WORLD_WIDTH, 1, Config.WORLD_DEPTH)
+	seabed.CFrame = CFrame.new(0, Config.OCEAN_LEVEL - 0.5, 0)
+	seabed.Parent = folder
+
+	-- Quatre murs invisibles ferment les bords du monde. Le serveur les possede
+	-- car la geometrie du client est locale et ne peut pas retenir un
+	-- personnage. Ils debordent aux coins pour qu'aucun passage ne reste ouvert.
+	local thickness = Config.WORLD_BORDER_THICKNESS
+	local wallHeight = Config.WORLD_BORDER_HEIGHT
+	local halfWidth = Config.WORLD_WIDTH / 2
+	local halfDepth = Config.WORLD_DEPTH / 2
+
+	local function borderWall(name: string, size: Vector3, position: Vector3)
+		local wall = Instance.new("Part")
+		wall.Name = name
+		wall.Anchored = true
+		wall.CanCollide = true
+		wall.CanTouch = false
+		wall.CanQuery = false
+		wall.CastShadow = false
+		wall.Transparency = 1
+		wall.Size = size
+		wall.CFrame = CFrame.new(position)
+		wall.Parent = folder
+	end
+
+	borderWall(
+		"BorderWest",
+		Vector3.new(thickness, wallHeight, Config.WORLD_DEPTH + thickness * 2),
+		Vector3.new(-halfWidth - thickness / 2, wallHeight / 2, 0)
+	)
+	borderWall(
+		"BorderEast",
+		Vector3.new(thickness, wallHeight, Config.WORLD_DEPTH + thickness * 2),
+		Vector3.new(halfWidth + thickness / 2, wallHeight / 2, 0)
+	)
+	borderWall(
+		"BorderNorth",
+		Vector3.new(Config.WORLD_WIDTH + thickness * 2, wallHeight, thickness),
+		Vector3.new(0, wallHeight / 2, -halfDepth - thickness / 2)
+	)
+	borderWall(
+		"BorderSouth",
+		Vector3.new(Config.WORLD_WIDTH + thickness * 2, wallHeight, thickness),
+		Vector3.new(0, wallHeight / 2, halfDepth + thickness / 2)
+	)
 
 	folder.Parent = Workspace
 
-	print(`[{Config.GAME_NAME}] collision du monde : {#blocks} blocs`)
+	print(`[{Config.GAME_NAME}] collision du monde : {#blocks} blocs + 4 bordures`)
 	return folder
 end
 
