@@ -84,6 +84,18 @@ BuildingDefs.LIST = {
 		goldBonus = 0,
 	},
 	{
+		id = B.NAVAL_BASE,
+		class = Config.BUILD_CLASS.MILITARY,
+		name = "Base navale",
+		symbol = "\u{2388}",
+		cost = 380,
+		description = "Entretient un porte-avions qui intercepte les debarquements",
+		coastalOnly = true,
+		buildable = true,
+		popCapBonus = 0,
+		goldBonus = 0,
+	},
+	{
 		id = B.SILO,
 		class = Config.BUILD_CLASS.MILITARY,
 		name = "Silo",

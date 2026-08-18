@@ -90,10 +90,75 @@ local function addWake(visual: Visual)
 	end
 end
 
+--[[
+	Modele importe du porte-avions.
+
+	Roblox ne charge pas un fichier .glb a l'execution : il faut l'importer une
+	fois via le 3D Importer de Studio, qui l'uploade et rend un identifiant.
+	Coller cet identifiant ici suffit — la coque procedurale de secours reste en
+	place tant que le champ est vide, donc le jeu n'attend jamais l'asset.
+
+	Le fichier source est versionne dans assets/models/aircraft-carrier.glb.
+]]
+UnitModels.CARRIER_MESH_ID = ""
+UnitModels.CARRIER_MESH_SCALE = Vector3.new(26, 26, 26)
+
+--[[
+	Porte-avions de patrouille : long pont plat, ilot decale sur tribord et
+	aeronefs au mouillage. La silhouette doit se distinguer d'un transport meme
+	completement dezoome — c'est elle qui dit au joueur qu'une cote est
+	defendue.
+]]
+local function buildCarrier(visual: Visual, faction: Color3)
+	if UnitModels.CARRIER_MESH_ID ~= "" then
+		local mesh = Instance.new("MeshPart")
+		mesh.Name = "CarrierMesh"
+		mesh.Anchored = true
+		mesh.CanCollide = false
+		mesh.CanTouch = false
+		mesh.CanQuery = false
+		mesh.CastShadow = false
+		mesh.Size = UnitModels.CARRIER_MESH_SCALE
+		mesh.CFrame = CFrame.new()
+		mesh.Parent = visual.model
+		table.insert(visual.parts, { part = mesh, offset = CFrame.new(), role = "hull" })
+		return
+	end
+
+	-- Coque longue et pont d'envol : deux volumes portent l'essentiel de la
+	-- lecture, le reste n'est que detail.
+	addPart(visual, "Part", "Hull", Vector3.new(5.6, 1.6, 18), NAVY_DARK, CFrame.new(0, -0.2, 0), Enum.Material.Metal)
+	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	addPart(visual, "Part", "FlightDeck", Vector3.new(8.4, 0.35, 19.5), DECK, CFrame.new(0, 0.78, 0), Enum.Material.DiamondPlate)
+	addPart(visual, "Part", "DeckLine", Vector3.new(0.35, 0.06, 15), WHITE, CFrame.new(-1.1, 0.98, 0), Enum.Material.SmoothPlastic)
+
+	-- Ilot decale a tribord, comme sur un vrai porte-avions.
+	addPart(visual, "Part", "Island", Vector3.new(1.9, 2.6, 4.2), NAVY, CFrame.new(3.05, 2.25, 2.2), Enum.Material.Metal)
+	local glass = addPart(visual, "Part", "IslandGlass", Vector3.new(1.96, 0.5, 0.12), GLASS, CFrame.new(3.05, 2.7, 0.12), Enum.Material.Glass)
+	glass.Transparency = 0.1
+	addPart(visual, "Part", "FactionStripe", Vector3.new(8.5, 0.12, 2.4), faction, CFrame.new(0, 0.99, 7.4), Enum.Material.SmoothPlastic)
+
+	-- Aeronefs au mouillage : de simples croix suffisent a la lecture.
+	for i = -1, 1 do
+		addPart(visual, "Part", "Jet", Vector3.new(0.5, 0.28, 2.1), WHITE, CFrame.new(2.2, 1.1, i * 3.4 - 3), Enum.Material.Metal)
+		addPart(visual, "Part", "JetWing", Vector3.new(2.1, 0.2, 0.5), WHITE, CFrame.new(2.2, 1.1, i * 3.4 - 3.2), Enum.Material.Metal)
+	end
+
+	addPart(visual, "Part", "Mast", Vector3.new(0.2, 3, 0.2), NAVY_DARK, CFrame.new(3.05, 5, 2.2), Enum.Material.Metal)
+	addPart(visual, "Part", "Radar", Vector3.new(2.6, 0.16, 0.5), WHITE, CFrame.new(3.05, 6.2, 2.2), Enum.Material.Metal, "radar")
+	addPart(visual, "Part", "Flag", Vector3.new(0.12, 0.8, 1.35), faction, CFrame.new(3.05, 6.6, 2.85), Enum.Material.Fabric, "flag")
+end
+
 function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Visual
 	local visual = baseVisual(kind, false)
 	visual.model.Parent = parent
 	local faction = Theme.factionColor(slot)
+
+	if kind == 3 then
+		buildCarrier(visual, faction)
+		addWake(visual)
+		return visual
+	end
 
 	-- Coque basse, proue inclinee et pont superieur : trois volumes suffisent a
 	-- casser instantanement la silhouette de cube du placeholder historique.

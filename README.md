@@ -277,6 +277,22 @@ usine animée avec quai et fumée, silo ouvert avec missile complet, batterie SA
 quatre intercepteurs et radar motorisé. Les matériaux, ombres, vitrages et lumières
 restent lisibles aussi bien depuis la vue stratégique qu'en avatar.
 
+### Marine
+
+Les débarquements sont le seul moyen d'ouvrir la carte : sans eux un joueur
+insulaire est en prison. Les transports suivent une vraie route maritime
+calculée en BFS — ils ne traversent jamais la terre.
+
+La **base navale** entretient un porte-avions qui orbite autour d'elle et saigne
+les transports ennemis passant à portée. Longer une côte défendue coûte cher, la
+contourner coûte du temps. C'est ce qui transforme une invasion maritime en pari
+plutôt qu'en simple dépense.
+
+Le modèle 3D importé se branche en une ligne : `UnitModels.CARRIER_MESH_ID`.
+Tant que le champ est vide, une coque procédurale prend le relais — le jeu
+n'attend jamais l'asset. Le fichier source est versionné dans
+`assets/models/aircraft-carrier.glb`.
+
 ### Diplomatie
 
 Les traités sont **mécaniques**, pas déclaratifs. Une alliance empêche
@@ -302,7 +318,6 @@ victoire et relance automatique · bots complets · rendu enrichi, minimap, HUD,
 **Pas encore fait**, par ordre de priorité :
 
 1. **Chat vocal de proximité** pour les négociations.
-2. **Navires de guerre** — actuellement les transports sont inarrêtables en mer.
 4. **Brouillard de guerre.**
 5. **Saisons et classement de clans.**
 

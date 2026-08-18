@@ -325,6 +325,7 @@ check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
 		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
 	}, {
 		{ id = 3, slot = 1, x = 40, y = 40, tx = 60, ty = 60, kind = 1 },
 	})

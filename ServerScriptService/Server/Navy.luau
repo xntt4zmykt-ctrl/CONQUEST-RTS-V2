@@ -25,6 +25,7 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local KIND_TRANSPORT = 1
 local KIND_TRADE = 2
+local KIND_CARRIER = 3
 
 local MAX_BFS_NODES = 24000
 
@@ -311,16 +312,137 @@ local function spawnTradeShip(state: GameState, rng: Random)
 end
 
 --=============================================================================
+-- Porte-avions de patrouille
+--=============================================================================
+
+--[[
+	Synchronise la flotte de patrouille avec les bases navales.
+
+	Un porte-avions par base : on en cree un quand une base apparait, on le
+	retire quand elle disparait ou change de main. Passer par cette
+	reconciliation plutot que par des evenements evite toute flotte fantome
+	apres une capture ou une frappe nucleaire.
+]]
+local function syncCarriers(state: GameState)
+	local seen: { [number]: boolean } = {}
+
+	for i = #state.boats, 1, -1 do
+		local boat = state.boats[i]
+		if boat.kind ~= KIND_CARRIER then
+			continue
+		end
+
+		local base = state.buildings[boat.homeTile]
+		if not base or base.kind ~= Config.BUILDING.NAVAL_BASE then
+			table.remove(state.boats, i)
+			continue
+		end
+
+		-- La base a change de main : le porte-avions suit son nouveau
+		-- proprietaire plutot que de rester au service du vaincu.
+		boat.slot = base.slot
+		seen[boat.homeTile] = true
+	end
+
+	for index, building in state.buildings do
+		if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
+			local x, y = MapGen.fromIndex(index)
+			table.insert(state.boats, {
+				id = state:nextId(),
+				slot = building.slot,
+				kind = KIND_CARRIER,
+				troops = 0,
+				x = x,
+				y = y,
+				path = {},
+				step = 1,
+				targetTile = index,
+				homeTile = index,
+				-- L'angle de depart derive de la tuile : deux bases voisines
+				-- n'ont pas leurs porte-avions superposes.
+				angle = (index % 360) * math.pi / 180,
+			})
+		end
+	end
+end
+
+--[[
+	Patrouille et interception.
+
+	L'orbite est purement geometrique — pas de trajectoire a calculer, pas de
+	collision a resoudre. Un transport ennemi a portee perd une fraction de ses
+	troupes a chaque tick, et coule s'il descend sous le seuil d'embarquement :
+	longer une cote defendue coute cher, la contourner coute du temps.
+]]
+local function stepCarriers(state: GameState)
+	for _, boat in state.boats do
+		if boat.kind ~= KIND_CARRIER then
+			continue
+		end
+
+		local hx, hy = MapGen.fromIndex(boat.homeTile)
+		boat.angle += Config.CARRIER_PATROL_SPEED
+		boat.x = hx + math.cos(boat.angle) * Config.CARRIER_PATROL_RADIUS
+		boat.y = hy + math.sin(boat.angle) * Config.CARRIER_PATROL_RADIUS
+	end
+
+	for i = #state.boats, 1, -1 do
+		local target = state.boats[i]
+		if target.kind ~= KIND_TRANSPORT then
+			continue
+		end
+
+		for _, carrier in state.boats do
+			if carrier.kind ~= KIND_CARRIER or carrier.slot == target.slot then
+				continue
+			end
+			if state:areAllied(carrier.slot, target.slot) then
+				continue
+			end
+
+			local dx = carrier.x - target.x
+			local dy = carrier.y - target.y
+			if dx * dx + dy * dy > Config.CARRIER_INTERCEPT_RANGE * Config.CARRIER_INTERCEPT_RANGE then
+				continue
+			end
+
+			target.troops -= target.troops * Config.CARRIER_INTERCEPT_DAMAGE
+
+			if target.troops < Config.MIN_BOAT_TROOPS then
+				local owner = state.players[target.slot]
+				local defender = state.players[carrier.slot]
+				state:notify("Ton convoi a ete coule en mer.", "bad", target.slot)
+				if defender then
+					state:notify(
+						`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
+						"good",
+						carrier.slot
+					)
+				end
+				state:sound("boatLand")
+				table.remove(state.boats, i)
+			end
+			break
+		end
+	end
+end
+
+--=============================================================================
 -- Tick
 --=============================================================================
 
 function Navy.step(state: GameState, rng: Random)
+	syncCarriers(state)
+	stepCarriers(state)
 	if state.tick % Config.TRADE_SHIP_INTERVAL == 0 then
 		spawnTradeShip(state, rng)
 	end
 
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
+		if boat.kind == KIND_CARRIER then
+			continue -- la patrouille est geree plus haut, sans chemin a suivre
+		end
 		local speed = Config.BOAT_SPEED * state:doctrineOf(boat.slot).boatSpeed
 
 		-- Avance le long du chemin, en interpolant pour un mouvement fluide
@@ -354,5 +476,6 @@ end
 
 Navy.KIND_TRANSPORT = KIND_TRANSPORT
 Navy.KIND_TRADE = KIND_TRADE
+Navy.KIND_CARRIER = KIND_CARRIER
 
 return Navy

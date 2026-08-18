@@ -83,6 +83,9 @@ export type Boat = {
 	path: { number },
 	step: number,
 	targetTile: number,
+	-- Porte-avions uniquement : base d'attache et angle d'orbite.
+	homeTile: number?,
+	angle: number?,
 }
 
 export type Missile = {

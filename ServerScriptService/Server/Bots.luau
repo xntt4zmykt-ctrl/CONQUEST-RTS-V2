@@ -183,7 +183,7 @@ end
 local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: number, rng: Random): { number }
 	local sites: { number } = {}
 
-	if kind == B.PORT then
+	if kind == B.PORT or kind == B.NAVAL_BASE then
 		for index in ps.coast do
 			table.insert(sites, index)
 			if #sites >= 40 then
@@ -303,6 +303,10 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 		wanted = B.PORT
 	elseif nukesUp and ps.samCount < 2 and roll < 0.5 then
 		wanted = B.SAM
+	elseif (ps.buildingCounts[B.NAVAL_BASE] or 0) < 2 and ps.era >= 2 and roll < 0.3 then
+		-- Une cote sans base navale laisse passer toutes les invasions : les
+		-- bots doivent la defendre, sinon le porte-avions ne sert que le joueur.
+		wanted = B.NAVAL_BASE
 	elseif ps.portCount < 3 and roll < 0.45 then
 		wanted = B.PORT
 	elseif roll < 0.78 then

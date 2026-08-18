@@ -413,8 +413,14 @@ print("")
 print(`--- apres {TICKS} ticks ({string.format("%.1f", TICKS / Config.TICK_RATE)} s de jeu simule) ---`)
 print(`temps de calcul   : {string.format("%.2f", elapsed)} s`)
 print(`colonisation      : {string.format("%.1f", state:colonizedRatio() * 100)} % des terres`)
-print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} capitale={buildingCounts[6] or 0} labo={buildingCounts[7] or 0} usine={buildingCounts[8] or 0}`)
-print(`navires en mer    : {#state.boats}`)
+print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} navale={buildingCounts[8] or 0} capitale={buildingCounts[6] or 0} labo={buildingCounts[7] or 0} usine={buildingCounts[8] or 0}`)
+local carriers = 0
+for _, boat in state.boats do
+	if boat.kind == 3 then
+		carriers += 1
+	end
+end
+print(`navires en mer    : {#state.boats} dont {carriers} porte-avions`)
 print(`offensives actives: {#state.attacks}`)
 print(`alliances         : {allianceCount}`)
 print(`trahisons         : {betrayalCount}`)

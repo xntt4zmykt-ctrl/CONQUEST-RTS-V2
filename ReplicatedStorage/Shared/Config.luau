@@ -258,6 +258,27 @@ Config.SUPPLY_MAX_PENALTY = 4.5 -- plafond : au-dela, la conquete est simplement
 --=============================================================================
 -- Marine
 --=============================================================================
+--[[
+	Porte-avions de patrouille.
+
+	Ils comblent un trou identifie de longue date : les transports de troupes
+	etaient strictement inarretables. Une invasion maritime etait donc une
+	depense, jamais un pari — l'adversaire ne pouvait rien y opposer.
+
+	Chaque base navale entretient un porte-avions qui tourne autour d'elle. Un
+	transport ennemi qui passe a portee perd des troupes a chaque tick : longer
+	une cote defendue coute cher, la contourner coute du temps. C'est ce choix
+	qui rend la carte maritime interessante.
+
+	Le porte-avions n'est pas pilotable. Il defend une zone, il ne poursuit
+	personne : une unite qu'on dirige demanderait une interface de selection que
+	le jeu n'a pas, et transformerait un RTS de territoire en jeu d'escarmouche.
+]]
+
+Config.CARRIER_PATROL_RADIUS = 13 -- tuiles, rayon de l'orbite autour de la base
+Config.CARRIER_PATROL_SPEED = 0.022 -- radians par tick
+Config.CARRIER_INTERCEPT_RANGE = 11 -- tuiles
+Config.CARRIER_INTERCEPT_DAMAGE = 0.075 -- part des troupes du transport, par tick
 -- Sans debarquements, un joueur insulaire est en prison et un continent est
 -- imprenable. C'est la mecanique qui ouvre la carte.
 
@@ -280,6 +301,7 @@ Config.BUILDING = {
 	SILO = 4,
 	SAM = 5,
 	CAPITAL = 6,
+	NAVAL_BASE = 8,
 	LAB = 7,
 	FACTORY = 8,
 }
