@@ -50,6 +50,9 @@ export type PlayerState = {
 	samCount: number,
 	capitalCount: number,
 	capitalTile: number?,
+	-- Centres de ravitaillement (capitale et villes). Ils definissent jusqu'ou
+	-- l'empire peut conquerir a cout normal.
+	hubs: { number },
 	-- Ere technologique atteinte, et compte par type de batiment. Le second
 	-- sert a la fois aux conditions d'ere et a l'inflation des couts.
 	era: number,
@@ -482,6 +485,26 @@ function GameState.logisticsFor(self: GameState, slot: number): (number, number)
 	return routes, income
 end
 
+--[[
+	Recalcule les centres de ravitaillement d'un joueur.
+
+	Balayage complet des batiments, mais uniquement quand l'un d'eux change de
+	main ou apparait — jamais dans la boucle de tick.
+]]
+function GameState.refreshSupplyHubs(self: GameState, slot: number)
+	local ps = self.players[slot]
+	if not ps then
+		return
+	end
+
+	table.clear(ps.hubs)
+	for index, building in self.buildings do
+		if building.slot == slot and (building.kind == B.CITY or building.kind == B.CAPITAL) then
+			table.insert(ps.hubs, index)
+		end
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -495,6 +518,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	end
 	if kind == B.CITY or kind == B.FACTORY then
 		self:refreshFactoryLinks(slot)
+	end
+	if kind == B.CITY or kind == B.CAPITAL then
+		self:refreshSupplyHubs(slot)
 	end
 end
 
@@ -525,6 +551,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		self:refreshFactoryLinks(previousSlot)
 		self:refreshFactoryLinks(newSlot)
 	end
+	if building.kind == B.CITY or building.kind == B.CAPITAL then
+		self:refreshSupplyHubs(previousSlot)
+		self:refreshSupplyHubs(newSlot)
+	end
 end
 
 function GameState.destroyBuilding(self: GameState, index: number)
@@ -542,6 +572,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	self.buildingDirty[index] = true
 	if previousKind == B.CITY or previousKind == B.FACTORY then
 		self:refreshFactoryLinks(previousSlot)
+	end
+	if previousKind == B.CITY or previousKind == B.CAPITAL then
+		self:refreshSupplyHubs(previousSlot)
 	end
 end
 
@@ -619,6 +652,7 @@ function GameState.addPlayer(
 		samCount = 0,
 		capitalCount = 0,
 		capitalTile = nil,
+		hubs = {},
 		era = 1,
 		buildingCounts = {},
 		betrayals = betrayals,
@@ -726,6 +760,52 @@ function GameState.areAllied(self: GameState, a: number, b: number): boolean
 end
 
 -- Cout en troupes pour absorber une tuile donnee.
+--[[
+	Penalite de ravitaillement : multiplicateur du cout de conquete selon la
+	distance au centre de ravitaillement le plus proche de l'assaillant.
+
+	C'est le frein systemique a l'emballement. Sans lui, plus un empire est
+	gros, plus il lui est facile de grossir, et la partie se decide dans les
+	premieres minutes. Avec, chaque conquete lointaine coute de plus en plus
+	cher jusqu'a devenir impossible — a moins d'investir dans une ville qui
+	deplace la frontiere du ravitaillement.
+
+	Le cout est en O(centres), soit une poignee d'iterations : la liste est
+	maintenue a l'incrementale et ne contient que capitales et villes.
+]]
+function GameState.supplyPenalty(self: GameState, slot: number, index: number): number
+	local ps = self.players[slot]
+	if not ps then
+		return 1
+	end
+
+	-- Plus aucun centre : l'empire est decapite, il ne conquiert plus rien
+	-- au-dela de ce qu'il tient deja.
+	if #ps.hubs == 0 then
+		return Config.SUPPLY_MAX_PENALTY
+	end
+
+	local x, y = MapGen.fromIndex(index)
+	local closest = math.huge
+
+	for _, hub in ps.hubs do
+		local hx, hy = MapGen.fromIndex(hub)
+		local dx, dy = hx - x, hy - y
+		local distance = dx * dx + dy * dy
+		if distance < closest then
+			closest = distance
+		end
+	end
+
+	local beyond = math.sqrt(closest) - Config.SUPPLY_FREE_RANGE
+	if beyond <= 0 then
+		return 1
+	end
+
+	local penalty = 1 + (beyond / Config.SUPPLY_FALLOFF) ^ Config.SUPPLY_EXPONENT
+	return math.min(penalty, Config.SUPPLY_MAX_PENALTY)
+end
+
 function GameState.tileCost(self: GameState, index: number, attackerSlot: number, defender: PlayerState?): number
 	local terrain = buffer.readu8(self.terrain, index)
 	local cost = Config.TILE_BASE_COST * Config.TERRAIN_COST[terrain]
@@ -745,6 +825,10 @@ function GameState.tileCost(self: GameState, index: number, attackerSlot: number
 	cost *= 1 + buffer.readu8(self.defense, index) / 100
 
 	cost /= self:doctrineOf(attackerSlot).attack
+
+	-- Eloignement du ravitaillement : applique en dernier, apres tous les
+	-- modificateurs, pour qu'il plafonne bien le cout total.
+	cost *= self:supplyPenalty(attackerSlot, index)
 
 	return cost
 end

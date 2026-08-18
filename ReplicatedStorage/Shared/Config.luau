@@ -220,6 +220,42 @@ Config.XP_TILE_DIVISOR = 12
 Config.XP_LEVEL_BASE = 220
 
 --=============================================================================
+-- Ravitaillement
+--=============================================================================
+--[[
+	Conquerir loin de ses villes coute de plus en plus cher.
+
+	Le probleme qu'on corrige : mesure en simulation, une partie se terminait sur
+	11 232 / 4 233 / 36 / 32 tuiles. Deux joueurs possedaient 99 % des terres et
+	il n'y avait aucun milieu de partie. Plus un empire etait gros, plus il lui
+	etait facile de grossir — l'expansion etait un cliquet, jamais une decision.
+
+	La coalition anti-leader des bots existait deja et ne suffisait pas : c'est
+	un correctif de comportement sur un desequilibre systemique.
+
+	Ici, c'est **l'empire lui-meme qui freine**. Chaque capitale et chaque ville
+	projette une zone de ravitaillement ; au-dela, le cout de conquete grimpe.
+	Effet secondaire recherche : les villes cessent d'etre un simple bonus de
+	population pour devenir le reseau logistique qui etend la portee. Construire
+	et conquerir deviennent la meme decision.
+]]
+
+--[[
+	Portee franche autour d'un centre.
+
+	Contre-intuitif, et mesure : la resserrer aggrave l'emballement. A 14 tuiles
+	le leader passe de 55 % a 72 % des terres, a 10 tuiles a 99 %. La penalite
+	amplifie en effet l'avantage de qui possede le plus de villes — serree, elle
+	paralyse les petits, qui n'ont pas les moyens d'en construire, sans gener
+	celui qui en a dix. Vingt tuiles laissent un joueur a une seule capitale
+	defendre et s'etendre localement.
+]]
+Config.SUPPLY_FREE_RANGE = 20
+Config.SUPPLY_FALLOFF = 16 -- distance sur laquelle la penalite se developpe
+Config.SUPPLY_EXPONENT = 1.5
+Config.SUPPLY_MAX_PENALTY = 4.5 -- plafond : au-dela, la conquete est simplement hors de portee
+
+--=============================================================================
 -- Marine
 --=============================================================================
 -- Sans debarquements, un joueur insulaire est en prison et un continent est

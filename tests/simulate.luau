@@ -441,6 +441,23 @@ local function eraTime(era)
 end
 print(`premiere ere 2/3/4/5 : {eraTime(2)} / {eraTime(3)} / {eraTime(4)} / {eraTime(5)}`)
 print(`or total          : {math.floor(totalGold)}`)
+
+-- Concentration : combien de factions pesent encore reellement en fin de
+-- partie. C'est la mesure du "milieu de partie" — une valeur de 1 ou 2 signifie
+-- que la partie s'est jouee toute seule.
+local contenders = 0
+local leaderShare = 0
+for _, ps in state.players do
+	local share = ps.tiles / math.max(1, state.landCount)
+	if share > 0.05 then
+		contenders += 1
+	end
+	if share > leaderShare then
+		leaderShare = share
+	end
+end
+print(`part du leader    : {string.format("%.0f", leaderShare * 100)} %`)
+print(`factions >5%      : {contenders}`)
 print("")
 print("classement :")
 for i = 1, math.min(6, #ranked) do
