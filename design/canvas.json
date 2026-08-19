@@ -1,0 +1,32 @@
+{
+  "artboards": [
+    { "file": "Avant.dc.html", "title": "Avant — 12 panneaux", "x": 0, "y": 0, "w": 1280, "h": 720 },
+    { "file": "Main.dc.html", "title": "Jeu — etat par defaut", "x": 1400, "y": 0, "w": 1280, "h": 720 },
+    { "file": "Construire.dc.html", "title": "Sous-menu Construire", "x": 1400, "y": 820, "w": 1280, "h": 720 },
+    { "file": "Nations.dc.html", "title": "Sous-menu Nations", "x": 0, "y": 820, "w": 1280, "h": 720 }
+  ],
+  "annotations": [
+    {
+      "id": "regle",
+      "x": 1400,
+      "y": -230,
+      "w": 620,
+      "text": "LA REGLE\n\nTrois elements permanents, jamais plus :\n1. barre haute — qui je suis, ou en est la partie\n2. barre basse — mes ressources et ma prochaine action\n3. minimap\n\nTout le reste s'ouvre a la demande, et un seul sous-menu a la fois."
+    },
+    {
+      "id": "avant",
+      "x": 0,
+      "y": -180,
+      "w": 400,
+      "text": "L'etat actuel, a l'echelle.\n\nDouze panneaux qui ne se ferment jamais. Aucun n'est mauvais isolement — c'est leur simultaneite qui etouffe la carte."
+    },
+    {
+      "id": "sous-menus",
+      "x": 0,
+      "y": 1600,
+      "w": 620,
+      "text": "LES SOUS-MENUS\n\nClassement et Diplomatie fusionnent : on ouvre le classement, on clique une nation, sa fiche se deplie SUR PLACE avec ses actions. Deux panneaux deviennent un seul geste.\n\nMeme principe pour Construire : les trois classes sont des onglets dans une seule feuille, pas deux palettes concurrentes."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

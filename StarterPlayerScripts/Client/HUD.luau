@@ -2,17 +2,30 @@
 --[[
 	Interface de commandement.
 
-	Principe directeur : a tout instant le joueur doit pouvoir repondre a trois
-	questions sans reflechir —
-	  combien j'ai de troupes,
-	  qui est en train de gagner,
-	  qu'est-ce que mon prochain clic va faire.
-	Tout le reste est secondaire et peut etre replie.
+	**Trois elements permanents, jamais plus.**
+
+	  1. la barre haute — qui je suis, ou en est la partie
+	  2. la barre basse — mes ressources et ma prochaine action
+	  3. la minimap (voir Minimap.luau)
+
+	Tout le reste s'ouvre a la demande, et **un seul sous-menu a la fois**.
+
+	Cette regle remplace une accumulation de douze panneaux simultanes, chacun
+	ajoute isolement pour repondre a une demande et aucun capable de se fermer.
+	Pris un par un ils etaient corrects ; c'est leur simultaneite qui etouffait
+	la carte, c'est-a-dire le jeu lui-meme.
+
+	Deux fusions font l'essentiel du travail :
+	  - classement et diplomatie ne font plus qu'un panneau : on ouvre le
+	    classement, on clique une nation, sa fiche se deplie sur place avec ses
+	    actions. Le lien entre "qui est fort" et "que faire avec lui" devient
+	    un seul geste au lieu de deux panneaux cote a cote.
+	  - les palettes de construction et d'arsenal partagent une seule feuille,
+	    au lieu de se disputer le meme coin d'ecran.
 
 	Le HUD ne connait ni le reseau ni la carte. Il expose des callbacks que
 	init.client branche sur les remotes, et un mode courant que le controleur de
-	saisie interroge. Cette separation permet de retravailler entierement
-	l'interface sans toucher a une ligne de simulation.
+	saisie interroge.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,6 +55,13 @@ local MAX_FEED_ENTRIES = 4
 local FEED_ENTRY_HEIGHT = 21
 local LEADER_ROWS = 10
 
+-- Geometrie des trois elements permanents et de la feuille d'action.
+local TOP_BAR_WIDTH = 604
+local TOP_BAR_HEIGHT = 40
+local BOTTOM_BAR_WIDTH = 720
+local BOTTOM_BAR_HEIGHT = 92
+local SIDE_SHEET_WIDTH = 306
+
 local TUTORIAL_STEPS = {
 	{ key = "doctrine", title = "Choisis ta doctrine", hint = "Elle definit ton style pour toute la campagne." },
 	{ key = "colonize", title = "Etends tes frontieres", hint = "Capture 20 territoires neutres." },
@@ -59,6 +79,7 @@ type LeaderRow = {
 	bar: Frame,
 	name: TextLabel,
 	value: TextLabel,
+	details: Frame,
 }
 
 export type HUD = typeof(setmetatable({} :: any, HUD))
@@ -119,6 +140,19 @@ local function setSelected(b: TextButton, selected: boolean, accent: Color3?)
 	end
 end
 
+-- Separateur vertical entre deux groupes d'une meme barre.
+local function divider(parent: GuiObject, height: number, offsetX: number)
+	local line = Instance.new("Frame")
+	line.Name = "Divider"
+	line.AnchorPoint = Vector2.new(0, 0.5)
+	line.Position = UDim2.new(0, offsetX, 0.5, 0)
+	line.Size = UDim2.fromOffset(1, height)
+	line.BackgroundColor3 = C.line
+	line.BorderSizePixel = 0
+	line.Parent = parent
+	return line
+end
+
 --=============================================================================
 -- Construction
 --=============================================================================
@@ -155,6 +189,12 @@ function HUD.new(parent: ScreenGui): HUD
 	self.selectedTerritory = nil
 	self.profile = { xp = 0, level = 1, matches = 0, wins = 0, betrayals = 0 }
 
+	-- Registre des sous-menus. Un seul peut etre ouvert : c'est la regle qui
+	-- empeche l'interface de redevenir un empilement.
+	self.sheets = {}
+	self.sheetButtons = {}
+	self.activeSheet = nil
+
 	local root = Instance.new("Frame")
 	root.Name = "HUD"
 	root.Size = UDim2.fromScale(1, 1)
@@ -162,16 +202,15 @@ function HUD.new(parent: ScreenGui): HUD
 	root.Parent = parent
 	self.root = root
 
-	self:buildIdentity()
-	self:buildEraPanel()
-	self:buildMissionPanel()
-	self:buildMatchBar()
-	self:buildLeaderboard()
-	self:buildDiplomacyPanel()
-	self:buildTerritoryPanel()
-	self:buildCommandBar()
-	self:buildPalettes()
+	self:buildTopBar()
+	self:buildMissionStrip()
 	self:buildFeed()
+	self:buildBottomBar()
+	self:buildNationsSheet()
+	self:buildProfileSheet()
+	self:buildBuildSheet()
+	self:buildArsenalSheet()
+	self:buildTerritorySheet()
 	self:buildDoctrineModal()
 
 	self:setRatio(self.ratio)
@@ -181,138 +220,208 @@ function HUD.new(parent: ScreenGui): HUD
 end
 
 --=============================================================================
--- Carte d'identite (haut gauche)
+-- Sous-menus
 --=============================================================================
 
-function HUD.buildIdentity(self: HUD)
-	local card = Theme.panel("Identity", self.root)
-	card.Position = UDim2.fromOffset(S.md, S.md)
-	card.Size = UDim2.fromOffset(222, 62)
+function HUD.registerSheet(self: HUD, id: string, frame: Frame)
+	frame.Visible = false
+	self.sheets[id] = frame
+end
 
-	-- Bandeau de couleur : le rappel permanent de "quelle couleur je suis" sur
-	-- la carte. C'est l'information d'orientation la plus fondamentale.
-	local stripe = Instance.new("Frame")
-	stripe.Name = "Stripe"
-	stripe.Size = UDim2.fromOffset(5, 48)
-	stripe.Position = UDim2.fromOffset(S.md, 8)
-	stripe.BorderSizePixel = 0
-	stripe.BackgroundColor3 = C.textFaint
-	stripe.Parent = card
-	Theme.corner(stripe, Theme.radius.sm)
-	self.identityStripe = stripe
+--[[
+	Ouvre un sous-menu et ferme tous les autres. Passer `nil` ferme tout.
 
-	local role = Theme.label(card, "COMMANDANT", T.tiny, C.accent)
-	role.Position = UDim2.fromOffset(S.md + 14, 8)
-	role.Size = UDim2.new(1, -(S.md * 2 + 14), 0, 12)
-	role.FontFace = F.medium
-	self.roleLabel = role
+	`toggle` n'est vrai que pour les boutons d'ouverture : un bouton qui ouvre
+	doit aussi savoir refermer, sinon le joueur cherche la croix. Le reste du
+	code force l'ouverture — armer le mode Construire deux fois de suite doit
+	laisser la palette ouverte, pas la refermer.
+]]
+function HUD.openSheet(self: HUD, id: string?, toggle: boolean?)
+	if toggle and id and self.activeSheet == id then
+		id = nil
+	end
 
-	local name = Theme.label(card, "CONQUEST RTS", T.title, C.text)
-	name.Position = UDim2.fromOffset(S.md + 14, 20)
-	name.Size = UDim2.new(1, -(S.md * 2 + 14), 0, 20)
-	name.TextTruncate = Enum.TextTruncate.AtEnd
-	self.nameLabel = name
+	self.activeSheet = id
 
-	local sub = Theme.label(card, "", T.small, C.textMuted)
-	sub.Position = UDim2.fromOffset(S.md + 14, 41)
-	sub.Size = UDim2.new(1, -(S.md * 2 + 14), 0, 18)
-	sub.FontFace = F.medium
-	sub.TextTruncate = Enum.TextTruncate.AtEnd
-	self.identitySub = sub
+	for sheetId, frame in self.sheets do
+		frame.Visible = sheetId == id
+	end
+	for sheetId, b in self.sheetButtons do
+		setSelected(b, sheetId == id)
+	end
+
+	-- Fermer la fiche de territoire annule la selection : la surbrillance sur
+	-- la carte ne doit jamais survivre au panneau qui l'explique.
+	if id ~= "territory" and self.selectedTerritory and self.onTerritoryClosed then
+		self.selectedTerritory = nil
+		self.onTerritoryClosed()
+	end
 end
 
 --=============================================================================
--- Progression technologique (haut gauche, sous l'identite)
+-- 1. Barre haute
 --=============================================================================
 
 --[[
-	Le panneau d'ere est le tableau de bord du developpement.
-
-	Il repond a la question "que dois-je faire maintenant" : la barre montre
-	l'avancement, et le bouton indique en clair ce qui manque quand on ne peut
-	pas encore avancer. C'est ce qui remplace l'ancien deblocage automatique du
-	nucleaire, qui ne demandait aucune decision au joueur.
+	Une seule ligne pour tout ce qui repond a "qui suis-je, ou en est la
+	partie". Elle remplace trois panneaux distincts (identite, ere, chrono) qui
+	occupaient tout le coin superieur gauche.
 ]]
-function HUD.buildEraPanel(self: HUD)
-	local panel = Theme.panel("Era", self.root)
-	panel.Position = UDim2.fromOffset(S.md, 62 + S.md * 2)
-	panel.Size = UDim2.fromOffset(222, 94)
+function HUD.buildTopBar(self: HUD)
+	local bar = Theme.panel("TopBar", self.root)
+	bar.AnchorPoint = Vector2.new(0.5, 0)
+	bar.Position = UDim2.new(0.5, 0, 0, S.md)
+	bar.Size = UDim2.fromOffset(TOP_BAR_WIDTH, TOP_BAR_HEIGHT)
 
-	local name = Theme.label(panel, "", T.body, C.text)
-	name.Position = UDim2.fromOffset(S.md, S.sm)
-	name.Size = UDim2.new(1, -S.md * 2, 0, 18)
-	self.eraName = name
+	--- Identite -------------------------------------------------------------
+	local stripe = Instance.new("Frame")
+	stripe.Name = "Stripe"
+	stripe.AnchorPoint = Vector2.new(0, 0.5)
+	stripe.Position = UDim2.new(0, S.md, 0.5, 0)
+	stripe.Size = UDim2.fromOffset(4, 20)
+	stripe.BackgroundColor3 = C.textFaint
+	stripe.BorderSizePixel = 0
+	stripe.Parent = bar
+	Theme.corner(stripe, 2)
+	self.identityStripe = stripe
 
-	local tagline = Theme.label(panel, "", T.tiny, C.textFaint)
-	tagline.Position = UDim2.fromOffset(S.md, 26)
-	tagline.Size = UDim2.new(1, -S.md * 2, 0, 14)
-	tagline.FontFace = F.medium
-	tagline.TextTruncate = Enum.TextTruncate.AtEnd
-	self.eraTagline = tagline
+	local name = Theme.label(bar, "CONQUEST RTS", T.body, C.text)
+	name.AnchorPoint = Vector2.new(0, 0.5)
+	name.Position = UDim2.new(0, S.md + 10, 0.5, 0)
+	name.Size = UDim2.fromOffset(112, 18)
+	name.TextTruncate = Enum.TextTruncate.AtEnd
+	self.nameLabel = name
 
-	local track = Instance.new("Frame")
-	track.Size = UDim2.new(1, -S.md * 2, 0, 5)
-	track.Position = UDim2.fromOffset(S.md, 44)
-	track.BackgroundColor3 = C.surfaceRaised
-	track.BorderSizePixel = 0
-	track.Parent = panel
-	Theme.corner(track, Theme.radius.pill)
+	-- Doctrine et reputation en un seul glyphe : l'information reste, le
+	-- panneau qui la portait disparait.
+	local sub = Theme.label(bar, "", T.small, C.textMuted)
+	sub.AnchorPoint = Vector2.new(0, 0.5)
+	sub.Position = UDim2.new(0, S.md + 124, 0.5, 0)
+	sub.Size = UDim2.fromOffset(40, 16)
+	sub.FontFace = F.medium
+	self.identitySub = sub
 
-	local fill = Instance.new("Frame")
-	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = C.nuclear
-	fill.BorderSizePixel = 0
-	fill.Parent = track
-	Theme.corner(fill, Theme.radius.pill)
-	self.eraFill = fill
+	divider(bar, 18, 172)
 
-	local advance = button(panel, "", T.small)
-	advance.Position = UDim2.fromOffset(S.md, 66)
-	advance.Size = UDim2.new(1, -S.md * 2, 0, 26)
-	advance.Activated:Connect(function()
+	--- Chrono ---------------------------------------------------------------
+	local timer = Theme.label(bar, "25:00", T.body, C.text)
+	timer.AnchorPoint = Vector2.new(0, 0.5)
+	timer.Position = UDim2.new(0, 186, 0.5, 0)
+	timer.Size = UDim2.fromOffset(52, 18)
+	timer.FontFace = F.display
+	self.timerLabel = timer
+
+	local phase = Theme.label(bar, "", T.tiny, C.textMuted)
+	phase.AnchorPoint = Vector2.new(0, 0.5)
+	phase.Position = UDim2.new(0, 240, 0.5, 0)
+	phase.Size = UDim2.fromOffset(130, 14)
+	phase.FontFace = F.medium
+	phase.TextTruncate = Enum.TextTruncate.AtEnd
+	self.phaseLabel = phase
+
+	divider(bar, 18, 378)
+
+	--- Ere ------------------------------------------------------------------
+	-- Le bandeau d'ere EST le bouton de recherche : quand le palier suivant est
+	-- finançable il change de couleur et annonce son prix. Aucun panneau
+	-- separe, aucun clic pour savoir ou on en est.
+	local era = button(bar, "", T.small)
+	era.AnchorPoint = Vector2.new(0, 0.5)
+	era.Position = UDim2.new(0, 392, 0.5, 0)
+	era.Size = UDim2.fromOffset(140, 28)
+	era.TextXAlignment = Enum.TextXAlignment.Left
+	era.Activated:Connect(function()
 		if self.onResearch then
 			self.onResearch()
 		end
 	end)
-	self.eraButton = advance
+	self.eraButton = era
+
+	local eraName = Theme.label(era, "", T.tiny, C.text)
+	eraName.Position = UDim2.fromOffset(S.sm, 3)
+	eraName.Size = UDim2.new(1, -S.sm * 2, 0, 13)
+	eraName.TextTruncate = Enum.TextTruncate.AtEnd
+	self.eraName = eraName
+
+	local eraTrack = Instance.new("Frame")
+	eraTrack.Position = UDim2.fromOffset(S.sm, 19)
+	eraTrack.Size = UDim2.new(1, -S.sm * 2, 0, 3)
+	eraTrack.BackgroundColor3 = C.glass
+	eraTrack.BorderSizePixel = 0
+	eraTrack.Parent = era
+	Theme.corner(eraTrack, Theme.radius.pill)
+
+	local eraFill = Instance.new("Frame")
+	eraFill.Size = UDim2.fromScale(0, 1)
+	eraFill.BackgroundColor3 = C.info
+	eraFill.BorderSizePixel = 0
+	eraFill.Parent = eraTrack
+	Theme.corner(eraFill, Theme.radius.pill)
+	self.eraFill = eraFill
+
+	--- Ouvertures de sous-menus --------------------------------------------
+	local nations = button(bar, "\u{2261}", T.body)
+	nations.AnchorPoint = Vector2.new(1, 0.5)
+	nations.Position = UDim2.new(1, -(S.md + 32), 0.5, 0)
+	nations.Size = UDim2.fromOffset(28, 26)
+	nations.Activated:Connect(function()
+		self:openSheet("nations", true)
+	end)
+	self.sheetButtons.nations = nations
+
+	local profile = button(bar, "\u{25CF}", T.small)
+	profile.AnchorPoint = Vector2.new(1, 0.5)
+	profile.Position = UDim2.new(1, -S.md, 0.5, 0)
+	profile.Size = UDim2.fromOffset(28, 26)
+	profile.Activated:Connect(function()
+		self:openSheet("profile", true)
+	end)
+	self.sheetButtons.profile = profile
 end
 
 --=============================================================================
--- Briefing guide
+-- Bandeau d'objectifs
 --=============================================================================
 
-function HUD.buildMissionPanel(self: HUD)
-	local panel = Theme.panel("Mission", self.root)
-	panel.Position = UDim2.fromOffset(S.md, 180 + S.md)
-	panel.Size = UDim2.fromOffset(222, 108)
-	panel.Visible = false
-	self.missionPanel = panel
+--[[
+	Une bande fine sous la barre haute, qui disparait des que le briefing est
+	termine. L'ancien panneau restait a l'ecran toute la partie.
+]]
+function HUD.buildMissionStrip(self: HUD)
+	local strip = Theme.panel("Mission", self.root)
+	strip.AnchorPoint = Vector2.new(0.5, 0)
+	strip.Position = UDim2.new(0.5, 0, 0, S.md + TOP_BAR_HEIGHT + S.sm)
+	strip.Size = UDim2.fromOffset(420, 30)
+	strip.Visible = false
+	self.missionStrip = strip
 
-	local eyebrow = Theme.label(panel, "OBJECTIF DE CAMPAGNE", T.tiny, C.accent)
-	eyebrow.Position = UDim2.fromOffset(S.md, S.sm)
-	eyebrow.Size = UDim2.new(1, -S.md * 2, 0, 13)
-	eyebrow.FontFace = F.bold
-
-	local title = Theme.label(panel, "", T.body, C.text)
-	title.Position = UDim2.fromOffset(S.md, 25)
-	title.Size = UDim2.new(1, -S.md * 2, 0, 18)
-	title.FontFace = F.bold
+	local title = Theme.label(strip, "", T.small, C.text)
+	title.Position = UDim2.fromOffset(S.md, 3)
+	title.Size = UDim2.fromOffset(180, 13)
+	title.TextTruncate = Enum.TextTruncate.AtEnd
 	self.missionTitle = title
 
-	local hint = Theme.label(panel, "", T.tiny, C.textMuted)
-	hint.Position = UDim2.fromOffset(S.md, 45)
-	hint.Size = UDim2.new(1, -S.md * 2, 0, 30)
-	hint.TextWrapped = true
-	hint.TextYAlignment = Enum.TextYAlignment.Top
+	local hint = Theme.label(strip, "", T.tiny, C.textFaint)
+	hint.Position = UDim2.fromOffset(S.md, 15)
+	hint.Size = UDim2.fromOffset(300, 12)
 	hint.FontFace = F.medium
+	hint.TextTruncate = Enum.TextTruncate.AtEnd
 	self.missionHint = hint
 
+	local counter = Theme.label(strip, "0 / 5", T.tiny, C.textMuted)
+	counter.AnchorPoint = Vector2.new(1, 0)
+	counter.Position = UDim2.new(1, -S.md, 0, 4)
+	counter.Size = UDim2.fromOffset(40, 12)
+	counter.TextXAlignment = Enum.TextXAlignment.Right
+	self.missionCounter = counter
+
 	local track = Instance.new("Frame")
-	track.Position = UDim2.fromOffset(S.md, 84)
-	track.Size = UDim2.new(1, -S.md * 2, 0, 5)
-	track.BackgroundColor3 = C.surfaceRaised
+	track.AnchorPoint = Vector2.new(1, 0)
+	track.Position = UDim2.new(1, -S.md, 0, 19)
+	track.Size = UDim2.fromOffset(60, 3)
+	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
-	track.Parent = panel
+	track.Parent = strip
 	Theme.corner(track, Theme.radius.pill)
 
 	local fill = Instance.new("Frame")
@@ -322,299 +431,135 @@ function HUD.buildMissionPanel(self: HUD)
 	fill.Parent = track
 	Theme.corner(fill, Theme.radius.pill)
 	self.missionFill = fill
-
-	local counter = Theme.label(panel, "0 / 5", T.tiny, C.textFaint)
-	counter.AnchorPoint = Vector2.new(1, 0)
-	counter.Position = UDim2.new(1, -S.md, 0, 92)
-	counter.Size = UDim2.fromOffset(60, 12)
-	counter.TextXAlignment = Enum.TextXAlignment.Right
-	counter.FontFace = F.medium
-	self.missionCounter = counter
 end
 
 --=============================================================================
--- Bandeau de match (haut centre)
+-- Fil de notifications
 --=============================================================================
 
-function HUD.buildMatchBar(self: HUD)
-	local bar = Theme.panel("MatchBar", self.root)
-	bar.AnchorPoint = Vector2.new(0.5, 0)
-	bar.Position = UDim2.new(0.5, 0, 0, S.md)
-	bar.Size = UDim2.fromOffset(188, 56)
+function HUD.buildFeed(self: HUD)
+	local feed = Instance.new("Frame")
+	feed.Name = "Feed"
+	feed.AnchorPoint = Vector2.new(0.5, 0)
+	feed.Position = UDim2.new(0.5, 0, 0, S.md + TOP_BAR_HEIGHT + S.sm + 34)
+	feed.Size = UDim2.fromOffset(380, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
+	feed.BackgroundTransparency = 1
+	feed.ClipsDescendants = true
+	feed.Parent = self.root
+	self.feed = feed
 
-	local eyebrow = Theme.label(bar, "OPERATION  /  ACTIVE", T.tiny, C.accent)
-	eyebrow.Position = UDim2.fromOffset(S.md, 5)
-	eyebrow.Size = UDim2.new(1, -S.md * 2, 0, 11)
-	eyebrow.TextXAlignment = Enum.TextXAlignment.Center
-	eyebrow.FontFace = F.medium
-
-	local rule = Instance.new("Frame")
-	rule.Position = UDim2.fromOffset(S.md, 20)
-	rule.Size = UDim2.new(1, -S.md * 2, 0, 1)
-	rule.BackgroundColor3 = C.line
-	rule.BorderSizePixel = 0
-	rule.Parent = bar
-
-	local timer = Theme.label(bar, "25:00", 18, C.text)
-	timer.Position = UDim2.fromOffset(0, 21)
-	timer.Size = UDim2.new(1, 0, 0, 20)
-	timer.FontFace = F.display
-	timer.TextXAlignment = Enum.TextXAlignment.Center
-	self.timerLabel = timer
-
-	local phase = Theme.label(bar, "", T.tiny, C.textMuted)
-	phase.Position = UDim2.fromOffset(0, 37)
-	phase.Size = UDim2.new(1, 0, 0, 14)
-	phase.FontFace = F.medium
-	phase.TextXAlignment = Enum.TextXAlignment.Center
-	self.phaseLabel = phase
+	local layout = Theme.list(feed, Enum.FillDirection.Vertical, S.xs)
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 end
 
---=============================================================================
--- Classement (haut droite)
---=============================================================================
+local FEED_COLORS: { [string]: Color3 } = {
+	good = C.ally,
+	bad = C.danger,
+	alert = C.warning,
+	info = C.info,
+}
 
-function HUD.buildLeaderboard(self: HUD)
-	local board = Theme.panel("Leaderboard", self.root)
-	board.AnchorPoint = Vector2.new(1, 0)
-	board.Position = UDim2.new(1, -S.md, 0, S.md)
-	board.Size = UDim2.fromOffset(206, 24 + LEADER_ROWS * 17)
+local FEED_SOUNDS: { [string]: string } = {
+	bad = "uiError",
+	alert = "uiSelect",
+}
 
-	local title = Theme.label(board, "DOMINATION", T.tiny, C.textFaint)
-	title.Position = UDim2.fromOffset(S.md, S.sm)
-	title.Size = UDim2.new(1, -S.md * 2, 0, 14)
+--[[
+	Ajoute un message au fil.
 
-	local list = Instance.new("Frame")
-	list.BackgroundTransparency = 1
-	list.Position = UDim2.fromOffset(S.sm, 26)
-	list.Size = UDim2.new(1, -S.sm * 2, 1, -32)
-	list.Parent = board
-	Theme.list(list, Enum.FillDirection.Vertical, 2)
-
-	for i = 1, LEADER_ROWS do
-		local row = Instance.new("TextButton")
-		row.LayoutOrder = i
-		row.BackgroundTransparency = 1
-		row.Size = UDim2.new(1, 0, 0, 16)
-		row.Text = ""
-		row.AutoButtonColor = false
-		row.Parent = list
-
-		-- Barre de fond proportionnelle au territoire : on lit le rapport de
-		-- force sans avoir a comparer des nombres.
-		local bar = Instance.new("Frame")
-		bar.Name = "Share"
-		bar.Size = UDim2.fromScale(0, 1)
-		bar.BackgroundTransparency = 0.78
-		bar.BorderSizePixel = 0
-		bar.Parent = row
-		Theme.corner(bar, Theme.radius.sm)
-
-		local name = Theme.label(row, "", T.small, C.textMuted)
-		name.Position = UDim2.fromOffset(S.sm, 0)
-		name.Size = UDim2.new(1, -70, 1, 0)
-		name.TextTruncate = Enum.TextTruncate.AtEnd
-
-		local value = Theme.label(row, "", T.small, C.textFaint)
-		value.AnchorPoint = Vector2.new(1, 0)
-		value.Position = UDim2.new(1, -S.sm, 0, 0)
-		value.Size = UDim2.fromOffset(48, 16)
-		value.TextXAlignment = Enum.TextXAlignment.Right
-		value.FontFace = F.medium
-
-		row.MouseEnter:Connect(function()
-			bar.BackgroundTransparency = 0.6
-		end)
-		row.MouseLeave:Connect(function()
-			bar.BackgroundTransparency = 0.78
-		end)
-		row.Activated:Connect(function()
-			local item = self.ranked[i]
-			if item then
-				SoundManager.play("uiSelect")
-				self:selectFaction(item.slot)
-			end
-		end)
-
-		self.leaderRows[i] = { button = row, bar = bar, name = name, value = value } :: LeaderRow
+	Le fil est plafonne en nombre d'entrees, pas seulement en duree : pendant
+	une phase agitee les messages arrivent bien plus vite qu'ils n'expirent, et
+	un simple minuteur laissait le fil recouvrir tout l'ecran.
+]]
+function HUD.notify(self: HUD, text: string, kind: string)
+	-- Un meme message repete remonte en compteur au lieu de s'empiler.
+	local existing = self.feedGroups[text]
+	if existing and existing.entry.Parent then
+		existing.count += 1
+		existing.entry.Text = `{text}   x{existing.count}`
+		return
 	end
-end
 
---=============================================================================
--- Panneau diplomatique (droite)
---=============================================================================
+	local entry = Instance.new("TextLabel")
+	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
+	entry.BackgroundColor3 = C.surface
+	entry.BackgroundTransparency = 0.14
+	entry.BorderSizePixel = 0
+	entry.FontFace = F.bold
+	entry.TextSize = T.small
+	entry.TextColor3 = FEED_COLORS[kind] or C.text
+	entry.Text = text
+	entry.TextTruncate = Enum.TextTruncate.AtEnd
+	entry.LayoutOrder = self.feedCounter
+	entry.Parent = self.feed
+	Theme.corner(entry, Theme.radius.sm)
+	Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
 
-function HUD.buildDiplomacyPanel(self: HUD)
-	local p = Theme.panel("Diplomacy", self.root)
-	p.AnchorPoint = Vector2.new(1, 0)
-	p.Position = UDim2.new(1, -S.md, 0, 24 + LEADER_ROWS * 17 + S.md * 2)
-	p.Size = UDim2.fromOffset(206, 152)
-	p.Visible = false
-	self.diploPanel = p
-
-	local title = Theme.label(p, "", T.title, C.text)
-	title.Position = UDim2.fromOffset(S.md, S.sm)
-	title.Size = UDim2.new(1, -S.md * 2, 0, 22)
-	title.TextTruncate = Enum.TextTruncate.AtEnd
-	self.diploTitle = title
-
-	local status = Theme.label(p, "", T.tiny, C.textMuted)
-	status.Position = UDim2.fromOffset(S.md, 30)
-	status.Size = UDim2.new(1, -S.md * 2, 0, 14)
-	status.FontFace = F.medium
-	self.diploStatus = status
-
-	local list = Instance.new("Frame")
-	list.BackgroundTransparency = 1
-	list.Position = UDim2.fromOffset(S.sm, 50)
-	list.Size = UDim2.new(1, -S.sm * 2, 1, -58)
-	list.Parent = p
-	Theme.list(list, Enum.FillDirection.Vertical, S.xs)
-
-	local actions = {
-		{ id = "request", text = "Proposer une alliance", color = C.ally, order = 1 },
-		{ id = "accept", text = "Accepter l'alliance", color = C.ally, order = 2 },
-		{ id = "break", text = "Rompre le pacte", color = C.danger, order = 3 },
-		{ id = "embargo", text = "Declarer un embargo", color = C.warning, order = 4 },
-		{ id = "unembargo", text = "Lever l'embargo", color = C.info, order = 5 },
-	}
-
-	for _, action in actions do
-		local b = button(list, action.text, T.small)
-		b.LayoutOrder = action.order
-		b.Size = UDim2.new(1, 0, 0, 23)
-		b.Visible = false
-		b.Activated:Connect(function()
-			local target = self.selectedSlot
-			if target and self.onDiplomacyAction then
-				self.onDiplomacyAction(action.id, target)
-			end
-		end)
-		self.diploButtons[action.id] = b
+	local sound = FEED_SOUNDS[kind]
+	if sound then
+		SoundManager.play(sound)
 	end
-end
 
---=============================================================================
--- Inspecteur de territoire
---=============================================================================
+	self.feedCounter += 1
+	table.insert(self.feedEntries, entry)
+	self.feedGroups[text] = { entry = entry, count = 1 }
 
-function HUD.buildTerritoryPanel(self: HUD)
-	local panel = Theme.panel("Territory", self.root)
-	panel.AnchorPoint = Vector2.new(1, 0)
-	panel.Position = UDim2.new(1, -S.md, 0, 382)
-	panel.Size = UDim2.fromOffset(206, 174)
-	panel.Visible = false
-	self.territoryPanel = panel
-
-	local eyebrow = Theme.label(panel, "TERRITOIRE SELECTIONNE", T.tiny, C.accent)
-	eyebrow.Position = UDim2.fromOffset(S.md, S.sm)
-	eyebrow.Size = UDim2.new(1, -36, 0, 13)
-	eyebrow.FontFace = F.bold
-
-	local close = button(panel, "×", T.body)
-	close.AnchorPoint = Vector2.new(1, 0)
-	close.Position = UDim2.new(1, -S.sm, 0, S.sm)
-	close.Size = UDim2.fromOffset(22, 20)
-	close.Activated:Connect(function()
-		panel.Visible = false
-		self.selectedTerritory = nil
-		if self.onTerritoryClosed then
-			self.onTerritoryClosed()
+	while #self.feedEntries > MAX_FEED_ENTRIES do
+		local oldest = table.remove(self.feedEntries, 1)
+		if oldest then
+			self.feedGroups[oldest.Text] = nil
+			oldest:Destroy()
 		end
-	end)
-
-	local owner = Theme.label(panel, "", T.title, C.text)
-	owner.Position = UDim2.fromOffset(S.md, 27)
-	owner.Size = UDim2.new(1, -S.md * 2, 0, 20)
-	owner.TextTruncate = Enum.TextTruncate.AtEnd
-	self.territoryOwner = owner
-
-	local details = Theme.label(panel, "", T.tiny, C.textMuted)
-	details.Position = UDim2.fromOffset(S.md, 49)
-	details.Size = UDim2.new(1, -S.md * 2, 0, 30)
-	details.TextWrapped = true
-	details.TextYAlignment = Enum.TextYAlignment.Top
-	details.FontFace = F.medium
-	self.territoryDetails = details
-
-	local actions = Instance.new("Frame")
-	actions.BackgroundTransparency = 1
-	actions.Position = UDim2.fromOffset(S.md, 87)
-	actions.Size = UDim2.new(1, -S.md * 2, 0, 72)
-	actions.Parent = panel
-
-	local layout = Instance.new("UIGridLayout")
-	layout.CellSize = UDim2.new(0.5, -3, 0, 33)
-	layout.CellPadding = UDim2.fromOffset(6, 6)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = actions
-
-	self.territoryButtons = {}
-	local entries = {
-		{ id = "attack", text = "Attaquer", order = 1 },
-		{ id = "build", text = "Construire", order = 2 },
-		{ id = "boat", text = "Debarquer", order = 3 },
-		{ id = "nuke", text = "Frappe", order = 4 },
-	}
-	for _, entry in entries do
-		local action = button(actions, entry.text, T.tiny)
-		action.LayoutOrder = entry.order
-		action.Activated:Connect(function()
-			local selected = self.selectedTerritory
-			if not selected or action:GetAttribute("Disabled") then
-				return
-			end
-			local actionId = entry.id
-			if entry.id == "build" and selected.buildingKind == Config.BUILDING.CITY then
-				actionId = "upgrade"
-			else
-				self:setMode(entry.id :: Mode)
-			end
-			if self.onTerritoryAction then
-				self.onTerritoryAction(actionId, selected.index)
-			end
-		end)
-		self.territoryButtons[entry.id] = action
 	end
+
+	task.delay(4.5, function()
+		if not entry.Parent then
+			return
+		end
+		local index = table.find(self.feedEntries, entry)
+		if index then
+			table.remove(self.feedEntries, index)
+		end
+		self.feedGroups[text] = nil
+		local tween = TweenService:Create(
+			entry,
+			Theme.motion.smooth,
+			{ BackgroundTransparency = 1, TextTransparency = 1 }
+		)
+		tween:Play()
+		tween.Completed:Wait()
+		entry:Destroy()
+	end)
 end
 
 --=============================================================================
--- Barre de commandement (bas centre)
+-- 2. Barre basse
 --=============================================================================
 
-function HUD.buildCommandBar(self: HUD)
+--[[
+	Ressources a gauche, engagement au centre, actions a droite.
+
+	Le compteur de troupes reste le plus gros chiffre de l'ecran : c'est la
+	seule valeur consultee en permanence, et la seule que la refonte n'a pas
+	reduite.
+]]
+function HUD.buildBottomBar(self: HUD)
 	local bar = Theme.panel("CommandBar", self.root)
 	bar.AnchorPoint = Vector2.new(0.5, 1)
 	bar.Position = UDim2.new(0.5, 0, 1, -S.md)
-	bar.Size = UDim2.fromOffset(500, 154)
+	bar.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, BOTTOM_BAR_HEIGHT)
 
-	local eyebrow = Theme.label(bar, "CENTRE DE COMMANDE", T.tiny, C.accent)
-	eyebrow.Position = UDim2.fromOffset(S.lg, 6)
-	eyebrow.Size = UDim2.fromOffset(180, 12)
-	eyebrow.FontFace = F.medium
-
-	local fronts = Theme.label(bar, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
-	fronts.AnchorPoint = Vector2.new(1, 0)
-	fronts.Position = UDim2.new(1, -S.lg, 0, 6)
-	fronts.Size = UDim2.fromOffset(250, 12)
-	fronts.TextXAlignment = Enum.TextXAlignment.Right
-	fronts.FontFace = F.bold
-	self.frontStatus = fronts
-
-	-- Ligne 1 : le compteur de troupes est le plus gros chiffre de l'ecran,
-	-- parce que c'est la seule valeur consultee en permanence.
+	--- Ressources -----------------------------------------------------------
 	local troops = Theme.label(bar, "0", T.hero, C.text)
-	troops.Position = UDim2.fromOffset(S.lg, 21)
-	troops.Size = UDim2.fromOffset(200, 30)
+	troops.Position = UDim2.fromOffset(S.lg, 12)
+	troops.Size = UDim2.fromOffset(124, 30)
 	troops.FontFace = F.display
 	self.troopsLabel = troops
 
-	-- Jauge de remplissage : dit d'un coup d'oeil s'il faut attendre que la
-	-- population monte ou si on plafonne et qu'il faut depenser.
 	local track = Instance.new("Frame")
-	track.Size = UDim2.fromOffset(200, 3)
-	track.Position = UDim2.fromOffset(S.lg, 52)
-	track.BackgroundColor3 = C.surfaceRaised
+	track.Position = UDim2.fromOffset(S.lg, 44)
+	track.Size = UDim2.fromOffset(132, 3)
+	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
 	track.Parent = bar
 	Theme.corner(track, Theme.radius.pill)
@@ -627,65 +572,71 @@ function HUD.buildCommandBar(self: HUD)
 	Theme.corner(fill, Theme.radius.pill)
 	self.troopsFill = fill
 
-	local gold = Theme.label(bar, "0", 16, C.gold)
-	gold.AnchorPoint = Vector2.new(1, 0)
-	gold.Position = UDim2.new(1, -S.lg, 0, 21)
-	gold.Size = UDim2.fromOffset(150, 20)
-	gold.TextXAlignment = Enum.TextXAlignment.Right
-	gold.FontFace = F.display
+	local gold = Theme.label(bar, "0", T.body, C.gold)
+	gold.Position = UDim2.fromOffset(S.lg, 52)
+	gold.Size = UDim2.fromOffset(132, 16)
+	gold.FontFace = F.bold
 	self.goldLabel = gold
+
 	local goldScale = Instance.new("UIScale")
-	goldScale.Scale = 1
 	goldScale.Parent = gold
 	self.goldScale = goldScale
 
-	local tiles = Theme.label(bar, "0 territoires", T.small, C.textMuted)
-	tiles.AnchorPoint = Vector2.new(1, 0)
-	tiles.Position = UDim2.new(1, -S.lg, 0, 41)
-	tiles.Size = UDim2.fromOffset(150, 14)
-	tiles.TextXAlignment = Enum.TextXAlignment.Right
+	local tiles = Theme.label(bar, "0 territoires", T.tiny, C.textFaint)
+	tiles.Position = UDim2.fromOffset(S.lg, 69)
+	tiles.Size = UDim2.fromOffset(132, 12)
 	tiles.FontFace = F.medium
+	tiles.TextTruncate = Enum.TextTruncate.AtEnd
 	self.tilesLabel = tiles
 
-	self:buildEngagementSlider(bar)
-	self:buildModeRow(bar)
+	divider(bar, 56, 168)
 
-	local hint = Theme.label(bar, "", T.tiny, C.textFaint)
-	hint.Position = UDim2.fromOffset(S.lg, 133)
-	hint.Size = UDim2.new(1, -S.lg * 2, 0, 16)
-	hint.FontFace = F.medium
-	hint.TextTruncate = Enum.TextTruncate.AtEnd
-	self.hintLabel = hint
+	--- Engagement -----------------------------------------------------------
+	self:buildEngagementSlider(bar)
+
+	divider(bar, 56, BOTTOM_BAR_WIDTH - 268)
+
+	--- Actions --------------------------------------------------------------
+	self:buildModeRow(bar)
 end
 
 --[[
 	Curseur d'engagement.
 
 	C'est la decision tactique centrale du jeu, donc elle merite un vrai
-	curseur continu plutot que quatre boutons : le joueur doit pouvoir doser
+	curseur continu plutot que des paliers : le joueur doit pouvoir doser
 	precisement ce qu'il risque, et voir en chiffres absolus combien de troupes
 	partent.
 ]]
 function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
+	local left = 184
+	local width = BOTTOM_BAR_WIDTH - 268 - left - S.md
+
 	local label = Theme.label(parent, "ENGAGEMENT", T.tiny, C.textFaint)
-	label.Position = UDim2.fromOffset(S.lg, 63)
-	label.Size = UDim2.fromOffset(120, 14)
+	label.Position = UDim2.fromOffset(left, 18)
+	label.Size = UDim2.fromOffset(90, 12)
 
 	local readout = Theme.label(parent, "", T.tiny, C.textMuted)
-	readout.AnchorPoint = Vector2.new(1, 0)
-	readout.Position = UDim2.new(1, -S.lg, 0, 63)
-	readout.Size = UDim2.fromOffset(220, 14)
+	readout.Position = UDim2.fromOffset(left + 90, 18)
+	readout.Size = UDim2.fromOffset(width - 90, 12)
 	readout.TextXAlignment = Enum.TextXAlignment.Right
 	readout.FontFace = F.medium
 	self.ratioReadout = readout
+
+	local front = Theme.label(parent, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
+	front.Position = UDim2.fromOffset(left, 56)
+	front.Size = UDim2.fromOffset(width, 12)
+	front.FontFace = F.bold
+	front.TextTruncate = Enum.TextTruncate.AtEnd
+	self.frontStatus = front
 
 	local track = Instance.new("TextButton")
 	track.Name = "EngagementTrack"
 	track.Text = ""
 	track.AutoButtonColor = false
-	track.Position = UDim2.fromOffset(S.lg, 78)
-	track.Size = UDim2.new(1, -S.lg * 2, 0, 11)
-	track.BackgroundColor3 = C.surfaceRaised
+	track.Position = UDim2.fromOffset(left, 34)
+	track.Size = UDim2.fromOffset(width, 11)
+	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
 	track.Parent = parent
 	Theme.corner(track, Theme.radius.pill)
@@ -698,13 +649,24 @@ function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
 	Theme.corner(fill, Theme.radius.pill)
 	self.ratioFill = fill
 
+	local knob = Instance.new("Frame")
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Position = UDim2.fromScale(Config.DEFAULT_ATTACK_RATIO, 0.5)
+	knob.Size = UDim2.fromOffset(13, 13)
+	knob.BackgroundColor3 = C.text
+	knob.BorderSizePixel = 0
+	knob.Parent = track
+	Theme.corner(knob, Theme.radius.pill)
+	Theme.stroke(knob, C.accent, 2)
+	self.ratioKnob = knob
+
 	local function ratioFromInput(inputX: number)
 		local origin = track.AbsolutePosition.X
-		local width = track.AbsoluteSize.X
-		if width <= 0 then
+		local size = track.AbsoluteSize.X
+		if size <= 0 then
 			return
 		end
-		local ratio = math.clamp((inputX - origin) / width, 0.05, 1)
+		local ratio = math.clamp((inputX - origin) / size, 0.05, 1)
 		self:setRatio(ratio)
 		if self.onRatioChanged then
 			self.onRatioChanged(ratio)
@@ -750,29 +712,33 @@ end
 
 function HUD.buildModeRow(self: HUD, parent: GuiObject)
 	local row = Instance.new("Frame")
+	row.Name = "Modes"
+	row.AnchorPoint = Vector2.new(1, 0.5)
+	row.Position = UDim2.new(1, -S.lg, 0.5, 0)
+	row.Size = UDim2.fromOffset(252, 60)
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(S.lg, 98)
-	row.Size = UDim2.new(1, -S.lg * 2, 0, 28)
 	row.Parent = parent
 	Theme.list(row, Enum.FillDirection.Horizontal, S.sm)
 
 	local modes: { { id: Mode, text: string, key: string } } = {
-		{ id = "attack", text = "Attaquer", key = "1" },
-		{ id = "boat", text = "Debarquer", key = "2" },
-		{ id = "build", text = "Construire", key = "3" },
-		{ id = "nuke", text = "Nucleaire", key = "4" },
+		{ id = "attack", text = "ATTAQUER", key = "1" },
+		{ id = "boat", text = "DEBARQUER", key = "2" },
+		{ id = "build", text = "CONSTRUIRE", key = "3" },
+		{ id = "nuke", text = "FRAPPE", key = "4" },
 	}
 
 	for i, entry in modes do
-		local b = button(row, entry.text, T.small)
+		local b = button(row, entry.text, T.tiny)
 		b.LayoutOrder = i
-		b.Size = UDim2.new(0.25, -6, 1, 0)
+		b.Size = UDim2.fromOffset(58, 60)
+		b.TextYAlignment = Enum.TextYAlignment.Bottom
+		b.TextWrapped = true
 
-		-- Rappel du raccourci clavier dans le coin : c'est ainsi qu'on fait
-		-- passer un joueur de la souris au clavier sans tutoriel.
+		-- Rappel du raccourci clavier : c'est ainsi qu'on fait passer un joueur
+		-- de la souris au clavier sans tutoriel.
 		local key = Theme.label(b, entry.key, T.tiny, C.textFaint)
-		key.AnchorPoint = Vector2.new(1, 1)
-		key.Position = UDim2.new(1, -5, 1, -2)
+		key.AnchorPoint = Vector2.new(1, 0)
+		key.Position = UDim2.new(1, -4, 0, 3)
 		key.Size = UDim2.fromOffset(10, 12)
 		key.TextXAlignment = Enum.TextXAlignment.Right
 
@@ -781,36 +747,237 @@ function HUD.buildModeRow(self: HUD, parent: GuiObject)
 		end)
 		self.modeButtons[entry.id] = b
 	end
+
+	local hint = Theme.label(parent, "", T.tiny, C.textFaint)
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(0.5, 0, 1, -4)
+	hint.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH - S.lg * 2, 12)
+	hint.TextXAlignment = Enum.TextXAlignment.Center
+	hint.FontFace = F.medium
+	hint.TextTruncate = Enum.TextTruncate.AtEnd
+	self.hintLabel = hint
 end
 
 --=============================================================================
--- Palettes contextuelles (bas gauche)
+-- Sous-menu : Nations (classement et diplomatie fusionnes)
 --=============================================================================
 
+--[[
+	Le classement et la diplomatie ne font plus qu'un.
+
+	On ouvre le classement, on clique une nation, et sa fiche se deplie **sur
+	place** — drapeau, reputation, boutons d'alliance. Le lien entre "qui est
+	fort" et "que faire avec lui" devient un seul geste, au lieu de deux
+	panneaux qui se regardaient en chiens de faience.
+]]
+function HUD.buildNationsSheet(self: HUD)
+	local sheet = Theme.panel("Nations", self.root)
+	sheet.AnchorPoint = Vector2.new(1, 0)
+	sheet.Position = UDim2.new(1, -S.md, 0, S.md + TOP_BAR_HEIGHT + S.sm)
+	sheet.Size = UDim2.fromOffset(SIDE_SHEET_WIDTH, 34 + LEADER_ROWS * 20 + 150)
+	self:registerSheet("nations", sheet)
+	self.diploPanel = sheet
+
+	local title = Theme.label(sheet, "DOMINATION", T.tiny, C.textFaint)
+	title.Position = UDim2.fromOffset(S.md, S.sm)
+	title.Size = UDim2.new(1, -S.md * 2, 0, 12)
+
+	local close = button(sheet, "\u{2715}", T.tiny)
+	close.AnchorPoint = Vector2.new(1, 0)
+	close.Position = UDim2.new(1, -S.sm, 0, S.sm - 2)
+	close.Size = UDim2.fromOffset(20, 18)
+	close.Activated:Connect(function()
+		self:openSheet(nil)
+	end)
+
+	local list = Instance.new("Frame")
+	list.Name = "Rows"
+	list.BackgroundTransparency = 1
+	list.Position = UDim2.fromOffset(S.sm, 26)
+	list.Size = UDim2.new(1, -S.sm * 2, 1, -34)
+	list.Parent = sheet
+	Theme.list(list, Enum.FillDirection.Vertical, 2)
+
+	for i = 1, LEADER_ROWS do
+		local holder = Instance.new("Frame")
+		holder.LayoutOrder = i
+		holder.BackgroundTransparency = 1
+		holder.Size = UDim2.new(1, 0, 0, 20)
+		holder.Parent = list
+
+		local row = Instance.new("TextButton")
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 20)
+		row.Text = ""
+		row.AutoButtonColor = false
+		row.Parent = holder
+
+		-- Barre de fond proportionnelle au territoire : on lit le rapport de
+		-- force sans avoir a comparer des nombres.
+		local bar = Instance.new("Frame")
+		bar.Name = "Share"
+		bar.Size = UDim2.fromScale(0, 1)
+		bar.BackgroundTransparency = 0.78
+		bar.BorderSizePixel = 0
+		bar.Parent = row
+		Theme.corner(bar, Theme.radius.sm)
+
+		local name = Theme.label(row, "", T.small, C.textMuted)
+		name.Position = UDim2.fromOffset(S.sm, 0)
+		name.Size = UDim2.new(1, -66, 1, 0)
+		name.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local value = Theme.label(row, "", T.small, C.textFaint)
+		value.AnchorPoint = Vector2.new(1, 0)
+		value.Position = UDim2.new(1, -S.sm, 0, 0)
+		value.Size = UDim2.fromOffset(50, 20)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.FontFace = F.medium
+
+		-- La fiche diplomatique de CETTE nation, repliee par defaut.
+		local details = Instance.new("Frame")
+		details.Name = "Details"
+		details.Position = UDim2.fromOffset(0, 20)
+		details.Size = UDim2.new(1, 0, 0, 66)
+		details.BackgroundColor3 = C.surfaceRaised
+		details.BorderSizePixel = 0
+		details.Visible = false
+		details.Parent = holder
+		Theme.corner(details, Theme.radius.sm)
+
+		row.MouseEnter:Connect(function()
+			bar.BackgroundTransparency = 0.6
+		end)
+		row.MouseLeave:Connect(function()
+			bar.BackgroundTransparency = 0.78
+		end)
+		row.Activated:Connect(function()
+			local item = self.ranked[i]
+			if item then
+				SoundManager.play("uiSelect")
+				self:selectFaction(item.slot)
+			end
+		end)
+
+		self.leaderRows[i] = { button = row, bar = bar, name = name, value = value, details = details } :: LeaderRow
+	end
+
+	-- Contenu de la fiche : un seul exemplaire, reparente dans la ligne
+	-- selectionnee. Dupliquer ces boutons dix fois serait du gaspillage et
+	-- multiplierait les connexions a maintenir.
+	local card = Instance.new("Frame")
+	card.Name = "DiplomacyCard"
+	card.BackgroundTransparency = 1
+	card.Size = UDim2.fromScale(1, 1)
+	card.Visible = false
+	card.Parent = sheet
+	self.diploCard = card
+
+	local cardTitle = Theme.label(card, "", T.small, C.text)
+	cardTitle.Position = UDim2.fromOffset(S.sm, S.xs)
+	cardTitle.Size = UDim2.new(1, -S.sm * 2, 0, 13)
+	cardTitle.TextTruncate = Enum.TextTruncate.AtEnd
+	self.diploTitle = cardTitle
+
+	local cardStatus = Theme.label(card, "", T.tiny, C.textMuted)
+	cardStatus.Position = UDim2.fromOffset(S.sm, 18)
+	cardStatus.Size = UDim2.new(1, -S.sm * 2, 0, 12)
+	cardStatus.FontFace = F.medium
+	cardStatus.TextTruncate = Enum.TextTruncate.AtEnd
+	self.diploStatus = cardStatus
+
+	local actions = Instance.new("Frame")
+	actions.BackgroundTransparency = 1
+	actions.Position = UDim2.fromOffset(S.sm, 34)
+	actions.Size = UDim2.new(1, -S.sm * 2, 0, 26)
+	actions.Parent = card
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.5, -2, 0, 24)
+	grid.CellPadding = UDim2.fromOffset(4, 4)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = actions
+
+	local actionDefs = {
+		{ id = "request", text = "Alliance", color = C.ally, order = 1 },
+		{ id = "accept", text = "Accepter", color = C.ally, order = 2 },
+		{ id = "break", text = "Rompre", color = C.danger, order = 3 },
+		{ id = "embargo", text = "Embargo", color = C.warning, order = 4 },
+		{ id = "unembargo", text = "Lever", color = C.info, order = 5 },
+	}
+
+	for _, action in actionDefs do
+		local b = button(actions, action.text, T.tiny)
+		b.LayoutOrder = action.order
+		b.Visible = false
+		b.TextColor3 = action.color
+		b.Activated:Connect(function()
+			local target = self.selectedSlot
+			if target and self.onDiplomacyAction then
+				self.onDiplomacyAction(action.id, target)
+			end
+		end)
+		self.diploButtons[action.id] = b
+	end
+end
+
+--=============================================================================
+-- Sous-menu : Profil
+--=============================================================================
+
+function HUD.buildProfileSheet(self: HUD)
+	local sheet = Theme.panel("Profile", self.root)
+	sheet.AnchorPoint = Vector2.new(1, 0)
+	sheet.Position = UDim2.new(1, -S.md, 0, S.md + TOP_BAR_HEIGHT + S.sm)
+	sheet.Size = UDim2.fromOffset(SIDE_SHEET_WIDTH, 96)
+	self:registerSheet("profile", sheet)
+
+	local role = Theme.label(sheet, "COMMANDANT  \u{00B7}  NIVEAU 1", T.small, C.text)
+	role.Position = UDim2.fromOffset(S.md, S.sm)
+	role.Size = UDim2.new(1, -S.md * 2, 0, 14)
+	self.roleLabel = role
+
+	local stats = Theme.label(sheet, "", T.tiny, C.textMuted)
+	stats.Position = UDim2.fromOffset(S.md, 28)
+	stats.Size = UDim2.new(1, -S.md * 2, 0, 40)
+	stats.FontFace = F.medium
+	stats.TextWrapped = true
+	stats.TextYAlignment = Enum.TextYAlignment.Top
+	self.profileStats = stats
+
+	local close = button(sheet, "Fermer", T.tiny)
+	close.AnchorPoint = Vector2.new(1, 1)
+	close.Position = UDim2.new(1, -S.md, 1, -S.sm)
+	close.Size = UDim2.fromOffset(64, 22)
+	close.Activated:Connect(function()
+		self:openSheet(nil)
+	end)
+end
+
+--=============================================================================
+-- Sous-menu : Construire
+--=============================================================================
 
 --[[
-	Le menu de construction est organise en onglets par classe : Economie,
-	Militaire, Science.
+	Les trois classes sont des onglets d'une seule feuille, et non deux
+	palettes concurrentes se disputant le meme coin d'ecran.
 
-	Sans classement, les six batiments formaient une liste plate ou un joueur
-	debutant ne pouvait pas deviner lequel servait a quoi. Les onglets forcent
-	une reponse a "je veux quoi maintenant" — de l'argent, de la force, ou de
-	l'avance technologique — avant de choisir un batiment precis.
+	Le classement par classe force une reponse a "je veux quoi maintenant" —
+	de l'argent, de la force, ou de l'avance technologique — avant de choisir
+	un batiment precis.
 ]]
-function HUD.buildPalettes(self: HUD)
-	local build = Theme.panel("BuildPalette", self.root)
-	build.AnchorPoint = Vector2.new(0, 1)
-	build.Position = UDim2.new(0, S.md, 1, -S.md)
-	build.Size = UDim2.fromOffset(196, 190)
-	build.Visible = false
-	self.buildPalette = build
+function HUD.buildBuildSheet(self: HUD)
+	local sheet = Theme.panel("BuildSheet", self.root)
+	sheet.AnchorPoint = Vector2.new(0.5, 1)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
+	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 152)
+	self:registerSheet("build", sheet)
+	self.buildPalette = sheet
 
-	-- Onglets de classe
 	local tabs = Instance.new("Frame")
 	tabs.BackgroundTransparency = 1
-	tabs.Position = UDim2.fromOffset(S.sm, S.sm)
-	tabs.Size = UDim2.new(1, -S.sm * 2, 0, 22)
-	tabs.Parent = build
+	tabs.Position = UDim2.fromOffset(S.md, S.sm)
+	tabs.Size = UDim2.new(1, -S.md * 2, 0, 22)
+	tabs.Parent = sheet
 	Theme.list(tabs, Enum.FillDirection.Horizontal, S.xs)
 
 	self.classTabs = {}
@@ -818,14 +985,14 @@ function HUD.buildPalettes(self: HUD)
 
 	local pages = Instance.new("Frame")
 	pages.BackgroundTransparency = 1
-	pages.Position = UDim2.fromOffset(S.sm, 34)
-	pages.Size = UDim2.new(1, -S.sm * 2, 1, -42)
-	pages.Parent = build
+	pages.Position = UDim2.fromOffset(S.md, 38)
+	pages.Size = UDim2.new(1, -S.md * 2, 1, -46)
+	pages.Parent = sheet
 
 	for i, class in BuildingDefs.CLASSES do
-		local tab = button(tabs, class.symbol, T.small)
+		local tab = button(tabs, string.upper(class.name), T.tiny)
 		tab.LayoutOrder = i
-		tab.Size = UDim2.new(1 / #BuildingDefs.CLASSES, -2, 1, 0)
+		tab.Size = UDim2.fromOffset(92, 22)
 		tab.Activated:Connect(function()
 			self:setBuildClass(class.id)
 		end)
@@ -837,30 +1004,38 @@ function HUD.buildPalettes(self: HUD)
 		page.Size = UDim2.fromScale(1, 1)
 		page.Visible = false
 		page.Parent = pages
-		Theme.list(page, Enum.FillDirection.Vertical, S.xs)
+		Theme.list(page, Enum.FillDirection.Horizontal, S.sm)
 		self.classPages[class.id] = page
 
 		for order, def in BuildingDefs.BY_CLASS[class.id] do
-			local b = button(page, "", T.small)
-			b.LayoutOrder = order
-			b.Size = UDim2.new(1, 0, 0, 34)
+			local card = button(page, "", T.small)
+			card.LayoutOrder = order
+			card.Size = UDim2.fromOffset(158, 96)
 
-			local glyph = Theme.label(b, def.symbol, 15, C.text)
-			glyph.Position = UDim2.fromOffset(S.sm, 0)
-			glyph.Size = UDim2.fromOffset(18, 34)
-			glyph.TextXAlignment = Enum.TextXAlignment.Center
+			local glyph = Theme.label(card, def.symbol, 18, C.text)
+			glyph.Position = UDim2.fromOffset(S.sm, S.sm)
+			glyph.Size = UDim2.fromOffset(22, 22)
 
-			local title = Theme.label(b, def.name, T.small, C.textMuted)
-			title.Position = UDim2.fromOffset(S.sm + 22, 4)
-			title.Size = UDim2.new(1, -S.sm - 22, 0, 14)
+			local name = Theme.label(card, def.name, T.small, C.text)
+			name.Position = UDim2.fromOffset(S.sm, 34)
+			name.Size = UDim2.new(1, -S.sm * 2, 0, 14)
+			name.TextTruncate = Enum.TextTruncate.AtEnd
 
-			local price = Theme.label(b, `{def.cost} or`, T.tiny, C.gold)
-			price.Position = UDim2.fromOffset(S.sm + 22, 17)
-			price.Size = UDim2.new(1, -S.sm - 22, 0, 12)
-			price.FontFace = F.medium
+			local description = Theme.label(card, def.description, T.tiny, C.textFaint)
+			description.Position = UDim2.fromOffset(S.sm, 50)
+			description.Size = UDim2.new(1, -S.sm * 2, 0, 26)
+			description.FontFace = F.medium
+			description.TextWrapped = true
+			description.TextYAlignment = Enum.TextYAlignment.Top
+
+			local price = Theme.label(card, `{def.cost} or`, T.tiny, C.gold)
+			price.AnchorPoint = Vector2.new(0, 1)
+			price.Position = UDim2.new(0, S.sm, 1, -S.sm)
+			price.Size = UDim2.new(1, -S.sm * 2, 0, 12)
+			price.FontFace = F.bold
 			self.buildPriceLabels[def.id] = price
 
-			b.Activated:Connect(function()
+			card.Activated:Connect(function()
 				self.buildKind = def.id
 				self:setMode("build")
 				if self.onBuildKindChanged then
@@ -868,177 +1043,134 @@ function HUD.buildPalettes(self: HUD)
 				end
 			end)
 
-			self.buildButtons[def.id] = b
+			self.buildButtons[def.id] = card
 		end
 	end
+end
 
-	--- Arsenal --------------------------------------------------------------
-	local nuke = Theme.panel("NukePalette", self.root)
-	nuke.AnchorPoint = Vector2.new(0, 1)
-	nuke.Position = UDim2.new(0, S.md, 1, -S.md)
-	nuke.Size = UDim2.fromOffset(196, 106)
-	nuke.Visible = false
-	self.nukePalette = nuke
+--=============================================================================
+-- Sous-menu : Arsenal
+--=============================================================================
 
-	local nukeTitle = Theme.label(nuke, "ARSENAL", T.tiny, C.textFaint)
-	nukeTitle.Position = UDim2.fromOffset(S.md, S.sm)
-	nukeTitle.Size = UDim2.new(1, -S.md * 2, 0, 12)
+function HUD.buildArsenalSheet(self: HUD)
+	local sheet = Theme.panel("Arsenal", self.root)
+	sheet.AnchorPoint = Vector2.new(0.5, 1)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
+	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 116)
+	self:registerSheet("nuke", sheet)
+	self.nukePalette = sheet
 
-	local nukeList = Instance.new("Frame")
-	nukeList.BackgroundTransparency = 1
-	nukeList.Position = UDim2.fromOffset(S.sm, 24)
-	nukeList.Size = UDim2.new(1, -S.sm * 2, 1, -32)
-	nukeList.Parent = nuke
-	Theme.list(nukeList, Enum.FillDirection.Vertical, S.xs)
+	local title = Theme.label(sheet, "ARSENAL", T.tiny, C.textFaint)
+	title.Position = UDim2.fromOffset(S.md, S.sm)
+	title.Size = UDim2.new(1, -S.md * 2, 0, 12)
+
+	local list = Instance.new("Frame")
+	list.BackgroundTransparency = 1
+	list.Position = UDim2.fromOffset(S.md, 26)
+	list.Size = UDim2.new(1, -S.md * 2, 1, -34)
+	list.Parent = sheet
+	Theme.list(list, Enum.FillDirection.Horizontal, S.sm)
 
 	for kind = 1, 2 do
 		local stats = Config.NUKE_STATS[kind]
-		local b = button(nukeList, "", T.small)
-		b.LayoutOrder = kind
-		b.Size = UDim2.new(1, 0, 0, 34)
+		local card = button(list, "", T.small)
+		card.LayoutOrder = kind
+		card.Size = UDim2.fromOffset(220, 74)
 
-		local glyph = Theme.label(b, "\u{2622}", 15, C.nuclear)
-		glyph.Position = UDim2.fromOffset(S.sm, 0)
-		glyph.Size = UDim2.fromOffset(18, 34)
-		glyph.TextXAlignment = Enum.TextXAlignment.Center
+		local glyph = Theme.label(card, "\u{2622}", 18, C.nuclear)
+		glyph.Position = UDim2.fromOffset(S.sm, S.sm)
+		glyph.Size = UDim2.fromOffset(22, 22)
 
-		local title = Theme.label(b, stats.name, T.small, C.textMuted)
-		title.Position = UDim2.fromOffset(S.sm + 22, 4)
-		title.Size = UDim2.new(1, -S.sm - 22, 0, 14)
+		local name = Theme.label(card, stats.name, T.small, C.text)
+		name.Position = UDim2.fromOffset(S.sm + 26, 10)
+		name.Size = UDim2.new(1, -S.sm - 26, 0, 14)
 
-		local price = Theme.label(b, `{stats.cost} or`, T.tiny, C.gold)
-		price.Position = UDim2.fromOffset(S.sm + 22, 17)
-		price.Size = UDim2.new(1, -S.sm - 22, 0, 12)
-		price.FontFace = F.medium
+		local detail = Theme.label(card, `Rayon {stats.radius} tuiles`, T.tiny, C.textFaint)
+		detail.Position = UDim2.fromOffset(S.sm + 26, 26)
+		detail.Size = UDim2.new(1, -S.sm - 26, 0, 12)
+		detail.FontFace = F.medium
 
-		b.Activated:Connect(function()
+		local price = Theme.label(card, `{stats.cost} or`, T.tiny, C.gold)
+		price.AnchorPoint = Vector2.new(0, 1)
+		price.Position = UDim2.new(0, S.sm, 1, -S.sm)
+		price.Size = UDim2.new(1, -S.sm * 2, 0, 12)
+		price.FontFace = F.bold
+
+		card.Activated:Connect(function()
 			self.nukeKind = kind
 			self:setMode("nuke")
 		end)
-		self.nukeButtons[kind] = b
-	end
-
-	self:setBuildClass(BuildingDefs.CLASSES[1].id)
-end
-
-function HUD.setBuildClass(self: HUD, classId: string)
-	self.buildClass = classId
-	for id, tab in self.classTabs do
-		setSelected(tab, id == classId)
-	end
-	for id, page in self.classPages do
-		page.Visible = id == classId
+		self.nukeButtons[kind] = card
 	end
 end
 
 --=============================================================================
--- Fil de notifications
+-- Sous-menu : Territoire
 --=============================================================================
 
-function HUD.buildFeed(self: HUD)
-	local feed = Instance.new("Frame")
-	feed.Name = "Feed"
-	feed.AnchorPoint = Vector2.new(0.5, 0)
-	feed.Position = UDim2.new(0.5, 0, 0, 56)
-	-- Hauteur bornee au nombre maximal de messages, et decoupage actif : le
-	-- fil ne doit jamais pouvoir grandir jusqu'a manger la carte.
-	feed.Size = UDim2.fromOffset(380, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
-	feed.BackgroundTransparency = 1
-	feed.ClipsDescendants = true
-	feed.Parent = self.root
-	self.feed = feed
+function HUD.buildTerritorySheet(self: HUD)
+	local sheet = Theme.panel("Territory", self.root)
+	sheet.AnchorPoint = Vector2.new(0.5, 1)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
+	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 92)
+	self:registerSheet("territory", sheet)
+	self.territoryPanel = sheet
 
-	local layout = Theme.list(feed, Enum.FillDirection.Vertical, S.xs)
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-end
+	local owner = Theme.label(sheet, "", T.small, C.text)
+	owner.Position = UDim2.fromOffset(S.md, S.sm)
+	owner.Size = UDim2.fromOffset(280, 14)
+	owner.TextTruncate = Enum.TextTruncate.AtEnd
+	self.territoryOwner = owner
 
-local FEED_COLORS: { [string]: Color3 } = {
-	good = C.ally,
-	bad = C.danger,
-	alert = C.warning,
-	info = C.info,
-}
+	local details = Theme.label(sheet, "", T.tiny, C.textMuted)
+	details.Position = UDim2.fromOffset(S.md, 26)
+	details.Size = UDim2.fromOffset(400, 30)
+	details.FontFace = F.medium
+	details.TextWrapped = true
+	details.TextYAlignment = Enum.TextYAlignment.Top
+	self.territoryDetails = details
 
-local FEED_SOUNDS: { [string]: string } = {
-	bad = "uiError",
-	alert = "uiSelect",
-}
-
---[[
-	Ajoute un message au fil.
-
-	Le fil est plafonne en nombre d'entrees, pas seulement en duree : pendant
-	une phase agitee, les messages arrivent bien plus vite qu'ils n'expirent, et
-	un simple minuteur laissait le fil recouvrir tout l'ecran.
-]]
-function HUD.notify(self: HUD, text: string, kind: string)
-	-- Un message identique reste groupe meme si d'autres alertes sont arrivees
-	-- entre-temps. Les fronts alternent souvent deux capitales et l'ancien
-	-- regroupement, limite a la derniere ligne, laissait encore tout s'empiler.
-	local grouped = self.feedGroups[text]
-	if grouped and grouped.Parent then
-		local repeats = (grouped:GetAttribute("Repeats") or 1) + 1
-		grouped:SetAttribute("Repeats", repeats)
-		grouped.Text = `{text}   x{repeats}`
-		return
-	end
-
-	local entry = Instance.new("TextLabel")
-	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
-	entry.BackgroundColor3 = C.surface
-	entry.BackgroundTransparency = 0.1
-	entry.BorderSizePixel = 0
-	entry.FontFace = F.bold
-	entry.TextSize = T.small
-	entry.TextColor3 = FEED_COLORS[kind] or C.text
-	entry.Text = text
-	entry.TextTruncate = Enum.TextTruncate.AtEnd
-	entry.LayoutOrder = self.feedCounter
-	entry:SetAttribute("Body", text)
-	entry.Parent = self.feed
-	Theme.corner(entry, Theme.radius.sm)
-	Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
-
-	local sound = FEED_SOUNDS[kind]
-	if sound then
-		SoundManager.play(sound)
-	end
-
-	self.feedCounter += 1
-	table.insert(self.feedEntries, entry)
-	self.feedGroups[text] = entry
-
-	while #self.feedEntries > MAX_FEED_ENTRIES do
-		local oldest = table.remove(self.feedEntries, 1)
-		if oldest then
-			local body = oldest:GetAttribute("Body")
-			if body and self.feedGroups[body] == oldest then
-				self.feedGroups[body] = nil
-			end
-			oldest:Destroy()
-		end
-	end
-
-	task.delay(4.5, function()
-		if not entry.Parent then
-			return
-		end
-		local index = table.find(self.feedEntries, entry)
-		if index then
-			table.remove(self.feedEntries, index)
-		end
-		if self.feedGroups[text] == entry then
-			self.feedGroups[text] = nil
-		end
-		local tween = TweenService:Create(
-			entry,
-			Theme.motion.smooth,
-			{ BackgroundTransparency = 1, TextTransparency = 1 }
-		)
-		tween:Play()
-		tween.Completed:Wait()
-		entry:Destroy()
+	local close = button(sheet, "\u{2715}", T.tiny)
+	close.AnchorPoint = Vector2.new(1, 0)
+	close.Position = UDim2.new(1, -S.sm, 0, S.sm - 2)
+	close.Size = UDim2.fromOffset(20, 18)
+	close.Activated:Connect(function()
+		self:openSheet(nil)
 	end)
+
+	local actions = Instance.new("Frame")
+	actions.AnchorPoint = Vector2.new(1, 1)
+	actions.Position = UDim2.new(1, -S.md, 1, -S.sm)
+	actions.Size = UDim2.fromOffset(316, 26)
+	actions.BackgroundTransparency = 1
+	actions.Parent = sheet
+	Theme.list(actions, Enum.FillDirection.Horizontal, S.xs)
+
+	self.territoryButtons = {}
+
+	local actionDefs = {
+		{ id = "attack", text = "Attaquer", order = 1 },
+		{ id = "boat", text = "Debarquer", order = 2 },
+		{ id = "build", text = "Construire", order = 3 },
+		{ id = "nuke", text = "Frappe", order = 4 },
+	}
+
+	for _, action in actionDefs do
+		local b = button(actions, action.text, T.tiny)
+		b.LayoutOrder = action.order
+		b.Size = UDim2.fromOffset(76, 26)
+		b.Activated:Connect(function()
+			if b:GetAttribute("Disabled") then
+				SoundManager.play("uiError")
+				return
+			end
+			local selected = self.selectedTerritory
+			if selected and self.onTerritoryAction then
+				self.onTerritoryAction(action.id, selected.index)
+			end
+		end)
+		self.territoryButtons[action.id] = b
+	end
 end
 
 --=============================================================================
@@ -1060,50 +1192,50 @@ function HUD.buildDoctrineModal(self: HUD)
 	local box = Theme.panel("Box", modal)
 	box.AnchorPoint = Vector2.new(0.5, 0.5)
 	box.Position = UDim2.fromScale(0.5, 0.5)
-	box.Size = UDim2.fromOffset(620, 330)
+	box.Size = UDim2.fromOffset(620, 300)
 	box.ZIndex = 21
 
-	local title = Theme.label(box, "CHOISIS TA DOCTRINE", 24, C.text)
+	local title = Theme.label(box, "CHOISIS TA DOCTRINE", 22, C.text)
 	title.Position = UDim2.fromOffset(S.xl, S.lg)
-	title.Size = UDim2.new(1, -S.xl * 2, 0, 30)
+	title.Size = UDim2.new(1, -S.xl * 2, 0, 26)
 	title.FontFace = F.display
 	title.ZIndex = 22
 
-	local subtitle = Theme.label(box, "Un engagement definitif pour toute la partie.", T.body, C.textMuted)
-	subtitle.Position = UDim2.fromOffset(S.xl, S.lg + 30)
-	subtitle.Size = UDim2.new(1, -S.xl * 2, 0, 18)
+	local subtitle = Theme.label(box, "Un engagement definitif pour toute la partie.", T.small, C.textMuted)
+	subtitle.Position = UDim2.fromOffset(S.xl, S.lg + 26)
+	subtitle.Size = UDim2.new(1, -S.xl * 2, 0, 16)
 	subtitle.FontFace = F.medium
 	subtitle.ZIndex = 22
 
 	local row = Instance.new("Frame")
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(S.xl, 92)
-	row.Size = UDim2.new(1, -S.xl * 2, 0, 210)
+	row.Position = UDim2.fromOffset(S.xl, 82)
+	row.Size = UDim2.new(1, -S.xl * 2, 0, 190)
 	row.ZIndex = 22
 	row.Parent = box
-	Theme.list(row, Enum.FillDirection.Horizontal, S.md)
+	Theme.list(row, Enum.FillDirection.Horizontal, S.sm)
 
 	for i, doctrine in Doctrines.LIST do
 		local card = button(row, "", T.small)
 		card.LayoutOrder = i
-		card.Size = UDim2.new(0.25, -9, 1, 0)
+		card.Size = UDim2.fromOffset(132, 190)
 		card.ZIndex = 22
 
-		local symbol = Theme.label(card, doctrine.symbol, 34, C.text)
+		local symbol = Theme.label(card, doctrine.symbol, 30, C.text)
 		symbol.Position = UDim2.fromOffset(0, S.lg)
-		symbol.Size = UDim2.new(1, 0, 0, 40)
+		symbol.Size = UDim2.new(1, 0, 0, 36)
 		symbol.TextXAlignment = Enum.TextXAlignment.Center
 		symbol.ZIndex = 23
 
 		local name = Theme.label(card, doctrine.name, T.title, C.text)
-		name.Position = UDim2.fromOffset(0, 64)
-		name.Size = UDim2.new(1, 0, 0, 22)
+		name.Position = UDim2.fromOffset(0, 60)
+		name.Size = UDim2.new(1, 0, 0, 20)
 		name.TextXAlignment = Enum.TextXAlignment.Center
 		name.ZIndex = 23
 
 		local tagline = Theme.label(card, doctrine.tagline, T.tiny, C.textMuted)
-		tagline.Position = UDim2.fromOffset(S.sm, 92)
-		tagline.Size = UDim2.new(1, -S.sm * 2, 0, 100)
+		tagline.Position = UDim2.fromOffset(S.sm, 86)
+		tagline.Size = UDim2.new(1, -S.sm * 2, 0, 92)
 		tagline.TextXAlignment = Enum.TextXAlignment.Center
 		tagline.TextYAlignment = Enum.TextYAlignment.Top
 		tagline.TextWrapped = true
@@ -1114,8 +1246,8 @@ function HUD.buildDoctrineModal(self: HUD)
 			if self.onDoctrineChosen then
 				self.onDoctrineChosen(doctrine.id)
 			end
-			self:recordTutorial("doctrine")
 			modal.Visible = false
+			self:recordTutorial("doctrine")
 		end)
 	end
 end
@@ -1125,28 +1257,37 @@ function HUD.showDoctrineModal(self: HUD)
 end
 
 --=============================================================================
--- Etat
+-- Onboarding
 --=============================================================================
 
 function HUD.startOnboarding(self: HUD)
 	self.tutorialStep = 1
-	self.tutorialStartTiles = self.tiles or 0
-	self.missionPanel.Visible = true
+	self.tutorialStartTiles = 0
+	self.missionStrip.Visible = true
 	self:refreshOnboarding()
 end
 
 function HUD.refreshOnboarding(self: HUD)
 	local step = TUTORIAL_STEPS[self.tutorialStep]
+
 	if not step then
 		self.missionTitle.Text = "Briefing termine"
 		self.missionTitle.TextColor3 = C.ally
 		self.missionHint.Text = "Tu es libre de construire ton empire comme tu veux."
 		self.missionFill.Size = UDim2.fromScale(1, 1)
 		self.missionFill.BackgroundColor3 = C.ally
-		self.missionCounter.Text = "5 / 5"
+		self.missionCounter.Text = `{#TUTORIAL_STEPS} / {#TUTORIAL_STEPS}`
+		-- Le bandeau s'efface de lui-meme : un objectif accompli ne doit pas
+		-- continuer a occuper l'ecran.
+		task.delay(4, function()
+			if self.tutorialStep > #TUTORIAL_STEPS then
+				self.missionStrip.Visible = false
+			end
+		end)
 		return
 	end
 
+	self.missionStrip.Visible = true
 	self.missionTitle.Text = step.title
 	self.missionTitle.TextColor3 = C.text
 	self.missionHint.Text = step.hint
@@ -1170,11 +1311,16 @@ function HUD.setProfile(self: HUD, profile)
 		return
 	end
 	self.profile = profile
-	self.roleLabel.Text = `COMMANDANT  ·  NIVEAU {profile.level or 1}`
+	self.roleLabel.Text = `COMMANDANT  \u{00B7}  NIVEAU {profile.level or 1}`
+	self.profileStats.Text = `{profile.xp or 0} XP  \u{00B7}  {profile.matches or 0} campagnes  \u{00B7}  {profile.wins or 0} victoires\n{profile.betrayals or 0} trahison(s) inscrite(s) a ton nom`
 	if profile.lastGain and profile.lastGain > 0 then
 		self:notify(`Progression de campagne : +{profile.lastGain} XP`, "good")
 	end
 end
+
+--=============================================================================
+-- Territoire
+--=============================================================================
 
 function HUD.selectTerritory(
 	self: HUD,
@@ -1193,6 +1339,7 @@ function HUD.selectTerritory(
 		buildingKind = buildingKind,
 		buildingLevel = level,
 	}
+	self:openSheet("territory")
 	self.territoryPanel.Visible = true
 
 	local ownerName = if ownerSlot == 0
@@ -1211,7 +1358,7 @@ function HUD.selectTerritory(
 		then Config.CITY_LEVELS[level].name
 		else buildingName
 	local building = if displayBuildingName and displayBuildingName ~= ""
-		then `  ·  {displayBuildingName}{if buildingKind == Config.BUILDING.CITY then ` niv. {level}` else ""}`
+		then `  \u{00B7}  {displayBuildingName}{if buildingKind == Config.BUILDING.CITY then ` niv. {level}` else ""}`
 		else ""
 	local detailLine = `Case tactique #{index}`
 	local upgradePrice = math.huge
@@ -1220,20 +1367,18 @@ function HUD.selectTerritory(
 		local currentCity = Config.CITY_LEVELS[level]
 		local doctrine = Doctrines.get(self.doctrineId)
 		upgradePrice = math.floor((currentCity.upgradeCost or math.huge) * doctrine.buildCost)
-		detailLine = `Vers {nextCity.name} : {upgradePrice} or · +{nextCity.popCapBonus - currentCity.popCapBonus} capacite`
+		detailLine = `Vers {nextCity.name} : {upgradePrice} or \u{00B7} +{nextCity.popCapBonus - currentCity.popCapBonus} capacite`
 	elseif buildingKind == Config.BUILDING.CITY then
-		detailLine = "Megapole achevee · niveau maximum"
+		detailLine = "Megapole achevee \u{00B7} niveau maximum"
 	elseif buildingKind == Config.BUILDING.FACTORY then
 		detailLine = if buildingLink
-			then `Route logistique active vers la case #{buildingLink} · revenu automatique`
-			else `Aucune ville a moins de {Config.FACTORY_ROUTE_RANGE} cases · production arretee`
+			then `Route logistique active vers la case #{buildingLink} \u{00B7} revenu automatique`
+			else `Aucune ville a moins de {Config.FACTORY_ROUTE_RANGE} cases \u{00B7} production arretee`
 	end
 	self.territoryDetails.Text = `{terrainName}{building}\n{detailLine}`
 
 	local citySelected = ownerSlot == self.mySlot and buildingKind == Config.BUILDING.CITY
-	local cityUpgradeable = citySelected
-		and nextCity ~= nil
-		and self.era >= nextCity.requiredEra
+	local cityUpgradeable = citySelected and nextCity ~= nil and self.era >= nextCity.requiredEra
 	local enabled = {
 		attack = ownerSlot ~= self.mySlot,
 		build = (ownerSlot == self.mySlot and buildingKind == nil) or cityUpgradeable,
@@ -1253,15 +1398,20 @@ function HUD.selectTerritory(
 	end
 end
 
+--=============================================================================
+-- Etat
+--=============================================================================
+
 function HUD.setRatio(self: HUD, ratio: number)
 	self.ratio = ratio
 	self.ratioFill.Size = UDim2.fromScale(ratio, 1)
+	self.ratioKnob.Position = UDim2.fromScale(ratio, 0.5)
 	self:refreshRatioReadout()
 end
 
 function HUD.refreshRatioReadout(self: HUD)
 	local committed = math.floor(self.troops * self.ratio)
-	self.ratioReadout.Text = `{math.floor(self.ratio * 100)} %  \u{2192}  {committed} troupes engagees`
+	self.ratioReadout.Text = `{math.floor(self.ratio * 100)} %  \u{2192}  {committed} troupes`
 end
 
 local HINTS: { [string]: string } = {
@@ -1271,39 +1421,55 @@ local HINTS: { [string]: string } = {
 	nuke = "Clique sur la cible de la frappe. Elle sera visible de tous.",
 }
 
+local MODE_COLORS: { [string]: Color3 } = {
+	attack = C.accent,
+	boat = C.info,
+	build = C.ally,
+	nuke = C.nuclear,
+}
+
 function HUD.setMode(self: HUD, mode: Mode)
 	self.mode = mode
 
 	for id, b in self.modeButtons do
-		local colors: { [Mode]: Color3 } = {
-			attack = C.accent,
-			boat = C.info,
-			build = C.ally,
-			nuke = C.nuclear,
-		}
-		setSelected(b, id == mode, colors[id])
+		setSelected(b, id == mode, MODE_COLORS[id])
 	end
 
-	self.buildPalette.Visible = mode == "build"
-	self.nukePalette.Visible = mode == "nuke"
 	self.hintLabel.Text = HINTS[mode] or ""
 
+	-- Le mode arme decide du sous-menu : construire ouvre la palette, frapper
+	-- ouvre l'arsenal, et les modes qui n'ont rien a choisir ne laissent rien
+	-- d'ouvert derriere eux.
 	if mode == "build" then
+		self:openSheet("build")
 		local def = BuildingDefs.get(self.buildKind)
 		if def then
-			self.hintLabel.Text = `{def.name}  ·  {def.description}  ·  Clique sur ton territoire pour construire.`
+			self.hintLabel.Text = `{def.name}  \u{00B7}  {def.description}`
 		end
 		self:refreshPalettes()
 	elseif mode == "nuke" then
+		self:openSheet("nuke")
 		self:refreshPalettes()
 		local needed = Eras.requiredForNuke(Config.NUKE.ATOM)
 		if self.era < needed then
 			self.hintLabel.Text = `Arsenal verrouille : necessite l'ere {Eras.get(needed).name}.`
 		end
+	elseif self.activeSheet == "build" or self.activeSheet == "nuke" then
+		self:openSheet(nil)
 	end
 
 	if self.onModeChanged then
 		self.onModeChanged(mode)
+	end
+end
+
+function HUD.setBuildClass(self: HUD, classId: string)
+	self.buildClass = classId
+	for id, tab in self.classTabs do
+		setSelected(tab, id == classId)
+	end
+	for id, page in self.classPages do
+		page.Visible = id == classId
 	end
 end
 
@@ -1317,69 +1483,58 @@ function HUD.refreshPalettes(self: HUD)
 		local affordable = def ~= nil and unlocked and self.gold >= realPrice
 		local priceLabel = self.buildPriceLabels[id]
 		if priceLabel then
-			priceLabel.Text = if realPrice < math.huge then `{realPrice} or` else "—"
+			priceLabel.Text = if realPrice < math.huge then `{realPrice} or` else "\u{2014}"
 			priceLabel.TextColor3 = if affordable then C.gold else C.textFaint
 		end
 		setSelected(b, id == self.buildKind)
-		if id ~= self.buildKind then
-			b.BackgroundTransparency = if affordable then 0 else 0.55
-		else
-			b.BackgroundTransparency = 0
-		end
+		b.BackgroundTransparency = if id == self.buildKind or affordable then 0 else 0.55
 	end
 
 	for kind, b in self.nukeButtons do
 		local stats = Config.NUKE_STATS[kind]
 		local affordable = self.gold >= stats.cost and self.era >= Eras.requiredForNuke(kind)
 		setSelected(b, kind == self.nukeKind, C.nuclear)
-		if kind ~= self.nukeKind then
-			b.BackgroundTransparency = if affordable then 0 else 0.55
-		else
-			b.BackgroundTransparency = 0
-		end
+		b.BackgroundTransparency = if kind == self.nukeKind or affordable then 0 else 0.55
 	end
 end
 
 --[[
-	Met a jour le tableau de bord technologique.
-
-	Le bouton affiche toujours le prochain palier et son prix : c'est
-	l'information qui oriente toute la partie economique, elle ne doit jamais
-	demander un clic pour etre lue.
+	Le bandeau d'ere de la barre haute annonce toujours le prochain palier et
+	son prix : c'est l'information qui oriente toute la partie economique, elle
+	ne doit jamais demander un clic pour etre lue.
 ]]
 function HUD.refreshEraPanel(self: HUD)
 	local era = Eras.get(self.era)
-	self.eraName.Text = `{era.symbol}  {era.name}`
-	self.eraTagline.Text = era.tagline
 
 	if self.era >= Eras.MAX_ID then
+		self.eraName.Text = `{era.symbol} APOGEE`
 		self.eraFill.Size = UDim2.fromScale(1, 1)
-		self.eraButton.Text = "Apogee technologique"
-		self.eraButton.Visible = false
+		self.eraFill.BackgroundColor3 = C.nuclear
+		setSelected(self.eraButton, false)
 		return
 	end
 
-	local next = Eras.get(self.era + 1)
-	self.eraButton.Visible = true
-	self.eraFill.Size = UDim2.fromScale(math.clamp(self.eraProgress, 0, 1), 1)
-
+	local nextEra = Eras.get(self.era + 1)
 	local ready = self.eraProgress >= 1
-	self.eraButton.Text = `{next.symbol} {next.name}  ·  {next.cost} or`
-	setSelected(self.eraButton, ready, C.nuclear)
+
+	self.eraName.Text = if ready
+		then `\u{2192} {string.upper(nextEra.name)}  {nextEra.cost} or`
+		else `{era.symbol} {string.upper(era.name)}`
+	self.eraFill.Size = UDim2.fromScale(math.clamp(self.eraProgress, 0, 1), 1)
 	self.eraFill.BackgroundColor3 = if ready then C.nuclear else C.info
+	setSelected(self.eraButton, ready, C.nuclear)
 end
 
 function HUD.setIdentity(self: HUD, slot: number, name: string, doctrineId: number, betrayals: number)
 	self.mySlot = slot
 	self.doctrineId = doctrineId
 	local color = Theme.factionColor(slot)
-	self.nameLabel.Text = name
+	self.nameLabel.Text = string.upper(name)
 	self.nameLabel.TextColor3 = color
 	self.identityStripe.BackgroundColor3 = color
 
 	local doctrine = Doctrines.get(doctrineId)
-	local reputation = if betrayals > 0 then `  \u{26A0} {betrayals} trahison(s)` else ""
-	self.identitySub.Text = `{doctrine.symbol} {doctrine.name}{reputation}`
+	self.identitySub.Text = if betrayals > 0 then `{doctrine.symbol} \u{26A0}{betrayals}` else doctrine.symbol
 	self.identitySub.TextColor3 = if betrayals > 0 then C.warning else C.textMuted
 end
 
@@ -1388,17 +1543,15 @@ function HUD.setMatch(self: HUD, match: Types.MatchInfo)
 	local seconds = math.floor(match.timeLeft % 60)
 	self.timerLabel.Text = string.format("%d:%02d", minutes, seconds)
 
-	local era = Eras.get(self.era)
 	if match.stage == "preparation" then
-		self.phaseLabel.Text = `🛡 PREPARATION  {math.ceil(match.combatIn or 0)} s`
+		self.phaseLabel.Text = `PREPARATION  {math.ceil(match.combatIn or 0)} s`
 		self.phaseLabel.TextColor3 = C.ally
 		self.timerLabel.TextColor3 = C.text
 	elseif match.stage == "ended" then
 		self.phaseLabel.Text = "CAMPAGNE TERMINEE"
 		self.phaseLabel.TextColor3 = C.gold
 	else
-		self.phaseLabel.Text = `{era.symbol} {string.upper(era.name)}`
-		self.phaseLabel.TextColor3 = if self.era >= 4 then C.nuclear else C.textMuted
+		self.phaseLabel.Text = ""
 		self.timerLabel.TextColor3 = if self.era >= 4 then C.nuclear else C.text
 	end
 end
@@ -1415,6 +1568,7 @@ function HUD.setDiplomacy(self: HUD, diplomacy: Types.Diplomacy)
 	-- merite un son et un message, pas juste un bouton qui apparait.
 	if not hadIncoming and next(diplomacy.incoming) ~= nil then
 		SoundManager.play("allianceFormed")
+		self:notify("Une nation te propose une alliance.", "info")
 	end
 
 	self:refreshDiplomacyPanel()
@@ -1422,18 +1576,39 @@ end
 
 function HUD.selectFaction(self: HUD, slot: number?)
 	self.selectedSlot = if slot ~= self.mySlot then slot else nil
+	if self.selectedSlot then
+		self:openSheet("nations")
+	end
 	self:refreshDiplomacyPanel()
 end
 
+--[[
+	Deplie la fiche diplomatique dans la ligne de la nation selectionnee.
+
+	La carte est un exemplaire unique qu'on reparente : dupliquer ces boutons
+	pour chacune des dix lignes multiplierait les connexions a maintenir pour
+	un panneau visible une ligne a la fois.
+]]
 function HUD.refreshDiplomacyPanel(self: HUD)
 	local slot = self.selectedSlot
-	if not slot or slot <= 0 or not self.roster[slot] then
-		self.diploPanel.Visible = false
+	local entry = if slot then self.roster[slot] else nil
+
+	for i, row in self.leaderRows do
+		local item = self.ranked[i]
+		local isSelected = entry ~= nil and item ~= nil and item.slot == slot
+		row.details.Visible = isSelected
+		row.button.Parent.Size = UDim2.new(1, 0, 0, if isSelected then 88 else 20)
+		if isSelected then
+			self.diploCard.Parent = row.details
+			self.diploCard.Visible = true
+		end
+	end
+
+	if not entry or not slot then
+		self.diploCard.Visible = false
 		return
 	end
 
-	local entry = self.roster[slot]
-	self.diploPanel.Visible = true
 	self.diploTitle.Text = entry.name
 	self.diploTitle.TextColor3 = Theme.factionColor(slot)
 
@@ -1443,12 +1618,16 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	local outgoing = d.outgoing[slot] == true
 	local embargoed = d.embargoes[slot] == true
 
-	local status = if allied then "Allie" elseif incoming then "Te propose une alliance" elseif outgoing then "Proposition envoyee" else "Neutre"
+	local status = if allied
+		then "Allie"
+		elseif incoming then "Te propose une alliance"
+		elseif outgoing then "Proposition envoyee"
+		else "Neutre"
 	if entry.betrayals > 0 then
 		status ..= `  \u{26A0} {entry.betrayals} trahison(s)`
 	end
 	if embargoed then
-		status ..= "  \u{2716} sous embargo"
+		status ..= "  \u{2716} embargo"
 	end
 	self.diploStatus.Text = status
 	self.diploStatus.TextColor3 = if allied then C.ally elseif entry.betrayals > 0 then C.warning else C.textMuted
@@ -1473,14 +1652,16 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		local previousGold = self.gold
 		self.troops = mine.troops
 		self.troopsLabel.Text = tostring(mine.troops)
+
 		local routes = mine.logisticsRoutes or 0
 		local logisticsPerSecond = (mine.logisticsIncome or 0) * Config.TICK_RATE
 		self.tilesLabel.Text = if routes > 0
-			then `{mine.tiles} territoires  ·  🚚 {routes}`
+			then `{mine.tiles} territoires  \u{00B7}  {routes} routes`
 			else `{mine.tiles} territoires`
 		self.goldLabel.Text = if routes > 0
 			then `{mine.gold}  +{string.format("%.1f", logisticsPerSecond)}/s`
 			else tostring(mine.gold)
+
 		if previousGold > 0 and mine.gold ~= previousGold then
 			local gained = mine.gold > previousGold
 			self.goldLabel.TextColor3 = if gained then C.ally else C.warning
@@ -1504,10 +1685,10 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		local fronts = mine.activeAttacks or 0
 		local committed = mine.committedTroops or 0
 		if fronts > 0 then
-			self.frontStatus.Text = `⚔ {fronts} FRONT{if fronts > 1 then "S" else ""} · {committed} ENGAGEES`
+			self.frontStatus.Text = `{fronts} FRONT{if fronts > 1 then "S" else ""} \u{00B7} {committed} ENGAGEES`
 			self.frontStatus.TextColor3 = C.accent
 		elseif routes > 0 then
-			self.frontStatus.Text = `🚚 {routes} ROUTE{if routes > 1 then "S" else ""} LOGISTIQUE{if routes > 1 then "S" else ""}`
+			self.frontStatus.Text = `{routes} ROUTE{if routes > 1 then "S" else ""} LOGISTIQUE{if routes > 1 then "S" else ""}`
 			self.frontStatus.TextColor3 = C.ally
 		else
 			self.frontStatus.Text = "AUCUN FRONT ACTIF"
@@ -1563,16 +1744,16 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 	for i, row in self.leaderRows do
 		local item = ranked[i]
 		if not item then
-			row.button.Visible = false
+			row.button.Parent.Visible = false
 			continue
 		end
 
-		row.button.Visible = true
+		row.button.Parent.Visible = true
 		local info = roster[item.slot]
 		local color = Theme.factionColor(item.slot)
 
 		-- Marqueurs sociaux : l'allie et le traitre doivent se reperer d'un
-		-- coup d'oeil, sans ouvrir de panneau.
+		-- coup d'oeil, sans ouvrir de fiche.
 		local marks = ""
 		if self.diplomacy.allies[item.slot] then
 			marks ..= " \u{1F91D}"
@@ -1588,6 +1769,8 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		row.bar.BackgroundColor3 = color
 		row.bar.Size = UDim2.fromScale(item.tiles / maxTiles, 1)
 	end
+
+	self:refreshDiplomacyPanel()
 end
 
 return HUD

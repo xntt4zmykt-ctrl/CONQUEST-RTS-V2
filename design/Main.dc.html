@@ -1,0 +1,200 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;700;900&display=swap">
+  <style>
+    body { margin: 0; font-family: Montserrat, "Gotham", system-ui, sans-serif; }
+    a { color: #2DC2B1; } a:hover { color: #56DA99; }
+    .panel { background: rgba(10, 17, 28, 0.82); border: 1px solid #2F485D; }
+    .btn { background: #121D2D; border: 1px solid #2F485D; border-radius: 6px; }
+  </style>
+</helmet>
+
+<div style="position: relative; width: 1280px; height: 720px; overflow: hidden; background: #050910;">
+
+  <!-- CARTE ------------------------------------------------------------ -->
+  <div style="position: absolute; inset: 0; background:
+      radial-gradient(circle at 30% 35%, #10243B 0%, #071322 55%, #050910 100%);"></div>
+  <div style="position: absolute; inset: 0; opacity: 0.28; background-image:
+      linear-gradient(#2F485D 1px, transparent 1px),
+      linear-gradient(90deg, #2F485D 1px, transparent 1px);
+      background-size: 64px 64px;"></div>
+
+  <div style="position: absolute; left: 120px; top: 130px; width: 430px; height: 330px;
+      background: #E74C3C; opacity: 0.9;
+      clip-path: polygon(18% 4%, 62% 0%, 88% 22%, 100% 58%, 74% 92%, 34% 100%, 6% 70%, 0% 30%);"></div>
+  <div style="position: absolute; left: 430px; top: 240px; width: 330px; height: 300px;
+      background: #3498DB; opacity: 0.9;
+      clip-path: polygon(24% 0%, 76% 10%, 100% 44%, 86% 84%, 44% 100%, 8% 78%, 0% 34%);"></div>
+  <div style="position: absolute; left: 700px; top: 120px; width: 300px; height: 260px;
+      background: #2ECC71; opacity: 0.88;
+      clip-path: polygon(12% 12%, 60% 0%, 96% 26%, 100% 70%, 62% 96%, 20% 84%, 0% 46%);"></div>
+  <div style="position: absolute; left: 840px; top: 400px; width: 250px; height: 220px;
+      background: #F1C40F; opacity: 0.85;
+      clip-path: polygon(20% 0%, 80% 14%, 100% 56%, 68% 96%, 22% 88%, 0% 44%);"></div>
+
+  <!-- 1. BARRE HAUTE ---------------------------------------------------- -->
+  <div class="panel" style="position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 16px; height: 40px; padding: 0 12px;
+      border-radius: 8px; backdrop-filter: blur(8px);">
+
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <div style="width: 4px; height: 20px; border-radius: 2px; background: #E74C3C;"></div>
+      <span style="color: #EFF7FA; font-size: 13px; font-weight: 700; letter-spacing: 0.02em;">VALORIA</span>
+    </div>
+
+    <div style="width: 1px; height: 18px; background: #2F485D;"></div>
+
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#658492" stroke-width="2">
+        <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
+      </svg>
+      <span style="color: #EFF7FA; font-size: 13px; font-weight: 900; font-variant-numeric: tabular-nums;">18:42</span>
+    </div>
+
+    <div style="width: 1px; height: 18px; background: #2F485D;"></div>
+
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2DC2B1" stroke-width="2">
+        <path d="M12 3l2.2 5.5L20 9.2l-4 4 1 5.8-5-2.9-5 2.9 1-5.8-4-4 5.8-.7z"></path>
+      </svg>
+      <span style="color: #9CB7C2; font-size: 11px; font-weight: 700;">INDUSTRIE</span>
+      <div style="width: 44px; height: 3px; border-radius: 999px; background: #121D2D; overflow: hidden;">
+        <div style="width: 62%; height: 100%; background: #2DC2B1;"></div>
+      </div>
+    </div>
+
+    <div style="width: 1px; height: 18px; background: #2F485D;"></div>
+
+    <div style="display: flex; gap: 4px;">
+      <div class="btn" style="width: 28px; height: 26px; display: flex; align-items: center; justify-content: center;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CB7C2" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h10"></path>
+        </svg>
+      </div>
+      <div class="btn" style="width: 28px; height: 26px; display: flex; align-items: center; justify-content: center;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CB7C2" stroke-width="2">
+          <path d="M16 20v-2a4 4 0 0 0-8 0v2"></path><circle cx="12" cy="8" r="3.2"></circle>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIL DE NOTIFICATIONS ---------------------------------------------- -->
+  <div style="position: absolute; top: 62px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; gap: 4px; width: 340px;">
+    <div class="panel" style="border-radius: 6px; border-color: #FFB445; padding: 5px 10px;
+        color: #FFB445; font-size: 11px; font-weight: 700;">Kerensk a TRAHI Odaria</div>
+  </div>
+
+  <!-- 3. MINIMAP --------------------------------------------------------- -->
+  <div class="panel" style="position: absolute; right: 12px; bottom: 12px; padding: 6px; border-radius: 8px;">
+    <div style="position: relative; width: 170px; height: 106px; border-radius: 4px; overflow: hidden; background: #071322;">
+      <div style="position: absolute; left: 12%; top: 16%; width: 34%; height: 46%; background: #E74C3C;
+          clip-path: polygon(18% 4%, 62% 0%, 88% 22%, 100% 58%, 74% 92%, 34% 100%, 6% 70%, 0% 30%);"></div>
+      <div style="position: absolute; left: 34%; top: 33%; width: 26%; height: 42%; background: #3498DB;
+          clip-path: polygon(24% 0%, 76% 10%, 100% 44%, 86% 84%, 44% 100%, 8% 78%, 0% 34%);"></div>
+      <div style="position: absolute; left: 55%; top: 16%; width: 24%; height: 36%; background: #2ECC71;
+          clip-path: polygon(12% 12%, 60% 0%, 96% 26%, 100% 70%, 62% 96%, 20% 84%, 0% 46%);"></div>
+      <div style="position: absolute; left: 66%; top: 55%; width: 20%; height: 31%; background: #F1C40F;
+          clip-path: polygon(20% 0%, 80% 14%, 100% 56%, 68% 96%, 22% 88%, 0% 44%);"></div>
+      <div style="position: absolute; left: 22%; top: 24%; width: 40%; height: 44%;
+          border: 1.5px solid rgba(239, 247, 250, 0.75); border-radius: 2px;"></div>
+    </div>
+  </div>
+
+  <!-- 2. BARRE BASSE ------------------------------------------------------ -->
+  <div class="panel" style="position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 20px; width: 720px; height: 92px; padding: 0 16px;
+      border-radius: 8px; backdrop-filter: blur(8px);">
+
+    <!-- Ressources -->
+    <div style="display: flex; flex-direction: column; gap: 3px; width: 132px;">
+      <div style="display: flex; align-items: baseline; gap: 5px;">
+        <span style="color: #EFF7FA; font-size: 28px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums;">4 820</span>
+        <span style="color: #658492; font-size: 10px; font-weight: 700;">/ 7.2k</span>
+      </div>
+      <div style="width: 100%; height: 3px; border-radius: 999px; background: #121D2D; overflow: hidden;">
+        <div style="width: 67%; height: 100%; background: #66B2F2;"></div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 5px; margin-top: 2px;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#F6C14D" stroke-width="2">
+          <circle cx="12" cy="12" r="8"></circle><path d="M12 8v8M9.5 10h5"></path>
+        </svg>
+        <span style="color: #F6C14D; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;">2 140</span>
+        <span style="color: #658492; font-size: 10px; font-weight: 500;">+18/s</span>
+      </div>
+    </div>
+
+    <div style="width: 1px; height: 56px; background: #2F485D;"></div>
+
+    <!-- Engagement -->
+    <div style="display: flex; flex-direction: column; gap: 7px; flex-grow: 1;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <span style="color: #658492; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;">ENGAGEMENT</span>
+        <span style="color: #9CB7C2; font-size: 11px; font-weight: 500;">35 % — 1 687 troupes</span>
+      </div>
+      <div style="position: relative; height: 10px; border-radius: 999px; background: #121D2D;">
+        <div style="position: absolute; inset: 0; width: 35%; border-radius: 999px; background: #2DC2B1;"></div>
+        <div style="position: absolute; left: 35%; top: 50%; width: 14px; height: 14px; margin-left: -7px;
+            transform: translateY(-50%); border-radius: 999px; background: #EFF7FA; border: 2px solid #2DC2B1;"></div>
+      </div>
+    </div>
+
+    <div style="width: 1px; height: 56px; background: #2F485D;"></div>
+
+    <!-- Actions -->
+    <div style="display: flex; gap: 6px;">
+      <div style="position: relative; width: 60px; height: 60px; border-radius: 6px; background: #2DC2B1;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#050910" stroke-width="2.2">
+          <path d="M4 20L20 4M14 4h6v6"></path>
+        </svg>
+        <span style="color: #050910; font-size: 9px; font-weight: 900;">ATTAQUER</span>
+        <span style="position: absolute; top: 3px; right: 5px; color: rgba(5,9,16,0.55); font-size: 9px; font-weight: 700;">1</span>
+      </div>
+      <div class="btn" style="position: relative; width: 60px; height: 60px;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9CB7C2" stroke-width="2">
+          <path d="M3 17l2.5-6h13L21 17M5 17h14M12 11V5M8 8h8"></path>
+        </svg>
+        <span style="color: #9CB7C2; font-size: 9px; font-weight: 700;">DEBARQUER</span>
+        <span style="position: absolute; top: 3px; right: 5px; color: #658492; font-size: 9px; font-weight: 700;">2</span>
+      </div>
+      <div class="btn" style="position: relative; width: 60px; height: 60px;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9CB7C2" stroke-width="2">
+          <path d="M4 20V9l8-5 8 5v11M9 20v-6h6v6"></path>
+        </svg>
+        <span style="color: #9CB7C2; font-size: 9px; font-weight: 700;">CONSTRUIRE</span>
+        <span style="position: absolute; top: 3px; right: 5px; color: #658492; font-size: 9px; font-weight: 700;">3</span>
+      </div>
+      <div class="btn" style="position: relative; width: 60px; height: 60px; opacity: 0.45;
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#658492" stroke-width="2">
+          <circle cx="12" cy="12" r="2.5"></circle>
+          <path d="M12 3v4M12 17v4M4.5 7.5l3.2 2M16.3 14.5l3.2 2M4.5 16.5l3.2-2M16.3 9.5l3.2-2"></path>
+        </svg>
+        <span style="color: #658492; font-size: 9px; font-weight: 700;">FRAPPE</span>
+        <svg style="position: absolute; top: 4px; right: 5px;" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#658492" stroke-width="2.5">
+          <rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

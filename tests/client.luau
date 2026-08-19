@@ -198,6 +198,48 @@ check("onboarding, profil et inspecteur de territoire", function()
 	assert(hud.territoryPanel.Visible, "la fiche de territoire ne s'affiche pas")
 end)
 
+check("un seul sous-menu ouvert a la fois", function()
+	local function openCount()
+		local open = 0
+		for _, frame in hud.sheets do
+			if frame.Visible then
+				open += 1
+			end
+		end
+		return open
+	end
+
+	-- Armer un mode ouvre sa feuille et referme celle d'avant.
+	hud:setMode("build")
+	assert(hud.sheets.build.Visible, "le mode Construire n'ouvre pas sa palette")
+	assert(openCount() == 1, `{openCount()} sous-menus ouverts apres Construire`)
+
+	hud:setMode("nuke")
+	assert(hud.sheets.nuke.Visible and not hud.sheets.build.Visible, "l'arsenal ne remplace pas la palette")
+	assert(openCount() == 1, `{openCount()} sous-menus ouverts apres Frappe`)
+
+	-- Armer deux fois le meme mode ne doit pas refermer sa feuille.
+	hud:setMode("nuke")
+	assert(hud.sheets.nuke.Visible, "rearmer un mode referme sa feuille")
+
+	-- Un mode sans feuille ne laisse rien d'ouvert.
+	hud:setMode("attack")
+	assert(openCount() == 0, `{openCount()} sous-menus ouverts en mode Attaquer`)
+
+	-- Le classement ferme tout le reste, et son bouton le referme.
+	hud:openSheet("nations")
+	assert(openCount() == 1, "le classement n'est pas exclusif")
+	hud:openSheet("nations", true)
+	assert(openCount() == 0, "le bouton du classement ne le referme pas")
+
+	-- Selectionner un territoire prend la place de toute autre feuille.
+	hud:setMode("build")
+	hud:selectTerritory(4242, 0, "Plaines", nil)
+	assert(hud.territoryPanel.Visible and not hud.sheets.build.Visible, "la fiche de territoire n'est pas exclusive")
+	assert(openCount() == 1, `{openCount()} sous-menus ouverts avec la fiche de territoire`)
+	hud:setMode("attack")
+end)
+
 check("curseur d'engagement et doctrines", function()
 	for _, ratio in { 0.05, 0.25, 0.5, 1 } do
 		hud:setRatio(ratio)

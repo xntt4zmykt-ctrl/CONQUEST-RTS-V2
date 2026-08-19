@@ -315,10 +315,13 @@ local function inspectTerritory(index: number)
 end
 
 local function onTileClicked(index: number)
-	inspectTerritory(index)
-	-- Le clic reste l'action principale d'un RTS : la fiche s'ouvre pour donner
-	-- le contexte, mais le mode Attaquer doit lancer l'ordre immédiatement.
-	-- Les boutons de la fiche peuvent ensuite renforcer ou relancer le front.
+	-- La fiche de territoire ne s'ouvre qu'en mode Attaquer, le seul ou le clic
+	-- sert aussi a inspecter. Dans les autres modes le clic EST un ordre :
+	-- ouvrir la fiche fermerait la palette et empecherait de poser plusieurs
+	-- batiments a la suite.
+	if hud.mode == "attack" then
+		inspectTerritory(index)
+	end
 	executeTerritoryAction(hud.mode, index)
 end
 
