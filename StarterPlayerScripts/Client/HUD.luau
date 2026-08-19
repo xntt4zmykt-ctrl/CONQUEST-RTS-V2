@@ -51,16 +51,24 @@ HUD.__index = HUD
 
 -- Le fil de notifications ne doit jamais depasser cette hauteur : au-dela il
 -- recouvre la carte, qui est l'element le plus important de l'ecran.
-local MAX_FEED_ENTRIES = 4
+local MAX_FEED_ENTRIES = 3
 local FEED_ENTRY_HEIGHT = 21
 local LEADER_ROWS = 10
 
--- Geometrie des trois elements permanents et de la feuille d'action.
-local TOP_BAR_WIDTH = 604
-local TOP_BAR_HEIGHT = 40
-local BOTTOM_BAR_WIDTH = 720
-local BOTTOM_BAR_HEIGHT = 92
-local SIDE_SHEET_WIDTH = 306
+--[[
+	Geometrie des trois elements permanents.
+
+	Tout ce qui est **informatif** vit dans la barre haute ; la barre basse ne
+	garde que ce sur quoi on agit. C'est ce partage qui permet de la reduire de
+	720x92 a 470x64 et de rendre le centre de l'ecran a la carte, qui est le
+	jeu.
+]]
+local TOP_BAR_WIDTH = 664
+local TOP_BAR_HEIGHT = 38
+local BOTTOM_BAR_WIDTH = 470
+local BOTTOM_BAR_HEIGHT = 64
+local SIDE_SHEET_WIDTH = 290
+local SHEET_WIDTH = 620
 
 local TUTORIAL_STEPS = {
 	{ key = "doctrine", title = "Choisis ta doctrine", hint = "Elle definit ton style pour toute la campagne." },
@@ -314,12 +322,31 @@ function HUD.buildTopBar(self: HUD)
 	local phase = Theme.label(bar, "", T.tiny, C.textMuted)
 	phase.AnchorPoint = Vector2.new(0, 0.5)
 	phase.Position = UDim2.new(0, 240, 0.5, 0)
-	phase.Size = UDim2.fromOffset(130, 14)
+	phase.Size = UDim2.fromOffset(112, 14)
 	phase.FontFace = F.medium
 	phase.TextTruncate = Enum.TextTruncate.AtEnd
 	self.phaseLabel = phase
 
-	divider(bar, 18, 378)
+	divider(bar, 18, 356)
+
+	--- Territoire et fronts -------------------------------------------------
+	-- Deux chiffres qu'on consulte sans jamais cliquer dessus : leur place est
+	-- ici, pas dans la barre d'action.
+	local tiles = Theme.label(bar, "0 territoires", T.tiny, C.textMuted)
+	tiles.Position = UDim2.fromOffset(368, 6)
+	tiles.Size = UDim2.fromOffset(124, 12)
+	tiles.FontFace = F.medium
+	tiles.TextTruncate = Enum.TextTruncate.AtEnd
+	self.tilesLabel = tiles
+
+	local front = Theme.label(bar, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
+	front.Position = UDim2.fromOffset(368, 20)
+	front.Size = UDim2.fromOffset(124, 12)
+	front.FontFace = F.bold
+	front.TextTruncate = Enum.TextTruncate.AtEnd
+	self.frontStatus = front
+
+	divider(bar, 18, 500)
 
 	--- Ere ------------------------------------------------------------------
 	-- Le bandeau d'ere EST le bouton de recherche : quand le palier suivant est
@@ -327,8 +354,8 @@ function HUD.buildTopBar(self: HUD)
 	-- separe, aucun clic pour savoir ou on en est.
 	local era = button(bar, "", T.small)
 	era.AnchorPoint = Vector2.new(0, 0.5)
-	era.Position = UDim2.new(0, 392, 0.5, 0)
-	era.Size = UDim2.fromOffset(140, 28)
+	era.Position = UDim2.new(0, 512, 0.5, 0)
+	era.Size = UDim2.fromOffset(76, 26)
 	era.TextXAlignment = Enum.TextXAlignment.Left
 	era.Activated:Connect(function()
 		if self.onResearch then
@@ -391,7 +418,7 @@ function HUD.buildMissionStrip(self: HUD)
 	local strip = Theme.panel("Mission", self.root)
 	strip.AnchorPoint = Vector2.new(0.5, 0)
 	strip.Position = UDim2.new(0.5, 0, 0, S.md + TOP_BAR_HEIGHT + S.sm)
-	strip.Size = UDim2.fromOffset(420, 30)
+	strip.Size = UDim2.fromOffset(360, 26)
 	strip.Visible = false
 	self.missionStrip = strip
 
@@ -441,8 +468,8 @@ function HUD.buildFeed(self: HUD)
 	local feed = Instance.new("Frame")
 	feed.Name = "Feed"
 	feed.AnchorPoint = Vector2.new(0.5, 0)
-	feed.Position = UDim2.new(0.5, 0, 0, S.md + TOP_BAR_HEIGHT + S.sm + 34)
-	feed.Size = UDim2.fromOffset(380, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
+	feed.Position = UDim2.new(0.5, 0, 0, S.md + TOP_BAR_HEIGHT + S.sm + 30)
+	feed.Size = UDim2.fromOffset(340, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
 	feed.BackgroundTransparency = 1
 	feed.ClipsDescendants = true
 	feed.Parent = self.root
@@ -549,16 +576,19 @@ function HUD.buildBottomBar(self: HUD)
 	bar.Position = UDim2.new(0.5, 0, 1, -S.md)
 	bar.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, BOTTOM_BAR_HEIGHT)
 
-	--- Ressources -----------------------------------------------------------
+	--- Ressources vives -----------------------------------------------------
+	-- Les troupes restent le plus gros chiffre de l'ecran : c'est la seule
+	-- valeur consultee en permanence, et la seule que la compaction n'a pas
+	-- reduite.
 	local troops = Theme.label(bar, "0", T.hero, C.text)
-	troops.Position = UDim2.fromOffset(S.lg, 12)
-	troops.Size = UDim2.fromOffset(124, 30)
+	troops.Position = UDim2.fromOffset(S.md, 6)
+	troops.Size = UDim2.fromOffset(104, 28)
 	troops.FontFace = F.display
 	self.troopsLabel = troops
 
 	local track = Instance.new("Frame")
-	track.Position = UDim2.fromOffset(S.lg, 44)
-	track.Size = UDim2.fromOffset(132, 3)
+	track.Position = UDim2.fromOffset(S.md, 35)
+	track.Size = UDim2.fromOffset(104, 3)
 	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
 	track.Parent = bar
@@ -572,9 +602,9 @@ function HUD.buildBottomBar(self: HUD)
 	Theme.corner(fill, Theme.radius.pill)
 	self.troopsFill = fill
 
-	local gold = Theme.label(bar, "0", T.body, C.gold)
-	gold.Position = UDim2.fromOffset(S.lg, 52)
-	gold.Size = UDim2.fromOffset(132, 16)
+	local gold = Theme.label(bar, "0", T.small, C.gold)
+	gold.Position = UDim2.fromOffset(S.md, 42)
+	gold.Size = UDim2.fromOffset(104, 14)
 	gold.FontFace = F.bold
 	self.goldLabel = gold
 
@@ -582,19 +612,10 @@ function HUD.buildBottomBar(self: HUD)
 	goldScale.Parent = gold
 	self.goldScale = goldScale
 
-	local tiles = Theme.label(bar, "0 territoires", T.tiny, C.textFaint)
-	tiles.Position = UDim2.fromOffset(S.lg, 69)
-	tiles.Size = UDim2.fromOffset(132, 12)
-	tiles.FontFace = F.medium
-	tiles.TextTruncate = Enum.TextTruncate.AtEnd
-	self.tilesLabel = tiles
-
-	divider(bar, 56, 168)
+	divider(bar, 40, 128)
 
 	--- Engagement -----------------------------------------------------------
 	self:buildEngagementSlider(bar)
-
-	divider(bar, 56, BOTTOM_BAR_WIDTH - 268)
 
 	--- Actions --------------------------------------------------------------
 	self:buildModeRow(bar)
@@ -609,33 +630,22 @@ end
 	partent.
 ]]
 function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
-	local left = 184
-	local width = BOTTOM_BAR_WIDTH - 268 - left - S.md
-
-	local label = Theme.label(parent, "ENGAGEMENT", T.tiny, C.textFaint)
-	label.Position = UDim2.fromOffset(left, 18)
-	label.Size = UDim2.fromOffset(90, 12)
+	local left = 140
+	local width = 108
 
 	local readout = Theme.label(parent, "", T.tiny, C.textMuted)
-	readout.Position = UDim2.fromOffset(left + 90, 18)
-	readout.Size = UDim2.fromOffset(width - 90, 12)
-	readout.TextXAlignment = Enum.TextXAlignment.Right
+	readout.Position = UDim2.fromOffset(left, 14)
+	readout.Size = UDim2.fromOffset(width, 12)
 	readout.FontFace = F.medium
+	readout.TextTruncate = Enum.TextTruncate.AtEnd
 	self.ratioReadout = readout
-
-	local front = Theme.label(parent, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
-	front.Position = UDim2.fromOffset(left, 56)
-	front.Size = UDim2.fromOffset(width, 12)
-	front.FontFace = F.bold
-	front.TextTruncate = Enum.TextTruncate.AtEnd
-	self.frontStatus = front
 
 	local track = Instance.new("TextButton")
 	track.Name = "EngagementTrack"
 	track.Text = ""
 	track.AutoButtonColor = false
-	track.Position = UDim2.fromOffset(left, 34)
-	track.Size = UDim2.fromOffset(width, 11)
+	track.Position = UDim2.fromOffset(left, 32)
+	track.Size = UDim2.fromOffset(width, 10)
 	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
 	track.Parent = parent
@@ -714,8 +724,8 @@ function HUD.buildModeRow(self: HUD, parent: GuiObject)
 	local row = Instance.new("Frame")
 	row.Name = "Modes"
 	row.AnchorPoint = Vector2.new(1, 0.5)
-	row.Position = UDim2.new(1, -S.lg, 0.5, 0)
-	row.Size = UDim2.fromOffset(252, 60)
+	row.Position = UDim2.new(1, -S.md, 0.5, 0)
+	row.Size = UDim2.fromOffset(212, 48)
 	row.BackgroundTransparency = 1
 	row.Parent = parent
 	Theme.list(row, Enum.FillDirection.Horizontal, S.sm)
@@ -730,7 +740,7 @@ function HUD.buildModeRow(self: HUD, parent: GuiObject)
 	for i, entry in modes do
 		local b = button(row, entry.text, T.tiny)
 		b.LayoutOrder = i
-		b.Size = UDim2.fromOffset(58, 60)
+		b.Size = UDim2.fromOffset(50, 48)
 		b.TextYAlignment = Enum.TextYAlignment.Bottom
 		b.TextWrapped = true
 
@@ -748,10 +758,12 @@ function HUD.buildModeRow(self: HUD, parent: GuiObject)
 		self.modeButtons[entry.id] = b
 	end
 
-	local hint = Theme.label(parent, "", T.tiny, C.textFaint)
+	-- L'aide contextuelle flotte SOUS la barre : elle change a chaque mode et
+	-- n'a pas a reserver de la hauteur en permanence.
+	local hint = Theme.label(self.root, "", T.tiny, C.textFaint)
 	hint.AnchorPoint = Vector2.new(0.5, 1)
-	hint.Position = UDim2.new(0.5, 0, 1, -4)
-	hint.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH - S.lg * 2, 12)
+	hint.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + 3))
+	hint.Size = UDim2.fromOffset(520, 12)
 	hint.TextXAlignment = Enum.TextXAlignment.Center
 	hint.FontFace = F.medium
 	hint.TextTruncate = Enum.TextTruncate.AtEnd
@@ -968,8 +980,8 @@ end
 function HUD.buildBuildSheet(self: HUD)
 	local sheet = Theme.panel("BuildSheet", self.root)
 	sheet.AnchorPoint = Vector2.new(0.5, 1)
-	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
-	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 152)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + 18))
+	sheet.Size = UDim2.fromOffset(SHEET_WIDTH, 148)
 	self:registerSheet("build", sheet)
 	self.buildPalette = sheet
 
@@ -1055,8 +1067,8 @@ end
 function HUD.buildArsenalSheet(self: HUD)
 	local sheet = Theme.panel("Arsenal", self.root)
 	sheet.AnchorPoint = Vector2.new(0.5, 1)
-	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
-	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 116)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + 18))
+	sheet.Size = UDim2.fromOffset(SHEET_WIDTH, 112)
 	self:registerSheet("nuke", sheet)
 	self.nukePalette = sheet
 
@@ -1111,8 +1123,8 @@ end
 function HUD.buildTerritorySheet(self: HUD)
 	local sheet = Theme.panel("Territory", self.root)
 	sheet.AnchorPoint = Vector2.new(0.5, 1)
-	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + S.sm))
-	sheet.Size = UDim2.fromOffset(BOTTOM_BAR_WIDTH, 92)
+	sheet.Position = UDim2.new(0.5, 0, 1, -(S.md + BOTTOM_BAR_HEIGHT + 18))
+	sheet.Size = UDim2.fromOffset(SHEET_WIDTH, 88)
 	self:registerSheet("territory", sheet)
 	self.territoryPanel = sheet
 
@@ -1330,7 +1342,7 @@ function HUD.selectTerritory(
 	buildingName: string?,
 	buildingKind: number?,
 	buildingLevel: number?,
-	buildingLink: number?
+	buildingRoutes: number?
 )
 	local level = buildingLevel or 1
 	self.selectedTerritory = {
@@ -1371,8 +1383,9 @@ function HUD.selectTerritory(
 	elseif buildingKind == Config.BUILDING.CITY then
 		detailLine = "Megapole achevee \u{00B7} niveau maximum"
 	elseif buildingKind == Config.BUILDING.FACTORY then
-		detailLine = if buildingLink
-			then `Route logistique active vers la case #{buildingLink} \u{00B7} revenu automatique`
+		local routes = buildingRoutes or 0
+		detailLine = if routes > 0
+			then `{routes} route{if routes > 1 then "s" else ""} logistique{if routes > 1 then "s" else ""} \u{00B7} une par ville desservie`
 			else `Aucune ville a moins de {Config.FACTORY_ROUTE_RANGE} cases \u{00B7} production arretee`
 	end
 	self.territoryDetails.Text = `{terrainName}{building}\n{detailLine}`

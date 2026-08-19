@@ -287,13 +287,13 @@ local function inspectTerritory(index: number)
 	local buildingName: string? = nil
 	local buildingKind: number? = nil
 	local buildingLevel: number? = nil
-	local buildingLink: number? = nil
+	local buildingRoutes: number? = nil
 	local o = overlay
 	if o then
-		local kind, _, level, link = o:buildingAt(index)
+		local kind, _, level, routes = o:buildingAt(index)
 		buildingKind = kind
 		buildingLevel = level
-		buildingLink = link
+		buildingRoutes = routes
 		local def = if kind then BuildingDefs.get(kind) else nil
 		buildingName = if def then def.name else nil
 	end
@@ -305,7 +305,7 @@ local function inspectTerritory(index: number)
 		buildingName,
 		buildingKind,
 		buildingLevel,
-		buildingLink
+		buildingRoutes
 	)
 	local fx = effects
 	if fx then

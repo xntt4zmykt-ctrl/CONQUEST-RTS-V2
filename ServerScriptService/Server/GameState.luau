@@ -106,7 +106,9 @@ export type Building = {
 	kind: number,
 	slot: number,
 	level: number,
-	link: number?, -- usine -> ville qui recoit les marchandises
+	-- Usine : toutes les villes desservies. Une usine bien placee au centre
+	-- d'un bassin en alimente plusieurs, c'est tout son interet.
+	links: { number },
 	cooldown: number, -- utilise par les batteries SAM
 }
 
@@ -427,6 +429,14 @@ end
 -- Reconnecte toutes les usines d'une faction a leur ville la plus proche.
 -- Cette operation n'arrive qu'a la construction/capture/destruction d'un
 -- batiment : aucun balayage de la carte n'est effectue a chaque tick.
+--[[
+	Recalcule les routes logistiques d'un joueur.
+
+	Une usine dessert **toutes** les villes a portee, pas seulement la plus
+	proche : c'est ce qui recompense une implantation au centre d'un bassin de
+	villes plutot qu'un placement au hasard. Trois villes dans le rayon font
+	trois routes.
+]]
 function GameState.refreshFactoryLinks(self: GameState, slot: number)
 	if not self.players[slot] then
 		return
@@ -446,22 +456,37 @@ function GameState.refreshFactoryLinks(self: GameState, slot: number)
 
 	local maxDistance2 = Config.FACTORY_ROUTE_RANGE * Config.FACTORY_ROUTE_RANGE
 	for _, factoryIndex in factories do
+		local factory = self.buildings[factoryIndex]
+		if not factory then
+			continue
+		end
+
 		local fx, fy = MapGen.fromIndex(factoryIndex)
-		local best: number? = nil
-		local bestDistance2 = maxDistance2 + 1
+		local links = {}
 		for _, cityIndex in cities do
 			local cx, cy = MapGen.fromIndex(cityIndex)
 			local dx, dy = cx - fx, cy - fy
-			local distance2 = dx * dx + dy * dy
-			if distance2 <= maxDistance2 and distance2 < bestDistance2 then
-				best = cityIndex
-				bestDistance2 = distance2
+			if dx * dx + dy * dy <= maxDistance2 then
+				table.insert(links, cityIndex)
 			end
 		end
 
-		local factory = self.buildings[factoryIndex]
-		if factory and factory.link ~= best then
-			factory.link = best
+		-- L'ordre doit etre stable, sinon la comparaison ci-dessous signale un
+		-- changement a chaque recalcul et sature la replication.
+		table.sort(links)
+
+		local changed = #links ~= #factory.links
+		if not changed then
+			for i, cityIndex in links do
+				if factory.links[i] ~= cityIndex then
+					changed = true
+					break
+				end
+			end
+		end
+
+		if changed then
+			factory.links = links
 			self.buildingDirty[factoryIndex] = true
 		end
 	end
@@ -471,19 +496,24 @@ function GameState.logisticsFor(self: GameState, slot: number): (number, number)
 	local routes = 0
 	local income = 0
 	for index, building in self.buildings do
-		if building.slot ~= slot or building.kind ~= B.FACTORY or not building.link then
+		if building.slot ~= slot or building.kind ~= B.FACTORY then
 			continue
 		end
-		local city = self.buildings[building.link]
-		if not city or city.slot ~= slot or city.kind ~= B.CITY then
-			continue
-		end
+
 		local fx, fy = MapGen.fromIndex(index)
-		local cx, cy = MapGen.fromIndex(building.link)
-		local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
-		local efficiency = 0.7 + 0.3 * (1 - math.clamp(distance / Config.FACTORY_ROUTE_RANGE, 0, 1))
-		routes += 1
-		income += Config.GOLD_PER_FACTORY_ROUTE * efficiency
+		for _, cityIndex in building.links do
+			local city = self.buildings[cityIndex]
+			if not city or city.slot ~= slot or city.kind ~= B.CITY then
+				continue
+			end
+			local cx, cy = MapGen.fromIndex(cityIndex)
+			local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
+			-- Une ville proche est mieux desservie qu'une ville en limite de
+			-- portee : le placement compte, pas seulement le compte.
+			local efficiency = 0.7 + 0.3 * (1 - math.clamp(distance / Config.FACTORY_ROUTE_RANGE, 0, 1))
+			routes += 1
+			income += Config.GOLD_PER_FACTORY_ROUTE * efficiency
+		end
 	end
 	return routes, income
 end
@@ -512,7 +542,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if self.buildings[index] then
 		return
 	end
-	self.buildings[index] = { kind = kind, slot = slot, level = 1, link = nil, cooldown = 0 }
+	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
 
@@ -1113,7 +1143,7 @@ function GameState.flushBuildingDelta(self: GameState): { any }?
 			kind = if building then building.kind else 0,
 			slot = if building then building.slot else 0,
 			level = if building then building.level else 0,
-			linkIndex = if building then building.link else nil,
+			links = if building then building.links else nil,
 		})
 	end
 	table.clear(self.buildingDirty)

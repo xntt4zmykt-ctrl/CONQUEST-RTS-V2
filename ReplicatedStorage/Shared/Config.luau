@@ -166,7 +166,7 @@ Config.GOLD_TILE_SCALE = 0.0042 -- par tick
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
 Config.GOLD_PER_CITY = 0.08 -- par tick, par ville possedee
-Config.GOLD_PER_FACTORY_ROUTE = 0.48 -- par tick, uniquement si une ville est reliee
+Config.GOLD_PER_FACTORY_ROUTE = 0.34 -- par tick et par ville desservie
 -- Volontairement faible : un joueur qui accumule les capitales conquises en
 -- tenait douze en simulation, soit l'equivalent de plusieurs milliers de
 -- territoires en revenu. La capitale est un objectif militaire, pas une rente.
@@ -301,9 +301,9 @@ Config.BUILDING = {
 	SILO = 4,
 	SAM = 5,
 	CAPITAL = 6,
-	NAVAL_BASE = 8,
 	LAB = 7,
 	FACTORY = 8,
+	NAVAL_BASE = 9,
 }
 
 -- Classes de batiments. Elles structurent le menu de construction, mais surtout
@@ -334,6 +334,14 @@ Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
 Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
+--[[
+	Portee d'une usine.
+
+	Une usine dessert **toutes** les villes dans ce rayon, pas seulement la plus
+	proche : son interet est de s'implanter au centre d'un bassin de villes.
+	Le revenu par route est reduit en consequence, sinon une usine bien placee
+	rapporterait trois fois ce qu'elle coute.
+]]
 Config.FACTORY_ROUTE_RANGE = 56 -- distance maximale usine -> ville, en tuiles
 
 -- Chaque batiment supplementaire du meme type coute plus cher. Sans cette

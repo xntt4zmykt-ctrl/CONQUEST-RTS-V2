@@ -132,16 +132,21 @@ local function checkInvariants(state, tick)
 			realCapitals[building.slot] = (realCapitals[building.slot] or 0) + 1
 			local def = BuildingDefs.get(Config.BUILDING.CAPITAL)
 			realCityPop[building.slot] = (realCityPop[building.slot] or 0) + (if def then def.popCapBonus else 0)
-		elseif building.kind == Config.BUILDING.FACTORY and building.link then
-			local city = state.buildings[building.link]
-			if not city or city.kind ~= Config.BUILDING.CITY or city.slot ~= building.slot then
-				fail(`tick {tick} — usine {index} reliee a un batiment invalide`)
-			else
-				local fx, fy = MapGen.fromIndex(index)
-				local cx, cy = MapGen.fromIndex(building.link)
+		elseif building.kind == Config.BUILDING.FACTORY then
+			-- Une usine dessert plusieurs villes : chaque route doit pointer sur
+			-- une vraie ville du meme camp, et rester dans le rayon.
+			local fx, fy = MapGen.fromIndex(index)
+			for _, cityIndex in building.links do
+				local city = state.buildings[cityIndex]
+				if not city or city.kind ~= Config.BUILDING.CITY or city.slot ~= building.slot then
+					fail(`tick {tick} — usine {index} reliee a un batiment invalide`)
+					break
+				end
+				local cx, cy = MapGen.fromIndex(cityIndex)
 				local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
 				if distance > Config.FACTORY_ROUTE_RANGE then
-					fail(`tick {tick} — route logistique {index}->{building.link} hors portee ({distance})`)
+					fail(`tick {tick} — route logistique {index}->{cityIndex} hors portee ({distance})`)
+					break
 				end
 			end
 		end
@@ -264,6 +269,33 @@ local function runMatch(seed, ticks)
 	}
 end
 
+--[[
+	Unicite des identifiants de batiment.
+
+	Deux batiments ont deja partage l'identifiant 8 pendant plusieurs commits :
+	l'usine et la base navale etaient alors strictement indistinguables — meme
+	definition, memes compteurs, meme comportement de flotte. Rien ne l'avait
+	signale, parce que tout le code lit les identifiants sans jamais verifier
+	qu'ils sont distincts.
+]]
+do
+	local seen = {}
+	for name, id in Config.BUILDING do
+		if seen[id] then
+			fail(`identifiant de batiment {id} partage par {seen[id]} et {name}`)
+		end
+		seen[id] = name
+	end
+
+	local defs = {}
+	for _, def in BuildingDefs.LIST do
+		if defs[def.id] then
+			fail(`deux definitions de batiment portent l'identifiant {def.id}`)
+		end
+		defs[def.id] = true
+	end
+end
+
 print("=== CONQUEST RTS — simulation headless ===")
 
 -- Accessibilite : un humain commence avec assez de ressources pour agir tout
@@ -337,7 +369,7 @@ do
 			if
 				not factoryBuilt
 				or not factory
-				or factory.link ~= site
+				or #factory.links == 0
 				or routes ~= 1
 				or logisticsIncome <= 0
 			then

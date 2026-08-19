@@ -166,15 +166,28 @@ local function routePart(parent: Instance, name: string, size: Vector3, color: C
 	return part
 end
 
-function Overlay.syncFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number?, slot: number)
-	local existing = self.routes[factoryIndex]
-	if existing then
-		existing.model:Destroy()
-		self.routes[factoryIndex] = nil
+--[[
+	Retrace toutes les routes d'une usine.
+
+	Une usine dessert plusieurs villes : on efface donc ses routes existantes
+	avant de les redessiner, plutot que de tenir un diff par ville. Le nombre
+	de routes reste petit et le recalcul n'a lieu qu'a la pose ou a la capture
+	d'un batiment.
+]]
+function Overlay.syncFactoryRoutes(self: Overlay, factoryIndex: number, links: { number }?, slot: number)
+	for key, route in self.routes do
+		if route.factory == factoryIndex then
+			route.model:Destroy()
+			self.routes[key] = nil
+		end
 	end
-	if not cityIndex then
-		return
+
+	for _, cityIndex in links or {} do
+		self:buildFactoryRoute(factoryIndex, cityIndex, slot)
 	end
+end
+
+function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number, slot: number)
 
 	local fromBase = WorldSpace.indexToWorld(factoryIndex)
 	local toBase = WorldSpace.indexToWorld(cityIndex)
@@ -256,7 +269,9 @@ function Overlay.syncFactoryRoute(self: Overlay, factoryIndex: number, cityIndex
 		end
 	end
 
-	self.routes[factoryIndex] = {
+	-- Cle composite : une usine peut avoir plusieurs routes simultanees.
+	self.routes[factoryIndex * 100000 + cityIndex] = {
+		factory = factoryIndex,
 		model = model,
 		truck = truck,
 		from = from + Vector3.new(0, 0.8, 0),
@@ -288,7 +303,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		local level = entry.level or 1
 
 		if entry.kind == 0 then
-			self:syncFactoryRoute(entry.index, nil, 0)
+			self:syncFactoryRoutes(entry.index, nil, 0)
 			if existing then
 				existing:Destroy()
 				self.buildings[entry.index] = nil
@@ -323,8 +338,8 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 				label.TextColor3 = next
 			end
 			if entry.kind == Config.BUILDING.FACTORY then
-				existing:SetAttribute("LinkIndex", entry.linkIndex or -1)
-				self:syncFactoryRoute(entry.index, entry.linkIndex, entry.slot)
+				existing:SetAttribute("Routes", if entry.links then #entry.links else 0)
+				self:syncFactoryRoutes(entry.index, entry.links, entry.slot)
 			end
 			continue
 		end
@@ -336,8 +351,8 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		local model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
 		self.buildings[entry.index] = model
 		if entry.kind == Config.BUILDING.FACTORY then
-			model:SetAttribute("LinkIndex", entry.linkIndex or -1)
-			self:syncFactoryRoute(entry.index, entry.linkIndex, entry.slot)
+			model:SetAttribute("Routes", if entry.links then #entry.links else 0)
+			self:syncFactoryRoutes(entry.index, entry.links, entry.slot)
 		end
 
 		if os.clock() >= self.animateFrom then
@@ -353,12 +368,11 @@ function Overlay.buildingAt(self: Overlay, index: number): (number?, number?, nu
 	if not model then
 		return nil, nil, nil, nil
 	end
-	local link = model:GetAttribute("LinkIndex") :: number?
 	return
 		model:GetAttribute("Kind") :: number?,
 		model:GetAttribute("Slot") :: number?,
 		model:GetAttribute("Level") :: number?,
-		if link and link >= 0 then link else nil
+		model:GetAttribute("Routes") :: number?
 end
 
 --=============================================================================

@@ -68,7 +68,7 @@ export type BuildingSnapshot = {
 	kind: number, -- 0 = detruit
 	slot: number,
 	level: number?, -- villes : 1 = ville, 2 = metropole, 3 = megapole
-	linkIndex: number?, -- usine : ville destinataire de la route logistique
+	links: { number }?, -- usine : toutes les villes desservies
 }
 
 export type MatchInfo = {

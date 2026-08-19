@@ -30,9 +30,6 @@ local T = Theme.textSize
 local MainMenu = {}
 MainMenu.__index = MainMenu
 
-local function debugMenu(message: string)
-end
-
 local function formatDuration(seconds: number): string
 	local minutes = math.floor(seconds / 60)
 	return `{minutes} MIN`
@@ -142,6 +139,9 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	content.Parent = root
 	self.content = content
 
+	-- Le contenu tient volontairement en 640 px de haut. La version precedente
+	-- descendait a 690 et devait donc etre reduite jusqu'a 0,72 sur les ecrans
+	-- courts : texte flou et cibles tactiles sous les 44 px recommandes.
 	-- Les dimensions du lobby sont pensees en pixels logiques. Sur Roblox
 	-- mobile/retina, la hauteur utile est souvent 640 alors que le contenu
 	-- complet depasse 720 : il faut reduire l'ensemble, pas couper le bouton.
@@ -158,8 +158,8 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 		end
 		local viewport = camera.ViewportSize
 		local widthScale = viewport.X / 1024
-		local heightScale = viewport.Y / 760
-		scale.Scale = math.clamp(math.min(widthScale, heightScale), 0.72, 1)
+		local heightScale = viewport.Y / 660
+		scale.Scale = math.clamp(math.min(widthScale, heightScale), 0.82, 1)
 	end
 	refreshScale()
 	if workspace and workspace.CurrentCamera then
@@ -248,7 +248,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	frame.Name = "BriefingFrame"
 	frame.AnchorPoint = Vector2.new(0.5, 0)
 	frame.Position = UDim2.new(0.5, 0, 0, 100)
-	frame.Size = UDim2.fromOffset(900, 620)
+	frame.Size = UDim2.fromOffset(900, 540)
 	frame.BackgroundColor3 = C.surface
 	frame.BackgroundTransparency = 0.1
 	frame.BorderSizePixel = 0
@@ -260,7 +260,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 
 	local accentLine = Instance.new("Frame")
 	accentLine.AnchorPoint = Vector2.new(0.5, 0)
-	accentLine.Position = UDim2.new(0.5, 0, 0, 100)
+	accentLine.Position = UDim2.new(0.5, 0, 0, 96)
 	accentLine.Size = UDim2.fromOffset(150, 2)
 	accentLine.BackgroundColor3 = C.accent
 	accentLine.BorderSizePixel = 0
@@ -269,7 +269,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 
 	local eyebrow = Theme.label(content, "GLOBAL CONQUEST  /  CHOOSE YOUR STORY", T.tiny, C.accent)
 	eyebrow.AnchorPoint = Vector2.new(0.5, 0)
-	eyebrow.Position = UDim2.new(0.5, 0, 0, 116)
+	eyebrow.Position = UDim2.new(0.5, 0, 0, 106)
 	eyebrow.Size = UDim2.fromOffset(700, 14)
 	eyebrow.TextXAlignment = Enum.TextXAlignment.Center
 	eyebrow.FontFace = F.medium
@@ -292,7 +292,6 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 
 	self:selectNation(1)
 	self:selectMode(GameModes.DEFAULT)
-	debugMenu(`created visible={root.Visible} group={root.GroupTransparency} background={root.BackgroundTransparency}`)
 
 	return self
 end
@@ -300,7 +299,7 @@ end
 function MainMenu.buildHeader(self: MainMenu)
 	local title = Theme.label(self.content, Config.GAME_NAME, 46, C.text)
 	title.AnchorPoint = Vector2.new(0.5, 0)
-	title.Position = UDim2.new(0.5, 0, 0, 132)
+	title.Position = UDim2.new(0.5, 0, 0, 122)
 	title.Size = UDim2.fromOffset(700, 52)
 	title.TextXAlignment = Enum.TextXAlignment.Center
 	title.FontFace = F.display
@@ -308,7 +307,7 @@ function MainMenu.buildHeader(self: MainMenu)
 
 	local rule = Instance.new("Frame")
 	rule.AnchorPoint = Vector2.new(0.5, 0)
-	rule.Position = UDim2.new(0.5, 0, 0, 184)
+	rule.Position = UDim2.new(0.5, 0, 0, 168)
 	rule.Size = UDim2.fromOffset(72, 1)
 	rule.BackgroundColor3 = C.lineStrong
 	rule.BorderSizePixel = 0
@@ -317,7 +316,7 @@ function MainMenu.buildHeader(self: MainMenu)
 
 	local subtitle = Theme.label(self.content, "CONSTRUIS TA NATION. FAIS EQUIPE. ECRIS TON HISTOIRE.", T.body, C.textMuted)
 	subtitle.AnchorPoint = Vector2.new(0.5, 0)
-	subtitle.Position = UDim2.new(0.5, 0, 0, 193)
+	subtitle.Position = UDim2.new(0.5, 0, 0, 176)
 	subtitle.Size = UDim2.fromOffset(700, 18)
 	subtitle.TextXAlignment = Enum.TextXAlignment.Center
 	subtitle.FontFace = F.medium
@@ -327,21 +326,21 @@ end
 function MainMenu.buildNations(self: MainMenu)
 	local label = Theme.label(self.content, "01  /  CHOISIS TA NATION", T.tiny, C.textFaint)
 	label.AnchorPoint = Vector2.new(0.5, 0)
-	label.Position = UDim2.new(0.5, -230, 0, 225)
+	label.Position = UDim2.new(0.5, -230, 0, 202)
 	label.Size = UDim2.fromOffset(380, 14)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	label.ZIndex = 51
 
 	local grid = Instance.new("Frame")
 	grid.AnchorPoint = Vector2.new(0.5, 0)
-	grid.Position = UDim2.new(0.5, -230, 0, 250)
-	grid.Size = UDim2.fromOffset(380, 264)
+	grid.Position = UDim2.new(0.5, -230, 0, 224)
+	grid.Size = UDim2.fromOffset(380, 232)
 	grid.BackgroundTransparency = 1
 	grid.ZIndex = 51
 	grid.Parent = self.content
 
 	local layout = Instance.new("UIGridLayout")
-	layout.CellSize = UDim2.fromOffset(88, 60)
+	layout.CellSize = UDim2.fromOffset(88, 54)
 	layout.CellPadding = UDim2.fromOffset(6, 6)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = grid
@@ -387,8 +386,8 @@ end
 function MainMenu.buildPreview(self: MainMenu)
 	local preview = Theme.panel("MapPreview", self.content)
 	preview.AnchorPoint = Vector2.new(0, 0)
-	preview.Position = UDim2.new(0.5, 10, 0, 225)
-	preview.Size = UDim2.fromOffset(420, 286)
+	preview.Position = UDim2.new(0.5, 10, 0, 202)
+	preview.Size = UDim2.fromOffset(420, 254)
 	preview.BackgroundColor3 = C.surfaceRaised
 	preview.BackgroundTransparency = 0.02
 	preview.ZIndex = 51
@@ -410,7 +409,7 @@ function MainMenu.buildPreview(self: MainMenu)
 	local map = Instance.new("Frame")
 	map.Name = "TerrainPreview"
 	map.Position = UDim2.fromOffset(S.md, 32)
-	map.Size = UDim2.fromOffset(388, 150)
+	map.Size = UDim2.fromOffset(388, 130)
 	map.BackgroundColor3 = Config.TERRAIN_COLORS[Config.TERRAIN.OCEAN]
 	map.BorderSizePixel = 0
 	map.ClipsDescendants = true
@@ -454,20 +453,20 @@ function MainMenu.buildPreview(self: MainMenu)
 	scanline.Parent = map
 
 	local nationLabel = Theme.label(preview, "VALORIA", 20, C.text)
-	nationLabel.Position = UDim2.fromOffset(S.md, 194)
+	nationLabel.Position = UDim2.fromOffset(S.md, 172)
 	nationLabel.Size = UDim2.fromOffset(210, 24)
 	nationLabel.FontFace = F.display
 	nationLabel.ZIndex = 53
 
 	local nationHint = Theme.label(preview, "Point de depart recommande", T.tiny, C.textFaint)
-	nationHint.Position = UDim2.fromOffset(S.md, 219)
+	nationHint.Position = UDim2.fromOffset(S.md, 197)
 	nationHint.Size = UDim2.fromOffset(220, 14)
 	nationHint.FontFace = F.medium
 	nationHint.ZIndex = 53
 
 	local modeLabel = Theme.label(preview, "CLASSIQUE", T.body, C.accent)
 	modeLabel.AnchorPoint = Vector2.new(1, 0)
-	modeLabel.Position = UDim2.new(1, -S.md, 0, 198)
+	modeLabel.Position = UDim2.new(1, -S.md, 0, 176)
 	modeLabel.Size = UDim2.fromOffset(160, 18)
 	modeLabel.TextXAlignment = Enum.TextXAlignment.Right
 	modeLabel.FontFace = F.bold
@@ -475,7 +474,7 @@ function MainMenu.buildPreview(self: MainMenu)
 
 	local modeMeta = Theme.label(preview, "25 MIN  ·  12 NATIONS", T.tiny, C.textMuted)
 	modeMeta.AnchorPoint = Vector2.new(1, 0)
-	modeMeta.Position = UDim2.new(1, -S.md, 0, 220)
+	modeMeta.Position = UDim2.new(1, -S.md, 0, 198)
 	modeMeta.Size = UDim2.fromOffset(200, 14)
 	modeMeta.TextXAlignment = Enum.TextXAlignment.Right
 	modeMeta.FontFace = F.medium
@@ -490,15 +489,15 @@ end
 function MainMenu.buildModes(self: MainMenu)
 	local label = Theme.label(self.content, "02  /  CHOISIS TON OPERATION", T.tiny, C.textFaint)
 	label.AnchorPoint = Vector2.new(0.5, 0)
-	label.Position = UDim2.new(0.5, 0, 0, 532)
+	label.Position = UDim2.new(0.5, 0, 0, 472)
 	label.Size = UDim2.fromOffset(820, 14)
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.ZIndex = 51
 
 	local row = Instance.new("Frame")
 	row.AnchorPoint = Vector2.new(0.5, 0)
-	row.Position = UDim2.new(0.5, 0, 0, 553)
-	row.Size = UDim2.fromOffset(820, 58)
+	row.Position = UDim2.new(0.5, 0, 0, 492)
+	row.Size = UDim2.fromOffset(820, 54)
 	row.BackgroundTransparency = 1
 	row.ZIndex = 51
 	row.Parent = self.content
@@ -542,7 +541,7 @@ function MainMenu.buildDeploy(self: MainMenu)
 	local deploy = Instance.new("TextButton")
 	deploy.Name = "Deploy"
 	deploy.AnchorPoint = Vector2.new(0.5, 0)
-	deploy.Position = UDim2.new(0.5, 0, 0, 620)
+	deploy.Position = UDim2.new(0.5, 0, 0, 556)
 	deploy.Size = UDim2.fromOffset(360, 46)
 	deploy.BackgroundColor3 = C.accentSoft
 	deploy.BorderSizePixel = 0
@@ -573,7 +572,7 @@ function MainMenu.buildDeploy(self: MainMenu)
 
 	local hint = Theme.label(self.content, "La simulation demarre a ton deploiement  ·  aucun bot ne joue derriere ce menu", T.tiny, C.textFaint)
 	hint.AnchorPoint = Vector2.new(0.5, 0)
-	hint.Position = UDim2.new(0.5, 0, 0, 676)
+	hint.Position = UDim2.new(0.5, 0, 0, 610)
 	hint.Size = UDim2.fromOffset(660, 14)
 	hint.TextXAlignment = Enum.TextXAlignment.Center
 	hint.FontFace = F.medium
@@ -636,7 +635,6 @@ function MainMenu.close(self: MainMenu)
 	-- animation : on masque donc la racine immédiatement.
 	self.root.GroupTransparency = 1
 	self.root.Visible = false
-	debugMenu(`close visible={self.root.Visible} group={self.root.GroupTransparency}`)
 end
 
 function MainMenu.open(self: MainMenu)
@@ -647,7 +645,6 @@ function MainMenu.open(self: MainMenu)
 	end
 	self.root.GroupTransparency = 0
 	self.root.Visible = true
-	debugMenu(`open visible={self.root.Visible} group={self.root.GroupTransparency}`)
 end
 
 return MainMenu

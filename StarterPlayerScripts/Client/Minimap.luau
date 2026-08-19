@@ -30,7 +30,9 @@ Minimap.__index = Minimap
 
 export type Minimap = typeof(setmetatable({} :: any, Minimap))
 
-local WIDTH = 224
+-- La minimap est le troisieme element permanent : elle doit rester lisible
+-- sans manger le coin de l'ecran. 176 px suffisent pour situer un front.
+local WIDTH = 176
 local HEIGHT = math.floor(WIDTH * H / W)
 
 local function toBytes(color: Color3): { number }

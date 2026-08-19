@@ -320,11 +320,32 @@ check("pose et capture de chaque type de batiment", function()
 		end
 	end
 	assert(cityIndex ~= nil and factoryEntry ~= nil, "ville ou usine absente du catalogue")
-	factoryEntry.linkIndex = cityIndex
+
+	local function routesOf(index)
+		local count = 0
+		local sample = nil
+		for _, route in overlay.routes do
+			if route.factory == index then
+				count += 1
+				sample = route
+			end
+		end
+		return count, sample
+	end
+
+	-- Une usine dessert TOUTES les villes a portee : trois villes, trois routes.
+	factoryEntry.links = { cityIndex, cityIndex + 300, cityIndex + 700 }
 	overlay:applyBuildingDelta({ factoryEntry })
-	local _, _, _, linkedCity = overlay:buildingAt(factoryEntry.index)
-	assert(linkedCity == cityIndex and overlay.routes[factoryEntry.index] ~= nil, "route logistique non creee")
-	assert(#overlay.routes[factoryEntry.index].path == 6, "la route logistique n'est pas courbee en segments")
+	local _, _, _, routeCount = overlay:buildingAt(factoryEntry.index)
+	assert(routeCount == 3, `l'usine annonce {routeCount} routes au lieu de 3`)
+	local built, sample = routesOf(factoryEntry.index)
+	assert(built == 3, `{built} routes tracees au lieu de 3`)
+	assert(sample and #sample.path == 6, "la route logistique n'est pas courbee en segments")
+
+	-- Perdre une ville doit retirer sa route, pas les laisser s'accumuler.
+	factoryEntry.links = { cityIndex }
+	overlay:applyBuildingDelta({ factoryEntry })
+	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
 	overlay:stepInterpolation(1 / 60)
 
 	-- Une ville qui evolue change reellement de silhouette et conserve son
