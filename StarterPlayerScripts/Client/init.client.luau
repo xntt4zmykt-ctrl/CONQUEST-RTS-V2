@@ -399,12 +399,36 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		if input.UserInputType == Enum.UserInputType.Touch then
 			local origin = pressOrigin
 			task.delay(LONG_PRESS_SECONDS, function()
-				if pressOrigin == origin and origin then
+				-- Un geste a deux doigts (zoom, rotation) ne doit jamais ouvrir
+				-- le menu radial : le premier doigt est immobile, mais il
+				-- participe a un pilotage de la vue, pas a un appui long.
+				if pressOrigin == origin and origin and camera.touchCount <= 1 then
 					pressOrigin = nil
 					openRadial(origin)
 				end
 			end)
 		end
+	end
+end)
+
+--[[
+	Un doigt qui glisse annule le tap ET l'appui long.
+
+	La camera tactile transforme ce meme glissement en panoramique : sans cette
+	annulation, l'appui long se declencherait en plein deplacement de vue et le
+	menu radial s'ouvrirait sous le doigt du joueur a chaque panoramique lent.
+]]
+UserInputService.InputChanged:Connect(function(input: InputObject)
+	if input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+	local origin = pressOrigin
+	if not origin then
+		return
+	end
+	local pos = Vector2.new(input.Position.X, input.Position.Y)
+	if (pos - origin).Magnitude > CLICK_DRAG_THRESHOLD then
+		pressOrigin = nil
 	end
 end)
 
@@ -492,6 +516,13 @@ end)
 
 hud.onRatioChanged = function(ratio: number)
 	Remotes.get("SetAttackRatio"):FireServer(ratio)
+end
+
+-- Bouton "Capitale" de la barre tactile : meme effet que la touche Espace.
+hud.onRecenter = function()
+	if myCapital then
+		camera:focusTile(myCapital)
+	end
 end
 
 hud.onDoctrineChosen = function(doctrineId: number)

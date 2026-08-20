@@ -884,6 +884,67 @@ check("camera strategique", function()
 	camera:tileAtScreen(Vector2.new(100, 100), world.root)
 end)
 
+--[[
+	Gestes tactiles de la camera.
+
+	Sans ce banc, un signe inverse ou un nil dans le pincement ne se verrait que
+	sur un vrai telephone, entre les mains d'un joueur. Les faux InputObject sont
+	de simples tables : le code ne lit que UserInputType et Position.
+]]
+check("camera tactile : panoramique, pincement et torsion", function()
+	local uis = game:GetService("UserInputService")
+	local camera = WorldCamera.new()
+	camera:setMode("overview")
+	camera:setDistance(300, true)
+	camera:focusTile(5000, true)
+
+	local function touch(x: number, y: number)
+		return { UserInputType = Enum.UserInputType.Touch, Position = Vector3.new(x, y, 0), Delta = Vector3.zero }
+	end
+
+	--- Un doigt sous le seuil : c'est un tap, la mire ne bouge pas. -----------
+	local fingerA = touch(100, 100)
+	uis.InputBegan:Fire(fingerA, false)
+	assert(camera.touchCount == 1, "le doigt n'est pas enregistre")
+	local anchor = camera.targetFocus
+	fingerA.Position = Vector3.new(104, 103, 0)
+	uis.InputChanged:Fire(fingerA)
+	assert(camera.targetFocus == anchor, "un micro-glissement a deplace la camera")
+
+	--- Au-dela du seuil : panoramique, avec rattrapage depuis l'origine. ------
+	fingerA.Position = Vector3.new(160, 140, 0)
+	uis.InputChanged:Fire(fingerA)
+	assert(camera.targetFocus ~= anchor, "le glissement ne deplace pas la camera")
+
+	--- Deuxieme doigt : l'ecartement pilote le zoom. ---------------------------
+	local fingerB = touch(300, 100)
+	uis.InputBegan:Fire(fingerB, false)
+	assert(camera.touchCount == 2, "le second doigt n'est pas enregistre")
+	local before = camera.targetDistance
+	fingerA.Position = Vector3.new(60, 140, 0) -- ecartement +80 px
+	uis.InputChanged:Fire(fingerA)
+	assert(camera.targetDistance < before, "ecarter les doigts ne rapproche pas la camera")
+
+	--- La torsion fait tourner la carte. ---------------------------------------
+	local yawBefore = camera.targetYaw
+	fingerB.Position = Vector3.new(300, 180, 0)
+	uis.InputChanged:Fire(fingerB)
+	assert(camera.targetYaw ~= yawBefore, "la torsion ne fait pas tourner la carte")
+
+	--- Retrait des doigts : l'etat se nettoie. ---------------------------------
+	uis.InputEnded:Fire(fingerB)
+	assert(camera.touchCount == 1 and camera.pinch == nil, "le pincement survit au retrait d'un doigt")
+	uis.InputEnded:Fire(fingerA)
+	assert(camera.touchCount == 0, "les doigts ne sont pas liberes")
+
+	--- Un doigt ignore par l'interface ne pilote pas la camera. ----------------
+	local ignored = touch(50, 50)
+	uis.InputBegan:Fire(ignored, true)
+	assert(camera.touchCount == 0, "un touch consomme par l'interface pilote quand meme la camera")
+
+	camera:step(1 / 60)
+end)
+
 check("minimap", function()
 	local minimap = Minimap.new(screenGui, terrain, function() end)
 	if minimap then
@@ -903,6 +964,57 @@ check("sons du catalogue", function()
 		SoundManager.play(name)
 	end
 	SoundManager.playAt("nukeImpact", 40)
+end)
+
+--[[
+	Barre d'action tactile.
+
+	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
+	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
+	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
+
+	Placee en dernier : elle peuple volontairement `modeButtons`, que le test de
+	disposition verifie vide — l'ordre des verifications fait donc partie du
+	contrat.
+]]
+check("barre tactile : modes, recentrage et feuilles decalees", function()
+	assert(hud.touchBar == nil, "la barre tactile existe sur un appareil a clavier")
+	assert(next(hud.modeButtons) == nil, "des boutons de mode existent sans tactile")
+
+	local sheetOffsetBefore = hud.sheets.build.Position.Y.Offset
+
+	hud.touchOnly = true
+	hud:buildTouchBar()
+	assert(hud.touchBar ~= nil, "la barre tactile ne se construit pas")
+	assert(next(hud.modeButtons) ~= nil, "les modes n'ont pas de bouton tactile")
+
+	--- Armer un mode depuis la barre produit le meme etat que le clavier. -----
+	hud.modeButtons.boat.Activated:Fire()
+	assert(hud.mode == "boat", "le bouton Debarquer n'arme pas le mode")
+	assert(hud.modeButtons.boat:GetAttribute("Selected"), "le mode actif n'est pas mis en evidence")
+	assert(not hud.modeButtons.attack:GetAttribute("Selected"), "l'ancien mode reste mis en evidence")
+
+	--- Le bouton Capitale appelle le rappel branche par le client. -------------
+	local recalled = 0
+	hud.onRecenter = function()
+		recalled += 1
+	end
+	hud.touchHome.Activated:Fire()
+	assert(recalled == 1, "le bouton Capitale ne declenche pas le recentrage")
+
+	--- Les feuilles du bas passent au-dessus de la barre. ----------------------
+	assert(
+		hud.sheets.build.Position.Y.Offset < sheetOffsetBefore,
+		"la palette de construction reste sous la barre tactile"
+	)
+
+	--- Une seconde construction ne duplique rien. ------------------------------
+	local bar = hud.touchBar
+	hud:buildTouchBar()
+	assert(hud.touchBar == bar, "la barre tactile se construit en double")
+
+	hud:setMode("attack")
 end)
 
 --=============================================================================

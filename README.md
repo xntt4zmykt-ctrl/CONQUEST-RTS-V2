@@ -54,6 +54,12 @@ débarquent, s'allient et se trahissent sans obtenir de faux départ.
 | `F` | Basculer vue stratégique ↔ avatar |
 | `G` | Défilement par les bords de l'écran |
 
+Sur **tactile** : un doigt glisse pour déplacer la vue, pincement pour zoomer,
+torsion à deux doigts pour pivoter, tap pour agir, appui long pour le menu
+radial. Une barre d'action en bas d'écran (modes + retour à la capitale)
+remplace les raccourcis clavier — elle n'existe que sur appareil tactile sans
+clavier, le bureau garde le bas de l'écran libre.
+
 Au lancement : **menu principal** (nation + mode) → écran de chargement pendant
 la construction du monde → compte à rebours de 5 s → partie.
 

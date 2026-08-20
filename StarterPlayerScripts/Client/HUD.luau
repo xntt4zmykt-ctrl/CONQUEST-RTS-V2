@@ -110,6 +110,23 @@ local TUTORIAL_STEPS = {
 	{ key = "era", title = "Atteins l'ere industrielle", hint = "Developpe ton economie puis finance la recherche." },
 }
 
+-- Aides contextuelles et couleurs d'accent de chaque mode. Declarees avec les
+-- constantes : la barre tactile, construite dans HUD.new, en a besoin avant
+-- les mutateurs qui les utilisent aussi.
+local HINTS: { [string]: string } = {
+	attack = "Clique sur un territoire voisin pour lancer l'offensive.",
+	boat = "Clique sur une cote ennemie ou neutre pour y debarquer.",
+	build = "Clique sur ton territoire pour poser le batiment choisi.",
+	nuke = "Clique sur la cible de la frappe. Elle sera visible de tous.",
+}
+
+local MODE_COLORS: { [string]: Color3 } = {
+	attack = C.accent,
+	boat = C.info,
+	build = C.ally,
+	nuke = C.nuclear,
+}
+
 export type Mode = "attack" | "build" | "boat" | "nuke"
 
 type Ranking = { { slot: number, tiles: number, troops: number, gold: number } }
@@ -327,6 +344,11 @@ function HUD.new(parent: ScreenGui): HUD
 	self:buildArsenalSheet()
 	self:buildTerritorySheet()
 	self:buildDoctrineModal()
+
+	-- La barre d'action n'existe que la ou elle sert : appareil tactile sans
+	-- clavier. Elle se construit apres les feuilles, qu'elle decale vers le haut.
+	self.touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	self:buildTouchBar()
 
 	self:setRatio(self.ratio)
 	self:setMode("attack")
@@ -1067,6 +1089,82 @@ function HUD.buildHint(self: HUD)
 end
 
 --=============================================================================
+-- Barre d'action tactile
+--=============================================================================
+
+--[[
+	La disposition OpenFront laisse le bas de l'ecran vide — sur desktop, ou le
+	clic droit ouvre le menu radial et le clavier arme les modes. Sur mobile ni
+	l'un ni l'autre n'existe : l'appui long ouvre bien le radial, mais chaque
+	action couterait alors deux gestes, et poser cinq batiments d'affilee — le
+	geste le plus repete du jeu — deviendrait une corvee.
+
+	Les quatre modes et le retour a la capitale tiennent donc dans une barre
+	basse, construite UNIQUEMENT sur appareil tactile sans clavier. Le test de
+	disposition continue de garantir que le bureau reste vierge : sans tactile,
+	rien n'est construit.
+
+	Les feuilles ancreees en bas remontent d'autant : une palette ouverte ne
+	doit jamais recouvrir les boutons qui commandent le mode actif.
+]]
+local TOUCH_BAR_HEIGHT = 44
+
+function HUD.buildTouchBar(self: HUD)
+	if self.touchBar or not self.touchOnly then
+		return
+	end
+
+	local bar = Theme.panel("TouchBar", self.layers.top)
+	bar.AnchorPoint = Vector2.new(0.5, 1)
+	bar.Position = UDim2.new(0.5, 0, 1, -S.sm)
+	bar.Size = UDim2.fromOffset(452, TOUCH_BAR_HEIGHT)
+	Theme.padding(bar, S.xs)
+	Theme.list(bar, Enum.FillDirection.Horizontal, S.xs)
+	self.touchBar = bar
+
+	local modes: { { id: Mode, label: string } } = {
+		{ id = "attack", label = "Attaquer" },
+		{ id = "boat", label = "Debarquer" },
+		{ id = "build", label = "Construire" },
+		{ id = "nuke", label = "Nucleaire" },
+	}
+	for order, entry in modes do
+		local b = button(bar, entry.label, T.small)
+		b.LayoutOrder = order
+		b.Size = UDim2.new(0, 96, 1, 0)
+		b.Activated:Connect(function()
+			self:setMode(entry.id)
+		end)
+		self.modeButtons[entry.id] = b
+	end
+
+	-- Meme role que la touche Espace : sur un monde de 1024 studs, le retour a
+	-- sa capitale est le repere principal du joueur.
+	local home = button(bar, "Capitale", T.small)
+	home.LayoutOrder = #modes + 1
+	home.Size = UDim2.new(0, 84, 1, 0)
+	home.Activated:Connect(function()
+		if self.onRecenter then
+			self.onRecenter()
+		end
+	end)
+	self.touchHome = home
+
+	-- Les feuilles du bas se decalent au-dessus de la barre.
+	for _, sheet in self.sheets do
+		if sheet.AnchorPoint.Y == 1 then
+			sheet.Position = UDim2.new(0.5, 0, 1, -(SHEET_BOTTOM + TOUCH_BAR_HEIGHT + S.sm))
+		end
+	end
+
+	-- Le mode deja arme se reflete immediatement sur les nouveaux boutons, sans
+	-- rejouer setMode : armer Construire ici rouvrirait la palette sans raison.
+	for id, b in self.modeButtons do
+		setSelected(b, id == self.mode, MODE_COLORS[id])
+	end
+end
+
+--=============================================================================
 -- Sous-menu : Profil
 --=============================================================================
 
@@ -1593,20 +1691,6 @@ function HUD.setBuildingCounts(self: HUD, counts: { [number]: number })
 		label.TextColor3 = if (counts[id] or 0) > 0 then C.text else C.textFaint
 	end
 end
-
-local HINTS: { [string]: string } = {
-	attack = "Clique sur un territoire voisin pour lancer l'offensive.",
-	boat = "Clique sur une cote ennemie ou neutre pour y debarquer.",
-	build = "Clique sur ton territoire pour poser le batiment choisi.",
-	nuke = "Clique sur la cible de la frappe. Elle sera visible de tous.",
-}
-
-local MODE_COLORS: { [string]: Color3 } = {
-	attack = C.accent,
-	boat = C.info,
-	build = C.ally,
-	nuke = C.nuclear,
-}
 
 --[[
 	Arme un batiment et bascule en mode Construire.

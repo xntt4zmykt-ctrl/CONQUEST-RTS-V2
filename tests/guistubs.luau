@@ -575,6 +575,10 @@ service("UserInputService", {
 		return false
 	end,
 	MouseBehavior = nil,
+	-- Le banc simule un poste de travail : la barre d'action tactile ne doit
+	-- donc pas se construire toute seule — les tests la forcent a la demande.
+	TouchEnabled = false,
+	KeyboardEnabled = true,
 })
 
 service("ContextActionService", {

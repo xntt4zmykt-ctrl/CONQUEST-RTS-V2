@@ -39,6 +39,17 @@ local MAX_PITCH = math.rad(82)
 local PAN_SPEED = 1.6 -- studs par stud de distance et par seconde
 local EDGE_MARGIN = 12 -- px : bande de bord qui declenche le defilement
 
+--[[
+	Seuil de bascule du panoramique tactile, en px.
+
+	Un doigt pose sur l'ecran tremble toujours un peu : sans seuil, chaque tap
+	(pour attaquer ou construire) deplacerait la camera de quelques pixels et le
+	joueur se battrait contre sa propre cible. Sous le seuil, le geste est un
+	tap ; au-dela, il devient un panoramique et on rattrape tout le deplacement
+	depuis l'origine pour que le monde ne saute pas.
+]]
+local TOUCH_PAN_THRESHOLD = 10
+
 function WorldCamera.new(): WorldCamera
 	local self = setmetatable({}, WorldCamera) :: any
 
@@ -58,10 +69,19 @@ function WorldCamera.new(): WorldCamera
 	self.fovKick = 0
 	self.clock = 0
 
+	-- Gestes tactiles. `touches` retient chaque doigt actif (cle : l'InputObject,
+	-- stable pendant toute la duree du contact) ; `touchCount` est expose pour
+	-- que le controleur de saisie sache qu'un geste a deux doigts est en cours
+	-- et ne declenche pas l'appui long du menu radial.
+	self.touches = {}
+	self.touchCount = 0
+	self.pinch = nil
+
 	self.camera.CameraType = Enum.CameraType.Scriptable
 	self.camera.FieldOfView = 60
 
 	self:bindActions()
+	self:bindTouch()
 
 	return self
 end
@@ -144,6 +164,12 @@ function WorldCamera.setMode(self: WorldCamera, mode: string)
 		end
 		self.camera.CameraType = Enum.CameraType.Custom
 		self.camera.FieldOfView = 70
+
+		-- Un geste strategique en cours ne survit pas a la bascule : en vue
+		-- avatar, l'ecran tactile appartient aux controles Roblox du personnage.
+		self.touches = {}
+		self.touchCount = 0
+		self.pinch = nil
 	end
 end
 
@@ -190,6 +216,165 @@ local function clampToMap(position: Vector3): Vector3
 		0,
 		math.clamp(position.Z, -halfD, halfD)
 	)
+end
+
+--=============================================================================
+-- Gestes tactiles
+--=============================================================================
+--[[
+	Sur mobile il n'y a ni clavier ni molette : tout le pilotage de la vue tient
+	en trois gestes.
+
+	  un doigt glisse    panoramique — le monde suit le doigt
+	  pincement          zoom — ecarter rapproche, pincer eloigne
+	  torsion a deux doigts  rotation de la carte
+
+	Le tap reste un ordre (attaque, construction...) : il est gere par le
+	controleur de saisie, pas ici. La frontiere entre les deux est le seuil
+	TOUCH_PAN_THRESHOLD, plus strict que le seuil de clic cote saisie : un doigt
+	qui depasse le seuil de clic annule l'ordre la-bas, et ne bouge la camera
+	ici qu'une fois le panoramique franchement amorce.
+]]
+
+local function touchPosition(input: InputObject): Vector2
+	return Vector2.new(input.Position.X, input.Position.Y)
+end
+
+-- Convertit un glissement ecran en deplacement du point de mire. Le monde suit
+-- le doigt : glisser a droite deplace la mire a gauche.
+function WorldCamera.panByScreenDelta(self: WorldCamera, delta: Vector2)
+	local viewport = self.camera.ViewportSize
+	-- Hauteur visible au niveau du sol, a la distance courante : c'est ce qui
+	-- rend le glissement "accroche" au doigt quel que soit le zoom.
+	local visibleHeight = 2 * self.targetDistance * math.tan(math.rad(self.camera.FieldOfView) / 2)
+	local studsPerPixel = visibleHeight / math.max(viewport.Y, 1)
+	local dx = delta.X * studsPerPixel
+	local dy = delta.Y * studsPerPixel
+	-- Meme repere que stepInput : "l'ecran" suit l'orientation courante.
+	local sin, cos = math.sin(self.targetYaw), math.cos(self.targetYaw)
+	local worldX = -cos * dx + sin * dy
+	local worldZ = -sin * dx - cos * dy
+	self.targetFocus = clampToMap(self.targetFocus + Vector3.new(worldX, 0, worldZ))
+end
+
+-- Les deux premiers doigts actifs, pour le pincement.
+function WorldCamera.twoTouches(self: WorldCamera): (any, any)
+	local first, second = nil, nil
+	for _, touch in self.touches do
+		if not first then
+			first = touch
+		else
+			second = touch
+			break
+		end
+	end
+	return first, second
+end
+
+function WorldCamera.beginPinch(self: WorldCamera)
+	local a, b = self:twoTouches()
+	if not a or not b then
+		return
+	end
+	self.pinch = {
+		distance = (a.last - b.last).Magnitude,
+		angle = math.atan2(b.last.Y - a.last.Y, b.last.X - a.last.X),
+		mid = (a.last + b.last) / 2,
+	}
+end
+
+function WorldCamera.stepPinch(self: WorldCamera)
+	local a, b = self:twoTouches()
+	if not a or not b then
+		return
+	end
+	local distance = (a.last - b.last).Magnitude
+	local angle = math.atan2(b.last.Y - a.last.Y, b.last.X - a.last.X)
+	local mid = (a.last + b.last) / 2
+
+	local pinch = self.pinch
+	if not pinch then
+		self:beginPinch()
+		return
+	end
+
+	-- Zoom : le rapport des ecartements, pas leur difference — un pincement
+	-- reste proportionnel a l'effort, de pres comme de loin.
+	if distance > 1 and pinch.distance > 1 then
+		self.targetDistance = math.clamp(
+			self.targetDistance * pinch.distance / distance,
+			MIN_DISTANCE,
+			MAX_DISTANCE
+		)
+	end
+
+	-- Torsion : le monde suit la rotation des doigts (sens inverse, puisque
+	-- c'est la camera qui orbite autour de la mire).
+	self.targetYaw -= angle - pinch.angle
+
+	-- Le point milieu qui derive translate la carte comme un glissement simple.
+	self:panByScreenDelta(mid - pinch.mid)
+
+	self.pinch = { distance = distance, angle = angle, mid = mid }
+end
+
+function WorldCamera.bindTouch(self: WorldCamera)
+	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+		if processed or self.mode ~= "overview" then
+			return
+		end
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		local pos = touchPosition(input)
+		self.touches[input] = { origin = pos, last = pos, panning = false }
+		self.touchCount += 1
+		if self.touchCount == 2 then
+			self:beginPinch()
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		local touch = self.touches[input]
+		if not touch then
+			return
+		end
+		local pos = touchPosition(input)
+		local delta = pos - touch.last
+		touch.last = pos
+
+		if self.touchCount >= 2 then
+			self:stepPinch()
+			return
+		end
+
+		if not touch.panning then
+			if (pos - touch.origin).Magnitude < TOUCH_PAN_THRESHOLD then
+				return
+			end
+			touch.panning = true
+			-- Rattrapage depuis l'origine : le franchissement du seuil ne doit
+			-- pas avaler les premiers pixels du glissement.
+			delta = pos - touch.origin
+		end
+		self:panByScreenDelta(delta)
+	end)
+
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+		if self.touches[input] then
+			self.touches[input] = nil
+			self.touchCount -= 1
+			if self.touchCount < 2 then
+				self.pinch = nil
+			end
+		end
+	end)
 end
 
 --[[
