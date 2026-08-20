@@ -263,52 +263,183 @@ local function resolveLanding(state: GameState, boat: GameState.Boat)
 end
 
 --=============================================================================
--- Navires marchands (visuels)
+-- Navires marchands
 --=============================================================================
--- L'or du commerce est calcule dans l'economie ; ces navires sont la
--- representation visible de ces routes. Voir passer les convois d'un rival
--- donne envie de lui couper la route — c'est ce qui rend l'embargo lisible.
 
-local function spawnTradeShip(state: GameState, rng: Random)
-	local ports: { { index: number, slot: number } } = {}
+--[[
+	Commerce maritime, modele OpenFront.
+
+	Trois regles portent tout le systeme :
+
+	  1. Un port ne commerce **jamais** avec ses propres ports. L'or vient de
+	     l'etranger, ce qui fait d'un voisin cotier une ressource et pas
+	     seulement une menace.
+	  2. Il faut une route navigable reelle entre les deux ports. Un embargo,
+	     une mer fermee ou une distance excessive coupent la ligne.
+	  3. Les deux ports touchent, a l'arrivee. Couler un convoi prive donc deux
+	     factions a la fois, dont celle qui ne l'escortait pas.
+
+	Le niveau du port est son debit : chaque niveau tire une chance d'armer un
+	navire, exactement comme un port de niveau 3 tire trois fois dans le jeu de
+	reference.
+]]
+
+-- Or verse a chaque extremite d'une route, selon sa longueur.
+local function tradeValue(distance: number): number
+	return Config.TRADE_GOLD_BASE + distance * Config.TRADE_GOLD_PER_TILE
+end
+
+--[[
+	Le commerce est-il ouvert entre ces deux factions ?
+
+	L'embargo est unilateral dans les deux sens : il suffit qu'un seul camp
+	l'ait declare pour que la route soit morte.
+]]
+local function canTrade(state: GameState, a: number, b: number): boolean
+	if a == b then
+		return false
+	end
+	local fromA = state.embargoes[a]
+	local fromB = state.embargoes[b]
+	if (fromA and fromA[b]) or (fromB and fromB[a]) then
+		return false
+	end
+	return true
+end
+
+local function countTradeShips(state: GameState): number
+	local n = 0
+	for _, boat in state.boats do
+		if boat.kind == KIND_TRADE then
+			n += 1
+		end
+	end
+	return n
+end
+
+--[[
+	Arme les convois du tick.
+
+	On collecte les ports une seule fois puis chaque port tire pour lui-meme :
+	un balayage par port couterait O(ports^2) sur une carte saturee, alors que
+	le partenaire se tire dans la liste deja construite.
+]]
+local function spawnTradeShips(state: GameState, rng: Random)
+	local ports: { { index: number, slot: number, level: number } } = {}
 	for index, building in state.buildings do
 		if building.kind == Config.BUILDING.PORT then
-			table.insert(ports, { index = index, slot = building.slot })
+			table.insert(ports, { index = index, slot = building.slot, level = building.level })
 		end
 	end
 	if #ports < 2 then
 		return
 	end
 
-	local a = ports[rng:NextInteger(1, #ports)]
-	local b = ports[rng:NextInteger(1, #ports)]
-	if a.slot == b.slot then
+	-- L'ordre d'iteration d'une table Luau n'est pas garanti. Sans tri, deux
+	-- serveurs partis de la meme graine divergeraient des le premier convoi.
+	table.sort(ports, function(a, b)
+		return a.index < b.index
+	end)
+
+	local afloat = countTradeShips(state)
+
+	for _, source in ports do
+		if afloat >= Config.MAX_TRADE_SHIPS then
+			return
+		end
+
+		-- Un tirage par niveau : le niveau du port EST son debit.
+		local armed = false
+		for _ = 1, source.level do
+			if rng:NextNumber() < Config.TRADE_SHIP_CHANCE then
+				armed = true
+				break
+			end
+		end
+		if not armed then
+			continue
+		end
+
+		--[[
+			Partenaires possibles, ponderes par niveau.
+
+			Un port etranger de niveau 3 apparait trois fois dans le tirage : les
+			grandes places commerciales attirent naturellement plus de trafic,
+			sans avoir a ecrire de regle pour le dire.
+		]]
+		local candidates: { number } = {}
+		for i, other in ports do
+			if canTrade(state, source.slot, other.slot) then
+				for _ = 1, other.level do
+					table.insert(candidates, i)
+				end
+			end
+		end
+		if #candidates == 0 then
+			continue
+		end
+
+		local target = ports[candidates[rng:NextInteger(1, #candidates)]]
+		local path = Navy.findSeaPath(state, source.index, target.index)
+		if not path or #path > Config.BOAT_MAX_RANGE then
+			continue
+		end
+
+		local ox, oy = MapGen.fromIndex(source.index)
+		table.insert(state.boats, {
+			id = state:nextId(),
+			slot = source.slot,
+			kind = KIND_TRADE,
+			troops = 0,
+			x = ox,
+			y = oy,
+			path = path,
+			step = 1,
+			targetTile = target.index,
+			-- Port d'attache : il faut savoir qui paie a l'arrivee, et le
+			-- proprietaire du navire a pu changer entre-temps.
+			homeTile = source.index,
+		})
+		afloat += 1
+	end
+end
+
+--[[
+	Le convoi arrive a bon port.
+
+	Tout est reverifie ici plutot qu'au depart : entre le depart et l'arrivee,
+	le port de destination a pu etre detruit, capture, ou un embargo a pu tomber.
+	Payer sur la foi des conditions de depart reviendrait a recompenser une
+	route qui n'existe plus.
+]]
+local function resolveTrade(state: GameState, boat: GameState.Boat)
+	local destination = state.buildings[boat.targetTile]
+	if not destination or destination.kind ~= Config.BUILDING.PORT then
 		return
 	end
 
-	local embargoA = state.embargoes[a.slot]
-	local embargoB = state.embargoes[b.slot]
-	if (embargoA and embargoA[b.slot]) or (embargoB and embargoB[a.slot]) then
-		return -- route commerciale fermee
-	end
-
-	local path = Navy.findSeaPath(state, a.index, b.index)
-	if not path or #path > Config.BOAT_MAX_RANGE then
+	local origin = if boat.homeTile then state.buildings[boat.homeTile] else nil
+	if not origin or origin.kind ~= Config.BUILDING.PORT then
 		return
 	end
 
-	local ox, oy = MapGen.fromIndex(a.index)
-	table.insert(state.boats, {
-		id = state:nextId(),
-		slot = a.slot,
-		kind = KIND_TRADE,
-		troops = 0,
-		x = ox,
-		y = oy,
-		path = path,
-		step = 1,
-		targetTile = b.index,
-	})
+	if not canTrade(state, origin.slot, destination.slot) then
+		return
+	end
+
+	local seller = state.players[origin.slot]
+	local buyer = state.players[destination.slot]
+	if not seller or not buyer then
+		return
+	end
+
+	local gold = tradeValue(#boat.path)
+	seller.gold += gold
+	buyer.gold += gold
+
+	local rounded = math.floor(gold)
+	state:notify(`\u{1F6A2} Convoi arrive chez {buyer.name} : +{rounded} or.`, "good", seller.slot)
+	state:notify(`\u{1F6A2} Convoi de {seller.name} accoste : +{rounded} or.`, "good", buyer.slot)
 end
 
 --=============================================================================
@@ -435,7 +566,7 @@ function Navy.step(state: GameState, rng: Random)
 	syncCarriers(state)
 	stepCarriers(state)
 	if state.tick % Config.TRADE_SHIP_INTERVAL == 0 then
-		spawnTradeShip(state, rng)
+		spawnTradeShips(state, rng)
 	end
 
 	for i = #state.boats, 1, -1 do
@@ -468,6 +599,8 @@ function Navy.step(state: GameState, rng: Random)
 		if boat.step > #boat.path then
 			if boat.kind == KIND_TRANSPORT then
 				resolveLanding(state, boat)
+			elseif boat.kind == KIND_TRADE then
+				resolveTrade(state, boat)
 			end
 			table.remove(state.boats, i)
 		end

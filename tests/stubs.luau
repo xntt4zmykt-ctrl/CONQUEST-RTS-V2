@@ -193,12 +193,154 @@ CFrame.new = function(x, y, z)
 	return { X = x or 0, Y = y or 0, Z = z or 0 }
 end
 
-Instance = {}
-Instance.new = function()
-	return setmetatable({}, {
-		__index = function()
-			return function() end
-		end,
-		__newindex = function() end,
-	})
+--=============================================================================
+-- Instances
+--=============================================================================
+--[[
+	Arbre d'instances minimal.
+
+	La version precedente etait un trou noir : toute propriete ecrite etait
+	jetee et toute methode appelee ne faisait rien. Cela suffisait tant que le
+	banc serveur ne faisait que charger des modules qui touchent des Instances
+	sans jamais les relire — mais le classement Roblox, lui, ecrit un arbre puis
+	le relit, et un trou noir aurait valide n'importe quoi.
+
+	Le banc client a le sien dans guistubs.luau, plus riche parce qu'il doit
+	simuler la mise en page. Les deux restent separes : le serveur n'a pas
+	besoin de GuiObject ni de tailles absolues, et un bouchon partage
+	obligerait a maintenir les deux besoins au meme endroit.
+]]
+
+local INSTANCE_CLASS_PARENTS = {
+	-- Seule la parente reellement interrogee par le code serveur est decrite :
+	-- IsA doit distinguer une valeur d'un dossier dans les enfants de
+	-- `leaderstats`, et reconnaitre une Part.
+	StringValue = "ValueBase",
+	IntValue = "ValueBase",
+	NumberValue = "ValueBase",
+	BoolValue = "ValueBase",
+	ValueBase = "Instance",
+	Folder = "Instance",
+	Part = "BasePart",
+	MeshPart = "BasePart",
+	BasePart = "Instance",
+	Player = "Instance",
+}
+
+local InstanceMT = {}
+
+local function newInstance(className)
+	return setmetatable({
+		ClassName = className,
+		Name = className,
+		_children = {},
+		_attributes = {},
+		_parent = nil,
+	}, InstanceMT)
 end
+
+InstanceMT.__index = function(t, key)
+	local method = InstanceMT.methods[key]
+	if method then
+		return method
+	end
+	if key == "Parent" then
+		return rawget(t, "_parent")
+	end
+	-- Une propriete jamais ecrite vaut nil, comme une valeur par defaut sans
+	-- interet pour le test.
+	return nil
+end
+
+InstanceMT.__newindex = function(t, key, value)
+	if key == "Parent" then
+		local previous = rawget(t, "_parent")
+		if previous and rawget(previous, "_children") then
+			local siblings = rawget(previous, "_children")
+			for i, child in siblings do
+				if child == t then
+					table.remove(siblings, i)
+					break
+				end
+			end
+		end
+		rawset(t, "_parent", value)
+		-- Roblox conserve l'ordre d'insertion des enfants, et c'est exactement
+		-- ce dont depend l'ordre des colonnes du classement : GetChildren doit
+		-- donc rendre les enfants dans l'ordre ou ils ont ete parentes.
+		if value and rawget(value, "_children") then
+			table.insert(rawget(value, "_children"), t)
+		end
+		return
+	end
+	rawset(t, key, value)
+end
+
+InstanceMT.methods = {
+	GetChildren = function(self)
+		local copy = {}
+		for _, child in rawget(self, "_children") do
+			table.insert(copy, child)
+		end
+		return copy
+	end,
+
+	FindFirstChild = function(self, name)
+		for _, child in rawget(self, "_children") do
+			if child.Name == name then
+				return child
+			end
+		end
+		return nil
+	end,
+
+	WaitForChild = function(self, name)
+		return InstanceMT.methods.FindFirstChild(self, name)
+	end,
+
+	IsA = function(self, className)
+		local own = rawget(self, "ClassName")
+		while own do
+			if own == className then
+				return true
+			end
+			own = INSTANCE_CLASS_PARENTS[own]
+		end
+		return className == "Instance"
+	end,
+
+	Destroy = function(self)
+		local parent = rawget(self, "_parent")
+		if parent and rawget(parent, "_children") then
+			local siblings = rawget(parent, "_children")
+			for i, child in siblings do
+				if child == self then
+					table.remove(siblings, i)
+					break
+				end
+			end
+		end
+		rawset(self, "_parent", nil)
+		rawset(self, "_children", {})
+	end,
+
+	SetAttribute = function(self, name, value)
+		rawget(self, "_attributes")[name] = value
+	end,
+
+	GetAttribute = function(self, name)
+		return rawget(self, "_attributes")[name]
+	end,
+
+	FireClient = function() end,
+	FireAllClients = function() end,
+}
+
+Instance = {}
+Instance.new = function(className)
+	return newInstance(className)
+end
+
+-- Expose au banc d'essai de quoi fabriquer un faux Player : c'est le seul
+-- receptacle du dossier `leaderstats`, et rien dans les modules ne le cree.
+__newInstance = newInstance

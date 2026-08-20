@@ -35,6 +35,8 @@ local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local Config = require(Shared:WaitForChild("Config"))
 local MapGen = require(Shared:WaitForChild("MapGen"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
+local Doctrines = require(Shared:WaitForChild("Doctrines"))
+local Eras = require(Shared:WaitForChild("Eras"))
 
 -- Ce fichier est le LocalScript "Client" ; les modules voisins en sont les
 -- enfants, pas les freres.
@@ -43,6 +45,8 @@ local WorldCamera = require(script.WorldCamera)
 local Overlay = require(script.Overlay)
 local Effects = require(script.Effects)
 local PlacementPreview = require(script.PlacementPreview)
+local RadialMenu = require(script.RadialMenu)
+local FactionLabels = require(script.FactionLabels)
 local MainMenu = require(script.MainMenu)
 local Intro = require(script.Intro)
 local Minimap = require(script.Minimap)
@@ -92,6 +96,7 @@ local world: WorldRenderer.WorldRenderer? = nil
 local overlay: Overlay.Overlay? = nil
 local effects: Effects.Effects? = nil
 local preview: PlacementPreview.PlacementPreview? = nil
+local factionLabels: FactionLabels.FactionLabels? = nil
 local minimap: Minimap.Minimap? = nil
 local camera = WorldCamera.new()
 
@@ -214,6 +219,11 @@ end)
 --=============================================================================
 
 local CLICK_DRAG_THRESHOLD = 8 -- px : au-dela, c'etait un deplacement de vue
+
+-- Duree d'appui au doigt qui vaut clic droit. Assez long pour ne pas se
+-- declencher sur un tap, assez court pour ne pas donner l'impression que rien
+-- ne repond.
+local LONG_PRESS_SECONDS = 0.35
 local pressOrigin: Vector2? = nil
 
 local function pointerPosition(input: InputObject): Vector2
@@ -325,12 +335,76 @@ local function onTileClicked(index: number)
 	executeTerritoryAction(hud.mode, index)
 end
 
+--[[
+	Menu radial : clic droit sur une case, modele OpenFront.
+
+	Il double les modes plutot que de les remplacer. Le clic gauche continue
+	d'appliquer le mode arme — c'est le geste rapide, celui qu'on repete pour
+	poser cinq batiments d'affilee — et le clic droit ouvre le menu sur la case
+	visee pour choisir explicitement, sans avoir a se souvenir du mode courant.
+
+	Un menu contextuel connait sa cible : il grise ce qui n'a pas de sens ici,
+	la ou une barre permanente reste generique et laisse decouvrir l'erreur
+	apres coup.
+]]
+local radial = RadialMenu.new(screenGui)
+
+radial.onAction = function(action: string, tile: number)
+	if action == "inspect" then
+		inspectTerritory(tile)
+		return
+	end
+	hud:setMode(action :: any)
+	inspectTerritory(tile)
+	executeTerritoryAction(action, tile)
+end
+
+radial.onBuild = function(kind: number, tile: number)
+	hud:setBuildKind(kind)
+	hud:setMode("build")
+	executeTerritoryAction("build", tile)
+end
+
+local function openRadial(position: Vector2)
+	local w = world
+	if not w or not deployed or not worldReady or camera.mode ~= "overview" then
+		return
+	end
+	local tile = camera:tileAtScreen(position, w.root)
+	if not tile then
+		return
+	end
+	radial:open(position.X, position.Y, {
+		tile = tile,
+		ownerSlot = w:ownerAt(tile),
+		mySlot = mySlot,
+		era = hud.era,
+		nukesUnlocked = hud.era >= Eras.requiredForNuke(Config.NUKE.ATOM),
+	})
+end
+
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
 		return
 	end
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		openRadial(pointerPosition(input))
+		return
+	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		pressOrigin = pointerPosition(input)
+		-- Appui long au doigt : l'equivalent tactile du clic droit. Sans lui le
+		-- menu serait reserve a la souris, sur une plateforme majoritairement
+		-- mobile.
+		if input.UserInputType == Enum.UserInputType.Touch then
+			local origin = pressOrigin
+			task.delay(LONG_PRESS_SECONDS, function()
+				if pressOrigin == origin and origin then
+					pressOrigin = nil
+					openRadial(origin)
+				end
+			end)
+		end
 	end
 end)
 
@@ -516,6 +590,12 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	overlay = Overlay.new(built.root, built.terrain)
 	effects = Effects.new(built.root, built.terrain)
 	preview = PlacementPreview.new(built.root, built.terrain)
+	factionLabels = FactionLabels.new(built.root, built.terrain)
+
+	-- Le pourcentage de domination a besoin du vrai nombre de tuiles de terre.
+	-- Le client possede le meme terrain que le serveur : il le compte lui-meme
+	-- plutot que de se fier au ratio moyen de MapGen, qui derive selon la graine.
+	hud:setLandCount(MapGen.countLand(built.terrain))
 	minimap = Minimap.new(screenGui, built.terrain, function(index: number)
 		camera:focusTile(index)
 	end)
@@ -588,6 +668,35 @@ Remotes.get("StateDelta").OnClientEvent:Connect(function(delta: buffer?, newStat
 	end
 
 	hud:update(stats, roster)
+
+	--[[
+		Nom et armee de chaque faction, poses sur son territoire.
+
+		On se branche sur la replication du HUD plutot que sur la boucle
+		d'images : ces deux valeurs ne changent qu'a l'arrivee d'un lot de stats,
+		et les recalculer entre deux lots ne pourrait produire que le meme
+		resultat. Le module se limite lui-meme a un balayage par seconde.
+	]]
+	local labels = factionLabels
+	local w = world
+	if labels and w then
+		labels:step(w.owner, stats, roster)
+	end
+
+	--[[
+		Compteurs de parc du bandeau.
+
+		Le detail par type de batiment n'est pas replique — `PlayerStats` ne
+		transporte qu'un total. Mais le client connait deja chaque batiment de la
+		carte, puisqu'il les dessine : le decompte se lit dans la couche
+		d'entites, qui le maintient a l'incrementale a chaque delta. Repliquer
+		neuf compteurs par joueur et par tick pour une information qu'on possede
+		deja serait du gaspillage pur.
+	]]
+	local o = overlay
+	if o then
+		hud:setBuildingCounts(o:buildingCounts(mySlot))
+	end
 end)
 
 Remotes.get("BuildingDelta").OnClientEvent:Connect(function(deltas)
@@ -711,27 +820,42 @@ RunService.RenderStepped:Connect(function(dt: number)
 			end
 		end
 
-		-- Apercu de construction : suit le curseur tant que le mode est arme.
+		--[[
+			Apercu de construction.
+
+			Le fantome ne suit pas le curseur : il suit **le resultat**. Le meme
+			resolveur que le serveur decide de la tuile, donc le fantome saute
+			visiblement sur la case libre voisine quand le clic est reporte, et
+			passe en bleu quand il s'agit d'une amelioration.
+		]]
 		local p = preview
 		if p and hud.mode == "build" and camera.mode == "overview" then
 			local mouse = UserInputService:GetMouseLocation()
 			local tile = camera:tileAtScreen(mouse, w.root)
 			if tile then
-				local valid = p:isValid(tile, hud.buildKind, function(index)
-					return w:ownerAt(index)
-					end, mySlot, hud.era, hud.gold, function(index)
-						local currentOverlay = overlay
-						if currentOverlay then
-							return currentOverlay:buildingAt(index)
+				local o = overlay
+				local landing, status = p:resolve(
+					tile,
+					hud.buildKind,
+					function(index)
+						return w:ownerAt(index)
+					end,
+					function(index)
+						if o then
+							local kind, slot, level = o:buildingAt(index)
+							return kind, slot, level
 						end
-						return nil, nil
-					end, function(index, slot, range)
-						local currentOverlay = overlay
-						return currentOverlay ~= nil and currentOverlay:hasCityNear(index, slot, range)
-					end)
-				p:update(tile, valid)
+						return nil, nil, nil
+					end,
+					mySlot,
+					hud.era,
+					hud.gold,
+					if o then o:buildingCounts(mySlot) else {},
+					Doctrines.get(hud.doctrineId).buildCost
+				)
+				p:update(landing, status)
 			else
-				p:update(nil, false)
+				p:update(nil, "invalid")
 			end
 		end
 

@@ -1,17 +1,24 @@
 --!strict
 --[[
-	Validation et pose des batiments.
+	Pose et amelioration des batiments, cote autoritaire.
 
-	Toute la validation est ici et nulle part ailleurs : le client propose, ce
-	module dispose. Une regle ajoutee ici est automatiquement appliquee aux
-	joueurs comme aux bots.
+	Toute la *regle* de placement vit dans Shared/Placement : ce module ne fait
+	que brancher l'etat serveur dessus et executer le resultat. C'est
+	deliberement mince — client et serveur doivent evaluer la meme fonction sur
+	les memes donnees, sinon le fantome de placement et la realite divergent, ce
+	qui a ete une source de bugs pendant toute la vie du projet.
+
+	Le contrat a change : un ordre de construction ne se refuse plus parce que la
+	tuile visee est occupee, trop proche ou mal orientee. Il s'accroche a la
+	meilleure tuile valide du voisinage, ou bascule en amelioration si un
+	batiment du meme type est deja la.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
-local MapGen = require(ReplicatedStorage.Shared.MapGen)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
+local Placement = require(ReplicatedStorage.Shared.Placement)
 local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
 
@@ -21,195 +28,113 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+--=============================================================================
+-- Branchement de l'etat serveur sur le resolveur partage
+--=============================================================================
+
+function Buildings.contextFor(state: GameState, slot: number): Placement.Context?
+	local ps = state.players[slot]
+	if not ps then
+		return nil
+	end
+
+	return {
+		slot = slot,
+		era = ps.era,
+		gold = ps.gold,
+		terrain = state.terrain,
+		ownerAt = function(index: number): number
+			return buffer.readu8(state.owner, index)
+		end,
+		buildingAt = function(index: number): (number?, number?, number?)
+			local building = state.buildings[index]
+			if not building then
+				return nil, nil, nil
+			end
+			return building.kind, building.slot, building.level
+		end,
+	}
+end
+
 --[[
 	Prix courant d'un batiment pour un joueur donne.
 
-	Le cout croit avec le nombre deja possede : le dixieme bunker coute bien
-	plus cher que le premier. C'est ce qui empeche un empire riche de saturer la
-	carte, et ce qui rend l'expansion economique reellement couteuse a soutenir.
+	Doublement borne, avec compteur partage entre le port et l'usine : voir
+	Config.BUILD_COST_CAP_MULT et Config.BUILD_COST_GROUPS.
 ]]
 function Buildings.priceFor(state: GameState, slot: number, kind: number): number
-	local def = BuildingDefs.get(kind)
-	if not def then
+	local ps = state.players[slot]
+	if not ps then
 		return math.huge
 	end
-
-	local ps = state.players[slot]
-	local owned = if ps then (ps.buildingCounts[kind] or 0) else 0
-	local inflation = 1 + owned * Config.BUILD_COST_SCALING
-
-	return math.floor(def.cost * inflation * state:doctrineOf(slot).buildCost)
+	return Placement.priceFor(ps.buildingCounts, kind, state:doctrineOf(slot).buildCost)
 end
 
 --[[
-	Renvoie (autorise, raison). La raison est renvoyee telle quelle au joueur,
-	donc elle doit etre exploitable — jamais un simple "impossible".
+	Que ferait un clic sur cette tuile ? Renvoie la resolution ou une raison.
+
+	Les seules raisons possibles sont l'ere, l'or, le territoire etranger et
+	l'absence totale de place a portee. Aucune n'est un probleme de precision de
+	visee, et c'est tout l'interet.
 ]]
-function Buildings.canBuild(state: GameState, slot: number, index: number, kind: number): (boolean, string?)
+function Buildings.resolve(state: GameState, slot: number, index: number, kind: number): (Placement.Resolution?, string?)
+	local ctx = Buildings.contextFor(state, slot)
+	if not ctx then
+		return nil, "Faction inconnue."
+	end
 	local ps = state.players[slot]
 	if not ps then
-		return false, "Faction inconnue."
+		return nil, "Faction inconnue."
 	end
-
-	local def = BuildingDefs.get(kind)
-	if not def then
-		return false, "Batiment inconnu."
-	end
-
-	-- La capitale est posee par le moteur au spawn : elle ne doit jamais etre
-	-- accessible depuis un ordre client, meme forge a la main.
-	if not def.buildable then
-		return false, "Ce batiment ne se construit pas."
-	end
-
-	if index < 0 or index >= Config.TILE_COUNT then
-		return false, "Position hors carte."
-	end
-
-	if buffer.readu8(state.owner, index) ~= slot then
-		return false, "Tu ne controles pas ce territoire."
-	end
-
-	if not state:isLand(index) then
-		return false, "Impossible de construire en mer."
-	end
-
-	if state.buildings[index] then
-		return false, "Il y a deja un batiment ici."
-	end
-
-	if def.coastalOnly and not MapGen.isCoastal(state.terrain, index) then
-		return false, "Un port doit etre construit sur la cote."
-	end
-
-	if kind == B.FACTORY then
-		local fx, fy = MapGen.fromIndex(index)
-		local inRange = false
-		for cityIndex, building in state.buildings do
-			if building.slot == slot and building.kind == B.CITY then
-				local cx, cy = MapGen.fromIndex(cityIndex)
-				local dx, dy = cx - fx, cy - fy
-				if dx * dx + dy * dy <= Config.FACTORY_ROUTE_RANGE * Config.FACTORY_ROUTE_RANGE then
-					inRange = true
-					break
-				end
-			end
-		end
-		if not inRange then
-			return false, `Construis l'usine a moins de {Config.FACTORY_ROUTE_RANGE} cases d'une ville.`
-		end
-	end
-
-	local requiredEra = Eras.requiredFor(kind)
-	if ps.era < requiredEra then
-		local era = Eras.get(requiredEra)
-		return false, `Necessite l'ere {era.name}.`
-	end
-
-	local price = Buildings.priceFor(state, slot, kind)
-	if ps.gold < price then
-		return false, `Il te faut {price} d'or ({math.floor(ps.gold)} disponible).`
-	end
-
-	-- Espacement minimal : evite les grappes de villes sur une seule tuile de
-	-- large et force a repartir ses investissements sur le territoire.
-	local cx, cy = MapGen.fromIndex(index)
-	local spacing = Config.BUILD_MIN_SPACING
-	for dy = -spacing, spacing do
-		for dx = -spacing, spacing do
-			if dx * dx + dy * dy <= spacing * spacing then
-				local nx, ny = cx + dx, cy + dy
-				if MapGen.inBounds(nx, ny) then
-					local other = state.buildings[MapGen.toIndex(nx, ny)]
-					if other and other.kind == kind then
-						return false, `Trop proche d'un autre batiment du meme type.`
-					end
-				end
-			end
-		end
-	end
-
-	return true, nil
+	return Placement.resolve(ctx, index, kind, ps.buildingCounts, state:doctrineOf(slot).buildCost)
 end
 
-function Buildings.build(state: GameState, slot: number, index: number, kind: number): (boolean, string?)
-	local ok, reason = Buildings.canBuild(state, slot, index, kind)
-	if not ok then
-		return false, reason
-	end
+--=============================================================================
+-- Execution
+--=============================================================================
 
-	local ps = state.players[slot]
-	if not ps then
-		return false, "Faction inconnue."
-	end
-
-	ps.gold -= Buildings.priceFor(state, slot, kind)
-	state:placeBuilding(index, kind, slot)
-	ps.buildingsBuilt += 1
-	state:sound("buildPlace", slot)
-
+local function describeBuild(state: GameState, slot: number, index: number, kind: number, snapped: boolean): string
 	local def = BuildingDefs.get(kind)
+	local name = if def then def.name else "Batiment"
+	-- Le mot "reporte" est important : sans lui le joueur croit avoir mal
+	-- clique alors que le moteur a fait exactement ce qu'il voulait.
+	local suffix = if snapped then " (reporte sur la case libre la plus proche)" else ""
+
 	if kind == B.CITY then
-		return true, `Ville construite : +900 capacite · +{Config.GOLD_PER_CITY} or/tick.`
+		return `Ville construite : +900 capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
 	elseif kind == B.FACTORY then
 		local routes, income = state:logisticsFor(slot)
-		return true,
-			`Usine connectee : route logistique active · +{string.format("%.1f", income * Config.TICK_RATE)} or/s sur {routes} route(s).`
+		return `Usine raccordee : reseau de {routes} liaison(s) · +{string.format("%.1f", income * Config.TICK_RATE)} or/s.{suffix}`
+	elseif kind == B.PORT then
+		return `Port ouvert : debarquements et routes commerciales.{suffix}`
 	end
-	return true, if def then `{def.name} construit.` else nil
+	return `{name} construit.{suffix}`
 end
 
-function Buildings.cityUpgradePrice(state: GameState, slot: number, index: number): number
-	local building = state.buildings[index]
-	if not building or building.kind ~= B.CITY then
-		return math.huge
+local function describeUpgrade(state: GameState, slot: number, index: number, kind: number, level: number): string
+	if kind == B.CITY then
+		local city = Config.CITY_LEVELS[level]
+		return `{city.name} niveau {level} : {city.popCapBonus} population max · +{city.goldBonus} or/tick.`
+	elseif kind == B.FACTORY then
+		local routes, income = state:logisticsFor(slot)
+		return `Usine niveau {level} : reseau de {routes} liaison(s) · +{string.format("%.1f", income * Config.TICK_RATE)} or/s.`
+	elseif kind == B.PORT then
+		return `Port niveau {level} : +{string.format("%.2f", Config.GOLD_PER_PORT)} or/tick supplementaire.`
 	end
-	local current = Config.CITY_LEVELS[building.level or 1]
-	if not current or not current.upgradeCost then
-		return math.huge
-	end
-	return math.floor(current.upgradeCost * state:doctrineOf(slot).buildCost)
+	local def = BuildingDefs.get(kind)
+	return `{if def then def.name else "Batiment"} niveau {level}.`
 end
 
-function Buildings.canUpgradeCity(state: GameState, slot: number, index: number): (boolean, string?)
-	local ps = state.players[slot]
-	if not ps then
-		return false, "Faction inconnue."
-	end
-	if index < 0 or index >= Config.TILE_COUNT then
-		return false, "Position hors carte."
-	end
+--[[
+	Execute un ordre de construction.
 
-	local building = state.buildings[index]
-	if not building or building.kind ~= B.CITY then
-		return false, "Selectionne une ville a ameliorer."
-	end
-	if building.slot ~= slot or buffer.readu8(state.owner, index) ~= slot then
-		return false, "Cette ville ne t'appartient pas."
-	end
-	if building.level >= Config.CITY_MAX_LEVEL then
-		return false, "Cette ville a atteint son niveau maximum."
-	end
-
-	local nextLevel = building.level + 1
-	local nextCity = Config.CITY_LEVELS[nextLevel]
-	if not nextCity then
-		return false, "Niveau de ville inconnu."
-	end
-	if ps.era < nextCity.requiredEra then
-		return false, `Necessite l'ere {Eras.get(nextCity.requiredEra).name}.`
-	end
-
-	local price = Buildings.cityUpgradePrice(state, slot, index)
-	if ps.gold < price then
-		return false, `Il te faut {price} d'or ({math.floor(ps.gold)} disponible).`
-	end
-	return true, nil
-end
-
-function Buildings.upgradeCity(state: GameState, slot: number, index: number): (boolean, string?)
-	local ok, reason = Buildings.canUpgradeCity(state, slot, index)
-	if not ok then
+	Un seul point d'entree pour poser et pour ameliorer : c'est ce qui permet a
+	l'interface de n'avoir qu'un bouton par type de batiment. Le moteur decide,
+	le joueur n'a pas de mode a choisir.
+]]
+function Buildings.build(state: GameState, slot: number, index: number, kind: number): (boolean, string?)
+	local resolution, reason = Buildings.resolve(state, slot, index, kind)
+	if not resolution then
 		return false, reason
 	end
 
@@ -217,21 +142,98 @@ function Buildings.upgradeCity(state: GameState, slot: number, index: number): (
 	if not ps then
 		return false, "Faction inconnue."
 	end
-	local price = Buildings.cityUpgradePrice(state, slot, index)
-	ps.gold -= price
 
-	local level = state:upgradeCity(index)
-	if not level then
-		return false, "La ville n'a pas pu evoluer."
-	end
+	ps.gold -= resolution.price
 	ps.buildingsBuilt += 1
 	state:sound("buildPlace", slot)
 
-	local city = Config.CITY_LEVELS[level]
-	return true, `{city.name} niveau {level} : {city.popCapBonus} population max · +{city.goldBonus} or/tick.`
+	if resolution.action == "upgrade" then
+		local level = state:upgradeBuilding(resolution.tile)
+		if not level then
+			-- Ne devrait pas arriver : la resolution vient d'etre calculee sur
+			-- cet etat. On rembourse plutot que de facturer dans le vide.
+			ps.gold += resolution.price
+			ps.buildingsBuilt -= 1
+			return false, "Ce batiment n'a pas pu evoluer."
+		end
+		return true, describeUpgrade(state, slot, resolution.tile, kind, level)
+	end
+
+	state:placeBuilding(resolution.tile, kind, slot)
+	return true, describeBuild(state, slot, resolution.tile, kind, resolution.tile ~= index)
 end
 
--- Le nucleaire depend desormais de l'ere du joueur, pas de l'etat de la carte.
+--[[
+	Conserve pour les appelants qui ne connaissent qu'une amelioration : la fiche
+	de territoire, qui vise un batiment precis et non une intention de placement.
+]]
+function Buildings.upgradeAt(state: GameState, slot: number, index: number): (boolean, string?)
+	local building = state.buildings[index]
+	if not building then
+		return false, "Selectionne un batiment a ameliorer."
+	end
+	if building.slot ~= slot or buffer.readu8(state.owner, index) ~= slot then
+		return false, "Ce batiment ne t'appartient pas."
+	end
+	if not BuildingDefs.isUpgradable(building.kind) then
+		return false, "Ce batiment n'a pas de niveau superieur."
+	end
+	if building.level >= BuildingDefs.maxLevel(building.kind) then
+		return false, "Ce batiment a atteint son niveau maximum."
+	end
+
+	local ps = state.players[slot]
+	if not ps then
+		return false, "Faction inconnue."
+	end
+
+	local modifier = state:doctrineOf(slot).buildCost
+	local price = Placement.upgradePriceFor(ps.buildingCounts, building.kind, building.level, modifier)
+	if price == math.huge then
+		return false, "Ce batiment a atteint son niveau maximum."
+	end
+	local requiredEra = Placement.upgradeRequiredEra(building.kind, building.level)
+	if ps.era < requiredEra then
+		return false, `Necessite l'ere {Eras.get(requiredEra).name}.`
+	end
+	if ps.gold < price then
+		return false, `Il te faut {price} d'or ({math.floor(ps.gold)} disponible).`
+	end
+
+	local kind = building.kind
+	ps.gold -= price
+	local level = state:upgradeBuilding(index)
+	if not level then
+		ps.gold += price
+		return false, "Ce batiment n'a pas pu evoluer."
+	end
+	ps.buildingsBuilt += 1
+	state:sound("buildPlace", slot)
+	return true, describeUpgrade(state, slot, index, kind, level)
+end
+
+-- Anciens noms, conserves parce que le banc d'essai et les bots les utilisent.
+Buildings.upgradeCity = Buildings.upgradeAt
+
+function Buildings.upgradePrice(state: GameState, slot: number, index: number): number
+	local building = state.buildings[index]
+	local ps = state.players[slot]
+	if not building or not ps or not BuildingDefs.isUpgradable(building.kind) then
+		return math.huge
+	end
+	if building.level >= BuildingDefs.maxLevel(building.kind) then
+		return math.huge
+	end
+	return Placement.upgradePriceFor(ps.buildingCounts, building.kind, building.level, state:doctrineOf(slot).buildCost)
+end
+
+Buildings.cityUpgradePrice = Buildings.upgradePrice
+
+--=============================================================================
+-- Interrogations
+--=============================================================================
+
+-- Le nucleaire depend de l'ere du joueur, pas de l'etat de la carte.
 function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 	local ps = state.players[slot]
 	return ps ~= nil and ps.era >= Eras.requiredForNuke(Config.NUKE.ATOM)

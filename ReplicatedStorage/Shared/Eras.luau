@@ -17,6 +17,14 @@
 	Regle d'equilibrage : chaque ere doit apporter un gain immediat (le bonus)
 	*et* ouvrir une option nouvelle (le deblocage). Une ere qui n'apporte qu'un
 	pourcentage n'est pas une decision, c'est une taxe.
+
+	Couts et seuils de territoire recalibres en meme temps que le frein a
+	l'emballement. Ils avaient ete cales sur une carte ou deux empires
+	finissaient a 8 000 tuiles chacun ; le leader plafonne desormais autour de
+	3 500, et le revenu territorial suit. Sans ce recalibrage la phase
+	thermonucleaire — le climax du jeu — disparaissait purement et simplement
+	des parties, ce qui est exactement le genre de regression qu'une mesure
+	attrape et qu'une relecture ne voit pas.
 ]]
 
 local Config = require(script.Parent.Config)
@@ -74,8 +82,8 @@ Eras.LIST = {
 		name = "Industrie",
 		tagline = "L'economie devient une arme",
 		symbol = "\u{2699}",
-		cost = 7800,
-		requiredTiles = 900,
+		cost = 5200,
+		requiredTiles = 700,
 		requiredBuildings = { [B.CITY] = 3, [B.PORT] = 1 },
 		unlocks = { B.LAB },
 		goldMultiplier = 1.35,
@@ -87,8 +95,8 @@ Eras.LIST = {
 		name = "Atomique",
 		tagline = "Le seuil que personne ne pardonne",
 		symbol = "\u{2622}",
-		cost = 28500,
-		requiredTiles = 2200,
+		cost = 15000,
+		requiredTiles = 1300,
 		requiredBuildings = { [B.CITY] = 6, [B.DEFENSE] = 2 },
 		unlocks = { B.SILO, B.SAM },
 		goldMultiplier = 1.1,
@@ -100,8 +108,8 @@ Eras.LIST = {
 		name = "Thermonucleaire",
 		tagline = "Rien ne survit a la seconde frappe",
 		symbol = "\u{1F4A5}",
-		cost = 69000,
-		requiredTiles = 4500,
+		cost = 30000,
+		requiredTiles = 2100,
 		requiredBuildings = { [B.SILO] = 1, [B.CITY] = 8 },
 		unlocks = {},
 		goldMultiplier = 1.2,

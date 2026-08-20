@@ -43,6 +43,14 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 		return false, "Vous etes deja allies."
 	end
 
+	-- Carence apres la fin d'un pacte : sans elle, deux camps resignent au tick
+	-- suivant l'expiration et la carte se retrouve a nouveau entierement alliee.
+	local cooldown = state.allianceCooldowns[from]
+	if cooldown and cooldown[to] and state.tick < cooldown[to] then
+		local seconds = math.ceil((cooldown[to] - state.tick) / Config.TICK_RATE)
+		return false, `Pacte rompu trop recemment. Attends encore {seconds} s.`
+	end
+
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
@@ -71,8 +79,11 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 
 	ensure(state.alliances, from)
 	ensure(state.alliances, to)
-	state.alliances[from][to] = true
-	state.alliances[to][from] = true
+	-- Un pacte a une date de fin. Voir Config.ALLIANCE_DURATION : une alliance
+	-- permanente gelait completement la fin de partie.
+	local expiry = state.tick + Config.ALLIANCE_DURATION
+	state.alliances[from][to] = expiry
+	state.alliances[to][from] = expiry
 
 	-- Une alliance annule automatiquement les offensives en cours entre les
 	-- deux camps : sinon on signe la paix pendant que ses troupes avancent.
@@ -117,6 +128,7 @@ function Diplomacy.breakAlliance(state: GameState, from: number, to: number): (b
 
 	state.alliances[from][to] = nil
 	state.alliances[to][from] = nil
+	Diplomacy.startCooldown(state, from, to)
 
 	a.betrayals += Config.BETRAYAL_REPUTATION_COST
 	a.traitorUntil = state.tick + Config.TRAITOR_MARK_DURATION
@@ -125,6 +137,14 @@ function Diplomacy.breakAlliance(state: GameState, from: number, to: number): (b
 	state:sound("betrayal", to)
 
 	return true, "Alliance rompue. Ta reputation en portera la marque."
+end
+
+function Diplomacy.startCooldown(state: GameState, a: number, b: number)
+	ensure(state.allianceCooldowns, a)
+	ensure(state.allianceCooldowns, b)
+	local until_ = state.tick + Config.ALLIANCE_COOLDOWN
+	state.allianceCooldowns[a][b] = until_
+	state.allianceCooldowns[b][a] = until_
 end
 
 --=============================================================================
@@ -162,6 +182,48 @@ function Diplomacy.step(state: GameState)
 			if state.tick >= expiry then
 				targets[to] = nil
 			end
+		end
+	end
+
+	--[[
+		Expiration des pactes.
+
+		Ce n'est pas une trahison : personne n'est marque, aucun compteur ne
+		bouge, et les deux camps peuvent resigner apres la carence. C'est ce qui
+		empeche la carte de se figer en un graphe complet d'alliances ou plus
+		personne n'a de cible legale.
+
+		On collecte avant de retirer : muter les deux tables pendant qu'on les
+		parcourt est un comportement indefini.
+	]]
+	local expired: { { a: number, b: number } } = {}
+	for a, set in state.alliances do
+		for b, expiry in set do
+			-- Une seule fois par paire.
+			if a < b and state.tick >= expiry then
+				table.insert(expired, { a = a, b = b })
+			end
+		end
+	end
+
+	for _, pair in expired do
+		local setA, setB = state.alliances[pair.a], state.alliances[pair.b]
+		if setA then
+			setA[pair.b] = nil
+		end
+		if setB then
+			setB[pair.a] = nil
+		end
+		Diplomacy.startCooldown(state, pair.a, pair.b)
+
+		local first, second = state.players[pair.a], state.players[pair.b]
+		if first and second then
+			state:notifyBetween(
+				`\u{23F3} Le pacte entre {first.name} et {second.name} est arrive a terme.`,
+				"info",
+				pair.a,
+				pair.b
+			)
 		end
 	end
 end

@@ -83,29 +83,40 @@ Config.WORLD_BORDER_THICKNESS = 4
 Config.WORLD_BORDER_HEIGHT = 80
 
 --[[
-	Altitude du sommet de chaque type de terrain, en studs.
+	Altitude du terrain, en studs. **Une seule pour toute la terre ferme.**
 
 	Le monde est bati en blocs et non en SmoothTerrain : la carte est une grille
 	de tuiles, et un terrain voxel lisse se bat en permanence contre cette
 	grille — les frontieres politiques suivent des cases, pas des courbes.
-	Le relief etage donne en plus une lecture immediate du cout de conquete, qui
-	varie deja par terrain dans la simulation.
+
+	Le relief etage a ete retire. Il donnait une lecture du cout de conquete,
+	qui varie toujours par terrain (voir TERRAIN_COST), mais au prix de trois
+	defauts qui pesaient plus lourd que ce gain :
+
+	  - les sommets a 24 studs masquaient le territoire derriere eux depuis une
+	    camera strategique, sur un jeu ou lire la carte EST le jeu ;
+	  - chaque palier d'altitude coupait la fusion des blocs, cote client comme
+	    cote serveur ;
+	  - les batiments, routes et effets devaient composer avec neuf altitudes
+	    alors qu'ils ne represent qu'une couche politique posee sur la carte.
+
+	Le type de terrain reste parfaitement lisible : il porte toujours sa propre
+	couleur. Ce qui disparait, c'est uniquement la troisieme dimension.
+
+	La table est construite en boucle plutot qu'ecrite a la main : neuf valeurs
+	identiques recopiees derivent tot ou tard, celle-ci ne le peut pas.
 ]]
-Config.TERRAIN_HEIGHT = {
-	[0] = 0, -- ocean : pas de bloc, seulement le plan d'eau
-	[1] = 2, -- plage
-	[2] = 4, -- plaines
-	[3] = 4, -- savane
-	[4] = 6, -- foret
-	[5] = 9, -- collines
-	[6] = 13, -- hautes terres
-	[7] = 18, -- montagne
-	[8] = 24, -- sommet
-}
+Config.LAND_HEIGHT = 4
+
+Config.TERRAIN_HEIGHT = { [0] = 0 } -- ocean : pas de bloc, seulement le plan d'eau
+for kind = 1, 8 do
+	Config.TERRAIN_HEIGHT[kind] = Config.LAND_HEIGHT
+end
 
 -- Altitude de reference des basses terres, utilisee par tout ce qui doit se
--- poser "au niveau du sol" sans connaitre la tuile exacte.
-Config.BASE_LAND_HEIGHT = Config.TERRAIN_HEIGHT[2]
+-- poser "au niveau du sol" sans connaitre la tuile exacte. Desormais la seule
+-- altitude qui existe.
+Config.BASE_LAND_HEIGHT = Config.LAND_HEIGHT
 
 Config.OCEAN_LEVEL = 1.5
 
@@ -134,7 +145,32 @@ Config.TICK_DT = 1 / Config.TICK_RATE
 
 Config.START_TROOPS = 150
 Config.BASE_MAX_TROOPS = 250
-Config.MAX_TROOPS_PER_TILE = 28
+
+--[[
+	Plafond de troupes apporte par le territoire — **sous-lineaire**.
+
+	C'est la correction la plus importante de tout l'equilibrage, et elle a ete
+	trouvee a la mesure. Le plafond etait auparavant lineaire (28 troupes par
+	tuile) : un empire dix fois plus grand levait dix fois plus d'hommes. C'etait
+	le vrai moteur de l'emballement, bien plus que le cout de conquete — tout
+	frein applique au cout se faisait rattraper en un instant par une armee qui
+	grossissait a la meme vitesse que la carte.
+
+	La preuve : une fois les alliances rendues temporaires (elles gelaient la fin
+	de partie et masquaient le probleme), le debuff de taille seul laissait
+	encore le leader monter a 99 % des terres. Avec un plafond en ^0.6, quinze
+	fois plus de territoire ne donne plus que cinq fois plus d'armee.
+
+	Consequence recherchee : **les villes deviennent le vrai levier militaire**,
+	puisque leur bonus de population, lui, reste plein. Un empire compact et
+	urbanise bat un empire etale, ce qui donne enfin une raison de construire
+	autre chose que la prochaine offensive.
+]]
+Config.MAX_TROOPS_TILE_EXPONENT = 0.6
+-- Calibre pour laisser inchange un empire moyen (1 000 tuiles) et n'ecraser que
+-- les geants : 28 x 1000 = 28 000, et 444 x 1000^0.6 = 28 000.
+Config.MAX_TROOPS_TILE_SCALE = 444
+
 Config.GROWTH_RATE = 0.012 -- fraction de l'ecart au plafond, comblee par tick
 Config.MIN_GROWTH = 0.6
 
@@ -171,8 +207,34 @@ Config.GOLD_PER_FACTORY_ROUTE = 0.34 -- par tick et par ville desservie
 -- tenait douze en simulation, soit l'equivalent de plusieurs milliers de
 -- territoires en revenu. La capitale est un objectif militaire, pas une rente.
 Config.GOLD_PER_CAPITAL = 0.08 -- par tick, par capitale tenue
-Config.TRADE_GOLD_PER_PARTNER = 0.14 -- par tick, par partenaire commercial
-Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux navires marchands (visuel)
+--[[
+	Commerce maritime.
+
+	Le commerce n'est plus un revenu abstrait. Il l'etait : un compteur de
+	"partenaires" multiplie par une constante, verse a chaque tick, pendant que
+	des navires marchands purement decoratifs traversaient la carte sans rien
+	transporter. Deux systemes qui parlaient de la meme chose et ne se
+	connaissaient pas — donc couler un navire ne coutait rien a personne, et un
+	embargo agissait instantanement sans qu'on voie jamais une route se fermer.
+
+	Desormais l'or arrive **a l'arrivee du navire**, et les deux ports touchent
+	la meme somme : celui qui expedie comme celui qui recoit. C'est ce qui rend
+	un port etranger precieux vivant plutot que mort, et c'est ce qui donne un
+	sens a la piraterie — un navire coule est de l'or qui n'arrivera jamais, des
+	deux cotes.
+
+	La distance paie : une longue route rapporte plus, donc le commerce
+	lointain vaut le risque de traverser des eaux hostiles.
+]]
+Config.TRADE_GOLD_BASE = 14 -- or verse a chaque port a l'arrivee d'un navire
+Config.TRADE_GOLD_PER_TILE = 0.22 -- supplement par tuile parcourue
+Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux vagues de departs
+-- Chance qu'un port donne arme un navire, tiree une fois par niveau : un port
+-- de niveau 3 a trois fois plus d'occasions qu'un port neuf.
+Config.TRADE_SHIP_CHANCE = 0.22
+-- Plafond global. Sans lui, une carte couverte de ports saturerait la mer de
+-- navires et la replication avec eux.
+Config.MAX_TRADE_SHIPS = 24
 
 --=============================================================================
 -- Attaque
@@ -220,40 +282,65 @@ Config.XP_TILE_DIVISOR = 12
 Config.XP_LEVEL_BASE = 220
 
 --=============================================================================
--- Ravitaillement
+-- Frein a l'emballement
 --=============================================================================
 --[[
-	Conquerir loin de ses villes coute de plus en plus cher.
-
 	Le probleme qu'on corrige : mesure en simulation, une partie se terminait sur
-	11 232 / 4 233 / 36 / 32 tuiles. Deux joueurs possedaient 99 % des terres et
-	il n'y avait aucun milieu de partie. Plus un empire etait gros, plus il lui
-	etait facile de grossir — l'expansion etait un cliquet, jamais une decision.
+	8 266 / 7 177 / 36 / 24 tuiles. Deux joueurs possedaient 99 % des terres et il
+	n'y avait aucun milieu de partie. Plus un empire etait gros, plus il lui etait
+	facile de grossir — l'expansion etait un cliquet, jamais une decision.
 
-	La coalition anti-leader des bots existait deja et ne suffisait pas : c'est
-	un correctif de comportement sur un desequilibre systemique.
+	La premiere tentative etait une penalite de ravitaillement : conquerir loin de
+	ses villes coutait plus cher. Elle a ete retiree parce qu'elle **aggravait**
+	le probleme, et c'est mesure : resserrer la portee franche a 14 tuiles faisait
+	passer le leader de 55 % a 72 % des terres, a 10 tuiles a 99 %. La raison est
+	structurelle — une penalite indexee sur la distance aux villes amplifie
+	l'avantage de qui en possede le plus. Elle paralysait les petits, qui n'ont
+	pas les moyens d'en construire, sans jamais gener celui qui en avait dix.
 
-	Ici, c'est **l'empire lui-meme qui freine**. Chaque capitale et chaque ville
-	projette une zone de ravitaillement ; au-dela, le cout de conquete grimpe.
-	Effet secondaire recherche : les villes cessent d'etre un simple bonus de
-	population pour devenir le reseau logistique qui etend la portee. Construire
-	et conquerir deviennent la meme decision.
+	Le remplacement s'indexe directement sur **la taille de l'empire**, comme
+	OpenFront. Trois effets continus, sans seuil brutal :
+
+	  1. un gros defenseur defend moins bien (sa densite de troupes s'effondre) ;
+	  2. un gros attaquant conquiert plus lentement ;
+	  3. en compensation, il perd moins de troupes par tuile.
+
+	Le troisieme point est essentiel : sans lui le geant est simplement puni, et
+	le jeu devient une course a rester deuxieme. Avec, le geant reste efficace
+	mais lent — donc rattrapable, et surtout attaquable.
 ]]
+
+-- Taille a partir de laquelle un empire est "grand", en part des terres. La
+-- sigmoide est centree ici : a ce point exact, la moitie du debuff est appliquee.
+Config.LARGE_EMPIRE_MIDPOINT_RATIO = 0.10
+-- Largeur de la transition, en part du point median. Plus c'est petit, plus le
+-- passage de "normal" a "grand" est brutal ; un tiers donne une pente lisible
+-- sans jamais produire de marche d'escalier.
+Config.LARGE_EMPIRE_SPREAD = 0.333
+-- Defense minimale d'un empire immense, en part de sa defense normale.
+Config.LARGE_DEFENDER_FLOOR = 0.70
+-- Seuil, en part du point median, au-dela duquel l'attaquant ralentit.
+Config.LARGE_ATTACKER_THRESHOLD_RATIO = 0.66
+Config.LARGE_ATTACKER_SPEED_EXPONENT = 0.6
+Config.LARGE_ATTACKER_SPEED_FLOOR = 0.35 -- un geant reste jouable, pas paralyse
+Config.LARGE_ATTACKER_COST_EXPONENT = 0.35 -- compensation : il perd moins par tuile
 
 --[[
-	Portee franche autour d'un centre.
+	Effondrement d'une faction agonisante.
 
-	Contre-intuitif, et mesure : la resserrer aggrave l'emballement. A 14 tuiles
-	le leader passe de 55 % a 72 % des terres, a 10 tuiles a 99 %. La penalite
-	amplifie en effet l'avantage de qui possede le plus de villes — serree, elle
-	paralyse les petits, qui n'ont pas les moyens d'en construire, sans gener
-	celui qui en a dix. Vingt tuiles laissent un joueur a une seule capitale
-	defendre et s'etendre localement.
+	Sans cette regle, la carte se termine avec des factions a trois tuiles qui ne
+	peuvent plus rien faire mais ne meurent jamais : elles n'ont plus assez de
+	troupes pour attaquer, et personne ne prend la peine de finir le travail. La
+	simulation en produisait quatre a la fois, et le milieu de partie etait vide.
+
+	Des qu'un defenseur passe sous ce seuil **pendant qu'on l'attaque**, son
+	territoire est reparti : les tuiles au contact vont a l'assaillant, les
+	autres a n'importe quel voisin hostile. La condition "pendant qu'on
+	l'attaque" est ce qui protege un joueur qui vient de spawner.
 ]]
-Config.SUPPLY_FREE_RANGE = 20
-Config.SUPPLY_FALLOFF = 16 -- distance sur laquelle la penalite se developpe
-Config.SUPPLY_EXPONENT = 1.5
-Config.SUPPLY_MAX_PENALTY = 4.5 -- plafond : au-dela, la conquete est simplement hors de portee
+Config.COLLAPSE_TILE_RATIO = 0.0025 -- part des terres sous laquelle on s'effondre
+Config.COLLAPSE_MIN_TILES = 24 -- plancher absolu, pour les tres petites cartes
+Config.COLLAPSE_MAX_PASSES = 24 -- garde-fou de la redistribution
 
 --=============================================================================
 -- Marine
@@ -333,22 +420,112 @@ Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
 
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
-Config.BUILD_MIN_SPACING = 4 -- tuiles entre deux batiments du meme joueur
+
 --[[
-	Portee d'une usine.
+	Espacement minimal entre deux batiments, **tous types confondus**.
 
-	Une usine dessert **toutes** les villes dans ce rayon, pas seulement la plus
-	proche : son interet est de s'implanter au centre d'un bassin de villes.
-	Le revenu par route est reduit en consequence, sinon une usine bien placee
-	rapporterait trois fois ce qu'elle coute.
+	Auparavant la regle ne comparait qu'un batiment a un autre du meme type : on
+	pouvait donc coller une ville, une usine et un laboratoire sur trois tuiles
+	voisines et concentrer tout un empire sur un mouchoir de poche. Les batiments
+	forment maintenant une grille reguliere, ce qui rend une frappe nucleaire
+	reellement dangereuse et donne une lecture immediate du developpement.
+
+	La valeur a baisse de 4 a 3 en passant de "meme type" a "tous types" : c'est
+	nettement plus contraignant au total (un seul batiment par disque de 28
+	tuiles, au lieu d'un par type), et surtout c'est ce qui garde le premier
+	batiment constructible dans le territoire de depart, qui n'est qu'un disque
+	de rayon SPAWN_RADIUS.
 ]]
-Config.FACTORY_ROUTE_RANGE = 56 -- distance maximale usine -> ville, en tuiles
+Config.BUILD_MIN_SPACING = 3
 
--- Chaque batiment supplementaire du meme type coute plus cher. Sans cette
--- inflation, un empire riche empile trois cents villes et le jeu se resume a
--- cliquer partout : la simulation en produisait 357 en dix minutes. Avec un
--- facteur de 0.35, la cinquieme ville coute deja 2,4 fois la premiere.
-Config.BUILD_COST_SCALING = 0.35
+--[[
+	Rayon d'accrochage du placement.
+
+	Le clic n'est pas une coordonnee, c'est une intention : le serveur cherche la
+	meilleure tuile valide dans ce rayon et construit la, plutot que de refuser.
+	Avant, poser un batiment etait un clic dans le vide suivi d'un message
+	d'erreur — le joueur se battait contre son curseur au lieu de jouer.
+
+	Le rayon est un peu plus large que l'espacement minimal : il faut toujours
+	qu'il existe un anneau de tuiles libres au-dela du disque bloque par un
+	batiment voisin, sinon l'accrochage echouerait exactement dans le cas ou il
+	sert le plus — un joueur qui essaie de densifier une zone deja batie.
+
+	La recherche est un parcours en largeur **connexe** a travers son propre
+	territoire : une enclave separee par des terres ennemies n'est pas
+	atteignable, meme si elle est proche a vol d'oiseau. Le placement respecte la
+	topologie du front.
+]]
+Config.BUILD_SNAP_RADIUS = Config.BUILD_MIN_SPACING + 2
+-- Un port doit trouver une cote : sa recherche porte plus loin, sinon cliquer a
+-- deux tuiles du rivage echouerait sans raison lisible.
+Config.BUILD_SNAP_RADIUS_COASTAL = 9
+--[[
+	Reseau logistique.
+
+	Une usine ne dessert plus une ville, ni meme plusieurs villes : elle
+	**transforme en gares** toutes les structures a portee — villes, capitales,
+	ports et autres usines — et ces gares se relient entre elles de proche en
+	proche pour former un reseau connexe.
+
+	La difference est enorme en jeu. Avec des routes usine -> ville, poser une
+	usine ajoutait simplement k liaisons independantes : le placement etait une
+	optimisation locale. Avec un reseau, une usine posee au bon endroit **fusionne
+	deux grappes** et debloque d'un coup toutes leurs destinations. Le placement
+	devient une decision de carte.
+]]
+Config.RAIL_RANGE = 56 -- portee de liaison entre deux gares, en tuiles
+-- Conserve sous son ancien nom : le rayon de recherche d'une usine reste le
+-- meme, seule la nature des cibles a change.
+Config.FACTORY_ROUTE_RANGE = Config.RAIL_RANGE
+
+--[[
+	Rendement d'une grappe.
+
+	Le revenu suit le nombre de **liaisons** de la grappe (gares - 1, soit un
+	arbre couvrant) et non le nombre de paires possibles : sinon une grappe de
+	dix gares rapporterait quarante-cinq fois une grappe de deux et l'economie
+	exploserait en fin de partie.
+
+	Les usines supplementaires ont un rendement decroissant explicite — une
+	hyperbole normalisee a 1 pour une seule usine. En poser une SECONDE dans la
+	meme grappe rapporte, mais de moins en moins : mieux vaut aller fonder un
+	second reseau ailleurs.
+
+	Ce frein ne s'applique qu'au **nombre** d'usines, jamais a leur niveau.
+	Empiler une usine sur une autre est strictement lineaire — niveau 2 produit
+	le double du niveau 1 — parce que le prix double deja a chaque exemplaire.
+	Freiner des deux cotes rendait l'amelioration toujours perdante face a une
+	construction neuve, ce qui vidait la mecanique de son interet.
+]]
+Config.RAIL_FACTORY_SOFTCAP = 2 -- constante de l'hyperbole f / (f + k)
+
+--[[
+	Inflation des couts de construction.
+
+	Sans inflation, un empire riche empile trois cents villes et le jeu se resume
+	a cliquer partout : la simulation en produisait 357 en dix minutes.
+
+	La courbe est un **doublement borne** et non une progression lineaire. Le
+	lineaire precedent (facteur 0.35) etait trop mou tot et trop dur tard : la
+	cinquieme ville ne coutait que 2,4 fois la premiere, la vingtieme 8 fois, et
+	rien ne s'arretait jamais. Ici chaque batiment double le prix du suivant
+	jusqu'au plafond, atteint des le quatrieme. Le message est clair : les trois
+	premiers sont bon marche, ensuite il vaut mieux **ameliorer** que multiplier.
+]]
+Config.BUILD_COST_CAP_MULT = 8 -- plafond, en multiples du prix de base
+
+--[[
+	Le port et l'usine partagent le meme compteur d'inflation.
+
+	Construire un port rencherit donc tes usines, et inversement. C'est un vrai
+	arbitrage economique entre l'axe maritime et l'axe ferroviaire, a budget
+	commun, au lieu de deux echelles independantes qu'on empile sans reflechir.
+]]
+Config.BUILD_COST_GROUPS = {
+	[Config.BUILDING.PORT] = { Config.BUILDING.PORT, Config.BUILDING.FACTORY },
+	[Config.BUILDING.FACTORY] = { Config.BUILDING.PORT, Config.BUILDING.FACTORY },
+}
 
 -- Une ville n'est plus un achat que l'on oublie : elle peut devenir une
 -- metropole puis une megapole. Les bonus sont des valeurs TOTALES par niveau
@@ -379,6 +556,18 @@ Config.CITY_LEVELS = {
 	},
 }
 
+--[[
+	Niveaux des ports et des usines.
+
+	Ils n'ont pas de paliers nommes comme la ville : leur effet est un simple
+	multiplicateur. Le prix d'une amelioration est **exactement celui du batiment
+	suivant du meme type** — ameliorer et construire coutent donc pareil, et le
+	joueur choisit sur le seul critere qui compte : a-t-il de la place, et
+	a-t-il besoin de couvrir une nouvelle zone ?
+]]
+Config.PORT_MAX_LEVEL = 3
+Config.FACTORY_MAX_LEVEL = 3
+
 --=============================================================================
 -- Nucleaire
 --=============================================================================
@@ -389,6 +578,16 @@ Config.MISSILE_SPEED = 1.6 -- tuiles par tick
 Config.SAM_RANGE = 34
 Config.SAM_INTERCEPT_CHANCE = 0.55
 Config.SAM_COOLDOWN = 90 -- ticks
+--[[
+	Rechargement d'un silo.
+
+	Il n'y en avait aucun : un silo pouvait tirer a chaque tick, et la simulation
+	sur une partie complete produisait 216 explosions — un missile toutes les
+	quatre secondes. La phase finale n'etait plus un climax, c'etait un tapis de
+	bombes. Neuf secondes par silo font du nombre de silos, et donc de leur
+	placement, la vraie variable de la puissance de frappe.
+]]
+Config.SILO_COOLDOWN = 90 -- ticks
 
 Config.NUKE = {
 	ATOM = 1,
@@ -407,6 +606,26 @@ Config.NUKE_STATS = {
 Config.ALLIANCE_REQUEST_TIMEOUT = 300 -- ticks avant expiration d'une demande
 Config.BETRAYAL_REPUTATION_COST = 1
 Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est affichee
+
+--[[
+	Une alliance expire.
+
+	Le probleme qu'on corrige, et il etait fatal : les pactes etaient permanents.
+	En fin de partie, les quatre survivants finissaient tous allies deux a deux —
+	graphe complet, plus une seule cible legale sur la carte. La simulation se
+	terminait sur zero offensive et zero frappe nucleaire. Le jeu ne se bloquait
+	pas, il **s'arretait**, ce qui est pire parce que rien ne le signale.
+
+	Une alliance dure maintenant cinq minutes puis tombe d'elle-meme. Ce n'est
+	pas une trahison : personne n'est marque, les deux camps peuvent resigner.
+	Mais la relation redevient une decision recurrente au lieu d'un clic unique,
+	et il existe toujours une fenetre ou la guerre est possible.
+
+	Le delai de carence apres la fin d'un pacte est ce qui empeche deux bots de
+	le resigner au tick suivant et de recreer le blocage.
+]]
+Config.ALLIANCE_DURATION = 3000 -- ticks, soit 5 minutes
+Config.ALLIANCE_COOLDOWN = 150 -- ticks avant de pouvoir resigner avec le meme camp
 
 --=============================================================================
 -- Coalition anti-leader (bots)

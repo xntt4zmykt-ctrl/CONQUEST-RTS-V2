@@ -25,6 +25,12 @@ export type BuildingDef = {
 	-- Une capitale est posee par le moteur au spawn et ne s'achete jamais.
 	buildable: boolean,
 	class: string,
+	-- Un batiment ameliorable ne se multiplie pas : cliquer a cote d'un
+	-- exemplaire existant fait monter son niveau au lieu d'en poser un second.
+	-- Les autres (bunker, silo, batterie, laboratoire) n'ont pas de palier :
+	-- leur effet est binaire ou deja plafonne.
+	upgradable: boolean,
+	maxLevel: number,
 	-- Effets
 	popCapBonus: number,
 	goldBonus: number,
@@ -44,6 +50,8 @@ BuildingDefs.LIST = {
 		description = "Ton coeur. Sa chute te coute la moitie de ton armee.",
 		coastalOnly = false,
 		buildable = false,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 1500,
 		goldBonus = 0.35,
 	},
@@ -56,6 +64,8 @@ BuildingDefs.LIST = {
 		description = "+900 population · evolue jusqu'a la megapole",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = true,
+		maxLevel = 3,
 		popCapBonus = 900,
 		goldBonus = Config.GOLD_PER_CITY,
 	},
@@ -68,6 +78,8 @@ BuildingDefs.LIST = {
 		description = "Debarquements et routes commerciales",
 		coastalOnly = true,
 		buildable = true,
+		upgradable = true,
+		maxLevel = 3,
 		popCapBonus = 0,
 		goldBonus = Config.GOLD_PER_PORT,
 	},
@@ -80,6 +92,8 @@ BuildingDefs.LIST = {
 		description = "Renforce la defense sur 6 tuiles",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -92,6 +106,8 @@ BuildingDefs.LIST = {
 		description = "Entretient un porte-avions qui intercepte les debarquements",
 		coastalOnly = true,
 		buildable = true,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -104,6 +120,8 @@ BuildingDefs.LIST = {
 		description = "Lance des frappes nucleaires",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -116,6 +134,8 @@ BuildingDefs.LIST = {
 		description = "Intercepte les missiles dans un rayon de 34",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -128,6 +148,8 @@ BuildingDefs.LIST = {
 		description = "-7 % sur le cout de chaque ere (max -35 %)",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = false,
+		maxLevel = 1,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},
@@ -137,9 +159,11 @@ BuildingDefs.LIST = {
 		name = "Usine",
 		symbol = "\u{2699}",
 		cost = 520,
-		description = "Reliee a une ville : produit et livre des marchandises",
+		description = "Relie villes, ports et usines en un reseau ferroviaire",
 		coastalOnly = false,
 		buildable = true,
+		upgradable = true,
+		maxLevel = 3,
 		popCapBonus = 0,
 		goldBonus = Config.GOLD_PER_FACTORY_ROUTE,
 	},
@@ -183,6 +207,16 @@ end
 
 function BuildingDefs.get(id: number): BuildingDef?
 	return byId[id]
+end
+
+function BuildingDefs.isUpgradable(id: number): boolean
+	local def = byId[id]
+	return def ~= nil and def.upgradable and def.maxLevel > 1
+end
+
+function BuildingDefs.maxLevel(id: number): number
+	local def = byId[id]
+	return if def then def.maxLevel else 1
 end
 
 return BuildingDefs

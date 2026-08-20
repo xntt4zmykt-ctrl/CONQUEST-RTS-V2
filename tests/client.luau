@@ -36,7 +36,7 @@ print("=== CONQUEST RTS — banc d'essai client ===")
 --=============================================================================
 
 local SoundManager, HUD, MainMenu, Intro, VictoryScreen
-local Effects, PlacementPreview, BuildingModels, Overlay
+local Effects, PlacementPreview, BuildingModels, Overlay, RadialMenu, FactionLabels
 local WorldRenderer, WorldCamera, Minimap
 
 check("chargement des modules", function()
@@ -48,6 +48,8 @@ check("chargement des modules", function()
 	VictoryScreen = __require("VictoryScreen")
 	Effects = __require("Effects")
 	PlacementPreview = __require("PlacementPreview")
+	RadialMenu = __require("RadialMenu")
+	FactionLabels = __require("FactionLabels")
 	Overlay = __require("Overlay")
 	WorldRenderer = __require("WorldRenderer")
 	WorldCamera = __require("WorldCamera")
@@ -133,11 +135,15 @@ check("identite, ere, diplomatie et classement", function()
 	local stats = {}
 	local roster = {}
 	for slot = 1, 12 do
+		-- Valeurs choisies pour tomber sur des formes compactes reconnaissables :
+		-- 5501 -> "5.50K", 39800 -> "39.8K", 5020000 -> "5.02M". Un formatage
+		-- casse se voit alors immediatement, au lieu de passer pour un chiffre
+		-- plausible.
 		stats[slot] = {
-			troops = 1000 + slot,
+			troops = 5500 + slot,
 			tiles = 500 - slot * 10,
-			gold = 2000,
-			maxTroops = 5000,
+			gold = 5020000,
+			maxTroops = 39800,
 			era = math.min(5, 1 + slot % 5),
 			eraProgress = slot / 12,
 			activeAttacks = if slot == 1 then 2 else 0,
@@ -154,6 +160,35 @@ check("identite, ere, diplomatie et classement", function()
 	assert(string.find(hud.tilesLabel.Text, "3") ~= nil, "les routes logistiques ne sont pas affichees")
 	assert(string.find(hud.goldLabel.Text, "+12.0/s") ~= nil, "le revenu logistique n'est pas affiche")
 	assert(hud.buildPriceLabels[Config.BUILDING.CITY].Text == "243 or", "le vrai prix de construction n'est pas affiche")
+
+	--[[
+		Tous les chiffres du bandeau passent par Format.
+
+		C'est la seule chose qui garantit que le classement, les etiquettes de
+		la carte et le bandeau racontent la meme histoire. Un `tostring` oublie
+		afficherait 5501 la ou la carte annonce 5.50K, et rien n'echouerait.
+	]]
+	assert(hud.troopsLabel.Text == "5.50K", `armee affichee "{hud.troopsLabel.Text}" au lieu de "5.50K"`)
+	assert(hud.popCapLabel.Text == "39.8K", `capacite affichee "{hud.popCapLabel.Text}" au lieu de "39.8K"`)
+	assert(string.find(hud.goldLabel.Text, "5.02M") ~= nil, `or affiche "{hud.goldLabel.Text}" au lieu de "5.02M"`)
+	assert(string.find(hud.growthLabel.Text, "%d") ~= nil, "la croissance de population n'affiche aucun chiffre")
+
+	--[[
+		Le tri des factions survit au retrait du classement maison.
+
+		Plus aucun panneau ne l'affiche — la liste native de Roblox s'en charge —
+		mais `ranked` reste la source de la selection de faction et de la fiche
+		diplomatique. Le supprimer avec le panneau aurait casse les deux sans
+		lever la moindre erreur.
+	]]
+	assert(#hud.ranked > 0, "le classement des factions n'est plus calcule")
+	for i = 2, #hud.ranked do
+		assert(
+			hud.ranked[i - 1].tiles >= hud.ranked[i].tiles,
+			"les factions ne sont plus triees par territoire decroissant"
+		)
+	end
+
 	hud:setDiplomacy({
 		allies = { [2] = true },
 		incoming = { [3] = true },
@@ -161,8 +196,32 @@ check("identite, ere, diplomatie et classement", function()
 		embargoes = { [5] = true },
 		traitors = { [6] = true },
 	})
+	--[[
+		La diplomatie reste joignable apres le retrait du classement.
+
+		C'est le vrai risque du retrait : alliance, embargo et rupture vivaient
+		toutes DANS une ligne du classement. Supprimer le panneau sans redonner
+		un toit a la fiche les rendait injoignables — sans erreur, sans trace,
+		juste une mecanique entiere devenue morte.
+	]]
 	hud:selectFaction(2)
+	assert(hud.diploDrawer.Visible, "la fiche diplomatique ne s'ouvre pas sur la nation selectionnee")
+	assert(hud.diploCard.Visible, "le contenu de la fiche diplomatique reste masque")
+	assert(hud.activeSheet == "diplomacy", `sous-menu actif "{tostring(hud.activeSheet)}" au lieu de "diplomacy"`)
+	assert(string.find(hud.diploTitle.Text, "Nation2") ~= nil, `la fiche vise "{hud.diploTitle.Text}"`)
+
+	-- Au moins une action doit etre proposee : une fiche sans bouton serait un
+	-- panneau qui s'ouvre pour ne rien permettre.
+	local offered = 0
+	for _, b in hud.diploButtons do
+		if b.Visible then
+			offered += 1
+		end
+	end
+	assert(offered > 0, "la fiche diplomatique n'offre aucune action")
+
 	hud:selectFaction(nil)
+	assert(not hud.diploDrawer.Visible, "la fiche reste ouverte apres deselection")
 
 	for era = 1, 5 do
 		hud.era = era
@@ -226,11 +285,11 @@ check("un seul sous-menu ouvert a la fois", function()
 	hud:setMode("attack")
 	assert(openCount() == 0, `{openCount()} sous-menus ouverts en mode Attaquer`)
 
-	-- Le classement ferme tout le reste, et son bouton le referme.
-	hud:openSheet("nations")
-	assert(openCount() == 1, "le classement n'est pas exclusif")
-	hud:openSheet("nations", true)
-	assert(openCount() == 0, "le bouton du classement ne le referme pas")
+	-- La fiche de profil ferme tout le reste, et son engrenage la referme.
+	hud:openSheet("profile")
+	assert(openCount() == 1, "la fiche de profil n'est pas exclusive")
+	hud:openSheet("profile", true)
+	assert(openCount() == 0, "l'engrenage ne referme pas la fiche de profil")
 
 	-- Selectionner un territoire prend la place de toute autre feuille.
 	hud:setMode("build")
@@ -238,6 +297,79 @@ check("un seul sous-menu ouvert a la fois", function()
 	assert(hud.territoryPanel.Visible and not hud.sheets.build.Visible, "la fiche de territoire n'est pas exclusive")
 	assert(openCount() == 1, `{openCount()} sous-menus ouverts avec la fiche de territoire`)
 	hud:setMode("attack")
+end)
+
+--[[
+	Disposition OpenFront.
+
+	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
+	choses, et c'est exactement ce qui casse quand on deplace une interface :
+	un panneau reste rattache a un parent disparu, ou un element cense etre
+	permanent se retrouve derriere un sous-menu que plus personne n'ouvre. Rien
+	de tout cela ne leve d'erreur, et tout cela se voit en jeu.
+]]
+check("disposition : bandeau en haut, rien en bas, aucun classement maison", function()
+	--[[
+		1. Aucun classement maison, sous aucune forme.
+
+		Le jeu publie deja son classement dans la liste native de Roblox, celle
+		qu'on ouvre avec Tab. En afficher un second demandait au joueur lequel
+		des deux dit vrai — et obligeait a maintenir deux chemins de mise a jour
+		pour la meme information.
+
+		On verifie l'absence par le contenu de l'arbre et pas seulement par un
+		champ a nil : un panneau construit puis oublie resterait affiche a
+		l'ecran sans qu'aucun champ ne le trahisse.
+	]]
+	hud:openSheet(nil)
+	assert(hud.sheets.nations == nil, "le classement est encore un sous-menu")
+	assert(rawget(hud, "leaderPanel") == nil, "le panneau de classement est encore construit")
+	assert(rawget(hud, "leaderRows") == nil, "les lignes de classement existent encore")
+	for _, node in hud.root:GetDescendants() do
+		assert(node.Name ~= "Leaderboard", "le panneau de classement est encore dans l'arbre")
+	end
+
+	--- 2. Plus rien de permanent en bas d'ecran. ---------------------------
+	assert(hud.layers.bottom == nil, "le calque bas existe encore")
+	assert(next(hud.modeButtons) == nil, "la rangee de modes existe encore")
+	for _, node in hud.root:GetDescendants() do
+		assert(node.Name ~= "CommandBar", "la barre basse est encore construite")
+		assert(node.Name ~= "Modes", "la rangee de modes est encore construite")
+	end
+
+	--- 3. L'engagement a suivi dans le bandeau du haut. ---------------------
+	local track = hud.ratioFill.Parent
+	assert(track.Parent == hud.playerBanner, "le curseur d'engagement n'est pas dans le bandeau")
+	-- Le libelle est POSE sur la jauge, pas a cote : c'est la forme du jeu de
+	-- reference, et la seule qui tienne dans une hauteur de ligne.
+	assert(hud.ratioReadout.Parent == track, "le libelle d'engagement n'est pas pose sur la jauge")
+	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
+	hud:setRatio(0.5)
+	assert(string.find(hud.ratioReadout.Text, "50 ") ~= nil, `engagement affiche "{hud.ratioReadout.Text}"`)
+
+	--- 4. Coin haut droit : chrono, ere, sorties. ---------------------------
+	assert(hud.timerLabel.Parent == hud.sessionBar, "le chrono n'est pas dans la barre de session")
+	hud:setMatch({ phase = "playing", stage = "combat", timeLeft = 25, restartIn = 0 })
+	assert(hud.timerLabel.Text == "00:25", `chrono affiche "{hud.timerLabel.Text}" au lieu de "00:25"`)
+
+	--- 5. Parc de batiments : une pastille par type constructible. ----------
+	hud:setBuildingCounts({ [Config.BUILDING.CITY] = 3 })
+	assert(hud.parkPills[Config.BUILDING.CITY].Text == "3", "le compteur de villes n'est pas repercute")
+	assert(hud.parkPills[Config.BUILDING.SILO].Text == "0", "un type absent n'affiche pas zero")
+	for _, def in BuildingDefs.BUILDABLE do
+		assert(hud.parkPills[def.id] ~= nil, `aucune pastille pour {def.name}`)
+	end
+
+	--- 6. Le prix du palier suivant a sa propre colonne. --------------------
+	-- Colle au bout du nom, il sortait du bouton des que l'ere s'appelait
+	-- "Thermonucleaire" — et c'est le prix qui declenche le clic.
+	local era, progress = hud.era, hud.eraProgress
+	hud.era, hud.eraProgress = 4, 1
+	hud:refreshEraPanel()
+	assert(string.find(hud.eraPrice.Text, "or") ~= nil, "le prix du palier suivant n'est pas affiche")
+	assert(string.find(hud.eraName.Text, "or") == nil, "le prix est encore colle au nom de l'ere")
+	hud.era, hud.eraProgress = era, progress
+	hud:refreshEraPanel()
 end)
 
 check("curseur d'engagement et doctrines", function()
@@ -333,14 +465,32 @@ check("pose et capture de chaque type de batiment", function()
 		return count, sample
 	end
 
-	-- Une usine dessert TOUTES les villes a portee : trois villes, trois routes.
+	-- Une usine est une gare : elle trace une voie vers chaque gare a portee.
 	factoryEntry.links = { cityIndex, cityIndex + 300, cityIndex + 700 }
 	overlay:applyBuildingDelta({ factoryEntry })
 	local _, _, _, routeCount = overlay:buildingAt(factoryEntry.index)
 	assert(routeCount == 3, `l'usine annonce {routeCount} routes au lieu de 3`)
 	local built, sample = routesOf(factoryEntry.index)
 	assert(built == 3, `{built} routes tracees au lieu de 3`)
-	assert(sample and #sample.path == 6, "la route logistique n'est pas courbee en segments")
+	--[[
+		Le trace suit la grille : chaque segment est strictement horizontal ou
+		vertical, jamais en biais.
+
+		C'est la seule propriete qui distingue une voie alignee d'une courbe, et
+		elle est invisible a la lecture du code de rendu — une erreur de calcul
+		produirait des diagonales parfaitement plausibles que personne ne
+		remarquerait avant de lancer le jeu.
+	]]
+	assert(sample and #sample.path >= 2, "la route logistique n'a pas de trace")
+	for i = 1, #sample.path - 1 do
+		local a, b = sample.path[i], sample.path[i + 1]
+		local dx = math.abs(b.X - a.X)
+		local dz = math.abs(b.Z - a.Z)
+		assert(
+			dx < 0.001 or dz < 0.001,
+			`segment {i} de la route part en diagonale (dx={dx}, dz={dz})`
+		)
+	end
 
 	-- Perdre une ville doit retirer sa route, pas les laisser s'accumuler.
 	factoryEntry.links = { cityIndex }
@@ -377,11 +527,309 @@ end)
 check("apercu de placement pour chaque batiment", function()
 	for _, def in BuildingDefs.BUILDABLE do
 		preview:setKind(def.id)
-		preview:update(1000, true)
-		preview:update(1200, false)
-		preview:update(nil, false)
+		preview:update(1000, "exact")
+		preview:update(1200, "snap")
+		preview:update(1300, "upgrade")
+		preview:update(1400, "invalid")
+		preview:update(nil, "invalid")
 	end
 	preview:hide()
+end)
+
+--[[
+	Accrochage du placement.
+
+	C'est le comportement qui remplace le refus sur clic invalide, et c'est aussi
+	celui qui a le plus de facons de casser en silence : le fantome et le serveur
+	executent le meme module, mais avec deux contextes differents. Si l'un des
+	deux ment sur la propriete d'une tuile ou sur un batiment pose, le joueur voit
+	un fantome vert la ou le serveur refusera.
+]]
+check("accrochage du placement et bascule en amelioration", function()
+	-- On cherche une zone de terre continue assez large pour y travailler.
+	local origin: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		local x, y = index % Config.MAP_WIDTH, index // Config.MAP_WIDTH
+		if x > 12 and x < Config.MAP_WIDTH - 12 and y > 12 and y < Config.MAP_HEIGHT - 12 then
+			local solid = true
+			for dy = -8, 8 do
+				for dx = -8, 8 do
+					local n = (y + dy) * Config.MAP_WIDTH + (x + dx)
+					if buffer.readu8(terrain, n) == Config.TERRAIN.OCEAN then
+						solid = false
+						break
+					end
+				end
+				if not solid then
+					break
+				end
+			end
+			if solid then
+				origin = index
+				break
+			end
+		end
+	end
+	assert(origin ~= nil, "aucune zone de terre continue pour tester le placement")
+
+	local ox, oy = (origin :: number) % Config.MAP_WIDTH, (origin :: number) // Config.MAP_WIDTH
+	local MINE = 1
+
+	local owned: { [number]: true } = {}
+	for dy = -8, 8 do
+		for dx = -8, 8 do
+			owned[(oy + dy) * Config.MAP_WIDTH + (ox + dx)] = true
+		end
+	end
+
+	local placed: { [number]: { kind: number, slot: number, level: number } } = {}
+	local function ownerAt(index: number): number
+		return if owned[index] then MINE else 0
+	end
+	local function buildingAt(index: number): (number?, number?, number?)
+		local b = placed[index]
+		if not b then
+			return nil, nil, nil
+		end
+		return b.kind, b.slot, b.level
+	end
+
+	local counts: { [number]: number } = {}
+	local function resolve(index: number, kind: number)
+		return preview:resolve(index, kind, ownerAt, buildingAt, MINE, 9, 1000000, counts, 1)
+	end
+
+	preview:setKind(Config.BUILDING.CITY)
+
+	-- 1. Terrain libre : le fantome se pose exactement sous le curseur.
+	local landing, status = resolve(origin :: number, Config.BUILDING.CITY)
+	assert(status == "exact", `terrain libre : statut {status} au lieu de "exact"`)
+	assert(landing == origin, "terrain libre : le fantome n'est pas sous le curseur")
+
+	-- 2. Tuile occupee par un autre type : le clic est reporte a cote au lieu
+	-- d'etre refuse. C'est tout le changement de comportement.
+	placed[origin :: number] = { kind = Config.BUILDING.DEFENSE, slot = MINE, level = 1 }
+	counts[Config.BUILDING.DEFENSE] = 1
+	landing, status = resolve(origin :: number, Config.BUILDING.CITY)
+	assert(status == "snap", `tuile occupee : statut {status} au lieu de "snap"`)
+	assert(landing ~= origin, "tuile occupee : le clic n'a pas ete reporte")
+
+	-- 3. Le report respecte l'espacement minimal, tous types confondus.
+	local lx, ly = landing % Config.MAP_WIDTH, landing // Config.MAP_WIDTH
+	local dx, dy = lx - ox, ly - oy
+	assert(
+		dx * dx + dy * dy >= Config.BUILD_MIN_SPACING * Config.BUILD_MIN_SPACING,
+		"le report ignore l'espacement minimal entre batiments"
+	)
+
+	-- 4. Une ville a portee bascule le clic en amelioration : un seul bouton par
+	-- type, aucun mode a choisir pour le joueur.
+	placed[landing] = { kind = Config.BUILDING.CITY, slot = MINE, level = 1 }
+	counts[Config.BUILDING.CITY] = 1
+	local upgradeTile, upgradeStatus = resolve(landing, Config.BUILDING.CITY)
+	assert(upgradeStatus == "upgrade", `ville existante : statut {upgradeStatus} au lieu de "upgrade"`)
+	assert(upgradeTile == landing, "l'amelioration ne vise pas la ville cliquee")
+
+	-- 5. Une ville au niveau maximum ne bascule plus : on repose a cote.
+	placed[landing].level = BuildingDefs.maxLevel(Config.BUILDING.CITY)
+	local _, maxedStatus = resolve(landing, Config.BUILDING.CITY)
+	assert(maxedStatus ~= "upgrade", "une ville au niveau maximum propose encore une amelioration")
+
+	-- 6. Hors territoire : c'est le seul refus de position qui subsiste, et il
+	-- correspond a une autre intention, pas a une erreur de visee.
+	local foreign = (oy - 12) * Config.MAP_WIDTH + ox
+	local _, foreignStatus = resolve(foreign, Config.BUILDING.CITY)
+	assert(foreignStatus == "invalid", "un clic hors territoire est accepte")
+
+	-- 7. Sans or, aucun placement : la seule autre raison de refus.
+	local _, brokeStatus = preview:resolve(origin :: number, Config.BUILDING.CITY, ownerAt, buildingAt, MINE, 9, 0, counts, 1)
+	assert(brokeStatus == "invalid", "un placement est propose sans l'or necessaire")
+
+	preview:hide()
+end)
+
+--[[
+	Menu radial.
+
+	Il porte desormais toutes les actions de jeu, et il n'a aucune trace a
+	l'ecran tant qu'il est ferme : une panne y est parfaitement silencieuse
+	jusqu'au moment ou un joueur clique droit et ne voit rien.
+]]
+check("menu radial : pages, contexte et sorties", function()
+	local menu = RadialMenu.new(screenGui)
+	assert(not menu:isOpen(), "le menu est ouvert avant qu'on le demande")
+
+	local actions: { string } = {}
+	local builds: { number } = {}
+	menu.onAction = function(action: string, tile: number)
+		table.insert(actions, `{action}@{tile}`)
+	end
+	menu.onBuild = function(kind: number, tile: number)
+		table.insert(builds, kind)
+	end
+
+	--- Sur une case etrangere : attaquer est possible, batir non. ------------
+	menu:open(400, 300, { tile = 1234, ownerSlot = 2, mySlot = 1, era = 5, nukesUnlocked = true })
+	assert(menu:isOpen(), "le menu ne s'ouvre pas")
+
+	local function petalNamed(label: string)
+		for _, p in menu.petals do
+			if p.button.Visible and p.label.Text == label then
+				return p
+			end
+		end
+		return nil
+	end
+
+	local attack = petalNamed("Attaquer")
+	local build = petalNamed("Batir")
+	assert(attack and build, "l'anneau racine n'expose pas Attaquer et Batir")
+	assert(not attack.button:GetAttribute("Disabled"), "Attaquer est grise sur un territoire ennemi")
+	assert(build.button:GetAttribute("Disabled"), "Batir est propose sur un territoire ennemi")
+
+	--- Sur son propre territoire, l'inverse. --------------------------------
+	menu:open(400, 300, { tile = 77, ownerSlot = 1, mySlot = 1, era = 5, nukesUnlocked = true })
+	attack = petalNamed("Attaquer")
+	build = petalNamed("Batir")
+	assert(attack and build, "l'anneau racine a change de contenu selon le proprietaire")
+	assert(attack.button:GetAttribute("Disabled"), "Attaquer est propose sur son propre territoire")
+	assert(not build.button:GetAttribute("Disabled"), "Batir est grise sur son propre territoire")
+
+	--- Batir ouvre la page des batiments sans fermer le menu ni perdre la case.
+	build.button.Activated:Fire()
+	assert(menu:isOpen(), "choisir Batir a ferme le menu")
+	assert(menu.page == "build", "la page des batiments ne s'ouvre pas")
+	assert(menu.context.tile == 77, "la case visee est perdue en changeant de page")
+
+	local shown = 0
+	for _, p in menu.petals do
+		if p.button.Visible then
+			shown += 1
+		end
+	end
+	assert(shown == #BuildingDefs.BUILDABLE, `{shown} batiments affiches sur {#BuildingDefs.BUILDABLE}`)
+
+	--- Le moyeu revient en arriere au lieu de tout fermer. -------------------
+	menu.hub.Activated:Fire()
+	assert(menu:isOpen() and menu.page == "root", "le moyeu ferme le menu au lieu de revenir a l'anneau")
+
+	--- Une action sort la valeur puis referme. ------------------------------
+	menu:open(400, 300, { tile = 512, ownerSlot = 3, mySlot = 1, era = 5, nukesUnlocked = true })
+	local strike = petalNamed("Frapper")
+	assert(strike and not strike.button:GetAttribute("Disabled"), "Frapper est indisponible malgre l'ere atomique")
+	strike.button.Activated:Fire()
+	assert(actions[#actions] == "nuke@512", `sortie inattendue : {actions[#actions]}`)
+	assert(not menu:isOpen(), "le menu reste ouvert apres une action")
+
+	--- Un petale grise ne declenche rien. -----------------------------------
+	menu:open(400, 300, { tile = 900, ownerSlot = 1, mySlot = 1, era = 1, nukesUnlocked = false })
+	local before = #actions
+	local blocked = petalNamed("Attaquer")
+	assert(blocked, "Attaquer a disparu de l'anneau")
+	blocked.button.Activated:Fire()
+	assert(#actions == before, "un petale grise a quand meme declenche son action")
+	assert(menu:isOpen(), "un petale grise a ferme le menu")
+
+	--- L'ere verrouille les batiments avances. ------------------------------
+	petalNamed("Batir").button.Activated:Fire()
+	local locked = false
+	for _, p in menu.petals do
+		if p.button.Visible and p.button:GetAttribute("Disabled") then
+			locked = true
+			break
+		end
+	end
+	assert(locked, "aucun batiment n'est verrouille a l'ere 1")
+
+	--- Ouvert dans un coin, l'anneau reste entierement a l'ecran. -----------
+	menu:open(0, 0, { tile = 5, ownerSlot = 0, mySlot = 1, era = 3, nukesUnlocked = false })
+	assert(
+		menu.ring.Position.X.Offset > 0 and menu.ring.Position.Y.Offset > 0,
+		"le menu ouvert dans un coin deborde de l'ecran"
+	)
+
+	--- Un clic a cote referme. ----------------------------------------------
+	menu.veil.Activated:Fire()
+	assert(not menu:isOpen(), "cliquer a cote ne ferme pas le menu")
+
+	menu:destroy()
+end)
+
+--[[
+	Etiquettes de faction posees sur la carte.
+
+	Elles n'existent que dans le monde 3D, donc rien a l'ecran ne signale une
+	panne : un barycentre faux pose simplement le nom d'un pays au milieu de la
+	mer, et un formatage casse affiche 87500 la ou on attend 87.5K.
+]]
+check("etiquettes de faction : centre, contenu et disparition", function()
+	local labels = FactionLabels.new(world.root, terrain)
+
+	-- Deux factions, l'une a gauche de la carte, l'autre a droite.
+	local owner = buffer.create(Config.TILE_COUNT)
+	local leftTiles, rightTiles = 0, 0
+	for y = 40, 70 do
+		for x = 20, 50 do
+			buffer.writeu8(owner, y * Config.MAP_WIDTH + x, 1)
+			leftTiles += 1
+		end
+		for x = 180, 200 do
+			buffer.writeu8(owner, y * Config.MAP_WIDTH + x, 2)
+			rightTiles += 1
+		end
+	end
+
+	local stats = {
+		[1] = { troops = 87500 },
+		[2] = { troops = 1290000 },
+	}
+	local roster = {
+		[1] = { name = "Valoria" },
+		[2] = { name = "Ostrave" },
+	}
+
+	labels:refresh(owner, stats, roster)
+
+	local first = labels.labels[1]
+	local second = labels.labels[2]
+	assert(first and second, "une faction possedant du territoire n'a pas d'etiquette")
+
+	assert(first.name.Text == "Valoria", `nom incorrect : {first.name.Text}`)
+	assert(first.troops.Text == "87.5K", `troupes affichees "{first.troops.Text}" au lieu de "87.5K"`)
+	assert(second.troops.Text == "1.29M", `troupes affichees "{second.troops.Text}" au lieu de "1.29M"`)
+
+	--[[
+		Le barycentre tombe bien dans le territoire.
+
+		C'est la seule verification qui attrape une erreur d'echantillonnage : un
+		barycentre calcule sur la mauvaise dimension resterait un point
+		parfaitement valide, juste pose au mauvais endroit.
+	]]
+	assert(
+		first.anchor.CFrame.X < second.anchor.CFrame.X,
+		"les deux etiquettes ne sont pas dans l'ordre est-ouest de leurs territoires"
+	)
+
+	-- La grande faction porte un nom plus large que la petite.
+	assert(
+		first.billboard.Size.X.Scale > second.billboard.Size.X.Scale,
+		"la taille de l'etiquette ne suit pas la taille de l'empire"
+	)
+
+	-- Une faction effacee de la carte perd son etiquette au lieu de la laisser
+	-- flotter sur un territoire qui ne lui appartient plus.
+	local emptied = buffer.create(Config.TILE_COUNT)
+    for y = 40, 70 do
+        for x = 180, 200 do
+            buffer.writeu8(emptied, y * Config.MAP_WIDTH + x, 2)
+        end
+    end
+	labels:refresh(emptied, stats, roster)
+	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
+	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
+
+	labels:clear()
+	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
 end)
 
 check("navires, missiles et interpolation", function()

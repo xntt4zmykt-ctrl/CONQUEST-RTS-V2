@@ -23,6 +23,7 @@ local BuildingModels = require(script.Parent.BuildingModels)
 local UnitModels = require(script.Parent.UnitModels)
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
+local RailPath = require(Shared:WaitForChild("RailPath"))
 local Types = require(Shared:WaitForChild("Types"))
 
 local Overlay = {}
@@ -42,6 +43,7 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 
 	self.terrain = terrain
 	self.buildings = {}
+	self.counts = {}
 	self.routes = {}
 	self.units = {}
 	self.seen = {}
@@ -59,6 +61,7 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 end
 
 function Overlay.clear(self: Overlay)
+	table.clear(self.counts)
 	for _, part in self.buildings do
 		part:Destroy()
 	end
@@ -125,8 +128,17 @@ local function makeBuilding(
 		label.Size = UDim2.fromScale(1, 1)
 		label.FontFace = Theme.font.bold
 		label.TextScaled = true
+		--[[
+			Le niveau est ecrit a cote du symbole, pour tout batiment a paliers.
+
+			C'est la seule chose qui rend l'empilement lisible : deux usines
+			empilees n'occupent qu'une case et ressemblent a une seule usine. Sans
+			ce chiffre, rien a l'ecran ne distingue un reseau qui produit le double
+			d'un reseau ordinaire. Reserve auparavant aux villes, alors que le port
+			et l'usine ont des paliers eux aussi.
+		]]
 		label.Text = if def
-			then `{def.symbol}{if kind == Config.BUILDING.CITY and level > 1 then level else ""}`
+			then `{def.symbol}{if level > 1 and BuildingDefs.isUpgradable(kind) then level else ""}`
 			else "?"
 		label.TextColor3 = color
 		label.Parent = billboard
@@ -187,54 +199,77 @@ function Overlay.syncFactoryRoutes(self: Overlay, factoryIndex: number, links: {
 	end
 end
 
-function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number, slot: number)
+--[[
+	Trace une liaison logistique entre deux gares.
 
-	local fromBase = WorldSpace.indexToWorld(factoryIndex)
-	local toBase = WorldSpace.indexToWorld(cityIndex)
-	local roadY = math.max(
-		WorldSpace.surfaceHeight(self.terrain, factoryIndex),
-		WorldSpace.surfaceHeight(self.terrain, cityIndex)
-	) + 0.38
-	local from = Vector3.new(fromBase.X, roadY, fromBase.Z)
-	local to = Vector3.new(toBase.X, roadY, toBase.Z)
-	local delta = to - from
-	local distance = delta.Magnitude
-	if distance < 1 then
+	Le trace suit la grille : quatre directions, aucune diagonale, et le moins de
+	virages possible (voir Shared/RailPath). Avant, c'etait une courbe de Bezier
+	avec un coude arbitraire — une belle ligne qui partait en travers des cases
+	alors que tout le reste du jeu, frontieres comprises, est aligne dessus.
+
+	Le chemin est recalcule ici a partir du terrain plutot que replique : il ne
+	depend que de deux indices de case et de la carte, que le client possede
+	deja. Une voie ne coute donc pas un octet de reseau.
+]]
+function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number, slot: number)
+	local tiles = RailPath.find(self.terrain, factoryIndex, cityIndex)
+	if not tiles or #tiles < 2 then
 		return
 	end
+
+	local roadY = WorldSpace.surfaceHeight(self.terrain, factoryIndex) + 0.38
 
 	local model = Instance.new("Model")
 	model.Name = `LogisticsRoute{factoryIndex}`
 	model.Parent = self.root
 
-	-- Courbe quadratique tres douce : une route parfaitement droite entre deux
-	-- centres ressemble a une ligne de debug. Le coude donne une vraie lecture
-	-- d'infrastructure sans rallonger fortement le trajet.
-	local forward = delta.Unit
-	local side = Vector3.new(-forward.Z, 0, forward.X)
-	local sign = if factoryIndex % 2 == 0 then 1 else -1
-	local control = from + delta * 0.5 + side * math.min(12, distance * 0.14) * sign
-	local path = {}
-	for i = 0, 5 do
-		local t = i / 5
-		local inv = 1 - t
-		table.insert(path, from * (inv * inv) + control * (2 * inv * t) + to * (t * t))
+	local function worldAt(index: number): Vector3
+		local base = WorldSpace.indexToWorld(index)
+		return Vector3.new(base.X, roadY, base.Z)
 	end
 
-	for i = 1, #path - 1 do
-		local a = path[i]
-		local b = path[i + 1]
-		local segment = b - a
-		local segmentLength = segment.Magnitude
-		local frame = CFrame.lookAt(a + segment * 0.5, b)
-		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7, 0.12, segmentLength + 0.4), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
+	--[[
+		Un tronçon droit = un jeu de Parts, pas une Part par case.
+
+		C'est ce qui rend le trace abordable : une liaison de cent cases dessinee
+		case par case couterait trois cents Parts. Et c'est justement parce que
+		l'algorithme evite les virages qu'il y a si peu de tronçons a produire —
+		la penalite de virage paie deux fois, en lisibilite et en budget.
+	]]
+	local runs = RailPath.runs(tiles)
+	local tileSize = Config.TILE_SIZE
+
+	for _, run in runs do
+		local a = worldAt(run.fromIndex)
+		local b = worldAt(run.toIndex)
+		local span = b - a
+		if span.Magnitude < 0.01 then
+			continue
+		end
+
+		-- On prolonge d'une demi-case a chaque bout : sinon deux tronçons
+		-- perpendiculaires laissent un trou carre visible dans le virage.
+		local length = span.Magnitude + tileSize
+		local frame = CFrame.lookAt(a + span * 0.5, b)
+
+		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7, 0.12, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
-		local asphalt = routePart(model, "Road", Vector3.new(1.9, 0.16, segmentLength + 0.45), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
+		local asphalt = routePart(model, "Road", Vector3.new(1.9, 0.16, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
 		asphalt.CFrame = frame + Vector3.new(0, 0.08, 0)
-		local stripe = routePart(model, "CenterMark", Vector3.new(0.1, 0.2, segmentLength * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
+		local stripe = routePart(model, "CenterMark", Vector3.new(0.1, 0.2, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
 		stripe.CFrame = frame + Vector3.new(0, 0.18, 0)
 	end
+
+	-- Le convoi suit les memes coins que la voie : il tourne a angle droit au
+	-- lieu de couper au travers.
+	local path: { Vector3 } = { worldAt(tiles[1]) }
+	for _, run in runs do
+		table.insert(path, worldAt(run.toIndex))
+	end
+
+	local from = path[1]
+	local to = path[#path]
 
 	-- La caisse mobile rend le flux economique concret : ce n'est plus un
 	-- simple bonus invisible dans une formule.
@@ -282,25 +317,54 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	}
 end
 
-function Overlay.hasCityNear(self: Overlay, index: number, slot: number, range: number): boolean
-	local x, y = index % Config.MAP_WIDTH, index // Config.MAP_WIDTH
-	local range2 = range * range
-	for cityIndex, model in self.buildings do
-		if model:GetAttribute("Kind") == Config.BUILDING.CITY and model:GetAttribute("Slot") == slot then
-			local cx, cy = cityIndex % Config.MAP_WIDTH, cityIndex // Config.MAP_WIDTH
-			local dx, dy = cx - x, cy - y
-			if dx * dx + dy * dy <= range2 then
-				return true
-			end
-		end
+--[[
+	Nombre de batiments par type pour une faction.
+
+	Le resolveur de placement partage en a besoin pour calculer le prix courant :
+	sans lui, le fantome ne saurait pas si le joueur a les moyens et afficherait
+	vert alors que le serveur refuse. Le decompte est maintenu a l'incrementale
+	dans applyBuildingDelta — le recalculer a chaque frame de survol couterait un
+	balayage complet des batiments soixante fois par seconde.
+]]
+local EMPTY_COUNTS: { [number]: number } = {}
+
+function Overlay.buildingCounts(self: Overlay, slot: number): { [number]: number }
+	-- Table partagee plutot qu'une allocation par frame : cette fonction est
+	-- appelee a chaque image tant que le mode Construire est arme.
+	return self.counts[slot] or EMPTY_COUNTS
+end
+
+--[[
+	Ajoute (ou retire) un batiment du decompte par faction.
+
+	Le compteur suit des unites et non des niveaux : c'est bien le nombre de
+	batiments possedes qui pilote l'inflation des couts.
+]]
+function Overlay.tally(self: Overlay, slot: number?, kind: number?, sign: number)
+	if not slot or not kind or kind == 0 then
+		return
 	end
-	return false
+	local bucket = self.counts[slot]
+	if not bucket then
+		bucket = {}
+		self.counts[slot] = bucket
+	end
+	bucket[kind] = math.max(0, (bucket[kind] or 0) + sign)
 end
 
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
 	for _, entry in deltas do
 		local existing = self.buildings[entry.index]
 		local level = entry.level or 1
+
+		-- Le batiment qui occupait la tuile disparait du decompte quoi qu'il
+		-- arrive ensuite : destruction, capture ou remplacement.
+		if existing then
+			self:tally(existing:GetAttribute("Slot") :: number?, existing:GetAttribute("Kind") :: number?, -1)
+		end
+		if entry.kind ~= 0 then
+			self:tally(entry.slot, entry.kind, 1)
+		end
 
 		if entry.kind == 0 then
 			self:syncFactoryRoutes(entry.index, nil, 0)

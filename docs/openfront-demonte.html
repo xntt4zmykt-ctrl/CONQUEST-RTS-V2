@@ -1,0 +1,928 @@
+<title>OpenFront démonté</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+:root {
+  --paper:        #EDF0F0;
+  --surface:      #FFFFFF;
+  --surface-sunk: #E3E8E8;
+  --line:         #C9D2D2;
+  --line-soft:    #DCE3E3;
+  --text:         #16202A;
+  --text-dim:     #5A6A72;
+  --text-faint:   #839197;
+  --teal:         #12796E;
+  --teal-soft:    #D3EBE7;
+  --ochre:        #9A6412;
+  --ochre-soft:   #F0E4CE;
+  --rust:         #A93B2E;
+  --rust-soft:    #F3DCD8;
+  --shadow:       0 1px 2px rgba(22,32,42,.06), 0 8px 24px -16px rgba(22,32,42,.28);
+
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body:    "Source Serif 4", Georgia, "Times New Roman", serif;
+  --f-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:        #0E151C;
+    --surface:      #16202A;
+    --surface-sunk: #111A22;
+    --line:         #2A3A46;
+    --line-soft:    #202D37;
+    --text:         #DFE7E9;
+    --text-dim:     #93A5AE;
+    --text-faint:   #6B7C86;
+    --teal:         #2DC2B1;
+    --teal-soft:    #10312F;
+    --ochre:        #D8A24E;
+    --ochre-soft:   #33280F;
+    --rust:         #E1705F;
+    --rust-soft:    #341A16;
+    --shadow:       0 1px 2px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.9);
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper:        #0E151C;
+  --surface:      #16202A;
+  --surface-sunk: #111A22;
+  --line:         #2A3A46;
+  --line-soft:    #202D37;
+  --text:         #DFE7E9;
+  --text-dim:     #93A5AE;
+  --text-faint:   #6B7C86;
+  --teal:         #2DC2B1;
+  --teal-soft:    #10312F;
+  --ochre:        #D8A24E;
+  --ochre-soft:   #33280F;
+  --rust:         #E1705F;
+  --rust-soft:    #341A16;
+  --shadow:       0 1px 2px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.9);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--f-body);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 28px 120px;
+}
+
+.col {
+  max-width: 68ch;
+}
+
+p { margin: 0 0 1.05em; }
+p:last-child { margin-bottom: 0; }
+
+a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+strong { font-weight: 600; color: var(--text); }
+
+code {
+  font-family: var(--f-mono);
+  font-size: .84em;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+  padding: .08em .34em;
+  white-space: nowrap;
+}
+
+/* ---------- masthead ---------- */
+
+header.masthead {
+  border-bottom: 2px solid var(--text);
+  padding: 64px 0 26px;
+  margin-bottom: 52px;
+}
+
+.kicker {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 22px;
+}
+
+h1 {
+  font-family: var(--f-display);
+  font-weight: 800;
+  font-size: clamp(42px, 7vw, 78px);
+  line-height: .95;
+  letter-spacing: -.035em;
+  margin: 0 0 20px;
+  text-wrap: balance;
+}
+
+.standfirst {
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-width: 60ch;
+  margin: 0;
+}
+
+/* ---------- table of contents ---------- */
+
+nav.toc {
+  margin: 40px 0 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 2px 26px;
+}
+
+nav.toc a {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  letter-spacing: .02em;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 5px 0;
+  border-bottom: 1px solid transparent;
+  display: block;
+}
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--teal); border-bottom-color: var(--teal); }
+
+/* ---------- sections ---------- */
+
+section { margin: 0 0 72px; scroll-margin-top: 24px; }
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-bottom: 24px;
+}
+
+.sec-label {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--teal);
+  flex: none;
+}
+
+h2 {
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: clamp(26px, 3.4vw, 34px);
+  letter-spacing: -.022em;
+  line-height: 1.12;
+  margin: 0;
+  flex: 1 1 300px;
+  text-wrap: balance;
+}
+
+h3 {
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 19px;
+  letter-spacing: -.01em;
+  margin: 34px 0 12px;
+  text-wrap: balance;
+}
+
+h4 {
+  font-family: var(--f-mono);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 26px 0 10px;
+}
+
+/* ---------- divergence chips ---------- */
+
+.chip {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 3px 9px 4px;
+  border-radius: 2px;
+  border: 1px solid;
+  white-space: nowrap;
+  flex: none;
+}
+.chip.same    { color: var(--teal);  border-color: var(--teal);  background: var(--teal-soft); }
+.chip.differs { color: var(--ochre); border-color: var(--ochre); background: var(--ochre-soft); }
+.chip.missing { color: var(--rust);  border-color: var(--rust);  background: var(--rust-soft); }
+
+/* ---------- code / formula blocks ---------- */
+
+pre {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--teal);
+  border-radius: 3px;
+  padding: 16px 18px;
+  margin: 20px 0;
+  overflow-x: auto;
+  tab-size: 2;
+  color: var(--text);
+}
+pre .cm { color: var(--text-faint); }
+
+.formula {
+  font-family: var(--f-mono);
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 14px 16px;
+  margin: 18px 0;
+  overflow-x: auto;
+  box-shadow: var(--shadow);
+}
+.formula .lbl {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 7px;
+}
+
+/* ---------- comparison ---------- */
+
+.vs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  margin: 22px 0;
+  overflow: hidden;
+}
+.vs > div { background: var(--surface); padding: 16px 18px; }
+.vs h5 {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+}
+.vs .of h5 { color: var(--ochre); }
+.vs .cq h5 { color: var(--teal); }
+.vs p { font-size: 15.5px; line-height: 1.55; }
+@media (max-width: 700px) { .vs { grid-template-columns: 1fr; } }
+
+/* ---------- tables ---------- */
+
+.tbl-scroll { overflow-x: auto; margin: 22px 0; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  min-width: 480px;
+}
+th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 10.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--text-dim);
+  padding: 0 14px 7px 0;
+}
+td {
+  padding: 8px 14px 8px 0;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num { text-align: right; padding-right: 22px; }
+
+/* ---------- notes ---------- */
+
+.note {
+  border-left: 3px solid var(--ochre);
+  background: var(--surface);
+  padding: 14px 18px;
+  margin: 22px 0;
+  font-size: 16px;
+  border-radius: 0 3px 3px 0;
+  box-shadow: var(--shadow);
+}
+.note .tag {
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+  color: var(--ochre);
+  display: block;
+  margin-bottom: 6px;
+}
+
+ul, ol { margin: 0 0 1.05em; padding-left: 1.3em; }
+li { margin-bottom: .45em; }
+li::marker { color: var(--text-faint); }
+
+.src {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: .01em;
+  margin: -8px 0 20px;
+}
+
+/* ---------- action list ---------- */
+
+.actions { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; margin: 24px 0; }
+.action { background: var(--surface); padding: 16px 18px; display: grid; grid-template-columns: 46px 1fr; gap: 16px; align-items: start; }
+.action .rank { font-family: var(--f-mono); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; padding-top: 3px; }
+.action.p1 .rank { color: var(--rust); }
+.action.p2 .rank { color: var(--ochre); }
+.action.p3 .rank { color: var(--text-faint); }
+.action .body { font-size: 15.5px; line-height: 1.55; }
+.action .body b { font-family: var(--f-display); font-weight: 600; font-size: 16px; display: block; margin-bottom: 3px; }
+
+footer {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 20px;
+  font-family: var(--f-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.7;
+}
+
+:focus-visible { outline: 2px solid var(--teal); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="kicker">
+    <span>Analyse du code source</span>
+    <span>OpenFront · AGPL-3.0 · TypeScript</span>
+    <span>vs. CONQUEST RTS · Luau</span>
+    <span>20 août 2026</span>
+  </div>
+  <h1>OpenFront démonté</h1>
+  <p class="standfirst">Comment le placement des bâtiments, le combat, l'économie et le rail fonctionnent réellement dans le moteur d'OpenFront — formules exactes, constantes, et les endroits précis où notre implémentation divergeait — et ce qui a été porté dans le jeu.</p>
+
+  <nav class="toc">
+    <a href="#placement">→ Placement des bâtiments</a>
+    <a href="#couts">→ Coûts &amp; niveaux</a>
+    <a href="#combat">→ Combat</a>
+    <a href="#economie">→ Or &amp; troupes</a>
+    <a href="#rail">→ Usines &amp; rail</a>
+    <a href="#naval">→ Ports &amp; marine</a>
+    <a href="#nucleaire">→ Nucléaire</a>
+    <a href="#diplo">→ Diplomatie</a>
+    <a href="#actions">→ Ce qui a ete applique</a>
+  </nav>
+</header>
+
+<div class="col">
+
+<section id="placement">
+  <div class="sec-head">
+    <span class="sec-label">Placement</span>
+    <h2>OpenFront ne refuse jamais un clic</h2>
+    <span class="chip missing">écart majeur</span>
+  </div>
+
+  <p>C'est la découverte centrale, et elle change tout le ressenti du jeu. Chez nous, cliquer une tuile invalide renvoie un message d'erreur. Chez OpenFront, <strong>le clic est une intention, pas une coordonnée</strong> : le serveur cherche la meilleure tuile valide autour du point cliqué et y construit. Le joueur ne se bat jamais contre le curseur.</p>
+
+  <h3>Le pipeline complet</h3>
+  <p class="src">src/client/hud/layers/BuildMenu.ts · src/core/execution/ConstructionExecution.ts · src/core/game/PlayerImpl.ts</p>
+
+<pre>clic droit sur une tuile
+  └─ MainRadialMenu → BuildMenu.showMenu(clickedTile)
+       └─ player.buildables(clickedTile, types)   <span class="cm">// 1 calcul pour TOUS les bâtiments</span>
+            └─ validStructureSpawnTiles(tile)     <span class="cm">// calculé UNE fois, partagé</span>
+       └─ chaque bouton affiche : coût, niveau total, actif/grisé
+  └─ clic sur un bouton → BuildUnitIntentEvent(type, clickedTile)
+       └─ ConstructionExecution.tick()
+            └─ player.canBuild(type, clickedTile) → renvoie une TUILE, pas un booléen
+            └─ buildUnit(type, spawnTile)         <span class="cm">// la tuile RETOURNÉE, pas la cliquée</span>
+            └─ setUnderConstruction(true) pendant constructionDuration ticks</pre>
+
+  <p>Le point clé est la signature : <code>canBuild()</code> retourne <code>TileRef | false</code>. Le <code>false</code> n'arrive que si le joueur n'a pas l'or, si l'unité est désactivée par la config de partie, ou si <em>aucune</em> tuile valide n'existe dans un rayon de 15. Sinon il retourne une tuile — potentiellement à 15 cases du clic.</p>
+
+  <h3>validStructureSpawnTiles, ligne par ligne</h3>
+
+<pre>private validStructureSpawnTiles(tile) {
+  if (owner(tile) !== this) return [];        <span class="cm">// seul filtre dur : ton territoire</span>
+  const searchRadius = 15;
+
+  nearbyUnits = nearbyUnits(tile, 30, Structures.types);
+  nearbyTiles = bfs(tile, t =>
+       euclideanDistSquared(tile, t) &lt; 225    <span class="cm">// BFS, donc connexe</span>
+    &amp;&amp; ownerID(t) === this.smallID());
+
+  validSet = new Set(nearbyTiles);
+  minDistSquared = structureMinDist() ** 2;   <span class="cm">// 15² = 225</span>
+
+  for (const t of nearbyTiles)
+    for (const {unit} of nearbyUnits)
+      if (distSq(unit.tile(), t) &lt; 225) { validSet.delete(t); break; }
+
+  valid.sort((a,b) =&gt; distSq(a,tile) - distSq(b,tile));
+  return valid;                               <span class="cm">// [0] = la plus proche du clic</span>
+}</pre>
+
+  <p>Quatre choses méritent d'être notées, parce qu'elles sont contre-intuitives :</p>
+
+  <ul>
+    <li>Le BFS est <strong>connexe</strong> : une enclave à toi séparée par du territoire ennemi n'est pas atteignable, même si elle est à 10 cases à vol d'oiseau. Le placement respecte la topologie du front.</li>
+    <li><code>structureMinDist()</code> vaut <strong>15</strong> et s'applique <em>entre tous les types de structures confondus</em> — un port bloque l'emplacement d'une usine. Chez nous <code>BUILD_MIN_SPACING</code> ne compare que <code>other.kind == kind</code> : on autorise une ville et une usine collées sur deux tuiles voisines.</li>
+    <li>Le rayon de recherche (15) est <em>exactement</em> égal à la distance minimale (15). Ce n'est pas un hasard : ça garantit qu'on ne peut jamais poser un bâtiment plus loin que la moitié du vide laissé entre deux structures existantes. La grille de bâtiments s'auto-organise.</li>
+    <li>Le tri est par distance au clic, donc le joueur garde le contrôle de la <em>direction</em> — il pose « vers le nord-est », pas exactement « ici ».</li>
+  </ul>
+
+  <div class="vs">
+    <div class="of"><h5>OpenFront</h5><p>Le clic est un souhait. Le serveur snap sur la tuile valide la plus proche. Un bouton grisé = pas assez d'or, jamais « mauvais endroit ».</p></div>
+    <div class="cq"><h5>CONQUEST RTS</h5><p><code>Buildings.canBuild</code> renvoie <code>(false, "raison")</code> sur 8 conditions distinctes. Le joueur reçoit un texte d'erreur et doit re-cliquer.</p></div>
+  </div>
+
+  <h3>Les cas particuliers de placement</h3>
+
+  <div class="tbl-scroll">
+  <table>
+    <thead><tr><th>Unité</th><th>Règle de spawn</th><th>Portée</th></tr></thead>
+    <tbody>
+      <tr><td>Ville, Usine,<br>Silo, Bunker, SAM</td><td><code>landBasedStructureSpawn</code> → <code>validStructureSpawnTiles[0]</code></td><td class="num">15</td></tr>
+      <tr><td>Port</td><td>BFS Manhattan autour du clic, filtré <code>owner === moi &amp;&amp; isShore(t)</code>, trié par distance, puis intersecté avec les tuiles valides structure</td><td class="num">20</td></tr>
+      <tr><td>Bombe A / H</td><td>Sélection automatique du <strong>silo prêt le plus proche de la cible</strong> (pas en cooldown, pas en construction). Le clic désigne la <em>cible</em>, pas le lanceur.</td><td class="num">∞</td></tr>
+      <tr><td>MIRV</td><td>Idem, plus l'exigence que la tuile visée soit possédée par quelqu'un</td><td class="num">∞</td></tr>
+      <tr><td>Navire de guerre</td><td>Port actif le plus proche <strong>partageant la même composante d'eau</strong> que la tuile cliquée</td><td class="num">∞</td></tr>
+      <tr><td>Transport de troupes</td><td><code>canBuildTransportShip</code>, plafonné à 3 bateaux simultanés</td><td class="num">—</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">À retenir pour le nucléaire</span>
+    <p>Chez OpenFront on ne « sélectionne pas un silo » : on clique la cible, le moteur choisit le silo. Notre système où le joueur doit d'abord armer un silo puis viser ajoute une étape que le jeu de référence a délibérément supprimée.</p>
+  </div>
+</section>
+
+<section id="couts">
+  <div class="sec-head">
+    <span class="sec-label">Coûts</span>
+    <h2>Doublement exponentiel et compteurs partagés</h2>
+    <span class="chip differs">écart de courbe</span>
+  </div>
+
+  <p class="src">src/core/configuration/Config.ts — <code>unitInfo()</code>, <code>costWrapper()</code></p>
+
+  <div class="tbl-scroll">
+  <table>
+    <thead><tr><th>Bâtiment</th><th>Coût</th><th class="num">Plafond</th><th class="num">Constr.</th><th>Améliorable</th></tr></thead>
+    <tbody>
+      <tr><td>Ville</td><td><code>2^n × 125 000</code></td><td class="num">1 000 000</td><td class="num">2 s</td><td>oui</td></tr>
+      <tr><td>Usine</td><td><code>2^n × 125 000</code> — <em>n compte usines + ports</em></td><td class="num">1 000 000</td><td class="num">2 s</td><td>oui</td></tr>
+      <tr><td>Port</td><td><code>2^n × 125 000</code> — <em>n compte ports + usines</em></td><td class="num">1 000 000</td><td class="num">5 s</td><td>oui</td></tr>
+      <tr><td>Bunker</td><td><code>(n+1) × 50 000</code></td><td class="num">250 000</td><td class="num">5 s</td><td>non</td></tr>
+      <tr><td>Silo</td><td><code>1 000 000</code> fixe</td><td class="num">—</td><td class="num">10 s</td><td>oui</td></tr>
+      <tr><td>SAM</td><td><code>(n+1) × 1 500 000</code></td><td class="num">3 000 000</td><td class="num">~9 s</td><td>oui</td></tr>
+      <tr><td>Navire</td><td><code>(n+1) × 250 000</code></td><td class="num">1 000 000</td><td class="num">—</td><td>non</td></tr>
+      <tr><td>Bombe A</td><td><code>750 000</code></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+      <tr><td>Bombe H</td><td><code>5 000 000</code></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+      <tr><td>MIRV</td><td><code>25M + 15M × MIRV déjà lancés</code> <em>(global, tous joueurs)</em></td><td class="num">—</td><td class="num">—</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Trois mécanismes ici n'existent pas chez nous :</p>
+
+  <h4>1. Le doublement, pas la progression linéaire</h4>
+  <p>Notre <code>BUILD_COST_SCALING = 0.35</code> donne <code>coût × (1 + 0.35n)</code> : la 10ᵉ ville coûte 4,5× la première. Chez OpenFront elle coûte <strong>8× le prix de base</strong> (plafonné). Le plafond à 1M est ce qui empêche la courbe de tuer complètement l'expansion tardive — c'est un doublement <em>borné</em>, pas un doublement pur. Notre courbe linéaire non bornée fait exactement l'inverse : trop molle tôt, trop dure tard.</p>
+
+  <h4>2. Le compteur partagé Port ↔ Usine</h4>
+<pre>cost: this.costWrapper(
+  (n) =&gt; Math.min(1_000_000, Math.pow(2, n) * 125_000),
+  UnitType.Factory,
+  UnitType.Port,          <span class="cm">// ← les deux types alimentent le même n</span>
+)</pre>
+  <p>Construire un port renchérit tes usines. C'est un vrai arbitrage économique entre l'axe maritime et l'axe ferroviaire, à budget commun.</p>
+
+  <h4>3. Les niveaux remplacent la prolifération</h4>
+  <p>Cliquer un bâtiment existant dans un rayon de 15 ne construit pas : ça <strong>améliore</strong> (<code>findExistingUnitToUpgrade</code> → <code>UpgradeStructureExecution</code>). Le niveau multiplie l'effet — un port de niveau 3 tire 3 fois par tirage de navire marchand, une ville de niveau 3 vaut 3 × 250 000 de capacité de troupes. Le même bouton fait donc deux choses selon le contexte, sans que le joueur ait à choisir un mode.</p>
+
+  <div class="note">
+    <span class="tag">Détail d'implémentation</span>
+    <p><code>costWrapper</code> compte <code>Math.min(unitsOwned, unitsConstructed)</code>. Un bâtiment encore en chantier ne fait donc pas monter le prix du suivant : on peut lancer deux villes dans la même seconde au prix d'une. Volontaire — ça évite de punir le joueur qui construit en rafale.</p>
+  </div>
+</section>
+
+<section id="combat">
+  <div class="sec-head">
+    <span class="sec-label">Combat</span>
+    <h2>Une file de priorité, pas une vague</h2>
+    <span class="chip differs">écart de structure</span>
+  </div>
+
+  <p class="src">src/core/execution/AttackExecution.ts · Config.attackLogic()</p>
+
+  <p>Une attaque n'est pas un état global du joueur : c'est un <strong>objet <code>Attack</code> avec son propre budget de troupes et sa propre frontière</strong>, qui vit dans un tas binaire de tuiles à conquérir triées par priorité.</p>
+
+<pre>priority = (rand(0,7) + 10) × (1 − voisinsÀMoi × 0.5 + mag/2) + tickActuel</pre>
+
+  <p>Le <code>+ tickActuel</code> est le détail élégant : c'est ce qui fait que les tuiles ajoutées tard passent après celles ajoutées tôt, sans avoir à gérer de FIFO séparée. Le tas est à la fois une priorité <em>et</em> une file. <code>voisinsÀMoi × 0.5</code> abaisse la priorité (donc accélère) les tuiles déjà encerclées : le front avale les poches avant de pousser en profondeur. <code>mag</code> (1 / 1,5 / 2 selon plaine / colline / montagne) pénalise le relief.</p>
+
+  <h3>La résolution par tuile</h3>
+
+  <div class="formula">
+    <span class="lbl">Terrain — magnitude et vitesse de base</span>
+    plaine     mag 80   speed 16.5<br>
+    colline    mag 100  speed 20<br>
+    montagne   mag 120  speed 25
+  </div>
+
+  <div class="formula">
+    <span class="lbl">Perte de l'attaquant, par tuile</span>
+    current = clamp(défTroupes / attTroupes, 0.6, 2) × mag × 0.8<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;× débuffGrosDéfenseur × bonusGrosAttaquant × traître<br>
+    alt&nbsp;&nbsp;&nbsp;&nbsp; = 1.3 × (défTroupes / défTuiles) × (mag/100) × traître<br>
+    <strong>perte = 0.6 × current + 0.4 × alt</strong>
+  </div>
+
+  <p>Le terme <code>alt</code> est ce qui fait qu'un défenseur <em>concentré</em> (beaucoup de troupes sur peu de tuiles) est réellement dur à percer, indépendamment du rapport de forces global. Un empire étalé sur 50 000 tuiles avec 2M de troupes a une densité ridicule et s'effondre — c'est le mécanisme anti-blob principal, et il est purement géométrique.</p>
+
+  <div class="formula">
+    <span class="lbl">Anti-runaway — sigmoïde sur la taille du défenseur</span>
+    MIDPOINT = 150 000 tuiles &nbsp;·&nbsp; DECAY = ln2 / 50 000<br>
+    defenseSig = 1 − sigmoid(défTuiles, DECAY, MIDPOINT)<br>
+    débuffGrosDéfenseur = 0.7 + 0.3 × defenseSig &nbsp;&nbsp;<span style="color:var(--text-faint)">// 1.0 → 0.7</span><br><br>
+    si attTuiles &gt; 100 000 :<br>
+    &nbsp;&nbsp;bonusGrosAttaquant = √(100000/attTuiles)^0.7<br>
+    &nbsp;&nbsp;bonusVitesse&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = (100000/attTuiles)^0.6
+  </div>
+
+  <p><strong>C'est exactement le problème qu'on n'a pas résolu.</strong> Le leader chez nous atteint 53 % parce qu'on pénalise l'attaquant par un système de ravitaillement (<code>supplyPenalty</code>) qui, on l'a mesuré, amplifie celui qui possède le plus de villes. OpenFront ne touche pas au ravitaillement : il applique un débuff direct, continu et sans discontinuité, sur la <em>défense</em> du gros et la <em>vitesse</em> du gros attaquant. Un empire de 300 000 tuiles perd 30 % de sa défense et 43 % de sa vitesse de conquête. Le grand devient une cible, pas un joueur handicapé dans sa logistique.</p>
+
+  <h3>Vitesse de propagation</h3>
+
+  <div class="formula">
+    <span class="lbl">attackTilesPerTick — budget de tuiles par tick</span>
+    contre joueur&nbsp;: clamp((5 × attTroupes / défTroupes) × 2, 0.01, 0.5) × tuilesFront × 3<br>
+    contre neutre&nbsp;: tuilesFront × 2
+  </div>
+
+  <p>Le budget est proportionnel à la <strong>largeur du front</strong> (<code>borderSize()</code> plus un bruit de 0 à 5). Un front large avance vite ; une percée en pointe est lente. Ça décourage naturellement les attaques en couloir et récompense l'encerclement — sans aucune règle explicite d'encerclement.</p>
+
+  <h3>Ce qu'on n'a pas du tout</h3>
+  <ul>
+    <li><strong>Annulation mutuelle des attaques.</strong> À l'<code>init</code>, si la cible a une attaque en cours contre l'attaquant, les deux budgets de troupes se soustraient. Deux joueurs qui se ruent dessus s'annulent au lieu d'empiler deux fronts.</li>
+    <li><strong>Fusion des attaques sortantes.</strong> Deux attaques du même joueur vers la même cible fusionnent en un seul objet.</li>
+    <li><strong>Retraite avec malus.</strong> <code>malusForRetreat = 25</code> : battre en retraite d'une attaque contre un joueur tue 25 % des troupes engagées. Contre un neutre, 0 %. La retraite est un choix coûteux, pas un undo.</li>
+    <li><strong>Absorption sous 100 tuiles.</strong> <code>handleDeadDefender</code> : dès qu'un défenseur passe sous 100 tuiles, <code>conquerPlayer</code> se déclenche et ses tuiles sont distribuées en boucle — celles au contact vont à l'attaquant, les autres à n'importe quel voisin hostile. Personne ne survit à 3 tuiles. <strong>C'est directement notre problème de petits joueurs qui végètent à 1–5 tuiles.</strong></li>
+    <li><strong>Bunkers</strong> (<code>DefensePost</code>) : portée 30, <strong>×5 sur la magnitude et ×3 sur la vitesse</strong> de défense. Un seul bunker suffit (boucle avec <code>break</code>) — pas d'empilement. Des multiplicateurs de cet ordre transforment vraiment une ligne de front ; les nôtres sont bien plus timides.</li>
+  </ul>
+</section>
+
+<section id="economie">
+  <div class="sec-head">
+    <span class="sec-label">Économie</span>
+    <h2>L'or ne vient pas du territoire</h2>
+    <span class="chip missing">écart de modèle</span>
+  </div>
+
+  <p>C'est probablement l'écart de design le plus profond entre les deux jeux.</p>
+
+  <div class="formula">
+    <span class="lbl">Revenu passif — goldAdditionRate()</span>
+    joueur humain&nbsp;: <strong>100 / tick</strong> &nbsp;&nbsp;<span style="color:var(--text-faint)">// constante. Aucun rapport au territoire.</span><br>
+    bot&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: 50 / tick
+  </div>
+
+  <p>100 or par tick à 10 ticks/s = 1 000 or/s. Une ville coûte 125 000. Le revenu passif seul met <strong>plus de deux minutes</strong> à payer la première ville, et n'accélère jamais. Tout le reste de l'économie vient de deux sources actives :</p>
+
+  <div class="formula">
+    <span class="lbl">Commerce maritime — tradeShipGold(dist)</span>
+    75 000 / (1 + e^(−0.03 × (dist − 300))) + 50 × dist
+  </div>
+
+  <p>Une sigmoïde centrée sur 300 cases de distance. En dessous, le commerce est quasi nul ; au-delà, il sature vers ~75 000 + linéaire. Le commerce longue distance vaut <strong>600 fois</strong> le revenu passif d'un tick. Le message de design est sans ambiguïté : <em>l'argent vient de la mer, et de la mer lointaine</em>.</p>
+
+  <div class="formula">
+    <span class="lbl">Rail — trainGold(relation, villesVisitées)</span>
+    allié 35 000 · équipe/autre 25 000 · soi-même 10 000<br>
+    − 5 000 × max(0, villesVisitées − 9) &nbsp;&nbsp;<span style="color:var(--text-faint)">// plancher 5 000</span>
+  </div>
+
+  <p>Commercer avec un allié rapporte 3,5× plus que sur son propre réseau. La diplomatie est une infrastructure économique, pas juste un pacte de non-agression. Et la pénalité au-delà de 10 villes visitées empêche un réseau ferroviaire géant de scaler indéfiniment.</p>
+
+  <h3>Troupes</h3>
+
+  <div class="formula">
+    <span class="lbl">Plafond de troupes</span>
+    maxTroops = 2 × (tuiles^0.6 × 1000 + 50 000) + Σ niveauxVilles × 250 000
+  </div>
+
+  <div class="formula">
+    <span class="lbl">Régénération par tick</span>
+    toAdd = (10 + troupes^0.73 / 4) × (1 − troupes / maxTroops)
+  </div>
+
+  <p>Deux propriétés à noter. L'exposant <strong>0.6</strong> sur les tuiles est très sublinéaire — quadrupler son territoire n'augmente le plafond que de ~2,3×. Et le terme constant de 50 000 (doublé, donc 100 000 minimum) signifie qu'<strong>un joueur réduit à une seule tuile garde une armée de 100 000 hommes</strong>. C'est la fenêtre de comeback, et elle est structurelle : les villes sont le vrai levier de puissance militaire (250 000 par niveau), pas la surface conquise.</p>
+
+  <p>La régénération est en <code>troupes^0.73</code> multipliée par la marge au plafond : elle est rapide quand on est loin du plafond, nulle quand on y est. Un joueur qui vient de perdre son armée la reconstruit vite ; un joueur au maximum ne gagne plus rien à attendre — ce qui le force à attaquer.</p>
+
+  <div class="note">
+    <span class="tag">Comparaison directe</span>
+    <p>Notre revenu territorial en <code>tuiles^0.8</code> reste une source de revenu <em>passive et scalante</em>. OpenFront n'en a aucune. Chez eux, le territoire donne des troupes (en ^0.6) et un accès à la mer ; l'or, lui, s'obtient uniquement en jouant — ports, routes commerciales, conquête (<code>conquerGoldAmount</code> : 100 % de l'or d'un bot capturé, 50 % de celui d'un humain).</p>
+  </div>
+</section>
+
+<section id="rail">
+  <div class="sec-head">
+    <span class="sec-label">Rail</span>
+    <h2>Les usines créent un réseau, pas des routes</h2>
+    <span class="chip differs">à corriger chez nous</span>
+  </div>
+
+  <p class="src">src/core/execution/FactoryExecution.ts · TrainStationExecution.ts · game/RailNetworkImpl.ts</p>
+
+  <p>Tu m'as demandé qu'une usine desserve plusieurs villes plutôt qu'une seule. OpenFront va plus loin que ça, et le mécanisme mérite d'être copié tel quel.</p>
+
+<pre>FactoryExecution.createStation() {
+  structures = nearbyUnits(usine, 110, [City, Port, Factory]);
+  addExecution(new TrainStationExecution(usine, <b>true</b>));   <span class="cm">// spawn les trains</span>
+  for (const {unit} of structures)
+    if (!unit.hasTrainStation())
+      addExecution(new TrainStationExecution(unit));       <span class="cm">// gare passive</span>
+}</pre>
+
+  <p>Une usine <strong>convertit en gares</strong> toutes les villes, ports et usines dans un rayon de 110. Ces gares sont ensuite reliées en <strong>clusters</strong> par une union-find (<code>connectToExistingRails</code> puis <code>connectToNearbyStations</code>), avec une distance minimale de 15 entre gares. Les trains partent des usines uniquement, vers une destination tirée au hasard dans le cluster.</p>
+
+  <div class="formula">
+    <span class="lbl">Fréquence des trains</span>
+    trainSpawnRate(nbUsines) = (nbUsines + 10) × 15<br>
+    probabilité par tick = 1 / rate, tirée <em>niveau de la gare</em> fois<br>
+    cooldown minimum : 10 ticks
+  </div>
+
+  <p>Décroissance hyperbolique : la 1ʳᵉ usine tire à 1/165, la 10ᵉ à 1/300. Le nombre <em>total</em> de trains monte quand même (chaque usine tire), mais avec un rendement décroissant explicite. Et une gare de niveau 3 tire 3 fois par tick — encore une fois, <strong>améliorer bat multiplier</strong>.</p>
+
+  <div class="vs">
+    <div class="of"><h5>OpenFront</h5><p>Usine → gares sur toutes structures dans 110 → clusters connexes → trains vers destination aléatoire du cluster. Le réseau est un graphe.</p></div>
+    <div class="cq"><h5>CONQUEST RTS</h5><p><code>refreshFactoryLinks</code> collecte les villes dans <code>FACTORY_ROUTE_RANGE = 56</code> et crée N routes usine→ville. C'est une étoile, pas un graphe : deux usines proches ne se relient pas entre elles.</p></div>
+  </div>
+
+  <p>Le passage de l'étoile au graphe est ce qui rend le rail intéressant : dans OpenFront, poser une usine au bon endroit peut <em>fusionner deux clusters</em> et débloquer d'un coup des dizaines de destinations. Chez nous, poser une usine ajoute simplement <em>k</em> routes indépendantes.</p>
+
+  <div class="note">
+    <span class="tag">Concrètement</span>
+    <p>Notre <code>FACTORY_ROUTE_RANGE = 56</code> sur une grille de 40 960 tuiles est proportionnellement proche du 110 d'OpenFront. Le changement à faire n'est pas la portée : c'est d'inclure <em>ports et usines</em> dans les cibles de liaison, et de faire du revenu une fonction du cluster plutôt que de la somme des routes.</p>
+  </div>
+</section>
+
+<section id="naval">
+  <div class="sec-head">
+    <span class="sec-label">Naval</span>
+    <h2>Les ports commercent avec l'ennemi</h2>
+    <span class="chip missing">absent chez nous</span>
+  </div>
+
+  <p class="src">src/core/execution/PortExecution.ts · WarshipExecution.ts</p>
+
+  <p><code>tradingPorts()</code> filtre explicitement <code>p !== this.port.owner()</code> : <strong>un port ne commerce jamais avec ses propres ports</strong>. Il commerce avec ceux de tous les joueurs qui ne t'ont pas mis sous embargo et avec qui tu partages une composante d'eau navigable.</p>
+
+  <p>La sélection est une liste pondérée par répétition, ce qui est astucieux et trivial à porter :</p>
+
+<pre>pour chaque port étranger, trié par distance Manhattan :
+  ajouter le port <b>niveau</b> fois                       <span class="cm">// un port niv.3 pèse 3×</span>
+  si distance ≥ 300 et rang &lt; clamp(nbPorts/3, 4, nbPorts) :
+      ajouter <b>encore</b> niveau fois                     <span class="cm">// bonus de proximité relative</span>
+  si distance ≥ 300 et propriétaire allié :
+      ajouter <b>encore</b> niveau fois                     <span class="cm">// bonus d'alliance</span>
+puis : randElement(liste)</pre>
+
+  <p>Trois conséquences de design : couper le commerce d'un rival passe par l'embargo ou par la piraterie navale, pas par la conquête de ses ports. Une alliance <em>double</em> littéralement le débit commercial. Et le seuil de 300 cases (<code>tradeShipShortRangeDebuff</code>) fait que les voisins immédiats ne sont jamais de bons partenaires.</p>
+
+  <h3>Navires de guerre</h3>
+  <ul>
+    <li>Patrouille autour d'une tuile assignée, rayon <strong>100</strong>. Priorité de cible : transports de troupes &gt; navires de guerre &gt; navires marchands.</li>
+    <li>Tire des obus (<code>Shell</code>, dégâts 250, durée de vie 20 ticks) ; PV max 1 000, donc 4 obus pour couler un navire neuf.</li>
+    <li>Se soigne en patrouille, et <strong>se replie vers un port pour réparation</strong> sous un seuil de PV proportionnel au max ajusté par vétérance.</li>
+    <li>Un <code>alreadySentShell</code> par cible empêche le tir en rafale sur la même unité.</li>
+  </ul>
+
+  <p>Notre porte-avions (<code>CARRIER_PATROL_RADIUS = 13</code>, <code>INTERCEPT_RANGE = 11</code>, dégâts 0,075/tick) applique un saignement continu sans notion de PV ni de projectile. Le modèle d'OpenFront — obus discrets, PV, repli pour réparation — donne des combats navals lisibles à l'écran, ce que notre bleed invisible ne fait pas.</p>
+
+  <h3>Transports de troupes</h3>
+  <p>Maximum <strong>3 bateaux</strong> simultanés par joueur (<code>boatMaxNumber</code>), chargeant <code>troupes / 5</code> (<code>boatAttackAmount</code>). Auto-retraite si la destination est transformée en eau par une frappe nucléaire. C'est un plafond dur : le débarquement est un outil de percée ponctuelle, jamais une stratégie de masse.</p>
+</section>
+
+<section id="nucleaire">
+  <div class="sec-head">
+    <span class="sec-label">Nucléaire</span>
+    <h2>Rayons, cadence et interception</h2>
+    <span class="chip same">proche du nôtre</span>
+  </div>
+
+  <div class="tbl-scroll">
+  <table>
+    <thead><tr><th>Arme</th><th class="num">Rayon int.</th><th class="num">Rayon ext.</th><th class="num">Vitesse</th></tr></thead>
+    <tbody>
+      <tr><td>Bombe A</td><td class="num">12</td><td class="num">30</td><td class="num">10</td></tr>
+      <tr><td>Bombe H</td><td class="num">80</td><td class="num">100</td><td class="num">10</td></tr>
+      <tr><td>MIRV</td><td class="num">—</td><td class="num">—</td><td class="num">15</td></tr>
+      <tr><td>Ogive MIRV</td><td class="num">12</td><td class="num">18</td><td class="num">22</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Entre le rayon intérieur et le rayon extérieur, la destruction est <strong>probabiliste</strong> (<code>rand.chance(2)</code>, donc 1 tuile sur 2), ce qui donne un bord de cratère irrégulier au lieu d'un disque parfait. Détail purement visuel, mais c'est ce qui fait qu'un impact ne ressemble pas à un emporte-pièce.</p>
+
+  <div class="formula">
+    <span class="lbl">Cadences</span>
+    SiloCooldown&nbsp;&nbsp;&nbsp; 90 ticks &nbsp;=&nbsp; 9 s par missile<br>
+    SAMCooldown&nbsp;&nbsp;&nbsp;&nbsp; 90 ticks<br>
+    portée SAM(niv) = 150 − 480/(niv + 5) &nbsp;&nbsp;<span style="color:var(--text-faint)">// 70 au niv.1 → ~150 asymptotique</span><br>
+    portée de ciblage nucléaire par défaut : 150
+  </div>
+
+  <p>La formule de portée SAM est une hyperbole : niveau 1 = 70, niveau 5 = 102, et elle ne dépasse jamais 150. Améliorer un SAM le fait passer de « couvre ma capitale » à « couvre mon front » sans jamais rendre le territoire invulnérable.</p>
+
+  <div class="formula">
+    <span class="lbl">Pertes humaines — nukeDeathFactor</span>
+    A / H&nbsp;: 5 × humains / max(1, tuiles)<br>
+    MIRV&nbsp;&nbsp;: 500 × (1 − e^(−2 × excédent/maxTroupes)),<br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;excédent = max(0, humains − 0.03 × maxTroupes)
+  </div>
+
+  <p>Là encore, la <em>densité</em> décide. Une frappe sur un empire concentré est dévastatrice ; sur un empire étalé, elle est presque cosmétique. Le MIRV, lui, est conçu comme une arme anti-stack : il ne peut pas descendre le défenseur sous 3 % de son plafond de troupes, mais il détruit tout ce qui dépasse.</p>
+
+  <p>Enfin, une frappe nucléaire brise les alliances au-delà d'un seuil de <strong>100</strong> tuiles pondérées touchées (intérieur = 1, extérieur = 0,5), <em>ou</em> dès qu'une seule structure alliée est détruite. En mode équipe, le moteur refuse même de lancer si l'explosion toucherait une structure coéquipière.</p>
+</section>
+
+<section id="diplo">
+  <div class="sec-head">
+    <span class="sec-label">Diplomatie</span>
+    <h2>La trahison a un prix chiffré</h2>
+    <span class="chip differs">à renforcer</span>
+  </div>
+
+  <div class="tbl-scroll">
+  <table>
+    <thead><tr><th>Paramètre</th><th class="num">Valeur</th><th>Effet</th></tr></thead>
+    <tbody>
+      <tr><td>Durée d'alliance</td><td class="num">300 s</td><td>5 minutes, réglable 1–15 par l'hôte ; 0 désactive</td></tr>
+      <tr><td>Durée du statut traître</td><td class="num">30 s</td><td>après rupture d'alliance</td></tr>
+      <tr><td>Défense du traître</td><td class="num">×0.5</td><td>moitié moins résistant pendant 30 s</td></tr>
+      <tr><td>Vitesse contre traître</td><td class="num">×0.8</td><td>on le conquiert 25 % plus vite</td></tr>
+      <tr><td>Requête d'alliance</td><td class="num">20 s</td><td>cooldown de 30 s entre demandes</td></tr>
+      <tr><td>Embargo temporaire</td><td class="num">300 s</td><td>posé automatiquement en attaquant</td></tr>
+      <tr><td>Relation à l'attaque</td><td class="num">−60 à −100</td><td>selon la difficulté</td></tr>
+      <tr><td>Don de troupes</td><td class="num">troupes/3</td><td>cooldown 10 s</td></tr>
+      <tr><td>Immunité au spawn</td><td class="num">5 s</td><td>aucun nucléaire possible</td></tr>
+      <tr><td>Distance min. entre joueurs</td><td class="num">30</td><td>au placement initial</td></tr>
+      <tr><td>Victoire</td><td class="num">80 % / 95 %</td><td>solo / mode équipe</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Deux choses opèrent automatiquement, sans clic : attaquer quelqu'un pose un <strong>embargo commercial mutuel</strong> et rejette ses demandes d'alliance en attente. La guerre coupe le commerce de façon mécanique — ce qui, vu que le commerce <em>est</em> l'économie, donne à chaque déclaration de guerre un coût immédiat et chiffrable.</p>
+
+  <p>Le compteur de trahisons (<code>_betrayalCount</code>) est public et suivi dans les stats. Un joueur qui trahit deux fois est identifiable par tous les autres.</p>
+</section>
+
+<section id="actions">
+  <div class="sec-head">
+    <span class="sec-label">Applique</span>
+    <h2>Ce qui a ete porte dans le jeu</h2>
+    <span class="chip same">livre</span>
+  </div>
+
+  <p>Les sept points sont implementes, plus quatre correctifs que la mesure a rendus obligatoires en cours de route. Tout est verrouille par des invariants dans les deux bancs d'essai.</p>
+
+  <div class="actions">
+    <div class="action p1"><span class="rank">1</span><div class="body">
+      <b>Le clic ne se refuse plus</b>
+      Nouveau module partage <code>Shared/Placement.luau</code> : parcours en largeur connexe de rayon 5 dans ton territoire, filtrage par espacement, tri par distance au clic. Client et serveur executent <em>la meme fonction</em> — le fantome ne peut plus mentir. Il ne reste que trois refus : ere, or, et aucune place a portee.
+    </div></div>
+    <div class="action p1"><span class="rank">2</span><div class="body">
+      <b>Debuff sigmoide sur la taille</b>
+      <code>supplyPenalty</code> supprime. A la place : defense x0.7 pour un empire immense, vitesse de conquete jusqu'a x0.35, et en compensation un cout par tuile reduit. Le geant conquiert moins cher mais beaucoup plus lentement.
+    </div></div>
+    <div class="action p1"><span class="rank">3</span><div class="body">
+      <b>Effondrement sous seuil</b>
+      Un defenseur attaque qui passe sous 0,25 % des terres est demantele : tuiles au contact a l'assaillant, le reste aux voisins hostiles, les enclaves au neutre. Plus de factions zombies a trois tuiles.
+    </div></div>
+    <div class="action p2"><span class="rank">4</span><div class="body">
+      <b>Espacement tous types confondus</b>
+      <code>BUILD_MIN_SPACING</code> passe de 4 (meme type) a 3 (tous types). Nettement plus contraignant au total, et calibre pour que le premier batiment reste posable dans le territoire de depart.
+    </div></div>
+    <div class="action p2"><span class="rank">5</span><div class="body">
+      <b>Un seul bouton par type</b>
+      Cliquer a portee d'un batiment ameliorable le fait monter d'un niveau au lieu d'en poser un second. Ville, port et usine ont des paliers ; le prix d'une amelioration est celui du batiment suivant du meme type. Aucun mode a choisir.
+    </div></div>
+    <div class="action p2"><span class="rank">6</span><div class="body">
+      <b>Cout en doublement borne</b>
+      <code>min(8x, 2^n) x base</code> au lieu de <code>base x (1 + 0,35n)</code>. Le port et l'usine partagent leur compteur d'inflation, comme dans OpenFront.
+    </div></div>
+    <div class="action p3"><span class="rank">7</span><div class="body">
+      <b>Reseau ferroviaire en grappes</b>
+      Villes, capitales, ports et usines deviennent des gares reliees par union-find. Le revenu suit l'arbre couvrant de la grappe, avec rendement decroissant des usines. Poser une usine peut fusionner deux grappes. Le calcul est mis en cache et sorti de la boucle de tick.
+    </div></div>
+  </div>
+
+  <h3>Les quatre correctifs que la mesure a imposes</h3>
+
+  <p>Chacun n'est apparu qu'apres avoir corrige le precedent — c'est le genre d'enchainement qu'aucune relecture ne trouve.</p>
+
+  <div class="actions">
+    <div class="action p1"><span class="rank">A</span><div class="body">
+      <b>Plafond de troupes sous-lineaire</b>
+      Le vrai moteur de l'emballement, et il n'etait dans aucun des sept points. Le plafond etait <em>lineaire</em> en territoire : dix fois plus de terres, dix fois plus d'hommes. Tout frein applique au cout de conquete etait rattrape instantanement. Passe en <code>444 x tuiles^0.6</code> — quinze fois plus de territoire ne donne plus que cinq fois plus d'armee. Le bonus urbain, lui, reste plein : <strong>les villes deviennent le levier militaire</strong>.
+    </div></div>
+    <div class="action p1"><span class="rank">B</span><div class="body">
+      <b>Les alliances expirent</b>
+      Les pactes etaient permanents. En fin de partie les survivants finissaient tous allies deux a deux — graphe complet, plus une seule cible legale, zero offensive, zero frappe. Le jeu ne plantait pas, il s'arretait. Duree 5 minutes, carence de 15 s avant de resigner, et l'expiration ne marque personne comme traitre.
+    </div></div>
+    <div class="action p2"><span class="rank">C</span><div class="body">
+      <b>La coalition anti-leader existe enfin</b>
+      <code>COALITION_ALLY_CHANCE</code> et <code>COALITION_EMBARGO_CHANCE</code> etaient decrites dans la config depuis le debut et n'etaient branchees nulle part. Les bots menaces s'allient maintenant entre eux, embargotent le leader, refusent de s'abriter derriere lui et ne se trahissent pas tant qu'il domine.
+    </div></div>
+    <div class="action p2"><span class="rank">D</span><div class="body">
+      <b>Rechargement des silos</b>
+      Il n'y en avait aucun : un silo tirait a chaque tick, et une partie complete produisait 216 explosions. 90 ticks par silo, et le tir part du silo <em>pret</em> le plus proche de la cible. Le nombre et le placement des silos deviennent la variable de la puissance de frappe.
+    </div></div>
+  </div>
+
+  <h3>Mesures, 12 factions, meme graine</h3>
+
+  <div class="tbl-scroll">
+  <table>
+    <thead><tr><th>A 10 minutes</th><th class="num">Avant</th><th class="num">Apres</th></tr></thead>
+    <tbody>
+      <tr><td>Part du leader</td><td class="num">53 %</td><td class="num">28 %</td></tr>
+      <tr><td>Factions au-dessus de 5 %</td><td class="num">2</td><td class="num">6</td></tr>
+      <tr><td>Factions encore en vie</td><td class="num">6</td><td class="num">10 a 12</td></tr>
+      <tr><td>Classement</td><td class="num">8266 / 7177 / 36 / 24</td><td class="num">4416 / 2917 / 2079 / 2051</td></tr>
+      <tr><td>Capitales prises</td><td class="num">24</td><td class="num">51</td></tr>
+      <tr><td>Parts client</td><td class="num">4 078</td><td class="num">6 934</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Le classement est le chiffre qui compte : on passe de deux geants et deux moribonds a quatre puissances comparables. Les factions a 24 et 36 tuiles ont disparu, c'est la regle d'effondrement.</p>
+
+  <p>Sur une partie complete de 25 minutes, le leader monte a 64 % — juste sous le seuil de victoire de 65 % — avec 161 frappes nucleaires et 112 capitales prises. L'arc est donc bien un milieu de partie dispute suivi d'une fin decisive, au lieu d'une partie jouee en dix minutes.</p>
+
+  <div class="note">
+    <span class="tag">Cout a surveiller</span>
+    <p>Le rendu client passe de 4 078 a 6 934 parts. C'est la contrepartie directe d'une carte disputee : six couleurs de faction imbriquees se fusionnent bien moins bien que deux blocs monochromes. On reste tres en dessous du budget, mais c'est le chiffre a regarder si la fluidite se degrade.</p>
+  </div>
+
+  <h3>Recalibrage force</h3>
+
+  <p>Les paliers d'ere avaient ete cales sur une carte ou deux empires finissaient a 8 000 tuiles chacun. Le leader plafonnant desormais autour de 3 500, la phase thermonucleaire — le climax du jeu — disparaissait purement et simplement. Couts et seuils de territoire des eres 3, 4 et 5 ont ete divises par environ deux. L'ere 5 arrive maintenant a 9 min 51.</p>
+</section>
+
+<footer>
+  Sources lues intégralement : Config.ts (1 079 l.), PlayerImpl.ts, AttackExecution.ts, ConstructionExecution.ts, UpgradeStructureExecution.ts, PortExecution.ts, FactoryExecution.ts, CityExecution.ts, TrainStationExecution.ts, RailNetworkImpl.ts, NukeExecution.ts, MissileSiloExecution.ts, WarshipExecution.ts, TransportShipExecution.ts, SpawnExecution.ts, BuildMenu.ts.<br>
+  OpenFront est distribué sous AGPL-3.0 — clone en lecture seule, rien n'a été exécuté ni copié dans le projet.
+</footer>
+
+</div>
+</div>

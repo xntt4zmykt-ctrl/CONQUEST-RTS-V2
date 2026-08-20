@@ -63,24 +63,42 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 		return false, "Tu es allie a cette faction."
 	end
 
-	-- Le tir part du silo le plus proche de la cible.
+	--[[
+		Le tir part du silo pret le plus proche de la cible.
+
+		Le joueur ne selectionne jamais un silo : il designe une cible, le moteur
+		choisit le lanceur. Un silo qui recharge est simplement ignore, ce qui
+		fait de la couverture geographique des silos une decision reelle.
+	]]
 	local tx, ty = MapGen.fromIndex(targetTile)
 	local bestSilo: number? = nil
 	local bestDist = math.huge
+	local anySilo = false
 	for index, building in state.buildings do
 		if building.slot == slot and building.kind == Config.BUILDING.SILO then
-			local x, y = MapGen.fromIndex(index)
-			local dx, dy = x - tx, y - ty
-			local dist = dx * dx + dy * dy
-			if dist < bestDist then
-				bestDist = dist
-				bestSilo = index
+			anySilo = true
+			if building.cooldown <= 0 then
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - tx, y - ty
+				local dist = dx * dx + dy * dy
+				if dist < bestDist then
+					bestDist = dist
+					bestSilo = index
+				end
 			end
 		end
 	end
 
 	if not bestSilo then
+		if anySilo then
+			return false, "Tous tes silos rechargent."
+		end
 		return false, "Il te faut un silo."
+	end
+
+	local silo = state.buildings[bestSilo]
+	if silo then
+		silo.cooldown = Config.SILO_COOLDOWN
 	end
 
 	ps.gold -= stats.cost

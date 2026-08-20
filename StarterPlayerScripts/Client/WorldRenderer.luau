@@ -281,6 +281,14 @@ end
 	illisible malgre leur difference de hauteur. La plage est au contraire
 	eclaircie : un littoral doit se lire meme sous une couleur sombre.
 ]]
+--[[
+	Assombrissement par type de terrain.
+
+	C'etait a l'origine un faux eclairage : plus c'etait haut, plus c'etait
+	sombre. La carte etant maintenant plate, ce degrade est devenu la seule
+	chose qui distingue une haute terre d'une plaine au premier coup d'oeil —
+	il gagne en importance au lieu d'en perdre.
+]]
 local TERRAIN_SHADE = {
 	[1] = 1.14, -- plage
 	[2] = 1.0, -- plaines
@@ -303,7 +311,7 @@ local function blockColor(slot: number, terrain: number): Color3
 
 	if slot ~= NEUTRAL then
 		-- La couleur de faction domine, mais on melange un peu de terrain pour
-		-- que le relief reste lisible a l'interieur d'un empire.
+		-- que la nature du sol reste lisible a l'interieur d'un empire.
 		base = Theme.factionColor(slot):Lerp(base, 0.24)
 	end
 
@@ -315,9 +323,11 @@ local function blockColor(slot: number, terrain: number): Color3
 end
 
 --[[
-	Cle de fusion : proprietaire **et** relief. Deux tuiles ne fusionnent que si
-	elles ont la meme couleur et la meme hauteur, sinon le bloc obtenu serait a
-	cheval sur deux factions ou sur deux altitudes.
+	Cle de fusion : proprietaire **et** type de terrain.
+
+	Deux tuiles ne fusionnent que si elles ont exactement la meme couleur. La
+	hauteur ne fait plus partie de la cle puisqu'elle est uniforme, mais le
+	terrain si : il porte toujours sa teinte et son assombrissement.
 ]]
 function WorldRenderer.chunkKeyAt(self: WorldRenderer, x: number, y: number): number?
 	local index = MapGen.toIndex(x, y)
@@ -326,6 +336,158 @@ function WorldRenderer.chunkKeyAt(self: WorldRenderer, x: number, y: number): nu
 		return nil -- l'ocean n'a pas de bloc, c'est un plan unique
 	end
 	return buffer.readu8(self.owner, index) * KEY_STRIDE + terrain
+end
+
+--=============================================================================
+-- Frontieres
+--=============================================================================
+
+--[[
+	Couleur du liseré d'une faction.
+
+	C'est la couleur de faction **pure**, alors que le remplissage du sol est
+	cette meme couleur melangee a 24 % de terrain. Le liseré est donc toujours
+	plus sature que ce qu'il entoure, sans qu'on ait a inventer une seconde
+	palette : chaque nation reste reconnaissable a une seule teinte, et le
+	contour se detache quand meme du remplissage.
+]]
+local function borderColor(slot: number): Color3
+	return Theme.factionColor(slot)
+end
+
+-- Epaisseur du liseré, et hauteur a laquelle il flotte au-dessus du sol.
+local BORDER_THICKNESS = 0.8
+local BORDER_LIFT = 0.05
+
+--[[
+	Trace le contour des territoires d'un chunk.
+
+	Chaque tuile ne dessine que **ses propres** cotes, et le liseré est pose a
+	l'INTERIEUR de la tuile. Deux consequences voulues :
+
+	  - Deux nations voisines tracent chacune sa ligne, cote a cote, comme sur
+	    une carte politique — au lieu d'une seule ligne mitoyenne dont la
+	    couleur devrait trancher entre les deux.
+	  - Aucune geometrie ne se superpose a la couture, donc pas de scintillement
+	    de profondeur entre deux Parts coplanaires.
+
+	Les cotes consecutifs de meme proprietaire sont fusionnes en un seul segment
+	long. Une frontiere de cent tuiles coute alors une poignee de Parts au lieu
+	de cent : c'est la meme economie que la fusion gloutonne du sol, appliquee a
+	une dimension de moins.
+]]
+function WorldRenderer.buildChunkBorders(
+	self: WorldRenderer,
+	folder: Folder,
+	cx: number,
+	cy: number,
+	x1: number,
+	y1: number
+): number
+	local drawn = 0
+	local surface = Config.LAND_HEIGHT + BORDER_LIFT
+
+	-- Proprietaire d'une tuile, ou nil si elle est en mer ou sans maitre : dans
+	-- les deux cas elle ne porte pas de frontiere.
+	local function ownerOf(x: number, y: number): number?
+		if x < 0 or x >= W or y < 0 or y >= H then
+			return nil
+		end
+		local index = MapGen.toIndex(x, y)
+		if buffer.readu8(self.terrain, index) == OCEAN then
+			return nil
+		end
+		local slot = buffer.readu8(self.owner, index)
+		return if slot == NEUTRAL then nil else slot
+	end
+
+	local function emit(slot: number, ax: number, ay: number, bx: number, by: number, dx: number, dy: number)
+		local a = WorldSpace.tileToWorld(ax, ay)
+		local b = WorldSpace.tileToWorld(bx, by)
+		local inset = TILE / 2 - BORDER_THICKNESS / 2
+
+		local horizontal = dy ~= 0
+		local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
+
+		local part = Instance.new("Part")
+		part.Name = "Border"
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CanQuery = false
+		part.CastShadow = false
+		part.Material = Enum.Material.SmoothPlastic
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		part.Color = borderColor(slot)
+		part.Size = if horizontal
+			then Vector3.new(length, 0.12, BORDER_THICKNESS)
+			else Vector3.new(BORDER_THICKNESS, 0.12, length)
+		part.CFrame = CFrame.new(
+			(a.X + b.X) / 2 + dx * inset,
+			surface,
+			(a.Z + b.Z) / 2 + dy * inset
+		)
+		part.Parent = folder
+		drawn += 1
+	end
+
+	--[[
+		Deux balayages : les cotes nord/sud se fusionnent le long des lignes, les
+		cotes est/ouest le long des colonnes. Ecrire les quatre a la main serait
+		quatre fois la meme boucle a une permutation d'axe pres — et quatre
+		occasions de se tromper d'indice.
+	]]
+	local passes = {
+		{ dx = 0, dy = -1 },
+		{ dx = 0, dy = 1 },
+		{ dx = -1, dy = 0 },
+		{ dx = 1, dy = 0 },
+	}
+
+	for _, pass in passes do
+		local alongRow = pass.dy ~= 0
+
+		local outerFrom = if alongRow then cy else cx
+		local outerTo = if alongRow then y1 else x1
+		local innerFrom = if alongRow then cx else cy
+		local innerTo = if alongRow then x1 else y1
+
+		for outer = outerFrom, outerTo do
+			local runSlot: number? = nil
+			local runStart = 0
+
+			for inner = innerFrom, innerTo + 1 do
+				local slot: number? = nil
+
+				-- Le tour supplementaire (innerTo + 1) sert uniquement a fermer
+				-- le dernier segment : sans lui, une frontiere qui touche le bord
+				-- du chunk ne serait jamais emise.
+				if inner <= innerTo then
+					local x = if alongRow then inner else outer
+					local y = if alongRow then outer else inner
+					local mine = ownerOf(x, y)
+					if mine ~= nil and ownerOf(x + pass.dx, y + pass.dy) ~= mine then
+						slot = mine
+					end
+				end
+
+				if slot ~= runSlot then
+					if runSlot ~= nil then
+						local ax = if alongRow then runStart else outer
+						local ay = if alongRow then outer else runStart
+						local bx = if alongRow then inner - 1 else outer
+						local by = if alongRow then outer else inner - 1
+						emit(runSlot, ax, ay, bx, by, pass.dx, pass.dy)
+					end
+					runSlot = slot
+					runStart = inner
+				end
+			end
+		end
+	end
+
+	return drawn
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
@@ -382,6 +544,7 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	end
 
 	self.partCount += #rects
+	self.partCount += self:buildChunkBorders(folder, cx, cy, x1, y1)
 	folder.Parent = self.root
 end
 

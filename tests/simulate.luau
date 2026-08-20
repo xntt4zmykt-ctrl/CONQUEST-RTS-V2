@@ -23,6 +23,10 @@ local GreedyMesh = __require("GreedyMesh")
 local WorldBuilder = __require("WorldBuilder")
 local GameModes = __require("GameModes")
 local BuildingDefs = __require("BuildingDefs")
+local Placement = __require("Placement")
+local RailPath = __require("RailPath")
+local Format = __require("Format")
+local Leaderstats = __require("Leaderstats")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -133,19 +137,31 @@ local function checkInvariants(state, tick)
 			local def = BuildingDefs.get(Config.BUILDING.CAPITAL)
 			realCityPop[building.slot] = (realCityPop[building.slot] or 0) + (if def then def.popCapBonus else 0)
 		elseif building.kind == Config.BUILDING.FACTORY then
-			-- Une usine dessert plusieurs villes : chaque route doit pointer sur
-			-- une vraie ville du meme camp, et rester dans le rayon.
+			-- Une usine est une gare : chaque liaison doit pointer sur une autre
+			-- gare du meme camp (ville, capitale, port ou usine) et rester dans
+			-- la portee du reseau.
 			local fx, fy = MapGen.fromIndex(index)
-			for _, cityIndex in building.links do
-				local city = state.buildings[cityIndex]
-				if not city or city.kind ~= Config.BUILDING.CITY or city.slot ~= building.slot then
-					fail(`tick {tick} — usine {index} reliee a un batiment invalide`)
+			for _, other in building.links do
+				local station = state.buildings[other]
+				local isStation = station ~= nil
+					and (
+						station.kind == Config.BUILDING.CITY
+						or station.kind == Config.BUILDING.CAPITAL
+						or station.kind == Config.BUILDING.PORT
+						or station.kind == Config.BUILDING.FACTORY
+					)
+				if not isStation or station.slot ~= building.slot then
+					fail(`tick {tick} — usine {index} reliee a un batiment qui n'est pas une gare du meme camp`)
 					break
 				end
-				local cx, cy = MapGen.fromIndex(cityIndex)
+				local cx, cy = MapGen.fromIndex(other)
 				local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
-				if distance > Config.FACTORY_ROUTE_RANGE then
-					fail(`tick {tick} — route logistique {index}->{cityIndex} hors portee ({distance})`)
+				if distance > Config.RAIL_RANGE then
+					fail(`tick {tick} — liaison ferroviaire {index}->{other} hors portee ({distance})`)
+					break
+				end
+				if other == index then
+					fail(`tick {tick} — usine {index} reliee a elle-meme`)
 					break
 				end
 			end
@@ -177,7 +193,30 @@ local function checkInvariants(state, tick)
 		end
 	end
 
-	-- 6. Les alliances doivent etre symetriques, sinon un camp peut frapper
+	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
+	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
+	-- elle passe par le resolveur de placement : si elle casse, c'est que le
+	-- chemin serveur a cesse de l'appliquer.
+	do
+		local spacing2 = Config.BUILD_MIN_SPACING * Config.BUILD_MIN_SPACING
+		local placed: { number } = {}
+		for index in state.buildings do
+			table.insert(placed, index)
+		end
+		table.sort(placed)
+		for i = 1, #placed do
+			for j = i + 1, #placed do
+				local ax, ay = MapGen.fromIndex(placed[i])
+				local bx, by = MapGen.fromIndex(placed[j])
+				local dx, dy = ax - bx, ay - by
+				if dx * dx + dy * dy < spacing2 then
+					fail(`tick {tick} — batiments {placed[i]} et {placed[j]} trop proches`)
+				end
+			end
+		end
+	end
+
+	-- 7. Les alliances doivent etre symetriques, sinon un camp peut frapper
 	-- alors que l'autre est bloque.
 	for a, set in state.alliances do
 		for b in set do
@@ -325,9 +364,9 @@ do
 	end
 end
 
--- Parcours joueur explicite : construire une ville, la faire evoluer, puis
--- brancher une usine dessus. Les bots exercent aussi ces chemins, mais ce test
--- garantit qu'ils restent couverts meme si leur strategie change plus tard.
+-- Parcours joueur explicite : accrochage du placement, evolution d'une ville,
+-- puis raccordement d'une usine au reseau. Les bots exercent aussi ces chemins,
+-- mais ce test garantit qu'ils restent couverts meme si leur strategie change.
 do
 	local cityState = GameState.new(20260817)
 	local ps = cityState:addPlayer(nil, "Urbaniste", Random.new(20260817), 0)
@@ -336,46 +375,951 @@ do
 	else
 		ps.gold = 100000
 		ps.era = 3
-		local site: number? = nil
-		local factorySite: number? = nil
+
+		-- Le territoire de depart n'est qu'un disque de rayon SPAWN_RADIUS : trop
+		-- petit pour y poser plusieurs batiments espaces. On elargit a la main
+		-- plutot que de tester le placement dans un cas degenere.
+		local capital = ps.capitalTile
+		if not capital then
+			fail("evolution urbaine — la faction de test n'a pas de capitale")
+		else
+			local ccx, ccy = MapGen.fromIndex(capital)
+			for dy = -14, 14 do
+				for dx = -14, 14 do
+					if dx * dx + dy * dy <= 196 then
+						local nx, ny = ccx + dx, ccy + dy
+						if MapGen.inBounds(nx, ny) then
+							local index = MapGen.toIndex(nx, ny)
+							if cityState:isLand(index) then
+								cityState:setOwner(index, ps.slot)
+							end
+						end
+					end
+				end
+			end
+
+			local function freeSiteAt(dx: number, dy: number): number?
+				local nx, ny = ccx + dx, ccy + dy
+				if not MapGen.inBounds(nx, ny) then
+					return nil
+				end
+				local index = MapGen.toIndex(nx, ny)
+				if buffer.readu8(cityState.owner, index) ~= ps.slot then
+					return nil
+				end
+				return index
+			end
+
+			local citySite = freeSiteAt(6, 0)
+			local factorySite = freeSiteAt(-6, 0)
+			if not citySite or not factorySite then
+				fail("evolution urbaine — aucune tuile constructible")
+			else
+				--[[
+					Accrochage : on vise deliberement la capitale elle-meme, ce qui
+					etait un refus pur et simple avant. Le moteur doit maintenant
+					reporter la ville sur une tuile libre du voisinage.
+				]]
+				local snapped = Buildings.build(cityState, ps.slot, capital, Config.BUILDING.CITY)
+				local snappedCity: number? = nil
+				for index, building in cityState.buildings do
+					if building.kind == Config.BUILDING.CITY then
+						snappedCity = index
+					end
+				end
+				if not snapped or not snappedCity or snappedCity == capital then
+					fail("placement — un clic sur une tuile occupee n'a pas ete reporte a cote")
+				end
+
+				--[[
+					Un second clic au meme endroit ne pose pas une deuxieme ville : il
+					fait monter celle qui vient d'apparaitre. C'est la regle "un seul
+					bouton par type" — le joueur n'a aucun mode a choisir.
+				]]
+				local before = ps.buildingCounts[Config.BUILDING.CITY] or 0
+				local upgraded = Buildings.build(cityState, ps.slot, snappedCity :: number, Config.BUILDING.CITY)
+				local after = ps.buildingCounts[Config.BUILDING.CITY] or 0
+				local grown = cityState.buildings[snappedCity :: number]
+				if not upgraded or after ~= before or not grown or grown.level ~= 2 then
+					fail("placement — un clic sur une ville existante n'a pas declenche son amelioration")
+				end
+
+				-- Parcours complet des paliers sur une ville posee a l'ecart.
+				local built = Buildings.build(cityState, ps.slot, citySite, Config.BUILDING.CITY)
+				local level2 = Buildings.upgradeAt(cityState, ps.slot, citySite)
+				local level3 = Buildings.upgradeAt(cityState, ps.slot, citySite)
+				local blocked = Buildings.upgradeAt(cityState, ps.slot, citySite)
+				if not built or not level2 or not level3 or blocked then
+					fail("evolution urbaine — parcours ville -> metropole -> megapole invalide")
+				end
+				local city = cityState.buildings[citySite]
+				if not city or city.level ~= Config.CITY_MAX_LEVEL then
+					fail("evolution urbaine — niveau final incorrect")
+				end
+
+				--[[
+					Reseau ferroviaire. Une usine relie *toutes* les gares a portee —
+					ici la capitale et les deux villes — et le revenu suit le nombre de
+					liaisons de la grappe, pas le nombre d'usines.
+				]]
+				local factoryBuilt = Buildings.build(cityState, ps.slot, factorySite, Config.BUILDING.FACTORY)
+				local factory = cityState.buildings[factorySite]
+				local routes, logisticsIncome = cityState:logisticsFor(ps.slot)
+				if not factoryBuilt or not factory then
+					fail("logistique — l'usine n'a pas pu etre construite")
+				elseif #factory.links < 3 then
+					fail(`logistique — l'usine ne relie que {#factory.links} gare(s), 3 attendues`)
+				elseif routes ~= 3 or logisticsIncome <= 0 then
+					fail(`logistique — grappe de {routes} liaison(s) pour {logisticsIncome} or/tick`)
+				end
+
+				--[[
+					Le port est une gare comme les autres : l'ajouter agrandit la
+					grappe existante au lieu de creer un reseau parallele. C'est la
+					difference entre un graphe et une etoile.
+				]]
+				local coastal: number? = nil
+				for index in cityState.dirty do
+					if buffer.readu8(cityState.owner, index) == ps.slot and MapGen.isCoastal(cityState.terrain, index) then
+						coastal = index
+						break
+					end
+				end
+				if coastal then
+					local portBuilt = Buildings.build(cityState, ps.slot, coastal, Config.BUILDING.PORT)
+					local grownRoutes = select(1, cityState:logisticsFor(ps.slot))
+					if portBuilt and grownRoutes <= routes then
+						fail("logistique — un port raccorde n'agrandit pas la grappe")
+					end
+				end
+
+				checkInvariants(cityState, 0)
+			end
+		end
+	end
+end
+
+--[[
+	Inflation des couts : doublement borne, et compteur partage port/usine.
+
+	La courbe precedente etait lineaire et sans plafond — trop molle sur les
+	premiers batiments, sans fin sur les derniers. Ce test verrouille les deux
+	proprietes qui la remplacent.
+]]
+do
+	local counts: { [number]: number } = {}
+	local base = 0
+	for _, def in BuildingDefs.LIST do
+		if def.id == Config.BUILDING.CITY then
+			base = def.cost
+		end
+	end
+
+	local expected = { 1, 2, 4, 8, 8, 8 }
+	for n, multiple in expected do
+		counts[Config.BUILDING.CITY] = n - 1
+		local price = Placement.priceFor(counts, Config.BUILDING.CITY, 1)
+		if price ~= math.floor(base * multiple) then
+			fail(`couts — {n}e ville a {price}, attendu {math.floor(base * multiple)}`)
+		end
+	end
+
+	-- Le port rencherit l'usine et reciproquement : un seul budget pour les deux
+	-- axes economiques.
+	local shared: { [number]: number } = { [Config.BUILDING.PORT] = 2 }
+	if
+		Placement.priceFor(shared, Config.BUILDING.FACTORY, 1)
+		~= Placement.priceFor({ [Config.BUILDING.FACTORY] = 2 }, Config.BUILDING.FACTORY, 1)
+	then
+		fail("couts — le port et l'usine ne partagent pas leur compteur d'inflation")
+	end
+end
+
+--[[
+	Frein a l'emballement.
+
+	Les trois proprietes qui remplacent l'ancienne penalite de ravitaillement.
+	Elles sont testees sur des valeurs et pas seulement sur des signes, parce que
+	c'est exactement ce genre de courbe qu'on casse sans s'en apercevoir en
+	ajustant une constante.
+]]
+do
+	local debuffState = GameState.new(4242)
+	local small = debuffState:addPlayer(nil, "Petit", Random.new(1), 0)
+	local huge = debuffState:addPlayer(nil, "Geant", Random.new(2), 0)
+	if not small or not huge then
+		fail("frein — impossible de creer les factions de test")
+	else
+		small.tiles = 200
+		huge.tiles = math.floor(debuffState.landCount * 0.5)
+
+		local smallDefense = debuffState:sizeDefenseFactor(small)
+		local hugeDefense = debuffState:sizeDefenseFactor(huge)
+		if smallDefense <= hugeDefense then
+			fail("frein — un empire immense ne defend pas moins bien qu'un petit")
+		end
+		if smallDefense > 1.0001 or hugeDefense < Config.LARGE_DEFENDER_FLOOR - 0.0001 then
+			fail(`frein — facteur de defense hors bornes ({smallDefense} / {hugeDefense})`)
+		end
+
+		local smallSpeed, smallCost = debuffState:sizeAttackFactors(small)
+		local hugeSpeed, hugeCost = debuffState:sizeAttackFactors(huge)
+		if smallSpeed ~= 1 or smallCost ~= 1 then
+			fail("frein — un petit empire est penalise alors qu'il ne devrait pas l'etre")
+		end
+		if hugeSpeed >= 1 or hugeSpeed < Config.LARGE_ATTACKER_SPEED_FLOOR - 0.0001 then
+			fail(`frein — vitesse du geant hors bornes ({hugeSpeed})`)
+		end
+		-- La compensation est la piece qui rend la regle jouable : sans elle, le
+		-- leader est simplement puni et le jeu devient une course a rester second.
+		if hugeCost >= 1 then
+			fail("frein — le gros attaquant ne beneficie d'aucune compensation en cout")
+		end
+	end
+end
+
+--[[
+	Commerce maritime.
+
+	L'or arrive a l'arrivee du convoi, pas au tick. Trois proprietes portent la
+	mecanique et aucune ne se voit dans une partie normale si elle casse : on
+	constate juste, dix minutes plus tard, que personne n'a d'or.
+]]
+do
+	local seaState = GameState.new(31415)
+	local a = seaState:addPlayer(nil, "Thalassa", Random.new(11), 0)
+	local b = seaState:addPlayer(nil, "Ostrave", Random.new(12), 0)
+	if not a or not b then
+		fail("commerce — impossible de creer les factions de test")
+	else
+		--[[
+			On choisit les deux ports sur la carte puis on donne la case a la
+			faction, plutot que de compter sur son territoire de depart.
+
+			Les premieres versions de ce test lisaient `ps.coast` : le resultat
+			dependait alors de l'endroit ou la graine avait fait apparaitre les
+			factions, et le test echouait sur une carte parfaitement saine des
+			qu'une faction naissait dans les terres.
+		]]
+		local coastal: { number } = {}
 		for index = 0, Config.TILE_COUNT - 1 do
-			if buffer.readu8(cityState.owner, index) == ps.slot and not cityState.buildings[index] then
-				if not site then
-					site = index
-				else
-					factorySite = index
+			if seaState:isLand(index) and MapGen.isCoastal(seaState.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
 					break
 				end
 			end
 		end
-		if not site or not factorySite then
-			fail("evolution urbaine — aucune tuile constructible")
-		else
-			local built = Buildings.build(cityState, ps.slot, site, Config.BUILDING.CITY)
-			local level2 = Buildings.upgradeCity(cityState, ps.slot, site)
-			local level3 = Buildings.upgradeCity(cityState, ps.slot, site)
-			local blocked = Buildings.upgradeCity(cityState, ps.slot, site)
-			if not built or not level2 or not level3 or blocked then
-				fail("evolution urbaine — parcours ville -> metropole -> megapole invalide")
+
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(seaState, first, second) then
+					portA, portB = first, second
+					break
+				end
 			end
-			local city = cityState.buildings[site]
-			if not city or city.level ~= Config.CITY_MAX_LEVEL then
-				fail("evolution urbaine — niveau final incorrect")
+			if portA then
+				break
+			end
+		end
+
+		if not portA or not portB then
+			fail("commerce — aucune paire de cotes reliees par la mer sur la carte de test")
+		else
+			seaState:setOwner(portA, a.slot)
+			seaState:setOwner(portB, b.slot)
+			seaState:placeBuilding(portA, Config.BUILDING.PORT, a.slot)
+			seaState:placeBuilding(portB, Config.BUILDING.PORT, b.slot)
+
+			local path = Navy.findSeaPath(seaState, portA :: number, portB :: number)
+			if not path then
+				fail("commerce — aucune route maritime entre les deux ports de test")
+			else
+				local goldA, goldB = a.gold, b.gold
+
+				--[[
+					Un convoi arrive : les DEUX ports touchent.
+
+					C'est ce qui fait d'un voisin cotier une ressource et pas
+					seulement une menace, et c'est ce qui donne un cout a la
+					piraterie — un convoi coule prive deux factions a la fois.
+				]]
+				table.insert(seaState.boats, {
+					id = seaState:nextId(),
+					slot = a.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				Navy.step(seaState, Random.new(1))
+
+				if a.gold <= goldA then
+					fail("commerce — le port expediteur ne touche rien a l'arrivee")
+				end
+				if b.gold <= goldB then
+					fail("commerce — le port destinataire ne touche rien a l'arrivee")
+				end
+				if math.abs((a.gold - goldA) - (b.gold - goldB)) > 0.001 then
+					fail("commerce — les deux ports ne touchent pas la meme somme")
+				end
+
+				-- Une route plus longue paie davantage : le commerce lointain
+				-- doit valoir le risque de traverser des eaux hostiles.
+				local shortGain = a.gold - goldA
+				goldA, goldB = a.gold, b.gold
+				local longPath = table.clone(path)
+				for _ = 1, 50 do
+					table.insert(longPath, path[#path])
+				end
+				table.insert(seaState.boats, {
+					id = seaState:nextId(),
+					slot = a.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = longPath,
+					step = #longPath + 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				Navy.step(seaState, Random.new(1))
+				if (a.gold - goldA) <= shortGain then
+					fail("commerce — une route longue ne rapporte pas plus qu'une courte")
+				end
+
+				--[[
+					L'embargo ferme la ligne.
+
+					Il est reverifie a l'ARRIVEE et pas au depart : entre les deux,
+					le port a pu etre detruit, capture, ou l'embargo tomber. Payer
+					sur la foi des conditions de depart recompenserait une route qui
+					n'existe plus.
+				]]
+				Diplomacy.setEmbargo(seaState, b.slot, a.slot, true)
+				goldA, goldB = a.gold, b.gold
+				table.insert(seaState.boats, {
+					id = seaState:nextId(),
+					slot = a.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				Navy.step(seaState, Random.new(1))
+				if a.gold ~= goldA or b.gold ~= goldB then
+					fail("commerce — un convoi paie malgre l'embargo")
+				end
+			end
+		end
+	end
+end
+
+--[[
+	Mise en forme des nombres.
+
+	Ces chaines partent dans la liste des joueurs, sur les etiquettes de la carte
+	et dans le bandeau du HUD. Une regression ne planterait rien : elle
+	afficherait juste 1290000 la ou on attend 1.29M, et personne ne le
+	remarquerait avant de voir la colonne deborder en jeu.
+]]
+do
+	local cases = {
+		{ value = 0, expected = "0" },
+		{ value = 543, expected = "543" },
+		{ value = 5500, expected = "5.50K" },
+		{ value = 39800, expected = "39.8K" },
+		{ value = 87500, expected = "87.5K" },
+		{ value = 683000, expected = "683K" },
+		{ value = 1290000, expected = "1.29M" },
+		{ value = 5020000, expected = "5.02M" },
+	}
+	for _, case in cases do
+		local got = Format.compact(case.value)
+		if got ~= case.expected then
+			fail(`format — {case.value} donne "{got}" au lieu de "{case.expected}"`)
+		end
+	end
+
+	-- Le negatif garde son signe plutot que de produire une chaine absurde.
+	if Format.compact(-1500) ~= "-1.50K" then
+		fail(`format — un nombre negatif donne "{Format.compact(-1500)}"`)
+	end
+
+	--[[
+		La part de territoire garde une decimale.
+
+		En debut de partie tout le monde est sous 1 % : un entier afficherait
+		douze factions a "0 %", soit exactement l'information que la colonne
+		existe pour donner.
+	]]
+	if Format.percent(80, 15568) ~= "0.5%" then
+		fail(`format — une part sous 1 %% donne "{Format.percent(80, 15568)}"`)
+	end
+	if Format.percent(5, 0) ~= "0.0%" then
+		fail("format — une carte sans terre fait diviser par zero")
+	end
+end
+
+--[[
+	Classement Roblox natif.
+
+	Cette logique vivait dans init.server.luau, exclu du bundle, donc verifiee
+	par relecture seulement. C'est un angle mort dangereux precisement parce
+	qu'une regression n'y plante rien : elle affiche des valeurs fausses ou
+	vides dans la liste que les joueurs ouvrent par reflexe, et rien dans les
+	journaux ne le signale.
+]]
+do
+	-- Rien dans les modules ne fabrique de Player : le bouchon expose son
+	-- constructeur d'instances pour qu'on puisse en poser un ici.
+	local function fakePlayer(name)
+		local player = __newInstance("Player")
+		player.Name = name
+		return player
+	end
+
+	local function columnValues(player)
+		local folder = player:FindFirstChild("leaderstats")
+		if not folder then
+			return nil
+		end
+		local keys, values = {}, {}
+		for _, child in folder:GetChildren() do
+			table.insert(keys, child:GetAttribute("Key"))
+			table.insert(values, child.Value)
+		end
+		return keys, values, folder
+	end
+
+	--[[
+		Ordre des colonnes.
+
+		La liste des joueurs affiche les colonnes dans leur ordre de creation et
+		n'offre aucun autre levier de rangement : le territoire doit rester en
+		tete, puisque c'est lui qui decide la victoire.
+	]]
+	local player = fakePlayer("Commandant")
+	local folder = Leaderstats.ensure(player)
+	if folder.Name ~= "leaderstats" then
+		fail(`classement — le dossier s'appelle "{folder.Name}" et non "leaderstats"`)
+	end
+	if folder.Parent ~= player then
+		fail("classement — le dossier n'est pas parente au joueur")
+	end
+
+	local keys, values = columnValues(player)
+	local expectedOrder = { "share", "gold", "troops" }
+	if not keys or #keys ~= #expectedOrder then
+		fail(`classement — {if keys then #keys else 0} colonne(s) creees, {#expectedOrder} attendues`)
+	else
+		for i, expected in expectedOrder do
+			if keys[i] ~= expected then
+				fail(`classement — colonne {i} = "{tostring(keys[i])}" au lieu de "{expected}"`)
+			end
+		end
+		-- Un tiret et non "0" : tant qu'aucun tick n'a publie, "pas encore
+		-- mesure" et "reduit a rien" ne doivent pas se confondre.
+		for i, value in values do
+			if value ~= "-" then
+				fail(`classement — colonne {i} vaut "{tostring(value)}" avant la premiere publication`)
+			end
+		end
+	end
+
+	--[[
+		Idempotence.
+
+		La publication passe par ensure a chaque tick de seconde. Si ensure
+		recreait les colonnes, la liste se remplirait de doublons en quelques
+		secondes de jeu — et rien ne leverait d'erreur.
+	]]
+	local again = Leaderstats.ensure(player)
+	if again ~= folder then
+		fail("classement — un second appel recree le dossier au lieu de reutiliser l'existant")
+	end
+	local keysAfter = columnValues(player)
+	if keysAfter and #keysAfter ~= #expectedOrder then
+		fail(`classement — {#keysAfter} colonnes apres deux appels, {#expectedOrder} attendues`)
+	end
+
+	--[[
+		Report de l'etat du joueur.
+
+		Les valeurs attendues passent par Format et non par une chaine ecrite a
+		la main : c'est le formatage partage qui fait foi, et le recopier ici
+		reintroduirait la divergence que Format existe pour empecher.
+	]]
+	local sample = { tiles = 1200, gold = 87500, troops = 1290000 }
+	Leaderstats.apply(player, sample :: any, 15568)
+
+	local _, applied = columnValues(player)
+	local expectedValues = {
+		Format.percent(sample.tiles, 15568),
+		Format.compact(sample.gold),
+		Format.compact(sample.troops),
+	}
+	if applied then
+		for i, expected in expectedValues do
+			if applied[i] ~= expected then
+				fail(`classement — colonne {i} affiche "{tostring(applied[i])}" au lieu de "{expected}"`)
+			end
+		end
+	end
+
+	--[[
+		La colonne se retrouve par son attribut `Key`, jamais par son nom.
+
+		Les en-tetes sont des emoji. Un code qui les comparerait en dur casserait
+		en silence a la premiere icone changee : on renomme donc les colonnes
+		avant de republier, et la mise a jour doit continuer a tomber juste.
+	]]
+	local renamed = fakePlayer("Iconoclaste")
+	local renamedFolder = Leaderstats.ensure(renamed)
+	for i, child in renamedFolder:GetChildren() do
+		child.Name = `colonne{i}`
+	end
+
+	local other = { tiles = 80, gold = 543, troops = 5500 }
+	Leaderstats.apply(renamed, other :: any, 15568)
+
+	local _, renamedValues = columnValues(renamed)
+	local expectedRenamed = {
+		Format.percent(other.tiles, 15568),
+		Format.compact(other.gold),
+		Format.compact(other.troops),
+	}
+	if renamedValues then
+		for i, expected in expectedRenamed do
+			if renamedValues[i] ~= expected then
+				fail(
+					`classement — colonne renommee {i} affiche "{tostring(renamedValues[i])}" `
+						.. `au lieu de "{expected}" : la mise a jour dependait du nom`
+				)
+			end
+		end
+	end
+
+	--[[
+		Publication complete, depuis un vrai GameState.
+
+		Elle exerce le chemin reel qu'emprunte le serveur, y compris la part de
+		territoire calculee sur `state.landCount` — la seule valeur des trois qui
+		ne sorte pas directement du joueur.
+	]]
+	local pubState = GameState.new(20260820)
+	local pubPlayer = fakePlayer("Publie")
+	local ps = pubState:addPlayer(pubPlayer :: any, "Publie", Random.new(3), 0)
+	if not ps then
+		fail("classement — impossible de creer la faction de publication")
+	else
+		ps.gold = 4321
+		ps.troops = 98765
+
+		Leaderstats.publish(pubState, { [pubPlayer] = ps.slot })
+
+		local pubKeys, pubValues = columnValues(pubPlayer)
+		if not pubKeys then
+			fail("classement — publish n'a pas equipe un joueur qui n'avait pas encore de liste")
+		else
+			local wanted = {
+				share = Format.percent(ps.tiles, pubState.landCount),
+				gold = Format.compact(ps.gold),
+				troops = Format.compact(ps.troops),
+			}
+			for i, key in pubKeys do
+				if pubValues[i] ~= wanted[key] then
+					fail(`classement — publish : "{key}" = "{tostring(pubValues[i])}" au lieu de "{wanted[key]}"`)
+				end
+			end
+		end
+
+		--[[
+			Une faction eliminee voit ses colonnes EFFACEES, pas gelees.
+
+			C'est le cas d'un joueur dont la faction est morte alors qu'il est
+			toujours connecte : le serveur garde son entree dans slotByPlayer
+			jusqu'a la relance du match.
+
+			Le comportement precedent se contentait de l'ignorer, et ses colonnes
+			restaient donc figees sur leur derniere valeur — un territoire qu'il
+			ne possede plus, une armee qui n'existe plus. La colonne affichait
+			exactement le contraire de ce pour quoi elle existe, avec des chiffres
+			parfaitement plausibles : rien a l'ecran ne pouvait le trahir.
+		]]
+		local ok = pcall(function()
+			Leaderstats.publish(pubState, { [pubPlayer] = 99 })
+		end)
+		if not ok then
+			fail("classement — publish plante sur un joueur sans faction")
+		end
+
+		local _, ghostValues = columnValues(pubPlayer)
+		if not ghostValues then
+			fail("classement — un joueur elimine mais connecte perd ses colonnes au lieu de les voir vidées")
+		else
+			for i, value in ghostValues do
+				if value ~= "\u{2014}" then
+					fail(
+						`classement — colonne {i} d'un elimine vaut encore "{tostring(value)}" : `
+							.. `les valeurs sont gelees au lieu d'etre effacees`
+					)
+				end
+			end
+		end
+
+		-- Et un joueur jamais equipe ne fait pas planter l'effacement.
+		local stranger = fakePlayer("Inconnu")
+		if not pcall(function()
+			Leaderstats.publish(pubState, { [stranger] = 99 })
+		end) then
+			fail("classement — publish plante sur un joueur sans liste prealable")
+		end
+	end
+end
+
+--[[
+	Trace des voies : alignement sur la grille et economie de virages.
+
+	Ce sont exactement les proprietes qu'un rendu ne trahit jamais tout seul. Une
+	diagonale ou un escalier a douze paliers s'affichent sans la moindre erreur —
+	ils sont juste laids, et on ne s'en apercoit qu'en lancant le jeu.
+]]
+do
+	local railTerrain = MapGen.generate(4242)
+
+	-- On cherche deux cases de terre eloignees, pour un cas realiste.
+	local land: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1, 37 do
+		if buffer.readu8(railTerrain, index) ~= Config.TERRAIN.OCEAN then
+			table.insert(land, index)
+		end
+	end
+
+	if #land < 2 then
+		fail("voies — pas assez de terre sur la carte de test")
+	else
+		local checked = 0
+		for i = 1, math.min(#land, 60) do
+			local from = land[i]
+			local to = land[math.min(#land, i + 7)]
+			if from == to then
+				continue
 			end
 
-			local factoryBuilt = Buildings.build(cityState, ps.slot, factorySite, Config.BUILDING.FACTORY)
-			local factory = cityState.buildings[factorySite]
-			local routes, logisticsIncome = cityState:logisticsFor(ps.slot)
-			if
-				not factoryBuilt
-				or not factory
-				or #factory.links == 0
-				or routes ~= 1
-				or logisticsIncome <= 0
-			then
-				fail("logistique — l'usine ne relie pas correctement la ville et son revenu")
+			local path = RailPath.find(railTerrain, from, to)
+			if not path then
+				fail(`voies — aucun trace entre {from} et {to}`)
+				break
 			end
-			checkInvariants(cityState, 0)
+			checked += 1
+
+			-- 1. Chaque pas est un deplacement d'une seule case en croix.
+			for k = 1, #path - 1 do
+				local ax, ay = MapGen.fromIndex(path[k])
+				local bx, by = MapGen.fromIndex(path[k + 1])
+				local step = math.abs(bx - ax) + math.abs(by - ay)
+				if step ~= 1 then
+					fail(`voies — pas de {step} cases entre deux points : le trace saute ou part en diagonale`)
+					break
+				end
+			end
+
+			-- 2. Les extremites sont bien celles demandees.
+			if path[1] ~= from or path[#path] ~= to then
+				fail("voies — le trace ne relie pas les deux cases demandees")
+				break
+			end
+
+			--[[
+				3. Des tronçons longs.
+
+				C'est la penalite de changement de direction qui est mesuree ici, et
+				c'est elle qui distingue le resultat d'un A* ordinaire : sans elle,
+				tous les escaliers coutent pareil et l'algorithme en choisit un au
+				hasard.
+
+				On mesure la longueur MOYENNE des tronçons plutot que leur nombre.
+				Compter les tronçons punissait un contournement de cote
+				parfaitement legitime — quatre segments sur vingt-trois cases est
+				un bon trace — alors que la moyenne separe nettement les deux cas :
+				un escalier a des tronçons d'une case, un trace propre en a de dix.
+			]]
+			local runs = RailPath.runs(path)
+			local manhattan = #path - 1
+			if manhattan >= 8 then
+				local average = manhattan / #runs
+				if average < 3 then
+					fail(
+						`voies — troncons de {string.format("%.1f", average)} cases en moyenne `
+							.. `({#runs} pour {manhattan}) : le trace fait un escalier`
+					)
+					break
+				end
+			end
+		end
+
+		if checked == 0 then
+			fail("voies — aucun trace n'a pu etre verifie")
+		end
+	end
+end
+
+--[[
+	Empilement des usines.
+
+	Deux effets qui portent le meme compteur mais ne doivent surtout pas se
+	comporter pareil : etaler subit un rendement decroissant, empiler est
+	strictement lineaire. Les confondre — ce qu'on faisait — rendait
+	l'amelioration systematiquement perdante face a une construction neuve.
+]]
+do
+	local millState = GameState.new(90210)
+	local ps = millState:addPlayer(nil, "Fonderie", Random.new(77), 0)
+	if not ps then
+		fail("usines — impossible de creer la faction de test")
+	else
+		local capital = ps.capitalTile
+		if not capital then
+			fail("usines — la faction de test n'a pas de capitale")
+		else
+			local cx, cy = MapGen.fromIndex(capital)
+			for dy = -14, 14 do
+				for dx = -14, 14 do
+					if dx * dx + dy * dy <= 196 then
+						local nx, ny = cx + dx, cy + dy
+						if MapGen.inBounds(nx, ny) then
+							local index = MapGen.toIndex(nx, ny)
+							if millState:isLand(index) then
+								millState:setOwner(index, ps.slot)
+							end
+						end
+					end
+				end
+			end
+
+			--[[
+				On cherche deux emplacements suffisamment ecartes, au lieu de les
+				supposer a des decalages fixes.
+
+				La version precedente visait (-7, 0) et (7, 0) en dur : selon la
+				graine, l'une des deux tombait a l'eau et le test echouait sur un
+				moteur parfaitement sain. Un test dont le montage depend du hasard
+				de la carte ne mesure pas ce qu'il pretend mesurer.
+			]]
+			local candidates: { number } = {}
+			for radius = 5, 13 do
+				for angle = 0, 7 do
+					local a2 = angle * math.pi / 4
+					local nx = cx + math.floor(math.cos(a2) * radius)
+					local ny = cy + math.floor(math.sin(a2) * radius)
+					if MapGen.inBounds(nx, ny) then
+						local index = MapGen.toIndex(nx, ny)
+						if
+							millState:isLand(index)
+							and buffer.readu8(millState.owner, index) == ps.slot
+							and not millState.buildings[index]
+						then
+							table.insert(candidates, index)
+						end
+					end
+				end
+			end
+
+			-- Les deux usines doivent etre assez loin l'une de l'autre pour ne
+			-- pas declencher l'accrochage en amelioration, et assez proches pour
+			-- rester dans la meme grappe ferroviaire.
+			local millSite: number? = nil
+			local secondSite: number? = nil
+			for _, first in candidates do
+				local fx, fy = MapGen.fromIndex(first)
+				for _, second in candidates do
+					local sx, sy = MapGen.fromIndex(second)
+					local dx, dy = fx - sx, fy - sy
+					local gap = dx * dx + dy * dy
+					local spacing = Config.BUILD_MIN_SPACING * Config.BUILD_MIN_SPACING
+					if gap > spacing and gap <= Config.RAIL_RANGE * Config.RAIL_RANGE then
+						millSite, secondSite = first, second
+						break
+					end
+				end
+				if millSite then
+					break
+				end
+			end
+
+			if not millSite or not secondSite then
+				fail("usines — pas de place pour poser les usines de test")
+			else
+				millState:placeBuilding(millSite, Config.BUILDING.FACTORY, ps.slot)
+				local _, single = millState:logisticsFor(ps.slot)
+				if single <= 0 then
+					fail("usines — une usine reliee a la capitale ne produit rien")
+				end
+
+				-- Empiler : niveau 2 produit exactement le double.
+				millState:upgradeBuilding(millSite)
+				local _, stacked = millState:logisticsFor(ps.slot)
+				if math.abs(stacked - single * 2) > 0.001 then
+					fail(`usines — empiler donne {stacked / single}x au lieu de 2x`)
+				end
+
+				-- Etaler : la seconde usine rapporte, mais nettement moins que
+				-- la premiere. C'est ce qui pousse a fonder un second reseau.
+				millState:upgradeBuilding(millSite) -- retour au niveau 3
+				local _, before = millState:logisticsFor(ps.slot)
+				millState:placeBuilding(secondSite, Config.BUILDING.FACTORY, ps.slot)
+				local _, spread = millState:logisticsFor(ps.slot)
+				if spread <= before then
+					fail("usines — une seconde usine ne rapporte rien du tout")
+				end
+			end
+		end
+	end
+end
+
+--[[
+	Plafond de troupes sous-lineaire.
+
+	C'est la correction qui a le plus change l'equilibrage, et c'est aussi celle
+	qu'une simple relecture ne rattrape pas : un plafond lineaire se remarque
+	seulement dix minutes plus tard, sous la forme d'un leader a 99 % des terres.
+]]
+do
+	local troopState = GameState.new(777)
+	local ps = troopState:addPlayer(nil, "Mesure", Random.new(777), 0)
+	if not ps then
+		fail("plafond de troupes — impossible de creer la faction de test")
+	else
+		ps.cityPopBonus = 0
+
+		ps.tiles = 1000
+		local atThousand = troopState:maxTroops(ps)
+		ps.tiles = 15000
+		local atFifteenThousand = troopState:maxTroops(ps)
+
+		local landRatio = 15
+		local troopRatio = atFifteenThousand / atThousand
+		if troopRatio >= landRatio then
+			fail(`plafond de troupes — {troopRatio}x d'armee pour {landRatio}x de territoire : la courbe est lineaire`)
+		end
+		if troopRatio > 6 then
+			fail(`plafond de troupes — {troopRatio}x reste trop proche du lineaire`)
+		end
+
+		-- Les villes, elles, gardent un rendement plein : c'est ce qui en fait le
+		-- vrai levier militaire face a l'expansion brute.
+		ps.tiles = 1000
+		ps.cityPopBonus = 10000
+		if math.abs(troopState:maxTroops(ps) - atThousand - 10000) > 0.001 then
+			fail("plafond de troupes — le bonus urbain n'est plus integralement compte")
+		end
+	end
+end
+
+--[[
+	Expiration des alliances.
+
+	Les pactes permanents figeaient la fin de partie : les survivants finissaient
+	tous allies deux a deux, plus une seule cible legale sur la carte, zero
+	offensive et zero frappe. Le jeu ne plantait pas, il s'arretait — et rien ne
+	le signalait.
+]]
+do
+	local diploState = GameState.new(5150)
+	local a = diploState:addPlayer(nil, "Alpha", Random.new(41), 0)
+	local b = diploState:addPlayer(nil, "Beta", Random.new(42), 0)
+	if not a or not b then
+		fail("alliances — impossible de creer les factions de test")
+	else
+		Diplomacy.request(diploState, a.slot, b.slot)
+		local signed = Diplomacy.accept(diploState, a.slot, b.slot)
+		if not signed or not diploState:areAllied(a.slot, b.slot) then
+			fail("alliances — le pacte n'a pas ete signe")
+		end
+
+		-- Toujours en vigueur juste avant l'echeance.
+		diploState.tick = Config.ALLIANCE_DURATION - 1
+		Diplomacy.step(diploState)
+		if not diploState:areAllied(a.slot, b.slot) then
+			fail("alliances — le pacte expire avant son terme")
+		end
+
+		-- Et tombe de lui-meme ensuite, sans marquer personne : ce n'est pas une
+		-- trahison.
+		local betrayalsBefore = a.betrayals
+		diploState.tick = Config.ALLIANCE_DURATION
+		Diplomacy.step(diploState)
+		if diploState:areAllied(a.slot, b.slot) then
+			fail("alliances — le pacte ne tombe jamais a echeance")
+		end
+		if a.betrayals ~= betrayalsBefore then
+			fail("alliances — une expiration est comptee comme une trahison")
+		end
+
+		-- Carence : sans elle, deux camps resignent au tick suivant et la carte
+		-- se retrouve a nouveau entierement alliee.
+		local tooSoon = Diplomacy.request(diploState, a.slot, b.slot)
+		if tooSoon then
+			fail("alliances — un pacte est resigne immediatement apres son expiration")
+		end
+		diploState.tick += Config.ALLIANCE_COOLDOWN
+		if not Diplomacy.request(diploState, a.slot, b.slot) then
+			fail("alliances — impossible de resigner apres la carence")
+		end
+	end
+end
+
+--[[
+	Effondrement d'une faction agonisante.
+
+	Sans cette regle la carte se termine avec des factions a trois tuiles qui ne
+	peuvent plus rien faire mais ne meurent jamais.
+]]
+do
+	local collapseState = GameState.new(20260819)
+	local victim = collapseState:addPlayer(nil, "Agonisant", Random.new(31), 0)
+	local heir = collapseState:addPlayer(nil, "Heritier", Random.new(32), 0)
+	if not victim or not heir then
+		fail("effondrement — impossible de creer les factions de test")
+	else
+		-- On colle l'heritier contre la victime pour garantir un contact.
+		local center = victim.capitalTile
+		if not center then
+			fail("effondrement — la victime n'a pas de capitale")
+		else
+			local cx, cy = MapGen.fromIndex(center)
+			local touched = 0
+			for dy = -6, 6 do
+				local nx, ny = cx + 5, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local index = MapGen.toIndex(nx, ny)
+					if collapseState:isLand(index) then
+						collapseState:setOwner(index, heir.slot)
+						touched += 1
+					end
+				end
+			end
+
+			local before = victim.tiles
+			collapseState:collapseFaction(victim.slot, heir.slot)
+			if victim.tiles >= before or victim.tiles > 0 then
+				fail(`effondrement — la victime conserve {victim.tiles} tuiles sur {before}`)
+			end
+			if touched > 0 and heir.tiles <= touched then
+				fail("effondrement — l'assaillant n'a rien recupere du territoire partage")
+			end
 		end
 	end
 end
@@ -559,17 +1503,26 @@ end
 --[[
 	Seuil du visuel client.
 
-	Mesure : le relief en huit paliers coute environ 5 500 Parts en fin de
-	partie, contre 2 800 pour la couche politique plate. C'est le prix du
-	relief, et il est assume — 5 500 Parts ancres, sans collision ni ombre,
-	restent confortables y compris sur mobile. Le seuil laisse de la marge pour
-	une carte plus fragmentee que la moyenne, mais attrapera un changement de
+	Mesure : environ 7 000 Parts en fin de partie. Ce qui les fragmente n'est
+	plus l'altitude — la carte est plate — mais le decoupage politique croise au
+	type de terrain : une carte disputee entre six factions fusionne bien moins
+	bien qu'une carte partagee entre deux. Le seuil laisse de la marge pour une
+	partie plus morcelee que la moyenne, tout en attrapant un changement de
 	generation qui ferait exploser la fragmentation.
 ]]
-if clientParts > 8000 then
+if clientParts > 9000 then
 	fail(`{clientParts} parts cote client : trop pour tenir sur mobile`)
 end
-if serverBlocks > 6000 then
+
+--[[
+	Seuil de la collision serveur.
+
+	La carte etant plate, la cle de fusion est constante sur toute la terre
+	ferme : on tombe a quelques centaines de dalles. Le seuil est resserre en
+	consequence — a 6 000 il ne cassait plus rien, alors qu'une regression qui
+	remettrait de la hauteur dans la cle se verrait immediatement ici.
+]]
+if serverBlocks > 1500 then
 	fail(`{serverBlocks} blocs de collision : replication initiale trop lourde`)
 end
 

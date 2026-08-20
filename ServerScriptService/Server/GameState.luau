@@ -46,13 +46,19 @@ export type PlayerState = {
 	cityPopBonus: number,
 	cityGoldBonus: number,
 	portCount: number,
+	-- Somme des niveaux des ports. Distincte de `portCount`, qui reste un
+	-- decompte d'unites : c'est elle qui pilote le revenu, pour qu'un port de
+	-- niveau 3 rapporte comme trois ports sans compter comme trois pour les
+	-- conditions d'ere.
+	portLevels: number,
 	siloCount: number,
 	samCount: number,
 	capitalCount: number,
 	capitalTile: number?,
-	-- Centres de ravitaillement (capitale et villes). Ils definissent jusqu'ou
-	-- l'empire peut conquerir a cout normal.
-	hubs: { number },
+	-- Reseau ferroviaire, recalcule a chaque changement de batiment et jamais
+	-- dans la boucle de tick.
+	railRoutes: number,
+	railIncome: number,
 	-- Ere technologique atteinte, et compte par type de batiment. Le second
 	-- sert a la fois aux conditions d'ere et a l'inflation des couts.
 	era: number,
@@ -128,7 +134,11 @@ export type GameState = typeof(setmetatable(
 		boats: { Boat },
 		missiles: { Missile },
 		buildings: { [number]: Building },
-		alliances: { [number]: { [number]: true } },
+		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
+		-- permanentes : voir Config.ALLIANCE_DURATION.
+		alliances: { [number]: { [number]: number } },
+		-- Fin de la carence apres la rupture ou l'expiration d'un pacte.
+		allianceCooldowns: { [number]: { [number]: number } },
 		requests: { [number]: { [number]: number } }, -- from -> to -> expiry tick
 		embargoes: { [number]: { [number]: true } },
 		dirty: { [number]: true },
@@ -172,6 +182,7 @@ function GameState.new(seed: number): GameState
 	self.missiles = {}
 	self.buildings = {}
 	self.alliances = {}
+	self.allianceCooldowns = {}
 	self.requests = {}
 	self.embargoes = {}
 	self.dirty = {}
@@ -384,6 +395,7 @@ function GameState.countBuilding(self: GameState, slot: number, kind: number, si
 		ps.capitalCount += sign
 	elseif kind == B.PORT then
 		ps.portCount += sign
+		ps.portLevels += sign * (level or 1)
 	elseif kind == B.SILO then
 		ps.siloCount += sign
 	elseif kind == B.SAM then
@@ -426,117 +438,210 @@ function GameState.onCapitalCaptured(self: GameState, formerOwner: number, capto
 	self.capitalEvents += 1
 end
 
--- Reconnecte toutes les usines d'une faction a leur ville la plus proche.
--- Cette operation n'arrive qu'a la construction/capture/destruction d'un
--- batiment : aucun balayage de la carte n'est effectue a chaque tick.
 --[[
-	Recalcule les routes logistiques d'un joueur.
+	Recalcule le reseau ferroviaire d'une faction.
 
-	Une usine dessert **toutes** les villes a portee, pas seulement la plus
-	proche : c'est ce qui recompense une implantation au centre d'un bassin de
-	villes plutot qu'un placement au hasard. Trois villes dans le rayon font
-	trois routes.
+	Ce qui a change, et pourquoi c'est le changement le plus profond de ce
+	systeme : une usine ne desservait qu'une liste de villes, en etoile. Poser
+	une usine ajoutait k liaisons independantes, et le placement se resumait a
+	compter les villes dans un cercle.
+
+	Maintenant les usines, villes, capitales et ports sont des **gares**, et deux
+	gares a portee l'une de l'autre sont reliees. Les liaisons forment des
+	grappes connexes ; une grappe ne produit que si elle contient au moins une
+	usine. Consequence en jeu : une usine posee au bon endroit **fusionne deux
+	grappes** et debloque d'un coup toutes leurs destinations. Le placement
+	devient une lecture de carte au lieu d'une optimisation locale.
+
+	Cout : O(gares^2) par recalcul, avec quelques dizaines de gares au plus, et
+	uniquement quand un batiment change de main, apparait ou disparait. La
+	boucle de tick ne recalcule plus rien — elle lit `ps.railRoutes` et
+	`ps.railIncome`.
 ]]
-function GameState.refreshFactoryLinks(self: GameState, slot: number)
-	if not self.players[slot] then
-		return
-	end
-
-	local cities = {}
-	local factories = {}
-	for index, building in self.buildings do
-		if building.slot == slot then
-			if building.kind == B.CITY then
-				table.insert(cities, index)
-			elseif building.kind == B.FACTORY then
-				table.insert(factories, index)
-			end
-		end
-	end
-
-	local maxDistance2 = Config.FACTORY_ROUTE_RANGE * Config.FACTORY_ROUTE_RANGE
-	for _, factoryIndex in factories do
-		local factory = self.buildings[factoryIndex]
-		if not factory then
-			continue
-		end
-
-		local fx, fy = MapGen.fromIndex(factoryIndex)
-		local links = {}
-		for _, cityIndex in cities do
-			local cx, cy = MapGen.fromIndex(cityIndex)
-			local dx, dy = cx - fx, cy - fy
-			if dx * dx + dy * dy <= maxDistance2 then
-				table.insert(links, cityIndex)
-			end
-		end
-
-		-- L'ordre doit etre stable, sinon la comparaison ci-dessous signale un
-		-- changement a chaque recalcul et sature la replication.
-		table.sort(links)
-
-		local changed = #links ~= #factory.links
-		if not changed then
-			for i, cityIndex in links do
-				if factory.links[i] ~= cityIndex then
-					changed = true
-					break
-				end
-			end
-		end
-
-		if changed then
-			factory.links = links
-			self.buildingDirty[factoryIndex] = true
-		end
-	end
-end
-
-function GameState.logisticsFor(self: GameState, slot: number): (number, number)
-	local routes = 0
-	local income = 0
-	for index, building in self.buildings do
-		if building.slot ~= slot or building.kind ~= B.FACTORY then
-			continue
-		end
-
-		local fx, fy = MapGen.fromIndex(index)
-		for _, cityIndex in building.links do
-			local city = self.buildings[cityIndex]
-			if not city or city.slot ~= slot or city.kind ~= B.CITY then
-				continue
-			end
-			local cx, cy = MapGen.fromIndex(cityIndex)
-			local distance = math.sqrt((cx - fx) ^ 2 + (cy - fy) ^ 2)
-			-- Une ville proche est mieux desservie qu'une ville en limite de
-			-- portee : le placement compte, pas seulement le compte.
-			local efficiency = 0.7 + 0.3 * (1 - math.clamp(distance / Config.FACTORY_ROUTE_RANGE, 0, 1))
-			routes += 1
-			income += Config.GOLD_PER_FACTORY_ROUTE * efficiency
-		end
-	end
-	return routes, income
-end
-
---[[
-	Recalcule les centres de ravitaillement d'un joueur.
-
-	Balayage complet des batiments, mais uniquement quand l'un d'eux change de
-	main ou apparait — jamais dans la boucle de tick.
-]]
-function GameState.refreshSupplyHubs(self: GameState, slot: number)
+function GameState.refreshRailNetwork(self: GameState, slot: number)
 	local ps = self.players[slot]
 	if not ps then
 		return
 	end
 
-	table.clear(ps.hubs)
+	-- 1. Collecte des gares.
+	local stations: { number } = {}
 	for index, building in self.buildings do
-		if building.slot == slot and (building.kind == B.CITY or building.kind == B.CAPITAL) then
-			table.insert(ps.hubs, index)
+		if
+			building.slot == slot
+			and (
+				building.kind == B.CITY
+				or building.kind == B.CAPITAL
+				or building.kind == B.PORT
+				or building.kind == B.FACTORY
+			)
+		then
+			table.insert(stations, index)
+		end
+	end
+	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
+	-- composition des grappes et donc les liens repliques changeraient a chaque
+	-- recalcul et satureraient la replication.
+	table.sort(stations)
+
+	local count = #stations
+	local range2 = Config.RAIL_RANGE * Config.RAIL_RANGE
+
+	-- 2. Union-find sur les gares a portee. `parent` indexe la position dans
+	-- `stations`, pas la tuile : les indices de tuile sont trop epars.
+	local parent = table.create(count, 0)
+	for i = 1, count do
+		parent[i] = i
+	end
+
+	local function find(i: number): number
+		while parent[i] ~= i do
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		end
+		return i
+	end
+
+	local xs = table.create(count, 0)
+	local ys = table.create(count, 0)
+	for i, index in stations do
+		xs[i], ys[i] = MapGen.fromIndex(index)
+	end
+
+	-- Liens par gare, pour l'affichage des voies cote client.
+	local neighborsOf: { { number } } = table.create(count)
+	for i = 1, count do
+		neighborsOf[i] = {}
+	end
+
+	for i = 1, count do
+		for j = i + 1, count do
+			local dx, dy = xs[i] - xs[j], ys[i] - ys[j]
+			if dx * dx + dy * dy <= range2 then
+				table.insert(neighborsOf[i], stations[j])
+				table.insert(neighborsOf[j], stations[i])
+				local ri, rj = find(i), find(j)
+				if ri ~= rj then
+					parent[ri] = rj
+				end
+			end
+		end
+	end
+
+	--[[
+		3. Taille de la grappe, et usines qu'elle contient.
+
+		On compte separement le **nombre** d'usines et la **somme de leurs
+		niveaux**, parce que les deux ne jouent pas le meme role : le nombre subit
+		un rendement decroissant, le niveau non. Les additionner dans un seul
+		compteur, comme avant, revenait a punir l'empilement exactement comme
+		l'etalement.
+	]]
+	local clusterStations: { [number]: number } = {}
+	local clusterFactoryCount: { [number]: number } = {}
+	local clusterFactoryLevels: { [number]: number } = {}
+	for i = 1, count do
+		local root = find(i)
+		clusterStations[root] = (clusterStations[root] or 0) + 1
+		local building = self.buildings[stations[i]]
+		if building and building.kind == B.FACTORY then
+			clusterFactoryCount[root] = (clusterFactoryCount[root] or 0) + 1
+			clusterFactoryLevels[root] = (clusterFactoryLevels[root] or 0) + building.level
+		end
+	end
+
+	-- 4. Revenu. Le nombre de liaisons d'une grappe est son arbre couvrant
+	-- (gares - 1) et non ses paires possibles : sinon dix gares rapporteraient
+	-- quarante-cinq fois deux gares et l'economie exploserait en fin de partie.
+	local routes = 0
+	local income = 0
+	for root, stationCount in clusterStations do
+		local factories = clusterFactoryCount[root] or 0
+		local levels = clusterFactoryLevels[root] or 0
+		if factories > 0 and stationCount > 1 then
+			local links = stationCount - 1
+
+			--[[
+				Deux effets distincts, et c'est tout l'interet de la mecanique.
+
+				  etalement — poser une SECONDE usine dans la meme grappe suit un
+				  rendement decroissant : la deuxieme n'apporte que la moitie de
+				  la premiere. Mieux vaut aller fonder un second reseau ailleurs.
+
+				  empilement — MONTER une usine d'un niveau est strictement
+				  lineaire : niveau 2 produit exactement le double du niveau 1.
+				  Le frein n'est pas ici, il est dans le prix, qui double a chaque
+				  exemplaire. Doubler le cout *et* raboter le rendement revenait a
+				  freiner deux fois, et rendait l'amelioration toujours perdante
+				  face a une construction neuve.
+			]]
+			local k = Config.RAIL_FACTORY_SOFTCAP
+			local spread = (factories / (factories + k)) * (1 + k)
+			local stacking = levels / factories -- niveau moyen : lineaire
+			local yield = spread * stacking
+
+			routes += links
+			income += Config.GOLD_PER_FACTORY_ROUTE * links * yield
+		end
+	end
+
+	ps.railRoutes = routes
+	ps.railIncome = income
+
+	-- 5. Liens repliques. Seules les usines portent des voies visibles : dessiner
+	-- chaque arete deux fois doublerait la geometrie pour rien.
+	for i = 1, count do
+		local index = stations[i]
+		local building = self.buildings[index]
+		if building and building.kind == B.FACTORY then
+			local links = neighborsOf[i]
+			table.sort(links)
+
+			local changed = #links ~= #building.links
+			if not changed then
+				for k, other in links do
+					if building.links[k] ~= other then
+						changed = true
+						break
+					end
+				end
+			end
+
+			if changed then
+				building.links = links
+				self.buildingDirty[index] = true
+			end
 		end
 	end
 end
+
+-- Ancien nom, conserve : les appelants ne savent pas qu'un reseau a remplace
+-- des routes en etoile, et n'ont pas besoin de le savoir.
+GameState.refreshFactoryLinks = GameState.refreshRailNetwork
+
+--[[
+	Etat courant du reseau : (liaisons, or par tick).
+
+	Simple lecture d'un cache. Avant, cette fonction balayait tous les batiments
+	a chaque appel — et elle etait appelee une fois par joueur et par tick dans
+	l'economie, plus une fois par joueur dans la replication.
+]]
+function GameState.logisticsFor(self: GameState, slot: number): (number, number)
+	local ps = self.players[slot]
+	if not ps then
+		return 0, 0
+	end
+	return ps.railRoutes, ps.railIncome
+end
+
+-- Types de batiments qui font partie du reseau ferroviaire. Toute modification
+-- de l'un d'eux invalide les grappes du proprietaire.
+local IS_STATION = {
+	[B.CITY] = true,
+	[B.CAPITAL] = true,
+	[B.PORT] = true,
+	[B.FACTORY] = true,
+}
 
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
@@ -549,17 +654,25 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
 	end
-	if kind == B.CITY or kind == B.FACTORY then
-		self:refreshFactoryLinks(slot)
-	end
-	if kind == B.CITY or kind == B.CAPITAL then
-		self:refreshSupplyHubs(slot)
+	if IS_STATION[kind] then
+		self:refreshRailNetwork(slot)
 	end
 end
 
-function GameState.upgradeCity(self: GameState, index: number): number?
+--[[
+	Fait monter un batiment d'un niveau.
+
+	Generique : la ville a ses paliers nommes, le port et l'usine un simple
+	multiplicateur. Les autres types n'ont pas de niveau superieur — cliquer a
+	cote d'un bunker existant pose un second bunker, ce qui est le comportement
+	attendu pour un batiment dont l'effet est une aire et non une intensite.
+]]
+function GameState.upgradeBuilding(self: GameState, index: number): number?
 	local building = self.buildings[index]
-	if not building or building.kind ~= B.CITY or building.level >= Config.CITY_MAX_LEVEL then
+	if not building or not BuildingDefs.isUpgradable(building.kind) then
+		return nil
+	end
+	if building.level >= BuildingDefs.maxLevel(building.kind) then
 		return nil
 	end
 
@@ -567,8 +680,16 @@ function GameState.upgradeCity(self: GameState, index: number): number?
 	building.level += 1
 	self:countBuilding(building.slot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+
+	-- Le niveau d'une usine pese sur le rendement de sa grappe.
+	if building.kind == B.FACTORY then
+		self:refreshRailNetwork(building.slot)
+	end
 	return building.level
 end
+
+-- Ancien nom : le banc d'essai et les bots l'appellent encore.
+GameState.upgradeCity = GameState.upgradeBuilding
 
 function GameState.transferBuilding(self: GameState, index: number, newSlot: number)
 	local building = self.buildings[index]
@@ -580,13 +701,9 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
-	if building.kind == B.CITY or building.kind == B.FACTORY then
-		self:refreshFactoryLinks(previousSlot)
-		self:refreshFactoryLinks(newSlot)
-	end
-	if building.kind == B.CITY or building.kind == B.CAPITAL then
-		self:refreshSupplyHubs(previousSlot)
-		self:refreshSupplyHubs(newSlot)
+	if IS_STATION[building.kind] then
+		self:refreshRailNetwork(previousSlot)
+		self:refreshRailNetwork(newSlot)
 	end
 end
 
@@ -603,11 +720,8 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
-	if previousKind == B.CITY or previousKind == B.FACTORY then
-		self:refreshFactoryLinks(previousSlot)
-	end
-	if previousKind == B.CITY or previousKind == B.CAPITAL then
-		self:refreshSupplyHubs(previousSlot)
+	if IS_STATION[previousKind] then
+		self:refreshRailNetwork(previousSlot)
 	end
 end
 
@@ -681,11 +795,13 @@ function GameState.addPlayer(
 		cityPopBonus = 0,
 		cityGoldBonus = 0,
 		portCount = 0,
+		portLevels = 0,
 		siloCount = 0,
 		samCount = 0,
 		capitalCount = 0,
 		capitalTile = nil,
-		hubs = {},
+		railRoutes = 0,
+		railIncome = 0,
 		era = 1,
 		buildingCounts = {},
 		betrayals = betrayals,
@@ -698,6 +814,7 @@ function GameState.addPlayer(
 	}
 	self.players[slot] = state
 	self.alliances[slot] = {}
+	self.allianceCooldowns[slot] = {}
 	self.requests[slot] = {}
 	self.embargoes[slot] = {}
 
@@ -776,6 +893,10 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 	self.alliances[slot] = nil
+	for _, set in self.allianceCooldowns do
+		set[slot] = nil
+	end
+	self.allianceCooldowns[slot] = nil
 	self.requests[slot] = nil
 	self.embargoes[slot] = nil
 
@@ -789,56 +910,73 @@ end
 
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
 	local set = self.alliances[a]
-	return set ~= nil and set[b] == true
+	return set ~= nil and set[b] ~= nil
+end
+
+--=============================================================================
+-- Frein a l'emballement
+--=============================================================================
+
+--[[
+	Taille a partir de laquelle un empire compte comme "grand", en tuiles.
+
+	Exprimee en part des terres et non en valeur absolue : la meme regle doit
+	fonctionner sur une carte a 15 000 tuiles de terre et sur une carte deux fois
+	plus grande.
+]]
+function GameState.largeEmpireMidpoint(self: GameState): number
+	return math.max(1, self.landCount * Config.LARGE_EMPIRE_MIDPOINT_RATIO)
+end
+
+local function sigmoid(x: number, k: number, midpoint: number): number
+	return 1 / (1 + math.exp(-k * (x - midpoint)))
+end
+
+--[[
+	Multiplicateur de defense d'une faction selon sa taille.
+
+	Vaut 1 pour un petit empire et descend vers LARGE_DEFENDER_FLOOR pour un
+	empire immense. C'est la piece maitresse du frein a l'emballement : le geant
+	n'est pas empeche de grossir, il devient **une cible**. Un empire qui tient
+	la moitie de la carte defend chaque tuile 30 % moins bien que son voisin a
+	trois cents tuiles, ce qui donne enfin une raison mecanique de l'attaquer.
+
+	La transition est une sigmoide, donc continue : aucun palier a partir duquel
+	un joueur "bascule", rien a optimiser en restant juste en dessous d'un seuil.
+]]
+function GameState.sizeDefenseFactor(self: GameState, ps: PlayerState): number
+	local midpoint = self:largeEmpireMidpoint()
+	local k = math.log(2) / math.max(1, midpoint * Config.LARGE_EMPIRE_SPREAD)
+	local small = 1 - sigmoid(ps.tiles, k, midpoint)
+	local floor = Config.LARGE_DEFENDER_FLOOR
+	return floor + (1 - floor) * small
+end
+
+--[[
+	Ralentissement de conquete d'un gros attaquant, et sa compensation.
+
+	Renvoie (facteur de vitesse, facteur de cout), tous deux dans ]0, 1].
+
+	Le second point est ce qui rend la regle jouable. Punir le geant sur les deux
+	tableaux — plus lent *et* plus cher — reviendrait a faire du jeu une course a
+	rester deuxieme, et un joueur qui prend l'avantage n'aurait plus qu'a subir.
+	Ici il conquiert moins cher en troupes mais nettement moins vite : son
+	avance se paie en temps, pas en impuissance, et ce temps est exactement ce
+	qu'il faut aux autres pour reagir.
+]]
+function GameState.sizeAttackFactors(self: GameState, ps: PlayerState): (number, number)
+	local threshold = self:largeEmpireMidpoint() * Config.LARGE_ATTACKER_THRESHOLD_RATIO
+	if ps.tiles <= threshold then
+		return 1, 1
+	end
+
+	local ratio = threshold / ps.tiles
+	local speed = math.max(Config.LARGE_ATTACKER_SPEED_FLOOR, ratio ^ Config.LARGE_ATTACKER_SPEED_EXPONENT)
+	local cost = ratio ^ Config.LARGE_ATTACKER_COST_EXPONENT
+	return speed, cost
 end
 
 -- Cout en troupes pour absorber une tuile donnee.
---[[
-	Penalite de ravitaillement : multiplicateur du cout de conquete selon la
-	distance au centre de ravitaillement le plus proche de l'assaillant.
-
-	C'est le frein systemique a l'emballement. Sans lui, plus un empire est
-	gros, plus il lui est facile de grossir, et la partie se decide dans les
-	premieres minutes. Avec, chaque conquete lointaine coute de plus en plus
-	cher jusqu'a devenir impossible — a moins d'investir dans une ville qui
-	deplace la frontiere du ravitaillement.
-
-	Le cout est en O(centres), soit une poignee d'iterations : la liste est
-	maintenue a l'incrementale et ne contient que capitales et villes.
-]]
-function GameState.supplyPenalty(self: GameState, slot: number, index: number): number
-	local ps = self.players[slot]
-	if not ps then
-		return 1
-	end
-
-	-- Plus aucun centre : l'empire est decapite, il ne conquiert plus rien
-	-- au-dela de ce qu'il tient deja.
-	if #ps.hubs == 0 then
-		return Config.SUPPLY_MAX_PENALTY
-	end
-
-	local x, y = MapGen.fromIndex(index)
-	local closest = math.huge
-
-	for _, hub in ps.hubs do
-		local hx, hy = MapGen.fromIndex(hub)
-		local dx, dy = hx - x, hy - y
-		local distance = dx * dx + dy * dy
-		if distance < closest then
-			closest = distance
-		end
-	end
-
-	local beyond = math.sqrt(closest) - Config.SUPPLY_FREE_RANGE
-	if beyond <= 0 then
-		return 1
-	end
-
-	local penalty = 1 + (beyond / Config.SUPPLY_FALLOFF) ^ Config.SUPPLY_EXPONENT
-	return math.min(penalty, Config.SUPPLY_MAX_PENALTY)
-end
-
 function GameState.tileCost(self: GameState, index: number, attackerSlot: number, defender: PlayerState?): number
 	local terrain = buffer.readu8(self.terrain, index)
 	local cost = Config.TILE_BASE_COST * Config.TERRAIN_COST[terrain]
@@ -850,6 +988,9 @@ function GameState.tileCost(self: GameState, index: number, attackerSlot: number
 		cost *= 1 + density * Config.DEFENSE_DENSITY_K
 		cost *= Doctrines.get(defender.doctrine).defense
 		cost *= Eras.accumulate(defender.era).defense
+		-- Un empire immense defend moins bien chaque tuile : voir
+		-- sizeDefenseFactor. C'est ce qui fait du leader une cible.
+		cost *= self:sizeDefenseFactor(defender)
 	else
 		cost *= Config.NEUTRAL_COST_MULT
 	end
@@ -859,9 +1000,13 @@ function GameState.tileCost(self: GameState, index: number, attackerSlot: number
 
 	cost /= self:doctrineOf(attackerSlot).attack
 
-	-- Eloignement du ravitaillement : applique en dernier, apres tous les
-	-- modificateurs, pour qu'il plafonne bien le cout total.
-	cost *= self:supplyPenalty(attackerSlot, index)
+	-- Compensation du gros attaquant : il paie moins par tuile, mais il avance
+	-- beaucoup plus lentement (applique dans stepAttacks).
+	local attacker = self.players[attackerSlot]
+	if attacker then
+		local _, costFactor = self:sizeAttackFactors(attacker)
+		cost *= costFactor
+	end
 
 	return cost
 end
@@ -970,7 +1115,100 @@ function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSl
 	})
 end
 
+--[[
+	Seuil d'effondrement, en tuiles.
+
+	Sous ce seuil une faction attaquee ne se defend plus : elle est repartie
+	entre ses voisins. Sans cette regle la carte se termine avec des factions a
+	trois tuiles qui ne peuvent plus rien faire mais ne meurent jamais — la
+	simulation en produisait quatre a la fois, et c'est exactement ce qui vidait
+	le milieu de partie.
+]]
+function GameState.collapseThreshold(self: GameState): number
+	return math.max(Config.COLLAPSE_MIN_TILES, self.landCount * Config.COLLAPSE_TILE_RATIO)
+end
+
+--[[
+	Demantele une faction agonisante.
+
+	Les tuiles au contact de l'assaillant lui reviennent ; celles qui ne
+	touchent que d'autres voisins hostiles vont a ces voisins. On repete jusqu'a
+	ce que plus rien ne bouge : une poche isolee au milieu du territoire d'un
+	tiers lui revient donc, ce qui evite les enclaves fantomes.
+
+	Un balayage complet de la carte, mais une seule fois dans la vie d'une
+	faction : c'est le seul endroit du moteur ou l'on n'a pas de liste de tuiles
+	par joueur, et en construire une en permanence couterait bien plus cher que
+	ce balayage ponctuel.
+]]
+function GameState.collapseFaction(self: GameState, victimSlot: number, captorSlot: number)
+	local remaining: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(self.owner, index) == victimSlot then
+			table.insert(remaining, index)
+		end
+	end
+	if #remaining == 0 then
+		return
+	end
+
+	local collapseScratch = table.create(4, 0)
+
+	for _ = 1, Config.COLLAPSE_MAX_PASSES do
+		local leftovers: { number } = {}
+		local progressed = false
+
+		for _, index in remaining do
+			if buffer.readu8(self.owner, index) ~= victimSlot then
+				continue
+			end
+
+			local n = MapGen.neighbors(index, collapseScratch)
+			local heir = NEUTRAL
+			for i = 1, n do
+				local nb = collapseScratch[i]
+				local owner = buffer.readu8(self.owner, nb)
+				if owner == captorSlot then
+					heir = captorSlot
+					break
+				end
+				if
+					heir == NEUTRAL
+					and owner ~= NEUTRAL
+					and owner ~= victimSlot
+					and self.players[owner]
+					and not self:areAllied(owner, victimSlot)
+				then
+					heir = owner
+				end
+			end
+
+			if heir ~= NEUTRAL then
+				self:setOwner(index, heir)
+				progressed = true
+			else
+				table.insert(leftovers, index)
+			end
+		end
+
+		remaining = leftovers
+		if #remaining == 0 or not progressed then
+			break
+		end
+	end
+
+	-- Ce qui n'a aucun voisin hostile — une ile, une enclave alliee — retourne
+	-- au neutre plutot que de rester la propriete d'un mort.
+	for _, index in remaining do
+		if buffer.readu8(self.owner, index) == victimSlot then
+			self:setOwner(index, NEUTRAL)
+		end
+	end
+end
+
 function GameState.stepAttacks(self: GameState)
+	local collapsing: { { victim: number, captor: number } } = {}
+
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
 		local attacker = self.players[atk.attacker]
@@ -981,11 +1219,15 @@ function GameState.stepAttacks(self: GameState)
 			continue
 		end
 
-		local budget = atk.troops * Config.ATTACK_SPEND_RATE
+		-- Un empire immense avance beaucoup plus lentement : son avance se paie
+		-- en temps. Voir sizeAttackFactors.
+		local speedFactor = select(1, self:sizeAttackFactors(attacker))
+		local budget = atk.troops * Config.ATTACK_SPEND_RATE * speedFactor
+		local tileLimit = math.max(1, math.floor(Config.MAX_TILES_PER_TICK * speedFactor))
 		local captured = 0
 		local spent = 0
 
-		while spent < budget and captured < Config.MAX_TILES_PER_TICK do
+		while spent < budget and captured < tileLimit do
 			local index = next(atk.frontier)
 			if not index then
 				break
@@ -1023,9 +1265,27 @@ function GameState.stepAttacks(self: GameState)
 			end
 		end
 
+		-- Effondrement : des que le defenseur passe sous le seuil, il cesse
+		-- d'exister comme puissance. On enregistre pour traiter apres la boucle,
+		-- parce que collapseFaction appelle setOwner en masse et invaliderait
+		-- les frontieres qu'on est en train de parcourir.
+		if defender and defender.tiles > 0 and defender.tiles < self:collapseThreshold() then
+			table.insert(collapsing, { victim = atk.target, captor = atk.attacker })
+		end
+
 		if atk.troops <= 0 or next(atk.frontier) == nil then
 			attacker.troops += math.max(0, atk.troops) -- les survivants rentrent
 			table.remove(self.attacks, i)
+		end
+	end
+
+	for _, entry in collapsing do
+		local victim = self.players[entry.victim]
+		if victim and victim.tiles > 0 and victim.tiles < self:collapseThreshold() then
+			if not victim.isBot then
+				self:notify(`\u{1F3F3} {victim.name} s'effondre : son territoire est partage.`, "alert")
+			end
+			self:collapseFaction(entry.victim, entry.captor)
 		end
 	end
 end
@@ -1034,28 +1294,15 @@ end
 -- Population et economie
 --=============================================================================
 
-function GameState.maxTroops(self: GameState, ps: PlayerState): number
-	return Config.BASE_MAX_TROOPS + ps.tiles * Config.MAX_TROOPS_PER_TILE + ps.cityPopBonus
-end
+--[[
+	Plafond de troupes.
 
--- Nombre de factions avec qui le commerce maritime est effectivement ouvert.
-function GameState.tradePartners(self: GameState, ps: PlayerState): number
-	if ps.portCount == 0 then
-		return 0
-	end
-	local myEmbargoes = self.embargoes[ps.slot]
-	local count = 0
-	for slot, other in self.players do
-		if slot ~= ps.slot and other.portCount > 0 then
-			local blockedByMe = myEmbargoes and myEmbargoes[slot]
-			local theirEmbargoes = self.embargoes[slot]
-			local blockedByThem = theirEmbargoes and theirEmbargoes[ps.slot]
-			if not blockedByMe and not blockedByThem then
-				count += 1
-			end
-		end
-	end
-	return count
+	La part territoriale est sous-lineaire, la part urbaine ne l'est pas : c'est
+	ce couple qui decide de la forme des empires. Voir Config.MAX_TROOPS_TILE_EXPONENT.
+]]
+function GameState.maxTroops(self: GameState, ps: PlayerState): number
+	local fromLand = Config.MAX_TROOPS_TILE_SCALE * ps.tiles ^ Config.MAX_TROOPS_TILE_EXPONENT
+	return Config.BASE_MAX_TROOPS + fromLand + ps.cityPopBonus
 end
 
 function GameState.stepEconomy(self: GameState)
@@ -1075,9 +1322,11 @@ function GameState.stepEconomy(self: GameState)
 		local income = territorial
 			+ ps.cityGoldBonus
 			+ logisticsIncome
-			+ ps.portCount * Config.GOLD_PER_PORT
+			+ ps.portLevels * Config.GOLD_PER_PORT
 			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
-			+ self:tradePartners(ps) * Config.TRADE_GOLD_PER_PARTNER
+		-- L'or du commerce maritime n'apparait pas ici : il est verse a
+		-- l'arrivee de chaque convoi, dans Navy. Le compter aussi au tick le
+		-- payait deux fois et rendait la piraterie sans effet sur le tresor.
 		local modeGold = if self.mode then self.mode.goldMultiplier else 1
 		local humanGold = if ps.isBot then 1 else Config.HUMAN_GOLD_MULTIPLIER
 		ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold

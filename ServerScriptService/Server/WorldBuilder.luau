@@ -33,19 +33,23 @@ local OCEAN = Config.TERRAIN.OCEAN
 local WorldBuilder = {}
 
 --[[
-	Cle de fusion cote serveur : le relief seul. On ignore volontairement le
-	proprietaire, puisque la collision n'a pas de couleur — ce qui donne
-	beaucoup moins de blocs que la version visuelle du client.
+	Cle de fusion cote serveur : la hauteur seule. On ignore volontairement le
+	proprietaire ET le type de terrain, puisqu'une collision invisible n'a ni
+	couleur ni matiere — ce qui donne beaucoup moins de blocs que la version
+	visuelle du client.
 ]]
 function WorldBuilder.blocksFor(terrain: buffer): { GreedyMesh.Rect }
 	--[[
 		La cle est la **hauteur**, pas le type de terrain.
 
 		Une collision invisible n'a ni couleur ni matiere : deux terrains de
-		meme altitude sont interchangeables. Fusionner par type separait
-		inutilement plaines et savane, qui sont a la meme hauteur — la
-		replication initiale passait de quelques centaines de blocs a plus de
-		trois mille.
+		meme altitude sont interchangeables. Depuis que la carte est plate, cette
+		cle est constante sur toute la terre ferme et le continent fusionne en
+		quelques centaines de dalles au lieu de trois mille cinq cents.
+
+		On renvoie quand meme la hauteur plutot qu'un simple marqueur : build()
+		lit `rect.key` comme altitude, et remettre du relief un jour ne
+		demanderait alors aucun autre changement ici.
 	]]
 	local function keyAt(x: number, y: number): number?
 		local kind = buffer.readu8(terrain, MapGen.toIndex(x, y))

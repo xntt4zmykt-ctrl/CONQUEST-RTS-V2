@@ -23,6 +23,7 @@ local Navy = require(script.Parent.Navy)
 local Nukes = require(script.Parent.Nukes)
 local Diplomacy = require(script.Parent.Diplomacy)
 local Research = require(script.Parent.Research)
+local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 
 type GameState = GameState.GameState
 
@@ -214,21 +215,26 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 	return sites
 end
 
-local function tryUpgradeCity(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
+local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
 	if ps.era < 2 or rng:NextNumber() > 0.32 then
 		return false
 	end
 
-	-- On ameliore d'abord la ville la moins developpee : les empires bots
+	-- On ameliore d'abord le batiment le moins developpe : les empires bots
 	-- produisent ainsi plusieurs centres regionaux au lieu d'une seule tour
 	-- geante et d'une couronne de villages.
+	--
+	-- Tous les types a paliers sont candidats, pas seulement la ville : un port
+	-- ou une usine de niveau 3 valent trois exemplaires sans occuper trois
+	-- emplacements, et sans cette boucle les niveaux resteraient du contenu mort
+	-- dans toutes les parties contre l'IA.
 	local bestIndex: number? = nil
-	local bestLevel = Config.CITY_MAX_LEVEL + 1
+	local bestLevel = math.huge
 	for index, building in state.buildings do
 		if
 			building.slot == ps.slot
-			and building.kind == B.CITY
-			and building.level < Config.CITY_MAX_LEVEL
+			and BuildingDefs.isUpgradable(building.kind)
+			and building.level < BuildingDefs.maxLevel(building.kind)
 			and building.level < bestLevel
 		then
 			bestIndex = index
@@ -239,11 +245,11 @@ local function tryUpgradeCity(state: GameState, ps: GameState.PlayerState, reser
 		return false
 	end
 
-	local price = Buildings.cityUpgradePrice(state, ps.slot, bestIndex)
+	local price = Buildings.upgradePrice(state, ps.slot, bestIndex)
 	if ps.gold - reserve < price then
 		return false
 	end
-	local ok = Buildings.upgradeCity(state, ps.slot, bestIndex)
+	local ok = Buildings.upgradeAt(state, ps.slot, bestIndex)
 	return ok
 end
 
@@ -267,7 +273,7 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 
 	local cityCount = ps.buildingCounts[B.CITY] or 0
 	local enoughCitiesForEra = (ps.era == 2 and cityCount >= 3) or (ps.era >= 3 and cityCount >= 6)
-	if enoughCitiesForEra and tryUpgradeCity(state, ps, reserve, rng) then
+	if enoughCitiesForEra and tryUpgradeBuilding(state, ps, reserve, rng) then
 		return
 	end
 
@@ -346,14 +352,54 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	end
 
 	local allies = state.alliances[slot] or {}
+	local leader, coalitionActive = dominantLeader(state)
+	local threatened = coalitionActive and leader ~= slot
+
+	--[[
+		Coalition anti-leader.
+
+		Ces deux comportements etaient decrits dans Config depuis le debut mais
+		n'avaient jamais ete branches : COALITION_ALLY_CHANCE et
+		COALITION_EMBARGO_CHANCE etaient des constantes mortes, et seul le choix
+		de cible d'attaque tenait compte du leader. Resultat, rien n'organisait
+		les faibles entre eux — chacun se contentait de proposer un pacte au plus
+		fort, c'est-a-dire souvent au leader lui-meme, ce qui le protegeait au
+		lieu de le contenir.
+	]]
+	if threatened and leader then
+		-- L'embargo est le seul levier qui coute au leader sans exposer de
+		-- troupes : c'est ce qui rend la coalition jouable pour un petit.
+		local myEmbargoes = state.embargoes[slot]
+		if not (myEmbargoes and myEmbargoes[leader]) and rng:NextNumber() < Config.COALITION_EMBARGO_CHANCE then
+			Diplomacy.setEmbargo(state, slot, leader, true)
+		end
+
+		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
+			for other, ps2 in state.players do
+				if other ~= slot and other ~= leader and not allies[other] then
+					Diplomacy.request(state, slot, other)
+					return
+				end
+			end
+		end
+	end
 
 	-- Trahison : le bot rompt quand son allie est devenu nettement plus faible
 	-- que lui et qu'ils partagent une frontiere. C'est exactement le calcul
 	-- qu'un humain fait, rendu visible.
+	--
+	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
+	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
 	for ally in allies do
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
-		if theirs > 0 and mine > theirs * 2.2 and rng:NextNumber() < 0.25 then
+		local protectedByCoalition = threatened and ally ~= leader
+		if
+			not protectedByCoalition
+			and theirs > 0
+			and mine > theirs * 2.2
+			and rng:NextNumber() < 0.25
+		then
 			local contacts = neighborFactions(state, slot)
 			if contacts[ally] and contacts[ally] > 4 then
 				Diplomacy.breakAlliance(state, slot, ally)
@@ -363,10 +409,12 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	end
 
 	-- Proposer une alliance a un voisin plus fort : la peur cree les pactes.
+	-- Jamais au leader quand une coalition est active : s'abriter derriere le
+	-- geant revient a lui offrir la partie.
 	if rng:NextNumber() < 0.3 then
 		local contacts = neighborFactions(state, slot)
 		for other in contacts do
-			if other ~= NEUTRAL and not allies[other] then
+			if other ~= NEUTRAL and not allies[other] and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
 					Diplomacy.request(state, slot, other)
 					return

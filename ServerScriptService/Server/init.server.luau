@@ -28,6 +28,7 @@ local Buildings = require(script.Buildings)
 local Navy = require(script.Navy)
 local Nukes = require(script.Nukes)
 local Diplomacy = require(script.Diplomacy)
+local Leaderstats = require(script.Leaderstats)
 local Persistence = require(script.Persistence)
 local Research = require(script.Research)
 local WorldBuilder = require(script.WorldBuilder)
@@ -149,52 +150,12 @@ end
 --[[
 	Classement Roblox natif.
 
-	Le jeu a deja son propre classement a l'ecran, mais celui de Roblox — la
-	liste ouverte par Tab, ou par le bouton en haut a droite sur mobile — est
-	celui que les joueurs consultent par reflexe, et le seul visible depuis le
-	menu d'echappement. Y publier le territoire et l'armee coute deux IntValue
-	par joueur et rend la partie lisible sans ouvrir aucun panneau du jeu.
-
-	Roblox impose le nom `leaderstats` et lit les valeurs enfants dans l'ordre
-	de creation : territoire d'abord, puisque c'est lui qui decide la victoire.
+	La logique vit dans le module Leaderstats : les contraintes de l'API Roblox
+	y sont documentees, et le module est couvert par le banc d'essai, alors que
+	ce fichier-ci en est exclu.
 ]]
-local function ensureLeaderstats(player: Player): Folder
-	local existing = player:FindFirstChild("leaderstats")
-	if existing and existing:IsA("Folder") then
-		return existing
-	end
-
-	local folder = Instance.new("Folder")
-	folder.Name = "leaderstats"
-
-	local tiles = Instance.new("IntValue")
-	tiles.Name = "Territoires"
-	tiles.Parent = folder
-
-	local troops = Instance.new("IntValue")
-	troops.Name = "Troupes"
-	troops.Parent = folder
-
-	folder.Parent = player
-	return folder
-end
-
 local function updateLeaderstats()
-	for player, slot in slotByPlayer do
-		local ps = state.players[slot]
-		if not ps then
-			continue
-		end
-		local folder = ensureLeaderstats(player)
-		local tiles = folder:FindFirstChild("Territoires")
-		local troops = folder:FindFirstChild("Troupes")
-		if tiles and tiles:IsA("IntValue") then
-			tiles.Value = ps.tiles
-		end
-		if troops and troops:IsA("IntValue") then
-			troops.Value = math.floor(ps.troops)
-		end
-	end
+	Leaderstats.publish(state, slotByPlayer)
 end
 
 local function playerForSlot(slot: number): Player?
@@ -551,7 +512,7 @@ upgradeBuildingOrder.OnServerEvent:Connect(function(player: Player, index: any)
 	if not isInteger(index) then
 		return
 	end
-	local ok, message = Buildings.upgradeCity(state, slot, index)
+	local ok, message = Buildings.upgradeAt(state, slot, index)
 	reply(player, ok, message)
 end)
 

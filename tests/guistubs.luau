@@ -28,9 +28,17 @@ local function makeSignal()
 	function signal:Wait()
 		return nil
 	end
-	-- Utilise par les tests pour declencher un evenement a la main.
+	--[[
+		Utilise par les tests pour declencher un evenement a la main.
+
+		On itere une copie : un gestionnaire qui se connecte ou se deconnecte
+		pendant la diffusion mutait la liste en cours de parcours, et le banc
+		pouvait alors appeler un gestionnaire pose une microseconde plus tot.
+		Roblox ne se comporte pas ainsi, donc le bouchon ne doit pas non plus.
+	]]
 	function signal:Fire(...)
-		for _, fn in self.handlers do
+		local snapshot = table.clone(self.handlers)
+		for _, fn in snapshot do
 			fn(...)
 		end
 	end
@@ -140,8 +148,22 @@ InstanceMT.__index = function(t, key)
 	if key == "Parent" then
 		return rawget(t, "_parent")
 	end
-	-- Les proprietes jamais ecrites valent nil, comme une valeur par defaut
-	-- non pertinente pour le test.
+	--[[
+		AbsoluteSize a une valeur par defaut, contrairement aux autres.
+
+		C'est une propriete calculee par le moteur de rendu : elle n'est jamais
+		ecrite par le code, mais elle n'est jamais nil non plus. La laisser a nil
+		faisait planter tout code qui borne une position a l'ecran — un cas
+		parfaitement legitime que le banc devait pouvoir exercer.
+	]]
+	if key == "AbsoluteSize" then
+		return Vector2.new(1280, 720)
+	end
+	if key == "AbsolutePosition" then
+		return Vector2.new(0, 0)
+	end
+	-- Les autres proprietes jamais ecrites valent nil, comme une valeur par
+	-- defaut non pertinente pour le test.
 	return nil
 end
 
