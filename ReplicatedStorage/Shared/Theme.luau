@@ -17,33 +17,41 @@ local Theme = {}
 -- Couleurs
 --=============================================================================
 
+--[[
+	Palette du jeu de reference (OpenFront), relevee dans sa base de code
+	publique : gris ardoise Tailwind pour les surfaces, et les deux bleus de
+	sa charte — "malibu" pour l'action, "aquarius" pour l'information.
+
+	Les noms de jetons ne changent pas : seules les valeurs bougent, donc
+	aucun ecran n'a a etre reecrit pour suivre le nouveau style.
+]]
 Theme.color = {
 	-- Fonds, du plus profond au plus clair
-	void = Color3.fromRGB(5, 9, 16), -- derriere la carte
-	surface = Color3.fromRGB(10, 17, 28), -- panneaux
-	surfaceRaised = Color3.fromRGB(18, 29, 45), -- boutons, lignes
-	surfaceHover = Color3.fromRGB(28, 48, 68),
-	surfaceBright = Color3.fromRGB(36, 58, 77),
-	glass = Color3.fromRGB(8, 15, 25),
+	void = Color3.fromRGB(3, 7, 18), -- derriere la carte (gray-950)
+	surface = Color3.fromRGB(31, 41, 55), -- panneaux (gray-800, pose a 92 %)
+	surfaceRaised = Color3.fromRGB(55, 65, 81), -- boutons, lignes (gray-700)
+	surfaceHover = Color3.fromRGB(75, 85, 99), -- survol (gray-600)
+	surfaceBright = Color3.fromRGB(107, 114, 128), -- (gray-500)
+	glass = Color3.fromRGB(17, 24, 39), -- rails de jauge (gray-900)
 
 	-- Bordures
-	line = Color3.fromRGB(47, 72, 93),
-	lineStrong = Color3.fromRGB(92, 136, 155),
+	line = Color3.fromRGB(75, 85, 99), -- gray-600
+	lineStrong = Color3.fromRGB(100, 116, 139), -- slate-500
 
 	-- Texte
-	text = Color3.fromRGB(239, 247, 250),
-	textMuted = Color3.fromRGB(156, 183, 194),
-	textFaint = Color3.fromRGB(101, 132, 146),
+	text = Color3.fromRGB(255, 255, 255),
+	textMuted = Color3.fromRGB(209, 213, 219), -- gray-300
+	textFaint = Color3.fromRGB(156, 163, 175), -- gray-400
 
 	-- Accents semantiques
-	accent = Color3.fromRGB(45, 194, 177), -- identite Blackline / action active
-	accentSoft = Color3.fromRGB(24, 92, 93),
-	gold = Color3.fromRGB(246, 193, 77), -- ressource
-	ally = Color3.fromRGB(86, 218, 153), -- diplomatie positive
-	danger = Color3.fromRGB(255, 94, 91),
-	warning = Color3.fromRGB(255, 180, 69),
-	info = Color3.fromRGB(102, 178, 242),
-	nuclear = Color3.fromRGB(195, 255, 119),
+	accent = Color3.fromRGB(0, 132, 209), -- malibu : action active, selection
+	accentSoft = Color3.fromRGB(14, 78, 126), -- malibu assombri : fonds actifs
+	gold = Color3.fromRGB(250, 204, 21), -- yellow-400 : ressource
+	ally = Color3.fromRGB(74, 222, 128), -- green-400 : diplomatie positive
+	danger = Color3.fromRGB(248, 113, 113), -- red-400
+	warning = Color3.fromRGB(251, 146, 60), -- orange-400
+	info = Color3.fromRGB(63, 169, 245), -- aquarius : information, troupes
+	nuclear = Color3.fromRGB(163, 230, 53), -- lime-400
 }
 
 --=============================================================================

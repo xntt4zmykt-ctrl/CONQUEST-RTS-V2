@@ -5,3 +5,4 @@
 .DS_Store
 tests/.bundle-*.luau
 design/conquest-hud-refonte.html
+.refs/

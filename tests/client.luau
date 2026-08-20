@@ -308,7 +308,7 @@ end)
 	permanent se retrouve derriere un sous-menu que plus personne n'ouvre. Rien
 	de tout cela ne leve d'erreur, et tout cela se voit en jeu.
 ]]
-check("disposition : bandeau en haut, rien en bas, aucun classement maison", function()
+check("disposition : panneau de controle en bas, aucun classement maison", function()
 	--[[
 		1. Aucun classement maison, sous aucune forme.
 
@@ -329,7 +329,14 @@ check("disposition : bandeau en haut, rien en bas, aucun classement maison", fun
 		assert(node.Name ~= "Leaderboard", "le panneau de classement est encore dans l'arbre")
 	end
 
-	--- 2. Plus rien de permanent en bas d'ecran. ---------------------------
+	--- 2. Le bas d'ecran n'appartient qu'au panneau de controle. ------------
+	-- La rangee de modes, elle, ne doit exister que sur tactile : ici le banc
+	-- simule un bureau, elle ne doit donc pas etre construite.
+	assert(hud.controlPanel ~= nil, "le panneau de controle n'est pas construit")
+	assert(
+		hud.controlPanel.AnchorPoint.X == 0.5 and hud.controlPanel.AnchorPoint.Y == 1,
+		"le panneau de controle n'est pas ancre en bas"
+	)
 	assert(hud.layers.bottom == nil, "le calque bas existe encore")
 	assert(next(hud.modeButtons) == nil, "la rangee de modes existe encore")
 	for _, node in hud.root:GetDescendants() do
@@ -337,12 +344,13 @@ check("disposition : bandeau en haut, rien en bas, aucun classement maison", fun
 		assert(node.Name ~= "Modes", "la rangee de modes est encore construite")
 	end
 
-	--- 3. L'engagement a suivi dans le bandeau du haut. ---------------------
+	--- 3. L'engagement vit dans le panneau de controle. ----------------------
 	local track = hud.ratioFill.Parent
-	assert(track.Parent == hud.playerBanner, "le curseur d'engagement n'est pas dans le bandeau")
-	-- Le libelle est POSE sur la jauge, pas a cote : c'est la forme du jeu de
-	-- reference, et la seule qui tienne dans une hauteur de ligne.
-	assert(hud.ratioReadout.Parent == track, "le libelle d'engagement n'est pas pose sur la jauge")
+	assert(track.Parent == hud.controlPanel, "le curseur d'engagement n'est pas dans le panneau de controle")
+	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
+	-- jeu de reference — la puce dit combien part, le curseur decide.
+	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
+	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
 	hud:setRatio(0.5)
 	assert(string.find(hud.ratioReadout.Text, "50 ") ~= nil, `engagement affiche "{hud.ratioReadout.Text}"`)

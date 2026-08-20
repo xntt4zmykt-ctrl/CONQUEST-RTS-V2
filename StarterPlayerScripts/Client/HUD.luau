@@ -1,25 +1,21 @@
 --!strict
 --[[
-	Interface de commandement.
+	Interface de commandement, calee sur la disposition du jeu de reference
+	(OpenFront) :
 
-	**Tout tient sur la bande superieure de l'ecran, en trois grappes.**
+	  haut gauche     la carte d'identite : nation, doctrine, territoire
+	  haut droit      la session : chrono, recherche, reglages
+	  bas centre      le panneau de controle : cadence, armee, or, engagement
+	  bas droit       le fil des evenements
 
-	  coin haut gauche   le classement, en tableau, toujours visible
-	  centre haut        le bandeau du joueur : or, croissance, armee, parc
-	  coin haut droit    la session : chrono, recherche, reglages
+	Le panneau de controle est le coeur de l'interface — deux lignes qui
+	repondent a "de quoi je dispose, la, maintenant" :
 
-	Le centre et le bas ne portent plus rien en permanence. C'est la seule
-	regle de disposition qui compte : le centre EST le jeu, et le bas de l'ecran
-	est la zone ou la souris se pose pour agir sur la carte.
+	  ligne 1   ce qui rentre : cadence de population, armee sur capacite, or
+	  ligne 2   ce qui part : le curseur d'engagement et le chiffre envoye
 
-	Ce que la disposition precedente y mettait a disparu ou a demenage :
-	  - la rangee de modes faisait doublon avec le menu radial du clic droit,
-	    qui pose les memes actions **sur la case visee** ; elle est supprimee.
-	  - le curseur d'engagement remonte dans le bandeau, contre l'etat des
-	    fronts : c'est la meme decision lue puis prise, au meme endroit.
-	  - le classement n'est plus un sous-menu qu'on ouvre. Savoir qui domine
-	    est une lecture permanente, pas une consultation ; seul le detail
-	    diplomatique reste replie, dans la ligne de la nation choisie.
+	Le centre de l'ecran ne porte rien en permanence : c'est la seule regle de
+	disposition qui compte, parce que le centre EST le jeu.
 
 	Tout le reste s'ouvre a la demande, et **un seul sous-menu a la fois** —
 	c'est la regle qui empeche l'interface de redevenir un empilement de douze
@@ -58,22 +54,25 @@ local MAX_FEED_ENTRIES = 3
 local FEED_ENTRY_HEIGHT = 21
 
 --[[
-	Geometrie, disposition OpenFront.
+	Geometrie, disposition du jeu de reference.
 
-	Les hauteurs sont derivees, jamais recopiees : le bandeau, le fil et le
-	briefing s'empilent sous la meme reference, donc changer BANNER_HEIGHT
-	deplace la pile entiere sans laisser un panneau en arriere.
+	Les hauteurs sont derivees, jamais recopiees : le panneau de controle, les
+	feuilles et la barre tactile s'empilent depuis la meme reference, donc
+	changer CONTROL_HEIGHT deplace la pile entiere sans laisser un panneau en
+	arriere.
 ]]
 
--- Bandeau du joueur, centre haut. Deux lignes, et une colonne d'engagement
--- separee a droite.
-local BANNER_WIDTH = 660
-local BANNER_HEIGHT = 62
-local BANNER_ENGAGEMENT = 132
-local BANNER_ROW1 = 9
-local BANNER_ROW2 = 33
--- Reference de la pile centrale : aide contextuelle, briefing puis fil.
-local BANNER_BOTTOM = S.md + BANNER_HEIGHT
+-- Panneau de controle, bas centre : deux lignes de commande et le parc.
+local CONTROL_WIDTH = 500
+local CONTROL_HEIGHT = 96
+local CONTROL_ROW_H = 24
+-- Ligne de basse que les feuilles a la demande ne franchissent jamais :
+-- panneau de controle + respiration.
+local DECK_BOTTOM = S.sm + CONTROL_HEIGHT + S.sm
+
+-- Carte d'identite, coin haut gauche.
+local IDENTITY_WIDTH = 210
+local IDENTITY_HEIGHT = 46
 
 -- Barre de session, coin haut droit, et la pile qu'elle amorce.
 local SESSION_WIDTH = 168
@@ -83,10 +82,8 @@ local SESSION_BOTTOM = S.md + SESSION_HEIGHT + S.xs + SESSION_ERA_HEIGHT + 16
 
 local SIDE_SHEET_WIDTH = 290
 local SHEET_WIDTH = 620
--- Les feuilles a la demande reviennent vers le bas de l'ecran, maintenant
--- qu'aucune barre permanente n'y reste : le bas est libre **par defaut**, pas
--- interdit.
-local SHEET_BOTTOM = S.xl
+-- Les feuilles s'ouvrent juste au-dessus du panneau de controle.
+local SHEET_BOTTOM = DECK_BOTTOM
 
 --[[
 	Nombre de tuiles de terre, denominateur du pourcentage de domination.
@@ -190,64 +187,6 @@ local function setSelected(b: TextButton, selected: boolean, accent: Color3?)
 end
 
 --[[
-	Separateur vertical entre deux groupes d'une meme barre.
-
-	`centerY` sert aux barres a plusieurs lignes : un filet centre sur le
-	panneau depasse au-dessus et en dessous de la ligne qu'il est cense couper,
-	et l'oeil le lit alors comme une colonne entiere.
-]]
-local function divider(parent: GuiObject, height: number, offsetX: number, centerY: number?)
-	local line = Instance.new("Frame")
-	line.Name = "Divider"
-	line.AnchorPoint = Vector2.new(0, 0.5)
-	line.Position = if centerY
-		then UDim2.fromOffset(offsetX, centerY)
-		else UDim2.new(0, offsetX, 0.5, 0)
-	line.Size = UDim2.fromOffset(1, height)
-	line.BackgroundColor3 = C.line
-	line.BorderSizePixel = 0
-	line.Parent = parent
-	return line
-end
-
---[[
-	Jauge dont l'etiquette est posee PAR-DESSUS, pas a cote.
-
-	C'est la forme du jeu de reference, et elle n'est pas qu'esthetique : le
-	chiffre et la barre parlent de la meme quantite, donc les separer oblige
-	l'oeil a faire l'aller-retour pour les rapprocher. Superposes, ils se lisent
-	d'un seul coup, et la ligne tient dans une hauteur au lieu de deux.
-
-	Le remplissage est ancre a gauche et ne fait que changer d'echelle ; le
-	texte, lui, ne bouge jamais. Un remplissage centre ou redimensionne par
-	Position ferait vibrer l'etiquette a chaque tick.
-]]
-local function meter(parent: GuiObject, color: Color3): (Frame, Frame, TextLabel)
-	local track = Instance.new("Frame")
-	track.Name = "Meter"
-	track.BackgroundColor3 = C.glass
-	track.BorderSizePixel = 0
-	track.ClipsDescendants = true
-	track.Parent = parent
-	Theme.corner(track, Theme.radius.sm)
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = color
-	fill.BorderSizePixel = 0
-	fill.Parent = track
-	Theme.corner(fill, Theme.radius.sm)
-
-	local label = Theme.label(track, "", T.small, C.text)
-	label.Size = UDim2.fromScale(1, 1)
-	label.TextXAlignment = Enum.TextXAlignment.Center
-	label.ZIndex = 2
-
-	return track, fill, label
-end
-
---[[
 	Pastille compacte : un glyphe, un chiffre, un contour fin.
 
 	Le contour remplace le fond plein parce qu'il en faut une dizaine cote a
@@ -334,7 +273,8 @@ function HUD.new(parent: ScreenGui): HUD
 	self:buildLayers()
 
 	self:buildDiplomacySheet()
-	self:buildPlayerBanner()
+	self:buildControlPanel()
+	self:buildIdentityPanel()
 	self:buildSessionBar()
 	self:buildHint()
 	self:buildMissionStrip()
@@ -525,39 +465,110 @@ function HUD.buildDiplomacySheet(self: HUD)
 end
 
 --=============================================================================
--- 2. Bandeau du joueur — centre haut
+-- 2. Panneau de controle — bas centre
 --=============================================================================
 
 --[[
-	Deux lignes qui repondent a "de quoi je dispose, la, maintenant".
+	Deux lignes qui repondent a "de quoi je dispose, la, maintenant", et une
+	troisieme qui compte le parc.
 
-	Ligne 1 : ce qui rentre — or, croissance de population, qui je suis.
-	Ligne 2 : ce que j'ai — armee sur sa capacite, et le parc de batiments.
+	Ligne 1 : ce qui rentre — cadence de population, armee sur capacite, or.
+	Ligne 2 : ce qui part — le curseur d'engagement et le chiffre envoye.
+	Ligne 3 : ce que j'ai — une pastille comptee par type de batiment.
 
-	La colonne de droite, separee par un filet, porte l'engagement : l'etat des
-	fronts au-dessus du curseur qui decide combien y part. Les deux etaient a
-	deux bouts d'ecran opposes ; c'est pourtant une seule question.
+	C'est la forme du jeu de reference : le joueur y pose les yeux entre deux
+	ordres, sans jamais quitter le bas de l'ecran ou sa main est deja. Les
+	puces sont des contours colores plutot que des fonds pleins : trois blocs
+	opaques cote a cote feraient un semafor, trois contours restent des puces.
 ]]
-function HUD.buildPlayerBanner(self: HUD)
-	local bar = Theme.panel("PlayerBanner", self.layers.top)
-	bar.AnchorPoint = Vector2.new(0.5, 0)
-	bar.Position = UDim2.new(0.5, 0, 0, S.md)
-	bar.Size = UDim2.fromOffset(BANNER_WIDTH, BANNER_HEIGHT)
-	self.playerBanner = bar
+function HUD.buildControlPanel(self: HUD)
+	local panel = Theme.panel("ControlPanel", self.layers.top)
+	panel.AnchorPoint = Vector2.new(0.5, 1)
+	panel.Position = UDim2.new(0.5, 0, 1, -S.sm)
+	panel.Size = UDim2.fromOffset(CONTROL_WIDTH, CONTROL_HEIGHT)
+	self.controlPanel = panel
 
-	--- Or -------------------------------------------------------------------
-	-- Fond teinte or plutot que texte dore seul : c'est la ressource qu'on
-	-- cherche du regard en premier, elle a droit a une forme, pas juste a une
-	-- couleur.
+	local row1Y = S.sm
+	local row2Y = S.sm + CONTROL_ROW_H + S.xs
+	local row3Y = row2Y + CONTROL_ROW_H + S.xs
+
+	--- Cadence de population -------------------------------------------------
+	-- Le stock de troupes ne dit pas si l'empire monte ou s'effondre ; la
+	-- pente, oui. C'est elle qui previent qu'une offensive coute plus qu'elle
+	-- ne rapporte, plusieurs dizaines de secondes avant le compteur.
+	local rateChip = Instance.new("Frame")
+	rateChip.Name = "RateChip"
+	rateChip.Position = UDim2.fromOffset(S.sm, row1Y)
+	rateChip.Size = UDim2.fromOffset(86, CONTROL_ROW_H)
+	rateChip.BackgroundColor3 = C.surfaceRaised
+	rateChip.BackgroundTransparency = 0.4
+	rateChip.BorderSizePixel = 0
+	rateChip.Parent = panel
+	Theme.corner(rateChip, Theme.radius.sm)
+	self.growthChipEdge = Theme.stroke(rateChip, C.ally, 1)
+
+	local rate = Theme.label(rateChip, "+0/s", T.small, C.ally)
+	rate.Size = UDim2.fromScale(1, 1)
+	rate.TextXAlignment = Enum.TextXAlignment.Center
+	self.growthLabel = rate
+
+	--- Jauge d'armee ----------------------------------------------------------
+	-- Troupes sur capacite, avec l'armee engagee posee a la suite : le joueur
+	-- lit d'un coup ce qui defend encore et ce qui est deja parti.
+	local troopTrack = Instance.new("Frame")
+	troopTrack.Name = "Troops"
+	troopTrack.Position = UDim2.fromOffset(S.sm + 86 + S.xs, row1Y)
+	troopTrack.Size = UDim2.fromOffset(CONTROL_WIDTH - S.sm * 2 - 86 - 108 - S.xs * 2, CONTROL_ROW_H)
+	troopTrack.BackgroundColor3 = C.glass
+	troopTrack.BackgroundTransparency = 0.4
+	troopTrack.BorderSizePixel = 0
+	troopTrack.ClipsDescendants = true
+	troopTrack.Parent = panel
+	Theme.corner(troopTrack, Theme.radius.sm)
+	Theme.stroke(troopTrack, C.line, 1)
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = C.info
+	fill.BorderSizePixel = 0
+	fill.Parent = troopTrack
+	self.troopsFill = fill
+
+	local committed = Instance.new("Frame")
+	committed.Name = "Committed"
+	committed.Size = UDim2.fromScale(0, 1)
+	committed.BackgroundColor3 = C.accent
+	committed.BorderSizePixel = 0
+	committed.Parent = troopTrack
+	self.committedFill = committed
+
+	local troops = Theme.label(troopTrack, "0", T.body, C.text)
+	troops.Position = UDim2.fromOffset(S.sm, 0)
+	troops.Size = UDim2.new(0.5, -S.sm, 1, 0)
+	troops.ZIndex = 2
+	self.troopsLabel = troops
+
+	local cap = Theme.label(troopTrack, "0", T.body, C.textMuted)
+	cap.AnchorPoint = Vector2.new(1, 0)
+	cap.Position = UDim2.new(1, -S.sm, 0, 0)
+	cap.Size = UDim2.new(0.5, -S.sm, 1, 0)
+	cap.TextXAlignment = Enum.TextXAlignment.Right
+	cap.FontFace = F.medium
+	cap.ZIndex = 2
+	self.popCapLabel = cap
+
+	--- Or ---------------------------------------------------------------------
 	local purse = Instance.new("Frame")
 	purse.Name = "Purse"
-	purse.Position = UDim2.fromOffset(S.md, BANNER_ROW1 - 1)
-	purse.Size = UDim2.fromOffset(112, 20)
-	purse.BackgroundColor3 = C.gold
-	purse.BackgroundTransparency = 0.86
+	purse.AnchorPoint = Vector2.new(1, 0)
+	purse.Position = UDim2.new(1, -S.sm, 0, row1Y)
+	purse.Size = UDim2.fromOffset(108, CONTROL_ROW_H)
+	purse.BackgroundColor3 = C.surfaceRaised
+	purse.BackgroundTransparency = 0.4
 	purse.BorderSizePixel = 0
-	purse.Parent = bar
-	Theme.corner(purse, Theme.radius.pill)
+	purse.Parent = panel
+	Theme.corner(purse, Theme.radius.sm)
 	Theme.stroke(purse, C.gold, 1)
 
 	local coin = Theme.label(purse, "\u{25C9}", T.small, C.gold)
@@ -575,84 +586,92 @@ function HUD.buildPlayerBanner(self: HUD)
 	goldScale.Parent = gold
 	self.goldScale = goldScale
 
-	--- Croissance -----------------------------------------------------------
-	-- Le stock de troupes ne dit pas si l'empire monte ou s'effondre ; la
-	-- pente, oui. C'est elle qui previent qu'une offensive coute plus qu'elle
-	-- ne rapporte, plusieurs dizaines de secondes avant le compteur.
-	local growth = Theme.label(bar, "\u{25B2} 0", T.small, C.info)
-	growth.Position = UDim2.fromOffset(S.md + 118, BANNER_ROW1)
-	growth.Size = UDim2.fromOffset(44, 18)
-	growth.FontFace = F.medium
-	self.growthLabel = growth
+	--- Engagement : la puce dit combien part, le curseur decide ---------------
+	local ratioChip = Instance.new("Frame")
+	ratioChip.Name = "RatioChip"
+	ratioChip.Position = UDim2.fromOffset(S.sm, row2Y)
+	ratioChip.Size = UDim2.fromOffset(128, CONTROL_ROW_H)
+	ratioChip.BackgroundColor3 = C.surfaceRaised
+	ratioChip.BackgroundTransparency = 0.4
+	ratioChip.BorderSizePixel = 0
+	ratioChip.Parent = panel
+	Theme.corner(ratioChip, Theme.radius.sm)
+	Theme.stroke(ratioChip, C.line, 1)
 
-	--- Identite -------------------------------------------------------------
+	local readout = Theme.label(ratioChip, "", T.small, C.text)
+	readout.Size = UDim2.fromScale(1, 1)
+	readout.TextXAlignment = Enum.TextXAlignment.Center
+	readout.FontFace = F.medium
+	self.ratioReadout = readout
+
+	self:buildEngagementSlider(panel, row2Y)
+
+	--- Parc de batiments -------------------------------------------------------
+	self:buildParkRow(panel, row3Y)
+
+	--- Etat des fronts, pose au-dessus du panneau ------------------------------
+	-- Sans cadre : il est vide la plupart du temps et ne doit pas reserver de
+	-- place en permanence.
+	local front = Theme.label(self.layers.top, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
+	front.AnchorPoint = Vector2.new(0.5, 1)
+	front.Position = UDim2.new(0.5, 0, 1, -(S.sm + CONTROL_HEIGHT + 2))
+	front.Size = UDim2.fromOffset(320, 14)
+	front.TextXAlignment = Enum.TextXAlignment.Center
+	front.TextTruncate = Enum.TextTruncate.AtEnd
+	self.frontStatus = front
+end
+
+--=============================================================================
+-- 3. Carte d'identite — coin haut gauche
+--=============================================================================
+
+--[[
+	Qui je suis dans cette partie : la nation et sa couleur, la doctrine qui
+	dit de quel genre de commandant il s'agit, et le territoire tenu.
+
+	Le classement complet est la liste native de Roblox : l'afficher une
+	seconde fois ici demanderait au joueur lequel des deux dit vrai.
+]]
+function HUD.buildIdentityPanel(self: HUD)
+	local panel = Theme.panel("Identity", self.layers.top)
+	panel.Position = UDim2.fromOffset(S.md, S.md)
+	panel.Size = UDim2.fromOffset(IDENTITY_WIDTH, IDENTITY_HEIGHT)
+	self.identityPanel = panel
+
 	local stripe = Instance.new("Frame")
 	stripe.Name = "Stripe"
-	stripe.AnchorPoint = Vector2.new(0, 0.5)
-	stripe.Position = UDim2.new(0, S.md + 168, 0, BANNER_ROW1 + 9)
-	stripe.Size = UDim2.fromOffset(3, 16)
+	stripe.Position = UDim2.fromOffset(S.sm, S.sm)
+	stripe.Size = UDim2.fromOffset(3, IDENTITY_HEIGHT - S.sm * 2)
 	stripe.BackgroundColor3 = C.textFaint
 	stripe.BorderSizePixel = 0
-	stripe.Parent = bar
+	stripe.Parent = panel
 	Theme.corner(stripe, 2)
 	self.identityStripe = stripe
 
-	local name = Theme.label(bar, "CONQUEST RTS", T.body, C.text)
-	name.Position = UDim2.fromOffset(S.md + 176, BANNER_ROW1)
-	name.Size = UDim2.fromOffset(126, 18)
+	local name = Theme.label(panel, "CONQUEST RTS", T.body, C.text)
+	name.Position = UDim2.fromOffset(S.sm + 9, S.sm + 1)
+	name.Size = UDim2.fromOffset(IDENTITY_WIDTH - S.sm * 2 - 9, 16)
 	name.TextTruncate = Enum.TextTruncate.AtEnd
 	self.nameLabel = name
 
-	-- Le gris a droite du nom dit de quel genre de commandant il s'agit. La
+	-- Le gris sous le nom dit de quel genre de commandant il s'agit. La
 	-- doctrine est ce qui s'en rapproche le plus chez nous, et elle porte deja
 	-- le marqueur de trahison.
-	local sub = Theme.label(bar, "", T.tiny, C.textMuted)
-	sub.Position = UDim2.fromOffset(S.md + 306, BANNER_ROW1 + 3)
-	sub.Size = UDim2.fromOffset(64, 14)
+	local sub = Theme.label(panel, "", T.tiny, C.textMuted)
+	sub.Position = UDim2.fromOffset(S.sm + 9, S.sm + 18)
+	sub.Size = UDim2.fromOffset(108, 12)
 	sub.FontFace = F.medium
 	sub.TextTruncate = Enum.TextTruncate.AtEnd
 	self.identitySub = sub
 
-	local tiles = Theme.label(bar, "0 tuiles", T.tiny, C.textFaint)
+	local tiles = Theme.label(panel, "0 tuiles", T.tiny, C.textFaint)
 	tiles.AnchorPoint = Vector2.new(1, 0)
-	tiles.Position = UDim2.new(0, S.md + 486, 0, BANNER_ROW1 + 3)
-	tiles.Size = UDim2.fromOffset(112, 14)
+	tiles.Position = UDim2.new(1, -S.sm, 0, S.sm + 18)
+	tiles.Size = UDim2.fromOffset(82, 12)
 	tiles.TextXAlignment = Enum.TextXAlignment.Right
 	tiles.FontFace = F.medium
 	tiles.TextTruncate = Enum.TextTruncate.AtEnd
 	self.tilesLabel = tiles
-
-	--- Armee ----------------------------------------------------------------
-	local track, fill, label = meter(bar, C.info)
-	track.Name = "Troops"
-	track.Position = UDim2.fromOffset(S.md, BANNER_ROW2)
-	track.Size = UDim2.fromOffset(104, 18)
-	self.troopsFill = fill
-	self.troopsLabel = label
-
-	local cap = Theme.label(bar, "0", T.small, C.textMuted)
-	cap.Position = UDim2.fromOffset(S.md + 110, BANNER_ROW2)
-	cap.Size = UDim2.fromOffset(50, 18)
-	cap.FontFace = F.medium
-	self.popCapLabel = cap
-
-	divider(bar, 20, S.md + 166, BANNER_ROW2 + 9)
-
-	--- Parc de batiments ----------------------------------------------------
-	self:buildParkRow(bar)
-
-	--- Engagement -----------------------------------------------------------
-	divider(bar, 40, BANNER_WIDTH - S.md - BANNER_ENGAGEMENT - S.md)
-
-	local front = Theme.label(bar, "AUCUN FRONT ACTIF", T.tiny, C.textFaint)
-	front.AnchorPoint = Vector2.new(1, 0)
-	front.Position = UDim2.new(1, -S.md, 0, BANNER_ROW1 + 3)
-	front.Size = UDim2.fromOffset(BANNER_ENGAGEMENT, 14)
-	front.TextXAlignment = Enum.TextXAlignment.Right
-	front.TextTruncate = Enum.TextTruncate.AtEnd
-	self.frontStatus = front
-
-	self:buildEngagementSlider(bar)
 end
 
 --[[
@@ -666,12 +685,12 @@ end
 	Overlay, que le HUD ne connait pas. Les compteurs restent donc a zero tant
 	que personne n'appelle setBuildingCounts.
 ]]
-function HUD.buildParkRow(self: HUD, parent: GuiObject)
+function HUD.buildParkRow(self: HUD, parent: GuiObject, offsetY: number)
 	local row = Instance.new("Frame")
 	row.Name = "Park"
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(S.md + 174, BANNER_ROW2)
-	row.Size = UDim2.fromOffset(312, 18)
+	row.Position = UDim2.fromOffset(S.sm, offsetY)
+	row.Size = UDim2.fromOffset(CONTROL_WIDTH - S.sm * 2, 18)
 	row.Parent = parent
 	Theme.list(row, Enum.FillDirection.Horizontal, S.xs)
 
@@ -807,13 +826,13 @@ end
 --=============================================================================
 
 --[[
-	Une bande fine sous la barre haute, qui disparait des que le briefing est
+	Une bande fine en haut-centre, qui disparait des que le briefing est
 	termine. L'ancien panneau restait a l'ecran toute la partie.
 ]]
 function HUD.buildMissionStrip(self: HUD)
 	local strip = Theme.panel("Mission", self.layers.top)
 	strip.AnchorPoint = Vector2.new(0.5, 0)
-	strip.Position = UDim2.new(0.5, 0, 0, BANNER_BOTTOM + 20)
+	strip.Position = UDim2.new(0.5, 0, 0, S.md)
 	strip.Size = UDim2.fromOffset(360, 26)
 	strip.Visible = false
 	self.missionStrip = strip
@@ -863,16 +882,17 @@ end
 function HUD.buildFeed(self: HUD)
 	local feed = Instance.new("Frame")
 	feed.Name = "Stream"
-	feed.AnchorPoint = Vector2.new(0.5, 0)
-	feed.Position = UDim2.new(0.5, 0, 0, BANNER_BOTTOM + 52)
-	feed.Size = UDim2.fromOffset(340, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
+	feed.AnchorPoint = Vector2.new(1, 1)
+	feed.Position = UDim2.new(1, -S.md, 1, -S.sm)
+	feed.Size = UDim2.fromOffset(300, MAX_FEED_ENTRIES * (FEED_ENTRY_HEIGHT + S.xs))
 	feed.BackgroundTransparency = 1
 	feed.ClipsDescendants = true
 	feed.Parent = self.layers.feed
 	self.feed = feed
 
 	local layout = Theme.list(feed, Enum.FillDirection.Vertical, S.xs)
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 end
 
 local FEED_COLORS: { [string]: Color3 } = {
@@ -960,27 +980,22 @@ end
 --=============================================================================
 
 --[[
-	Curseur d'engagement, colonne droite du bandeau.
+	Curseur d'engagement, seconde ligne du panneau de controle.
 
 	C'est la decision tactique centrale du jeu, donc elle merite un vrai
 	curseur continu plutot que des paliers : le joueur doit pouvoir doser
-	precisement ce qu'il risque, et voir en chiffres absolus combien de troupes
-	partent.
-
-	Il descendait de la barre basse, ou il occupait deux lignes — un texte
-	au-dessus d'un rail. Ici il prend la meme forme que les autres jauges du
-	bandeau : le chiffre est pose sur le rail, et le rail lui-meme sert de
-	poignee. L'etiquette est un TextLabel, donc inerte : glisser dessus glisse
-	bien le curseur. Y poser un bouton avalerait le geste.
+	precisement ce qu'il risque. La puce a sa gauche dit en chiffres absolus
+	combien de troupes partent ; le rail, lui, sert de poignee. L'etiquette de
+	la puce est un TextLabel, donc inerte : glisser dessus glisse bien le
+	curseur. Y poser un bouton avalerait le geste.
 ]]
-function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
+function HUD.buildEngagementSlider(self: HUD, parent: GuiObject, offsetY: number)
 	local track = Instance.new("TextButton")
 	track.Name = "EngagementTrack"
 	track.Text = ""
 	track.AutoButtonColor = false
-	track.AnchorPoint = Vector2.new(1, 0)
-	track.Position = UDim2.new(1, -S.md, 0, BANNER_ROW2)
-	track.Size = UDim2.fromOffset(BANNER_ENGAGEMENT, 18)
+	track.Position = UDim2.fromOffset(S.sm + 128 + S.xs, offsetY)
+	track.Size = UDim2.fromOffset(CONTROL_WIDTH - S.sm * 2 - 128 - S.xs, CONTROL_ROW_H)
 	track.BackgroundColor3 = C.glass
 	track.BorderSizePixel = 0
 	track.ClipsDescendants = true
@@ -994,13 +1009,6 @@ function HUD.buildEngagementSlider(self: HUD, parent: GuiObject)
 	fill.Parent = track
 	Theme.corner(fill, Theme.radius.sm)
 	self.ratioFill = fill
-
-	local readout = Theme.label(track, "", T.tiny, C.text)
-	readout.Size = UDim2.fromScale(1, 1)
-	readout.TextXAlignment = Enum.TextXAlignment.Center
-	readout.FontFace = F.medium
-	readout.ZIndex = 2
-	self.ratioReadout = readout
 
 	-- Le curseur est un filet vertical plutot qu'une bille : sur un rail de la
 	-- hauteur d'une ligne de texte, une bille depasse et fait de la place a
@@ -1074,13 +1082,13 @@ end
 	n'a pas d'equivalent — le menu radial ne dit pas ce qu'on attend du clic
 	suivant, une fois qu'il s'est referme.
 
-	Elle flotte sous le bandeau, sans cadre : elle est vide la plupart du temps
-	et ne doit pas reserver de place en permanence.
+	Elle flotte au-dessus du panneau de controle, sans cadre : elle est vide la
+	plupart du temps et ne doit pas reserver de place en permanence.
 ]]
 function HUD.buildHint(self: HUD)
 	local hint = Theme.label(self.layers.top, "", T.tiny, C.textFaint)
-	hint.AnchorPoint = Vector2.new(0.5, 0)
-	hint.Position = UDim2.new(0.5, 0, 0, BANNER_BOTTOM + S.xs)
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(0.5, 0, 1, -(S.sm + CONTROL_HEIGHT + 18))
 	hint.Size = UDim2.fromOffset(520, 12)
 	hint.TextXAlignment = Enum.TextXAlignment.Center
 	hint.FontFace = F.medium
@@ -1093,16 +1101,16 @@ end
 --=============================================================================
 
 --[[
-	La disposition OpenFront laisse le bas de l'ecran vide — sur desktop, ou le
-	clic droit ouvre le menu radial et le clavier arme les modes. Sur mobile ni
-	l'un ni l'autre n'existe : l'appui long ouvre bien le radial, mais chaque
+	Le bas de l'ecran n'appartient qu'au panneau de controle — sur desktop, ou
+	le clic droit ouvre le menu radial et le clavier arme les modes. Sur mobile
+	ni l'un ni l'autre n'existe : l'appui long ouvre bien le radial, mais chaque
 	action couterait alors deux gestes, et poser cinq batiments d'affilee — le
 	geste le plus repete du jeu — deviendrait une corvee.
 
 	Les quatre modes et le retour a la capitale tiennent donc dans une barre
-	basse, construite UNIQUEMENT sur appareil tactile sans clavier. Le test de
-	disposition continue de garantir que le bureau reste vierge : sans tactile,
-	rien n'est construit.
+	posee juste au-dessus du panneau, construite UNIQUEMENT sur appareil tactile
+	sans clavier. Le test de disposition continue de garantir que le bureau
+	reste vierge : sans tactile, rien n'est construit.
 
 	Les feuilles ancreees en bas remontent d'autant : une palette ouverte ne
 	doit jamais recouvrir les boutons qui commandent le mode actif.
@@ -1116,7 +1124,7 @@ function HUD.buildTouchBar(self: HUD)
 
 	local bar = Theme.panel("TouchBar", self.layers.top)
 	bar.AnchorPoint = Vector2.new(0.5, 1)
-	bar.Position = UDim2.new(0.5, 0, 1, -S.sm)
+	bar.Position = UDim2.new(0.5, 0, 1, -(S.sm + CONTROL_HEIGHT + S.xs))
 	bar.Size = UDim2.fromOffset(452, TOUCH_BAR_HEIGHT)
 	Theme.padding(bar, S.xs)
 	Theme.list(bar, Enum.FillDirection.Horizontal, S.xs)
@@ -1856,7 +1864,12 @@ function HUD.setMatch(self: HUD, match: Types.MatchInfo)
 		self.phaseLabel.TextColor3 = C.gold
 	else
 		self.phaseLabel.Text = ""
-		self.timerLabel.TextColor3 = if self.era >= 4 then C.nuclear else C.text
+		-- Derniere minute : le chrono vire au rouge, prioritaire sur la teinte
+		-- nucleaire — c'est l'echeance qui compte desormais, plus l'ere.
+		self.timerLabel.TextColor3 = if match.timeLeft <= 60
+			then C.danger
+			elseif self.era >= 4 then C.nuclear
+			else C.text
 	end
 end
 
@@ -1970,9 +1983,11 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		end
 		local growth = math.floor(self.troopGrowth + 0.5)
 		self.growthLabel.Text = if growth >= 0
-			then `\u{25B2} {Format.compact(growth)}`
-			else `\u{25BC} {Format.compact(-growth)}`
-		self.growthLabel.TextColor3 = if growth >= 0 then C.info else C.danger
+			then `+{Format.compact(growth)}/s`
+			else `-{Format.compact(-growth)}/s`
+		local growthColor = if growth >= 0 then C.ally else C.warning
+		self.growthLabel.TextColor3 = growthColor
+		self.growthChipEdge.Color = growthColor
 
 		local routes = mine.logisticsRoutes or 0
 		local logisticsPerSecond = (mine.logisticsIncome or 0) * Config.TICK_RATE
@@ -2005,8 +2020,8 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 
 		local fronts = mine.activeAttacks or 0
 		local committed = mine.committedTroops or 0
-		-- La colonne fait 132 px : le libelle doit tenir sans troncature, sinon
-		-- c'est justement le chiffre engage qui saute.
+		-- Le libelle flotte au-dessus du panneau sur 320 px : il doit tenir sans
+		-- troncature, sinon c'est justement le chiffre engage qui saute.
 		if fronts > 0 then
 			self.frontStatus.Text =
 				`{fronts} FRONT{if fronts > 1 then "S" else ""} \u{00B7} {Format.compact(committed)}`
@@ -2020,9 +2035,17 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		end
 
 		local fillRatio = if mine.maxTroops > 0 then mine.troops / mine.maxTroops else 0
-		self.troopsFill.Size = UDim2.fromScale(math.clamp(fillRatio, 0, 1), 1)
+		local fillClamped = math.clamp(fillRatio, 0, 1)
+		self.troopsFill.Size = UDim2.fromScale(fillClamped, 1)
 		-- Plafond atteint : la population stagne, il faut depenser.
 		self.troopsFill.BackgroundColor3 = if fillRatio > 0.97 then C.warning else C.info
+
+		-- Les troupes engagees sont deja sorties du pool : elles se dessinent
+		-- a la suite du remplissage, pour lire d'un coup ce qui defend encore
+		-- et ce qui est deja parti.
+		local committedRatio = if mine.maxTroops > 0 then committed / mine.maxTroops else 0
+		self.committedFill.Position = UDim2.fromScale(fillClamped, 0)
+		self.committedFill.Size = UDim2.fromScale(math.clamp(committedRatio, 0, 1 - fillClamped), 1)
 
 		self:refreshRatioReadout()
 
