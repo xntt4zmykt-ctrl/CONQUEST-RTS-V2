@@ -24,6 +24,9 @@ export type PlayerStats = {
 	attacksLaunched: number?,
 	activeAttacks: number?,
 	committedTroops: number?,
+	-- Slots des factions contre lesquelles une offensive est en cours : c'est
+	-- ce qui permet au client de proposer la retraite sur la bonne case.
+	attackTargets: { number }?,
 	buildPrices: { [number]: number }?,
 	logisticsRoutes: number?,
 	logisticsIncome: number?,

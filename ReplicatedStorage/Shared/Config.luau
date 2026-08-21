@@ -270,6 +270,9 @@ Config.TRUCK_COOLDOWN = 60 -- ticks de rechargement entre deux expeditions
 Config.DEFAULT_ATTACK_RATIO = 0.25
 Config.MIN_ATTACK_TROOPS = 20
 Config.ATTACK_SPEND_RATE = 0.035 -- part du corps expeditionnaire depensee par tick
+-- Delai avant qu'une retraite soit honoree, en ticks : le front continue de
+-- se battre pendant ce temps. Calque sur le jeu de reference (20 ticks).
+Config.RETREAT_DELAY = 20
 Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
@@ -632,6 +635,14 @@ Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est af
 ]]
 Config.ALLIANCE_DURATION = 3000 -- ticks, soit 5 minutes
 Config.ALLIANCE_COOLDOWN = 150 -- ticks avant de pouvoir resigner avec le meme camp
+
+-- Dons entre allies. Un plancher evite les transferts symboliques d'une
+-- unite, qui n'ont d'autre effet que de spammer le fil de notifications.
+Config.MIN_DONATION = 100 -- or minimal par don
+Config.MIN_DONATION_TROOPS = 100 -- troupes minimales par don
+-- Part du tresor envoyee par un don : proportionnelle, elle reste pertinente
+-- du debut a la fin de partie sans qu'on ait a la retarifer.
+Config.DONATION_SHARE = 0.1
 
 --=============================================================================
 -- Coalition anti-leader (bots)

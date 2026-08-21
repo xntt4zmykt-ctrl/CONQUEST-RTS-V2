@@ -404,7 +404,7 @@ function HUD.buildDiplomacySheet(self: HUD)
 	local drawer = Theme.panel("Diplomatie", self.layers.sheets)
 	drawer.AnchorPoint = Vector2.new(0.5, 1)
 	drawer.Position = UDim2.new(0.5, 0, 1, -S.md)
-	drawer.Size = UDim2.fromOffset(320, 86)
+	drawer.Size = UDim2.fromOffset(340, 118)
 	drawer.Visible = false
 	self.diploDrawer = drawer
 	self:registerSheet("diplomacy", drawer)
@@ -433,10 +433,10 @@ function HUD.buildDiplomacySheet(self: HUD)
 	local actions = Instance.new("Frame")
 	actions.BackgroundTransparency = 1
 	actions.Position = UDim2.fromOffset(S.sm, 34)
-	actions.Size = UDim2.new(1, -S.sm * 2, 0, 26)
+	actions.Size = UDim2.new(1, -S.sm * 2, 0, 76)
 	actions.Parent = card
 	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(0.5, -2, 0, 24)
+	grid.CellSize = UDim2.new(1 / 3, -3, 0, 24)
 	grid.CellPadding = UDim2.fromOffset(4, 4)
 	grid.SortOrder = Enum.SortOrder.LayoutOrder
 	grid.Parent = actions
@@ -447,6 +447,9 @@ function HUD.buildDiplomacySheet(self: HUD)
 		{ id = "break", text = "Rompre", color = C.danger, order = 3 },
 		{ id = "embargo", text = "Embargo", color = C.warning, order = 4 },
 		{ id = "unembargo", text = "Lever", color = C.info, order = 5 },
+		{ id = "extend", text = "Prolonger", color = C.ally, order = 6 },
+		{ id = "donateGold", text = "Don or", color = C.warning, order = 7 },
+		{ id = "donateTroops", text = "Don troupes", color = C.info, order = 8 },
 	}
 
 	for _, action in actionDefs do
@@ -1995,6 +1998,11 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	self.diploButtons["break"].Visible = allied
 	self.diploButtons.embargo.Visible = not embargoed
 	self.diploButtons.unembargo.Visible = embargoed
+	-- Gestes d'alliance active : prolongation du pacte et dons, uniquement
+	-- entre allies. Le montant du don est fixe cote serveur (part du tresor).
+	self.diploButtons.extend.Visible = allied
+	self.diploButtons.donateGold.Visible = allied
+	self.diploButtons.donateTroops.Visible = allied
 end
 
 --=============================================================================

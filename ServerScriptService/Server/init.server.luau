@@ -55,6 +55,7 @@ local sfx = Remotes.get("Sfx")
 local tradeEvent = Remotes.get("TradeEvent")
 
 local attackOrder = Remotes.get("AttackOrder")
+local retreatOrder = Remotes.get("RetreatOrder")
 local setAttackRatio = Remotes.get("SetAttackRatio")
 local chooseDoctrine = Remotes.get("ChooseDoctrine")
 local buildOrder = Remotes.get("BuildOrder")
@@ -461,6 +462,21 @@ attackOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any)
 	reply(player, ok, message)
 end)
 
+retreatOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any)
+	local slot = slotOf(player)
+	if not slot or matchPhase ~= "playing" then
+		return
+	end
+	if not isInteger(targetIndex) or targetIndex < 0 or targetIndex >= Config.TILE_COUNT then
+		return
+	end
+	-- Comme pour l'attaque, la faction vient de l'etat serveur autoritaire :
+	-- un delta de retard cote client ne doit pas rappeler le mauvais front.
+	local targetSlot = buffer.readu8(state.owner, targetIndex)
+	local ok, message = state:retreatAttack(slot, targetSlot)
+	reply(player, ok, message)
+end)
+
 setAttackRatio.OnServerEvent:Connect(function(player: Player, ratio: any)
 	local slot = slotOf(player)
 	if not slot then
@@ -572,6 +588,19 @@ diplomacyOrder.OnServerEvent:Connect(function(player: Player, action: any, targe
 		ok, message = Diplomacy.decline(state, targetSlot, slot)
 	elseif action == "break" then
 		ok, message = Diplomacy.breakAlliance(state, slot, targetSlot)
+	elseif action == "extend" then
+		ok, message = Diplomacy.extend(state, slot, targetSlot)
+	elseif action == "donateGold" then
+		-- Le don est proportionnel : un dixieme du tresor, comme l'offrande
+		-- standard du jeu de reference. Le montant exact se calcule ici, cote
+		-- autoritaire, jamais cote client.
+		local ps = state.players[slot]
+		local amount = ps and math.floor(ps.gold * Config.DONATION_SHARE) or 0
+		ok, message = Diplomacy.donateGold(state, slot, targetSlot, amount)
+	elseif action == "donateTroops" then
+		local ps = state.players[slot]
+		local amount = ps and math.floor(ps.troops * Config.DONATION_SHARE) or 0
+		ok, message = Diplomacy.donateTroops(state, slot, targetSlot, amount)
 	elseif action == "embargo" then
 		ok, message = Diplomacy.setEmbargo(state, slot, targetSlot, true)
 	elseif action == "unembargo" then
@@ -592,9 +621,16 @@ local function replicate()
 
 	local activeAttacks: { [number]: number } = {}
 	local committedTroops: { [number]: number } = {}
+	local attackTargets: { [number]: { number } } = {}
 	for _, attack in state.attacks do
 		activeAttacks[attack.attacker] = (activeAttacks[attack.attacker] or 0) + 1
 		committedTroops[attack.attacker] = (committedTroops[attack.attacker] or 0) + math.floor(attack.troops)
+		local targets = attackTargets[attack.attacker]
+		if not targets then
+			targets = {}
+			attackTargets[attack.attacker] = targets
+		end
+		table.insert(targets, attack.target)
 	end
 
 	local stats = {}
@@ -618,6 +654,7 @@ local function replicate()
 			attacksLaunched = ps.attacksLaunched,
 			activeAttacks = activeAttacks[slot] or 0,
 			committedTroops = committedTroops[slot] or 0,
+			attackTargets = attackTargets[slot],
 			buildPrices = buildPrices,
 			logisticsRoutes = logisticsRoutes,
 			logisticsIncome = math.floor(logisticsIncome * 100) / 100,

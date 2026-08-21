@@ -128,6 +128,14 @@ function Diplomacy.breakAlliance(state: GameState, from: number, to: number): (b
 
 	state.alliances[from][to] = nil
 	state.alliances[to][from] = nil
+	-- Les intentions de prolongation meurent avec le pacte.
+	local extFrom, extTo = state.allianceExtensions[from], state.allianceExtensions[to]
+	if extFrom then
+		extFrom[to] = nil
+	end
+	if extTo then
+		extTo[from] = nil
+	end
 	Diplomacy.startCooldown(state, from, to)
 
 	a.betrayals += Config.BETRAYAL_REPUTATION_COST
@@ -145,6 +153,102 @@ function Diplomacy.startCooldown(state: GameState, a: number, b: number)
 	local until_ = state.tick + Config.ALLIANCE_COOLDOWN
 	state.allianceCooldowns[a][b] = until_
 	state.allianceCooldowns[b][a] = until_
+end
+
+--[[
+	Prolonge un pacte avant son terme, modele OpenFront : la prolongation est
+	MUTUELLE. Le premier camp marque son intention ; le pacte n'est repousse
+	que quand le second marque la sienne. Une prolongation unilaterale
+	permettrait a un camp d'enfermer l'autre dans une alliance dont il ne
+	veut plus, sans jamais avoir a se justifier.
+]]
+function Diplomacy.extend(state: GameState, from: number, to: number): (boolean, string?)
+	if not state:areAllied(from, to) then
+		return false, "Vous n'etes pas allies."
+	end
+
+	ensure(state.allianceExtensions, from)
+	ensure(state.allianceExtensions, to)
+
+	-- Les deux camps ont marque leur intention : le pacte repart pour une
+	-- duree complete a compter de maintenant.
+	if state.allianceExtensions[to][from] then
+		local newExpiry = state.tick + Config.ALLIANCE_DURATION
+		state.alliances[from][to] = newExpiry
+		state.alliances[to][from] = newExpiry
+		state.allianceExtensions[from][to] = nil
+		state.allianceExtensions[to][from] = nil
+
+		local a, b = state.players[from], state.players[to]
+		if a and b then
+			state:notifyBetween(`\u{1F91D} Le pacte entre {a.name} et {b.name} est prolonge.`, "good", from, to)
+		end
+		return true, nil
+	end
+
+	state.allianceExtensions[from][to] = true
+	local a = state.players[from]
+	state:notify(`{a and a.name} propose de prolonger votre alliance.`, "info", to)
+	return true, "Prolongation proposee : ton allie doit confirmer."
+end
+
+--=============================================================================
+-- Dons entre allies
+--=============================================================================
+
+--[[
+	Envoyer de l'or ou des troupes a un allie. C'est ce qui donne un corps a
+	l'alliance : sans dons, un pacte n'est qu'un traite de non-agression ;
+	avec eux, le plus riche finance reellement le front du plus pauvre.
+
+	Reserve aux allies, comme toute aide directe : financer un futur ennemi
+	serait sans consequence diplomatique, et donc sans interet.
+]]
+function Diplomacy.donateGold(state: GameState, from: number, to: number, amount: number): (boolean, string?)
+	if not state:areAllied(from, to) then
+		return false, "Les dons sont reserves aux allies."
+	end
+	local a, b = state.players[from], state.players[to]
+	if not a or not b then
+		return false, "Cette faction n'existe plus."
+	end
+	amount = math.floor(amount)
+	if amount < Config.MIN_DONATION then
+		return false, `Un don doit valoir au moins {Config.MIN_DONATION} or.`
+	end
+	if a.gold < amount then
+		return false, "Tu n'as pas assez d'or."
+	end
+
+	a.gold -= amount
+	b.gold += amount
+	state:notifyBetween(`\u{1F4B0} {a.name} offre {amount} or a {b.name}.`, "good", from, to)
+	return true, nil
+end
+
+function Diplomacy.donateTroops(state: GameState, from: number, to: number, amount: number): (boolean, string?)
+	if not state:areAllied(from, to) then
+		return false, "Les dons sont reserves aux allies."
+	end
+	local a, b = state.players[from], state.players[to]
+	if not a or not b then
+		return false, "Cette faction n'existe plus."
+	end
+	amount = math.floor(amount)
+	if amount < Config.MIN_DONATION_TROOPS then
+		return false, `Un don doit valoir au moins {Config.MIN_DONATION_TROOPS} troupes.`
+	end
+	if a.troops < amount then
+		return false, "Tu n'as pas assez de troupes."
+	end
+
+	a.troops -= amount
+	-- Le receveur ne depasse jamais son plafond : l'excedent est perdu, comme
+	-- des renforts arrives dans des casernes deja pleines.
+	local received = math.min(amount, math.max(0, state:maxTroops(b) - b.troops))
+	b.troops += received
+	state:notifyBetween(`\u{2694} {a.name} envoie {math.floor(received)} troupes a {b.name}.`, "good", from, to)
+	return true, nil
 end
 
 --=============================================================================
@@ -213,6 +317,13 @@ function Diplomacy.step(state: GameState)
 		end
 		if setB then
 			setB[pair.a] = nil
+		end
+		local extA, extB = state.allianceExtensions[pair.a], state.allianceExtensions[pair.b]
+		if extA then
+			extA[pair.b] = nil
+		end
+		if extB then
+			extB[pair.a] = nil
 		end
 		Diplomacy.startCooldown(state, pair.a, pair.b)
 

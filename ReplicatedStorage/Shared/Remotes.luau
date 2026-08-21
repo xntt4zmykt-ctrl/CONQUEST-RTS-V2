@@ -22,6 +22,7 @@ local NAMES = {
 
 	-- Client -> serveur
 	"AttackOrder", -- (targetTileIndex), le serveur derive la faction
+	"RetreatOrder", -- (targetTileIndex), rappelle l'offensive contre ce proprietaire
 	"SetAttackRatio", -- (ratio)
 	"ChooseDoctrine", -- (doctrineId)
 	"BuildOrder", -- (tileIndex, buildingKind)

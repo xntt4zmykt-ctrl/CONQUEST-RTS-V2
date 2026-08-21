@@ -77,6 +77,8 @@ export type Attack = {
 	target: number,
 	troops: number,
 	frontier: { [number]: true },
+	-- Tick a partir duquel le front se degage, si la retraite a ete ordonnee.
+	retreatAt: number?,
 }
 
 export type Boat = {
@@ -183,6 +185,9 @@ function GameState.new(seed: number): GameState
 	self.buildings = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
+	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
+	-- repousse que quand les deux directions sont presentes.
+	self.allianceExtensions = {}
 	self.requests = {}
 	self.embargoes = {}
 	self.dirty = {}
@@ -1092,6 +1097,26 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 end
 
 --[[
+	Rappelle une offensive en cours, modele OpenFront : l'ordre n'est pas
+	honore immediatement mais apres un delai (RETREAT_DELAY ticks), pendant
+	lequel le front continue de se battre. Une retraite instantanee ferait de
+	chaque engagement un essai sans risque ; le delai rend la decision
+	couteuse a prendre, et les survivants rentrent ensuite au pays.
+]]
+function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	for _, atk in self.attacks do
+		if atk.attacker == attackerSlot and atk.target == targetSlot then
+			if atk.retreatAt then
+				return false, "La retraite est deja ordonnee."
+			end
+			atk.retreatAt = self.tick + Config.RETREAT_DELAY
+			return true, "Retraite ordonnee : le front se degage."
+		end
+	end
+	return false, "Aucune offensive sur ce front."
+end
+
+--[[
 	Cree une tete de pont apres un debarquement : l'offensive demarre depuis une
 	tuile isolee, sans contact terrestre prealable.
 ]]
@@ -1214,6 +1239,14 @@ function GameState.stepAttacks(self: GameState)
 		local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 
 		if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			table.remove(self.attacks, i)
+			continue
+		end
+
+		-- Le delai de retraite est ecoule : les survivants rentrent au pays,
+		-- comme lorsqu'un front s'epuise naturellement.
+		if atk.retreatAt and self.tick >= atk.retreatAt then
+			attacker.troops += math.max(0, atk.troops)
 			table.remove(self.attacks, i)
 			continue
 		end

@@ -354,6 +354,10 @@ radial.onAction = function(action: string, tile: number)
 		inspectTerritory(tile)
 		return
 	end
+	if action == "retreat" then
+		Remotes.get("RetreatOrder"):FireServer(tile)
+		return
+	end
 	hud:setMode(action :: any)
 	inspectTerritory(tile)
 	executeTerritoryAction(action, tile)
@@ -374,12 +378,26 @@ local function openRadial(position: Vector2)
 	if not tile then
 		return
 	end
+	-- La retraite ne se propose que sur une case dont le proprietaire subit
+	-- deja une de nos offensives.
+	local owner = w:ownerAt(tile)
+	local attacking = false
+	local mine = stats and stats[mySlot]
+	if mine and mine.attackTargets then
+		for _, target in mine.attackTargets do
+			if target == owner then
+				attacking = true
+				break
+			end
+		end
+	end
 	radial:open(position.X, position.Y, {
 		tile = tile,
-		ownerSlot = w:ownerAt(tile),
+		ownerSlot = owner,
 		mySlot = mySlot,
 		era = hud.era,
 		nukesUnlocked = hud.era >= Eras.requiredForNuke(Config.NUKE.ATOM),
+		attacking = attacking,
 	})
 end
 

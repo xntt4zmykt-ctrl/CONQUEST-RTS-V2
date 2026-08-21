@@ -55,6 +55,9 @@ export type Context = {
 	mySlot: number,
 	era: number,
 	nukesUnlocked: boolean,
+	-- Une offensive contre ce proprietaire est en cours : la retraite a un
+	-- sens ici, et seulement ici.
+	attacking: boolean,
 }
 
 type Petal = {
@@ -306,6 +309,14 @@ function RadialMenu.showPage(self: RadialMenu, page: string)
 			enabled = true,
 			run = function()
 				self:emit("inspect")
+			end,
+		})
+		table.insert(entries, {
+			icon = "\u{1F3F3}",
+			label = "Rappeler",
+			enabled = foreign and context.attacking,
+			run = function()
+				self:emit("retreat")
 			end,
 		})
 	else

@@ -1393,6 +1393,210 @@ do
 end
 
 --[[
+	Retraite d'attaque.
+
+	Le rappel n'est honore qu'apres RETREAT_DELAY ticks : sans delai, chaque
+	offensive devient un essai sans risque. Le test verifie les trois temps de
+	la mecanique — l'ordre est pris, le front survit pendant le delai, les
+	survivants rentrent ensuite.
+]]
+do
+	local retreatState = GameState.new(777)
+	local a = retreatState:addPlayer(nil, "Attaquant", Random.new(51), 0)
+	local b = retreatState:addPlayer(nil, "Assiege", Random.new(52), 0)
+	if not a or not b then
+		fail("retraite — impossible de creer les factions de test")
+	else
+		-- On colle l'assiege contre l'attaquant : une tuile frontaliere de a,
+		-- puis un large carre de terres pour b afin qu'une seule etape de
+		-- combat ne le fasse pas s'effondrer.
+		local scratch = table.create(4, 0)
+		local anchor: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(retreatState.owner, index) == a.slot then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if buffer.readu8(retreatState.owner, nb) == 0 and retreatState:isLand(nb) then
+						anchor = nb
+						break
+					end
+				end
+			end
+			if anchor then
+				break
+			end
+		end
+		if not anchor then
+			fail("retraite — aucune tuile neutre au contact de l'attaquant")
+		else
+			local ax, ay = MapGen.fromIndex(anchor)
+			local given = 0
+			for dy = 0, 24 do
+				for dx = 0, 24 do
+					local nx, ny = ax + dx, ay + dy
+					if given < 500 and MapGen.inBounds(nx, ny) then
+						local index = MapGen.toIndex(nx, ny)
+						if retreatState:isLand(index) and buffer.readu8(retreatState.owner, index) == 0 then
+							retreatState:setOwner(index, b.slot)
+							given += 1
+						end
+					end
+				end
+			end
+
+			retreatState.combatUnlocked = true
+			a.attackRatio = 0.5
+			a.troops = 20000
+
+			local launched = retreatState:launchAttack(a.slot, b.slot)
+			if not launched or #retreatState.attacks ~= 1 then
+				fail("retraite — l'offensive de test n'a pas pu etre lancee")
+			else
+				if not retreatState:retreatAttack(a.slot, b.slot) then
+					fail("retraite — l'ordre de rappel est refuse")
+				end
+				if retreatState:retreatAttack(a.slot, b.slot) then
+					fail("retraite — un second rappel est accepte sur le meme front")
+				end
+				if retreatState:retreatAttack(b.slot, a.slot) then
+					fail("retraite — un rappel sans front est accepte")
+				end
+
+				local atk = retreatState.attacks[1]
+				local retreatAt = atk.retreatAt
+				if not retreatAt then
+					fail("retraite — l'echeance du rappel n'est pas enregistree")
+				else
+					-- Avant l'echeance, le front continue de se battre.
+					retreatState.tick = retreatAt - 1
+					retreatState:stepAttacks()
+					if #retreatState.attacks ~= 1 then
+						fail("retraite — le front se degage avant la fin du delai")
+					end
+
+					-- A l'echeance, les survivants rentrent au pays.
+					atk = retreatState.attacks[1]
+					local survivors = atk and atk.troops or 0
+					local before = a.troops
+					retreatState.tick = retreatAt
+					retreatState:stepAttacks()
+					if #retreatState.attacks ~= 0 then
+						fail("retraite — le front n'est pas dissous a echeance")
+					end
+					if math.abs((a.troops - before) - math.max(0, survivors)) > 0.001 then
+						fail("retraite — les survivants ne sont pas restitues a l'attaquant")
+					end
+				end
+			end
+		end
+	end
+end
+
+--[[
+	Prolongation d'alliance.
+
+	La prolongation est mutuelle : l'intention du premier camp ne change rien
+	tant que le second n'a pas marque la sienne. Sans ca, un camp enfermerait
+	l'autre dans un pacte dont il ne veut plus.
+]]
+do
+	local extState = GameState.new(5151)
+	local a = extState:addPlayer(nil, "Prolonge", Random.new(53), 0)
+	local b = extState:addPlayer(nil, "Confirme", Random.new(54), 0)
+	local c = extState:addPlayer(nil, "Etranger", Random.new(55), 0)
+	if not a or not b or not c then
+		fail("prolongation — impossible de creer les factions de test")
+	else
+		Diplomacy.request(extState, a.slot, b.slot)
+		Diplomacy.accept(extState, a.slot, b.slot)
+
+		if Diplomacy.extend(extState, a.slot, c.slot) then
+			fail("prolongation — un pacte inexistant peut etre prolonge")
+		end
+
+		extState.tick = 100
+		if not Diplomacy.extend(extState, a.slot, b.slot) then
+			fail("prolongation — l'intention du premier camp est refusee")
+		end
+		if extState.alliances[a.slot][b.slot] ~= Config.ALLIANCE_DURATION then
+			fail("prolongation — l'intention seule repousse deja l'echeance")
+		end
+
+		if not Diplomacy.extend(extState, b.slot, a.slot) then
+			fail("prolongation — la confirmation du second camp est refusee")
+		end
+		if extState.alliances[a.slot][b.slot] ~= 100 + Config.ALLIANCE_DURATION then
+			fail("prolongation — le pacte confirme ne repart pas pour une duree complete")
+		end
+		if extState.allianceExtensions[a.slot][b.slot] or extState.allianceExtensions[b.slot][a.slot] then
+			fail("prolongation — les intentions ne sont pas purgees apres confirmation")
+		end
+
+		-- Une intention en suspens meurt avec le pacte.
+		Diplomacy.extend(extState, a.slot, b.slot)
+		Diplomacy.breakAlliance(extState, a.slot, b.slot)
+		if extState.allianceExtensions[a.slot][b.slot] or extState.allianceExtensions[b.slot][a.slot] then
+			fail("prolongation — une intention survit a la rupture du pacte")
+		end
+	end
+end
+
+--[[
+	Dons entre allies.
+
+	C'est ce qui donne un corps a l'alliance : sans dons, un pacte n'est qu'un
+	traite de non-agression. Les planchers evitent le spam de micro-dons, et le
+	receveur ne depasse jamais son plafond de troupes.
+]]
+do
+	local giftState = GameState.new(5152)
+	local a = giftState:addPlayer(nil, "Donateur", Random.new(56), 0)
+	local b = giftState:addPlayer(nil, "Receveur", Random.new(57), 0)
+	local c = giftState:addPlayer(nil, "Tiers", Random.new(58), 0)
+	if not a or not b or not c then
+		fail("dons — impossible de creer les factions de test")
+	else
+		Diplomacy.request(giftState, a.slot, b.slot)
+		Diplomacy.accept(giftState, a.slot, b.slot)
+
+		a.gold = 1000
+		b.gold = 0
+		if Diplomacy.donateGold(giftState, a.slot, c.slot, 500) then
+			fail("dons — un non-allie peut recevoir de l'or")
+		end
+		if Diplomacy.donateGold(giftState, a.slot, b.slot, Config.MIN_DONATION - 1) then
+			fail("dons — un micro-don sous le plancher est accepte")
+		end
+		if not Diplomacy.donateGold(giftState, a.slot, b.slot, 400) then
+			fail("dons — un don d'or valide est refuse")
+		end
+		if a.gold ~= 600 or b.gold ~= 400 then
+			fail(`dons — comptabilite de l'or fausse ({a.gold} / {b.gold})`)
+		end
+		if Diplomacy.donateGold(giftState, a.slot, b.slot, 10000) then
+			fail("dons — un don superieur au tresor est accepte")
+		end
+
+		a.troops = 5000
+		b.troops = 0
+		if Diplomacy.donateTroops(giftState, a.slot, b.slot, Config.MIN_DONATION_TROOPS - 1) then
+			fail("dons — un micro-don de troupes est accepte")
+		end
+		if not Diplomacy.donateTroops(giftState, a.slot, b.slot, 500) then
+			fail("dons — un don de troupes valide est refuse")
+		end
+		if a.troops ~= 4500 then
+			fail(`dons — le donateur conserve {a.troops} troupes au lieu de 4500`)
+		end
+		local cap = giftState:maxTroops(b)
+		if b.troops > cap then
+			fail("dons — le receveur depasse son plafond de troupes")
+		end
+	end
+end
+
+--[[
 	Effondrement d'une faction agonisante.
 
 	Sans cette regle la carte se termine avec des factions a trois tuiles qui ne
