@@ -271,11 +271,15 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	local from = path[1]
 	local to = path[#path]
 
-	-- La caisse mobile rend le flux economique concret : ce n'est plus un
-	-- simple bonus invisible dans une formule.
+	--[[
+		Le camion EST le colis : il n'existe visuellement que pendant une
+		livraison reelle, commandee par le serveur (voir onTradeEvent). Hors
+		livraison la route reste vide — un camion qui tournerait en boucle
+		ferait croire a un flux continu qui n'existe plus.
+	]]
 	local truckModel = Instance.new("Model")
 	truckModel.Name = "CargoTruck"
-	truckModel.Parent = model
+	truckModel.Parent = nil
 	local truck = {}
 	local function truckPart(name: string, size: Vector3, color: Color3, offset: CFrame, material: Enum.Material?): Part
 		local part = routePart(truckModel, name, size, color, material or Enum.Material.Metal)
@@ -309,12 +313,94 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		factory = factoryIndex,
 		model = model,
 		truck = truck,
+		truckModel = truckModel,
 		from = from + Vector3.new(0, 0.8, 0),
 		to = to + Vector3.new(0, 0.8, 0),
 		path = path,
 		slot = slot,
-		progress = (factoryIndex % 29) / 29,
+		delivery = nil,
 	}
+end
+
+--[[
+	Evenement de commerce terrestre, envoye par le serveur.
+
+	  "dispatch" (usine, gare, slot, trajetTicks) — un colis part : le camion
+	  apparait au depart de la voie et roule pendant `trajetTicks` ticks.
+
+	  "arrival" (gare, _, slot, or) — le colis est livre : l'or monte au-
+	  dessus de la gare. Le retrait du camion est pilote localement par la fin
+	  du trajet, pas par cet evenement, pour que le vehicule ne s'efface pas
+	  en plein virage si le reseau a du retard.
+]]
+function Overlay.onTradeEvent(self: Overlay, action: string, a: number, b: number, slot: number, value: number)
+	if action == "dispatch" then
+		local route = self.routes[a * 100000 + b]
+		if not route then
+			-- La voie n'est pas encore dessinee chez nous : le colis arrivera
+			-- quand meme, seule l'animation manque.
+			return
+		end
+		route.delivery = {
+			progress = 0,
+			duration = math.max(value / Config.TICK_RATE, 0.1),
+		}
+		route.truckModel.Parent = route.model
+	elseif action == "arrival" then
+		self:goldPopup(a, value)
+	end
+end
+
+--[[
+	"+X or" flottant au-dessus d'une gare, la signature d'une livraison
+	reussie — le seul retour du commerce terrestre, exactement comme dans le
+	jeu de reference.
+]]
+function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number)
+	local base = WorldSpace.indexToWorld(tileIndex)
+	local y = WorldSpace.surfaceHeight(self.terrain, tileIndex)
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "GoldPopup"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Size = Vector3.one
+	anchor.CFrame = CFrame.new(base.X, y + 7, base.Z)
+	anchor.Parent = self.root
+
+	local board = Instance.new("BillboardGui")
+	board.Name = "Board"
+	board.Size = UDim2.fromOffset(90, 26)
+	board.StudsOffset = Vector3.new(0, 1.5, 0)
+	board.AlwaysOnTop = true
+	board.Parent = anchor
+
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.FontFace = Theme.font.display
+	text.TextSize = 18
+	text.TextColor3 = Theme.color.gold
+	text.TextStrokeTransparency = 0.6
+	text.Text = `+{gold}`
+	text.Parent = board
+
+	local lift = TweenService:Create(anchor, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		CFrame = anchor.CFrame + Vector3.new(0, 5, 0),
+	})
+	lift:Play()
+	TweenService:Create(text, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	}):Play()
+	task.delay(1.5, function()
+		if anchor.Parent then
+			anchor:Destroy()
+		end
+	end)
 end
 
 --[[
@@ -534,24 +620,21 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 	local alpha = math.min(1, dt * 9)
 	local now = os.clock()
 
-	-- Les camions font une boucle continue de l'usine vers la ville. Le flux
-	-- economique reste ainsi lisible dans le monde sans ouvrir un panneau.
+	--[[
+		Les camions ne roulent que pendant une livraison reelle, cadencee par le
+		serveur. En fin de trajet, le vehicule s'efface et la gare pulse : le
+		flux economique reste lisible dans le monde, mais il dit desormais la
+		verite — un camion visible est un colis qui arrive, pas une decoration.
+	]]
 	for _, route in self.routes do
-		local previous = route.progress
-		route.progress = (route.progress + dt * 0.14) % 1
-		local scaled = route.progress * (#route.path - 1)
-		local segmentIndex = math.min(#route.path - 1, math.floor(scaled) + 1)
-		local segmentProgress = scaled - math.floor(scaled)
-		local a = route.path[segmentIndex] + Vector3.new(0, 0.8, 0)
-		local b = route.path[segmentIndex + 1] + Vector3.new(0, 0.8, 0)
-		local direction = b - a
-		local position = a + direction * segmentProgress
-		local frame = CFrame.lookAt(position, position + direction)
-		for _, piece in route.truck do
-			local spin = if piece.part.Name == "Wheel" then CFrame.Angles(route.progress * math.pi * 20, 0, 0) else CFrame.new()
-			piece.part.CFrame = frame * piece.offset * spin
+		local delivery = route.delivery
+		if not delivery then
+			continue
 		end
-		if route.progress < previous then
+		delivery.progress += dt / delivery.duration
+		if delivery.progress >= 1 then
+			route.delivery = nil
+			route.truckModel.Parent = nil
 			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
 			pulse.Shape = Enum.PartType.Cylinder
 			pulse.Transparency = 0.28
@@ -565,6 +648,19 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 					pulse:Destroy()
 				end
 			end)
+			continue
+		end
+		local scaled = delivery.progress * (#route.path - 1)
+		local segmentIndex = math.min(#route.path - 1, math.floor(scaled) + 1)
+		local segmentProgress = scaled - math.floor(scaled)
+		local a = route.path[segmentIndex] + Vector3.new(0, 0.8, 0)
+		local b = route.path[segmentIndex + 1] + Vector3.new(0, 0.8, 0)
+		local direction = b - a
+		local position = a + direction * segmentProgress
+		local frame = CFrame.lookAt(position, position + direction)
+		for _, piece in route.truck do
+			local spin = if piece.part.Name == "Wheel" then CFrame.Angles(delivery.progress * math.pi * 20, 0, 0) else CFrame.new()
+			piece.part.CFrame = frame * piece.offset * spin
 		end
 	end
 

@@ -16,6 +16,7 @@ local MapGen = __require("MapGen")
 local GameState = __require("GameState")
 local Buildings = __require("Buildings")
 local Navy = __require("Navy")
+local Trade = __require("Trade")
 local Nukes = __require("Nukes")
 local Diplomacy = __require("Diplomacy")
 local Bots = __require("Bots")
@@ -274,6 +275,7 @@ local function runMatch(seed, ticks)
 		Bots.step(state, rng)
 		Navy.step(state, rng)
 		Nukes.step(state, rng, onExplosion)
+		Trade.step(state, rng, function() end)
 		Diplomacy.step(state)
 		state:step()
 
@@ -720,6 +722,115 @@ do
 				Navy.step(seaState, Random.new(1))
 				if a.gold ~= goldA or b.gold ~= goldB then
 					fail("commerce — un convoi paie malgre l'embargo")
+				end
+			end
+		end
+	end
+end
+
+--[[
+	Commerce terrestre.
+
+	Une usine n'a qu'un colis en route a la fois, un rechargement suit chaque
+	livraison, et l'or n'arrive qu'avec le colis — jamais au depart, jamais si
+	la gare est tombee entre-temps. Trois proprietes invisibles en jeu normal :
+	on constate juste, dix minutes plus tard, que l'economie tourne deux fois
+	ou pas du tout.
+]]
+do
+	local landState = GameState.new(2718)
+	local a = landState:addPlayer(nil, "Ferrovia", Random.new(21), 0)
+	if not a then
+		fail("commerce terrestre — impossible de creer la faction de test")
+	else
+		-- Deux cases terrestres proches : une usine, une ville a sa portee. La
+		-- distance depasse TRUCK_SPEED pour que le trajet dure plus d'un tick —
+		-- sinon la livraison est immediate et les etapes se telescopent.
+		local factoryTile: number? = nil
+		local cityTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if landState:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				for d = Config.TRUCK_SPEED + 2, Config.TRUCK_SPEED + 10 do
+					local cx, cy = fx + d, fy
+					if MapGen.inBounds(cx, cy) then
+						local candidate = MapGen.toIndex(cx, cy)
+						if landState:isLand(candidate) then
+							factoryTile, cityTile = index, candidate
+							break
+						end
+					end
+				end
+			end
+			if factoryTile then
+				break
+			end
+		end
+
+		if not factoryTile or not cityTile then
+			fail("commerce terrestre — aucune paire de cases terrestres proches sur la carte de test")
+		else
+			landState:setOwner(factoryTile, a.slot)
+			landState:setOwner(cityTile, a.slot)
+			landState:placeBuilding(factoryTile, Config.BUILDING.FACTORY, a.slot)
+			landState:placeBuilding(cityTile, Config.BUILDING.CITY, a.slot)
+
+			local events: { { any } } = {}
+			local function onEvent(action, x, y, slot, value)
+				table.insert(events, { action, x, y, slot, value })
+			end
+
+			-- Une expedition part des que l'usine est prete : un colis, un seul.
+			landState.tick += 1
+			Trade.step(landState, Random.new(7), onEvent)
+			local delivery = landState.tradeDeliveries[factoryTile]
+			if not delivery then
+				fail("commerce terrestre — l'usine n'expedie pas vers sa gare voisine")
+			else
+				if events[#events][1] ~= "dispatch" then
+					fail("commerce terrestre — l'expedition n'est pas annoncee au client")
+				end
+
+				-- Tant que le colis roule, aucun second depart.
+				landState.tick += 1
+				Trade.step(landState, Random.new(8), onEvent)
+				if #events ~= 1 then
+					fail("commerce terrestre — une usine a deux colis en route a la fois")
+				end
+
+				-- L'or n'arrive qu'avec le colis, pas avant.
+				local goldBefore = a.gold
+				landState.tick = delivery.arrivalTick
+				Trade.step(landState, Random.new(9), onEvent)
+				if a.gold <= goldBefore then
+					fail("commerce terrestre — la livraison ne paie pas")
+				end
+				if events[#events][1] ~= "arrival" then
+					fail("commerce terrestre — la livraison n'est pas annoncee au client")
+				end
+
+				-- Rechargement : pas de nouvelle expedition avant la fin du retour.
+				landState.tick += 1
+				Trade.step(landState, Random.new(10), onEvent)
+				if landState.tradeDeliveries[factoryTile] ~= nil then
+					fail("commerce terrestre — l'usine repart sans rechargement")
+				end
+				landState.tick += Config.TRUCK_COOLDOWN
+				Trade.step(landState, Random.new(11), onEvent)
+				if landState.tradeDeliveries[factoryTile] == nil then
+					fail("commerce terrestre — l'usine ne repart pas apres le rechargement")
+				end
+
+				-- Une gare tombee entre le depart et l'arrivee ne paie rien.
+				local pending = landState.tradeDeliveries[factoryTile]
+				if pending then
+					landState.buildings[cityTile] = nil
+					local goldMid = a.gold
+					landState.tick = pending.arrivalTick
+					Trade.step(landState, Random.new(12), onEvent)
+					if a.gold ~= goldMid then
+						fail("commerce terrestre — un colis paie une gare qui n'existe plus")
+					end
 				end
 			end
 		end

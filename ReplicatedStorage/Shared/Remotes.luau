@@ -18,6 +18,7 @@ local NAMES = {
 	"Notify", -- (text, kind)
 	"Explosion", -- (x, y, radius)
 	"Sfx", -- (soundName)
+	"TradeEvent", -- ("dispatch", usine, gare, slot, trajetTicks) | ("arrival", gare, slot, or)
 
 	-- Client -> serveur
 	"AttackOrder", -- (targetTileIndex), le serveur derive la faction

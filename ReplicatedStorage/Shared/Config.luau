@@ -202,7 +202,6 @@ Config.GOLD_TILE_SCALE = 0.0042 -- par tick
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
 Config.GOLD_PER_CITY = 0.08 -- par tick, par ville possedee
-Config.GOLD_PER_FACTORY_ROUTE = 0.34 -- par tick et par ville desservie
 -- Volontairement faible : un joueur qui accumule les capitales conquises en
 -- tenait douze en simulation, soit l'equivalent de plusieurs milliers de
 -- territoires en revenu. La capitale est un objectif militaire, pas une rente.
@@ -235,6 +234,34 @@ Config.TRADE_SHIP_CHANCE = 0.22
 -- Plafond global. Sans lui, une carte couverte de ports saturerait la mer de
 -- navires et la replication avec eux.
 Config.MAX_TRADE_SHIPS = 24
+
+--[[
+	Commerce terrestre, meme philosophie que le maritime : l'or n'est plus un
+	revenu abstrait verse au tick, il arrive **avec le colis**.
+
+	Trois regles, calquees sur le jeu de reference :
+
+	  1. Une usine n'a qu'UN colis en route a la fois. Le debit d'une usine,
+	     c'est sa cadence, pas le nombre de villes dans son cercle.
+	  2. Apres chaque livraison, un temps de rechargement avant l'expedition
+	     suivante — le camion doit bien faire le retour.
+	  3. L'or est verse a l'arrivee, proportionnel a la distance et au niveau
+	     de l'usine. Entre le depart et l'arrivee, la gare cible a pu tomber :
+	     on ne paie que ce qui est reellement livre.
+
+	Le chargement grossit avec le reseau : une usine qui dessert dix gares
+	expedie des colis dix fois plus riches qu'une usine au bout du monde. Le
+	debit reste plafonne par la cadence — un seul colis a la fois — mais la
+	taille du reseau compte autant que dans l'ancienne economie par liaisons.
+
+	Equilibrage : calibre sur l'ancien revenu passif (~5 or/tick et par usine
+	en milieu de partie, mesure en simulation) pour que le passage aux colis
+	ne change ni le rythme de partie ni la course aux eres.
+]]
+Config.TRUCK_GOLD_BASE = 10 -- or verse a l'arrivee d'un colis, avant distance
+Config.TRUCK_GOLD_PER_TILE = 1.2 -- supplement par tuile de liaison
+Config.TRUCK_SPEED = 4 -- tuiles parcourues par tick
+Config.TRUCK_COOLDOWN = 60 -- ticks de rechargement entre deux expeditions
 
 --=============================================================================
 -- Attaque
@@ -478,27 +505,6 @@ Config.RAIL_RANGE = 56 -- portee de liaison entre deux gares, en tuiles
 -- Conserve sous son ancien nom : le rayon de recherche d'une usine reste le
 -- meme, seule la nature des cibles a change.
 Config.FACTORY_ROUTE_RANGE = Config.RAIL_RANGE
-
---[[
-	Rendement d'une grappe.
-
-	Le revenu suit le nombre de **liaisons** de la grappe (gares - 1, soit un
-	arbre couvrant) et non le nombre de paires possibles : sinon une grappe de
-	dix gares rapporterait quarante-cinq fois une grappe de deux et l'economie
-	exploserait en fin de partie.
-
-	Les usines supplementaires ont un rendement decroissant explicite — une
-	hyperbole normalisee a 1 pour une seule usine. En poser une SECONDE dans la
-	meme grappe rapporte, mais de moins en moins : mieux vaut aller fonder un
-	second reseau ailleurs.
-
-	Ce frein ne s'applique qu'au **nombre** d'usines, jamais a leur niveau.
-	Empiler une usine sur une autre est strictement lineaire — niveau 2 produit
-	le double du niveau 1 — parce que le prix double deja a chaque exemplaire.
-	Freiner des deux cotes rendait l'amelioration toujours perdante face a une
-	construction neuve, ce qui vidait la mecanique de son interet.
-]]
-Config.RAIL_FACTORY_SOFTCAP = 2 -- constante de l'hyperbole f / (f + k)
 
 --[[
 	Inflation des couts de construction.

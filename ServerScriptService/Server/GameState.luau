@@ -191,6 +191,10 @@ function GameState.new(seed: number): GameState
 	self.capitalEvents = 0
 	self.sounds = {}
 	self.events = {}
+	-- Commerce terrestre : un colis en route par usine, et le tick de reprise
+	-- apres livraison. Cles : index de tuile de l'usine. Voir Trade.luau.
+	self.tradeDeliveries = {}
+	self.tradeCooldowns = {}
 	self.mode = nil
 	-- L'etat brut reste immediatement jouable pour les simulations et les
 	-- tests. Le serveur de match le passe explicitement a false pendant son
@@ -528,60 +532,55 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 		end
 	end
 
-	--[[
-		3. Taille de la grappe, et usines qu'elle contient.
-
-		On compte separement le **nombre** d'usines et la **somme de leurs
-		niveaux**, parce que les deux ne jouent pas le meme role : le nombre subit
-		un rendement decroissant, le niveau non. Les additionner dans un seul
-		compteur, comme avant, revenait a punir l'empilement exactement comme
-		l'etalement.
-	]]
+	-- 3. Taille de la grappe, et usines qu'elle contient : une grappe ne
+	-- produit que si elle contient au moins une usine.
 	local clusterStations: { [number]: number } = {}
 	local clusterFactoryCount: { [number]: number } = {}
-	local clusterFactoryLevels: { [number]: number } = {}
 	for i = 1, count do
 		local root = find(i)
 		clusterStations[root] = (clusterStations[root] or 0) + 1
 		local building = self.buildings[stations[i]]
 		if building and building.kind == B.FACTORY then
 			clusterFactoryCount[root] = (clusterFactoryCount[root] or 0) + 1
-			clusterFactoryLevels[root] = (clusterFactoryLevels[root] or 0) + building.level
 		end
 	end
 
-	-- 4. Revenu. Le nombre de liaisons d'une grappe est son arbre couvrant
-	-- (gares - 1) et non ses paires possibles : sinon dix gares rapporteraient
-	-- quarante-cinq fois deux gares et l'economie exploserait en fin de partie.
+	--[[
+		4. Revenu ESTIME. L'or reel n'est plus verse au tick : il arrive colis
+		par colis, voir Trade. Ce qui suit n'est que l'esperance mathematique
+		du debit de chaque usine, pour que le "+x/s" du HUD reste honnete.
+
+		Le nombre de liaisons d'une grappe reste son arbre couvrant (gares - 1)
+		et non ses paires possibles : sinon dix gares compteraient quarante-cinq
+		routes et l'affichage mentirait autant que l'ancienne economie.
+	]]
 	local routes = 0
-	local income = 0
 	for root, stationCount in clusterStations do
-		local factories = clusterFactoryCount[root] or 0
-		local levels = clusterFactoryLevels[root] or 0
-		if factories > 0 and stationCount > 1 then
-			local links = stationCount - 1
+		if (clusterFactoryCount[root] or 0) > 0 and stationCount > 1 then
+			routes += stationCount - 1
+		end
+	end
 
-			--[[
-				Deux effets distincts, et c'est tout l'interet de la mecanique.
-
-				  etalement — poser une SECONDE usine dans la meme grappe suit un
-				  rendement decroissant : la deuxieme n'apporte que la moitie de
-				  la premiere. Mieux vaut aller fonder un second reseau ailleurs.
-
-				  empilement — MONTER une usine d'un niveau est strictement
-				  lineaire : niveau 2 produit exactement le double du niveau 1.
-				  Le frein n'est pas ici, il est dans le prix, qui double a chaque
-				  exemplaire. Doubler le cout *et* raboter le rendement revenait a
-				  freiner deux fois, et rendait l'amelioration toujours perdante
-				  face a une construction neuve.
-			]]
-			local k = Config.RAIL_FACTORY_SOFTCAP
-			local spread = (factories / (factories + k)) * (1 + k)
-			local stacking = levels / factories -- niveau moyen : lineaire
-			local yield = spread * stacking
-
-			routes += links
-			income += Config.GOLD_PER_FACTORY_ROUTE * links * yield
+	local income = 0
+	for i = 1, count do
+		local building = self.buildings[stations[i]]
+		local links = neighborsOf[i]
+		if building and building.kind == B.FACTORY and #links > 0 then
+			-- Esperance par colis : tirage uniforme sur les liaisons, distance
+			-- ponderee par le niveau, chargement proportionnel au reseau.
+			-- Periode : trajet + rechargement.
+			local goldSum = 0
+			local periodSum = 0
+			local fx, fy = MapGen.fromIndex(stations[i])
+			for _, other in links do
+				local ox, oy = MapGen.fromIndex(other)
+				local dx, dy = fx - ox, fy - oy
+				local d = math.sqrt(dx * dx + dy * dy)
+				goldSum += Config.TRUCK_GOLD_BASE + d * Config.TRUCK_GOLD_PER_TILE
+				periodSum += math.max(1, math.ceil(d / Config.TRUCK_SPEED)) + Config.TRUCK_COOLDOWN
+			end
+			local n = #links
+			income += (goldSum * building.level) / (periodSum / n)
 		end
 	end
 
@@ -1317,16 +1316,15 @@ function GameState.stepEconomy(self: GameState)
 			ps.troops = math.min(maxTroops, ps.troops + gain * doctrine.growth * era.growth * humanGrowth)
 		end
 
-		local _, logisticsIncome = self:logisticsFor(ps.slot)
 		local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
 		local income = territorial
 			+ ps.cityGoldBonus
-			+ logisticsIncome
 			+ ps.portLevels * Config.GOLD_PER_PORT
 			+ ps.capitalCount * Config.GOLD_PER_CAPITAL
-		-- L'or du commerce maritime n'apparait pas ici : il est verse a
-		-- l'arrivee de chaque convoi, dans Navy. Le compter aussi au tick le
-		-- payait deux fois et rendait la piraterie sans effet sur le tresor.
+		-- L'or du commerce n'apparait pas ici : le maritime est verse a
+		-- l'arrivee de chaque convoi dans Navy, le terrestre a l'arrivee de
+		-- chaque colis dans Trade. Les compter aussi au tick les paierait deux
+		-- fois et rendrait piraterie et sabotage sans effet sur le tresor.
 		local modeGold = if self.mode then self.mode.goldMultiplier else 1
 		local humanGold = if ps.isBot then 1 else Config.HUMAN_GOLD_MULTIPLIER
 		ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold

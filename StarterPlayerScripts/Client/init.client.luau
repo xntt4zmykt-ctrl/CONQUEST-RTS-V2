@@ -796,6 +796,13 @@ Remotes.get("Sfx").OnClientEvent:Connect(function(name: string)
 	end
 end)
 
+Remotes.get("TradeEvent").OnClientEvent:Connect(function(action: string, a: number, b: number, slot: number, value: number)
+	local o = overlay
+	if o then
+		o:onTradeEvent(action, a, b, slot, value)
+	end
+end)
+
 -- Watchdog temporaire : si le menu et le HUD sont visibles ensemble, le bug
 -- est immediatement identifiable dans Output avec les valeurs reelles de la
 -- scene, au lieu de devoir deviner quel fondu est reste bloque.

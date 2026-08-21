@@ -159,13 +159,13 @@ BuildingDefs.LIST = {
 		name = "Usine",
 		symbol = "\u{2699}",
 		cost = 520,
-		description = "Relie villes, ports et usines en un reseau ferroviaire",
+		description = "Expedie des colis vers les gares proches : chaque livraison rapporte de l'or",
 		coastalOnly = false,
 		buildable = true,
 		upgradable = true,
 		maxLevel = 3,
 		popCapBonus = 0,
-		goldBonus = Config.GOLD_PER_FACTORY_ROUTE,
+		goldBonus = 0,
 	},
 } :: { BuildingDef }
 
