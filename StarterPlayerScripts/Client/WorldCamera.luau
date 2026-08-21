@@ -11,9 +11,9 @@
 	  **Avatar** — la camera Roblox classique attachee au personnage, pour se
 	  promener sur son propre territoire.
 
-	Le point de mire est contraint aux limites de la carte : sans cette borne,
-	deux coups de molette suffisent a se perdre dans le vide et a ne plus
-	retrouver le monde.
+	Le point de mire reste accroche a la carte, a la maniere du jeu de
+	reference : la moitie de l'ecran peut depasser le bord — assez pour
+	centrer un coin de carte, pas assez pour se perdre dans le vide.
 ]]
 
 local ContextActionService = game:GetService("ContextActionService")
@@ -65,6 +65,7 @@ function WorldCamera.new(): WorldCamera
 	self.mode = "overview"
 	self.edgePan = false
 	self.orbiting = false
+	self.panning = false
 	self.shake = 0
 	self.fovKick = 0
 	self.clock = 0
@@ -98,11 +99,27 @@ function WorldCamera.bindActions(self: WorldCamera)
 		if state ~= Enum.UserInputState.Change or self.mode ~= "overview" then
 			return Enum.ContextActionResult.Pass
 		end
-		self.targetDistance = math.clamp(
-			self.targetDistance * (1 - input.Position.Z * 0.12),
-			MIN_DISTANCE,
-			MAX_DISTANCE
-		)
+		local oldDistance = self.targetDistance
+		local newDistance = math.clamp(oldDistance * (1 - input.Position.Z * 0.12), MIN_DISTANCE, MAX_DISTANCE)
+		if newDistance ~= oldDistance then
+			--[[
+				Zoom vers le curseur, la signature du jeu de reference : le
+				point sous la souris reste sous la souris. Sans ca, zoomer sur
+				une cible exige de reframer a chaque coup de molette — la mire
+				ne bougeant jamais, c'est toujours le centre de l'ecran qui
+				grossit.
+			]]
+			local mouse = UserInputService:GetMouseLocation()
+			local ray = self.camera:ScreenPointToRay(mouse.X, mouse.Y)
+			if ray.Direction.Y < -1e-3 then
+				local ground = ray.Origin + ray.Direction * (-ray.Origin.Y / ray.Direction.Y)
+				local blend = 1 - newDistance / oldDistance
+				self.targetFocus = self:clampFocus(
+					self.targetFocus + (Vector3.new(ground.X, 0, ground.Z) - self.targetFocus) * blend
+				)
+			end
+			self.targetDistance = newDistance
+		end
 		return Enum.ContextActionResult.Sink
 	end, false, Enum.UserInputType.MouseWheel)
 
@@ -121,6 +138,13 @@ function WorldCamera.bindActions(self: WorldCamera)
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
 			self.orbiting = true
 			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+		elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+			-- Glisser au clic du milieu : le monde suit la souris, comme un
+			-- panoramique tactile. C'est le geste de deplacement libre du jeu
+			-- de reference, que ni le clavier ni le bord d'ecran ne rendent
+			-- aussi directement.
+			self.panning = true
+			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
 		end
 	end)
 
@@ -128,18 +152,25 @@ function WorldCamera.bindActions(self: WorldCamera)
 		if input.UserInputType == Enum.UserInputType.MouseButton2 then
 			self.orbiting = false
 			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+			self.panning = false
+			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 		end
 	end)
 
 	UserInputService.InputChanged:Connect(function(input: InputObject)
-		if not self.orbiting or self.mode ~= "overview" then
+		if self.mode ~= "overview" then
 			return
 		end
 		if input.UserInputType ~= Enum.UserInputType.MouseMovement then
 			return
 		end
-		self.targetYaw += input.Delta.X * 0.006
-		self.targetPitch = math.clamp(self.targetPitch - input.Delta.Y * 0.005, MIN_PITCH, MAX_PITCH)
+		if self.orbiting then
+			self.targetYaw += input.Delta.X * 0.006
+			self.targetPitch = math.clamp(self.targetPitch - input.Delta.Y * 0.005, MIN_PITCH, MAX_PITCH)
+		elseif self.panning then
+			self:panByScreenDelta(Vector2.new(input.Delta.X, input.Delta.Y))
+		end
 	end)
 end
 
@@ -150,6 +181,7 @@ function WorldCamera.setMode(self: WorldCamera, mode: string)
 		self.camera.CameraType = Enum.CameraType.Scriptable
 		self.camera.FieldOfView = 60
 		self.orbiting = false
+		self.panning = false
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	else
 		-- On rend la camera a Roblox : le controle du personnage, la collision
@@ -207,15 +239,33 @@ function WorldCamera.punch(self: WorldCamera, intensity: number)
 	self.fovKick = math.max(self.fovKick, intensity * 2.2)
 end
 
--- Le point de mire ne quitte jamais la carte, avec une marge de tolerance.
-local function clampToMap(position: Vector3): Vector3
-	local halfW = Config.WORLD_WIDTH / 2 + 60
-	local halfD = Config.WORLD_DEPTH / 2 + 60
+--[[
+	Le point de mire ne s'egare jamais completement : comme chez le jeu de
+	reference, la moitie de l'ecran peut depasser le bord de la carte — assez
+	pour centrer un coin de carte et y travailler, pas assez pour se perdre
+	dans le vide. La marge depend donc du zoom : elle vaut la moitie de
+	l'etendue au sol visible a la distance courante.
+]]
+local function clampToMap(position: Vector3, marginX: number, marginZ: number): Vector3
+	local halfW = Config.WORLD_WIDTH / 2 + marginX
+	local halfD = Config.WORLD_DEPTH / 2 + marginZ
 	return Vector3.new(
 		math.clamp(position.X, -halfW, halfW),
 		0,
 		math.clamp(position.Z, -halfD, halfD)
 	)
+end
+
+-- Etendue au sol visible a la distance courante (largeur, hauteur).
+function WorldCamera.visibleGround(self: WorldCamera): (number, number)
+	local height = 2 * self.targetDistance * math.tan(math.rad(self.camera.FieldOfView) / 2)
+	local viewport = self.camera.ViewportSize
+	return height * (viewport.X / math.max(viewport.Y, 1)), height
+end
+
+function WorldCamera.clampFocus(self: WorldCamera, position: Vector3): Vector3
+	local groundW, groundH = self:visibleGround()
+	return clampToMap(position, groundW / 2, groundH / 2)
 end
 
 --=============================================================================
@@ -254,7 +304,7 @@ function WorldCamera.panByScreenDelta(self: WorldCamera, delta: Vector2)
 	local sin, cos = math.sin(self.targetYaw), math.cos(self.targetYaw)
 	local worldX = -cos * dx + sin * dy
 	local worldZ = -sin * dx - cos * dy
-	self.targetFocus = clampToMap(self.targetFocus + Vector3.new(worldX, 0, worldZ))
+	self.targetFocus = self:clampFocus(self.targetFocus + Vector3.new(worldX, 0, worldZ))
 end
 
 -- Les deux premiers doigts actifs, pour le pincement.
@@ -442,7 +492,7 @@ function WorldCamera.stepInput(self: WorldCamera, dt: number)
 		local worldX = move.X * cos - move.Y * sin
 		local worldZ = move.X * sin + move.Y * cos
 		local speed = PAN_SPEED * self.targetDistance * dt
-		self.targetFocus = clampToMap(self.targetFocus + Vector3.new(worldX, 0, worldZ) * speed)
+		self.targetFocus = self:clampFocus(self.targetFocus + Vector3.new(worldX, 0, worldZ) * speed)
 	end
 end
 

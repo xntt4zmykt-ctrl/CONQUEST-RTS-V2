@@ -238,6 +238,30 @@ check("fil de notifications sature", function()
 	for _ = 1, 5 do
 		hud:notify("repetition", "info")
 	end
+
+	--[[
+		Chaque message porte sa croix de rejet : une demande d'alliance qu'on
+		ne veut pas traiter ne doit pas rester a l'ecran jusqu'a expiration.
+		Apres le rejet, le groupe est oublie — le meme message peut revenir
+		sans heriter du compteur precedent.
+
+		Le harnais execute task.delay immediatement : sans le court-circuiter,
+		chaque message expirerait avant meme le retour de notify.
+	]]
+	local realDelay = task.delay
+	task.delay = function() end
+	hud:notify("a degager", "alert")
+	local group = hud.feedGroups["a degager"]
+	assert(group ~= nil, "le message ne rejoint pas le fil")
+	local afterAdd = #hud.feedEntries
+	local cross = group.entry:FindFirstChild("Dismiss")
+	assert(cross ~= nil, "le message n'a pas sa croix de rejet")
+	cross.Activated:Fire()
+	assert(hud.feedGroups["a degager"] == nil, "le message rejete reste indexe")
+	assert(#hud.feedEntries == afterAdd - 1, "le message rejete reste dans le fil")
+	hud:notify("a degager", "alert")
+	assert(hud.feedGroups["a degager"].count == 1, "le compteur survit au rejet")
+	task.delay = realDelay
 end)
 
 check("onboarding, profil et inspecteur de territoire", function()
@@ -886,6 +910,33 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
+
+	--[[
+		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Les faux InputObject sont de simples tables : le code ne lit que
+		UserInputType, Position et Delta.
+	]]
+	local uis = game:GetService("UserInputService")
+	local anchor = camera.targetFocus
+	uis.InputBegan:Fire(
+		{ UserInputType = Enum.UserInputType.MouseButton3, Position = Vector3.new(400, 300, 0), Delta = Vector3.zero },
+		false
+	)
+	uis.InputChanged:Fire({
+		UserInputType = Enum.UserInputType.MouseMovement,
+		Position = Vector3.new(460, 330, 0),
+		Delta = Vector3.new(60, 30, 0),
+	})
+	assert(camera.targetFocus ~= anchor, "le glissement au clic du milieu ne deplace pas la camera")
+	uis.InputEnded:Fire({ UserInputType = Enum.UserInputType.MouseButton3, Position = Vector3.new(460, 330, 0), Delta = Vector3.zero })
+	local afterRelease = camera.targetFocus
+	uis.InputChanged:Fire({
+		UserInputType = Enum.UserInputType.MouseMovement,
+		Position = Vector3.new(500, 350, 0),
+		Delta = Vector3.new(40, 20, 0),
+	})
+	assert(camera.targetFocus == afterRelease, "la camera bouge encore apres le relachement")
+
 	camera:toggleMode()
 	camera:step(1 / 60)
 	camera:toggleMode()

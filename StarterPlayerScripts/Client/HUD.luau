@@ -923,6 +923,25 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		return
 	end
 
+	-- Retrait partage par l'expiration, le plafond d'entrees et la croix :
+	-- trois chemins, un seul endroit qui nettoie les deux index.
+	local function removeEntry(target: TextLabel)
+		if not target.Parent then
+			return
+		end
+		local index = table.find(self.feedEntries, target)
+		if index then
+			table.remove(self.feedEntries, index)
+		end
+		for key, group in self.feedGroups do
+			if group.entry == target then
+				self.feedGroups[key] = nil
+				break
+			end
+		end
+		target:Destroy()
+	end
+
 	local entry = Instance.new("TextLabel")
 	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
 	entry.BackgroundColor3 = C.surface
@@ -938,6 +957,34 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	Theme.corner(entry, Theme.radius.sm)
 	Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
 
+	-- Le texte s'arrete avant la croix, sinon les longs messages passent
+	-- dessous et l'un des deux devient illisible.
+	local inset = Instance.new("UIPadding")
+	inset.PaddingRight = UDim.new(0, 20)
+	inset.Parent = entry
+
+	--[[
+		Croix de rejet. Un message qui reste — une demande d'alliance qu'on ne
+		veut pas traiter tout de suite — ne doit pas devenir un element
+		permanent : le joueur le degage, le minuteur le degage, mais l'un des
+		deux doit toujours pouvoir le faire tout de suite.
+	]]
+	local dismiss = Instance.new("TextButton")
+	dismiss.Name = "Dismiss"
+	dismiss.AnchorPoint = Vector2.new(1, 0.5)
+	dismiss.Position = UDim2.new(1, -3, 0.5, 0)
+	dismiss.Size = UDim2.fromOffset(14, 14)
+	dismiss.BackgroundTransparency = 1
+	dismiss.FontFace = F.bold
+	dismiss.TextSize = T.small
+	dismiss.TextColor3 = C.textFaint
+	dismiss.Text = "\u{00D7}"
+	dismiss.ZIndex = 2
+	dismiss.Parent = entry
+	dismiss.Activated:Connect(function()
+		removeEntry(entry)
+	end)
+
 	local sound = FEED_SOUNDS[kind]
 	if sound then
 		SoundManager.play(sound)
@@ -950,8 +997,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	while #self.feedEntries > MAX_FEED_ENTRIES do
 		local oldest = table.remove(self.feedEntries, 1)
 		if oldest then
-			self.feedGroups[oldest.Text] = nil
-			oldest:Destroy()
+			removeEntry(oldest)
 		end
 	end
 
@@ -959,11 +1005,12 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		if not entry.Parent then
 			return
 		end
-		local index = table.find(self.feedEntries, entry)
-		if index then
-			table.remove(self.feedEntries, index)
+		-- Le fondu ne touche que l'etiquette : la croix part d'elle-meme,
+		-- sinon elle resterait visible sur un message deja efface.
+		local cross = entry:FindFirstChild("Dismiss")
+		if cross then
+			cross:Destroy()
 		end
-		self.feedGroups[text] = nil
 		local tween = TweenService:Create(
 			entry,
 			Theme.motion.smooth,
@@ -971,7 +1018,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		)
 		tween:Play()
 		tween.Completed:Wait()
-		entry:Destroy()
+		removeEntry(entry)
 	end)
 end
 
