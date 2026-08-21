@@ -337,6 +337,51 @@ function Diplomacy.step(state: GameState)
 			)
 		end
 	end
+
+	-- Une marque qui vise un disparu, ou posee par un disparu, ne doit pas
+	-- survivre a son auteur : la carte oublierait sinon des cibles fantomes.
+	for marker, target in state.targetMarks do
+		if not state.players[marker] or not state.players[target] then
+			state.targetMarks[marker] = nil
+		end
+	end
+end
+
+--=============================================================================
+-- Marquage de cible
+--=============================================================================
+
+--[[
+	Designe une faction comme cible de l'alliance, modele des coordonnees
+	partagees du jeu de reference : une offensive a trois n'a de poids que si
+	tout le monde frappe au meme endroit. La marque est propre a chaque joueur,
+	visible de ses allies, et remplace la precedente — une seule priorite a la
+	fois, sinon elle ne priorise plus rien.
+]]
+function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: number): (boolean, string?)
+	if from == targetSlot then
+		return false, "Cible invalide."
+	end
+	local a, t = state.players[from], state.players[targetSlot]
+	if not a or not t then
+		return false, "Cette faction n'existe plus."
+	end
+
+	if state.targetMarks[from] == targetSlot then
+		state.targetMarks[from] = nil
+		return true, "Marque retiree."
+	end
+
+	state.targetMarks[from] = targetSlot
+	local message = `\u{2691} {a.name} designe {t.name} comme cible.`
+	state:notify(message, "info", from)
+	local allySet = state.alliances[from]
+	if allySet then
+		for other in allySet do
+			state:notify(message, "info", other)
+		end
+	end
+	return true, `{t.name} designee comme cible pour ton alliance.`
 end
 
 --[[
@@ -383,12 +428,27 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 		end
 	end
 
+	-- Marquages de cible : les miens et ceux de mes allies. La marque d'un
+	-- ennemi est un renseignement qu'on ne livre pas gratuitement.
+	local marks: { [number]: number } = {}
+	local mine = state.targetMarks[slot]
+	if mine and state.players[mine] then
+		marks[slot] = mine
+	end
+	for other in allies do
+		local theirs = state.targetMarks[other]
+		if theirs and state.players[theirs] then
+			marks[other] = theirs
+		end
+	end
+
 	return {
 		allies = allies,
 		incoming = incoming,
 		outgoing = outgoing,
 		embargoes = embargoes,
 		traitors = traitors,
+		marks = marks,
 	}
 end
 

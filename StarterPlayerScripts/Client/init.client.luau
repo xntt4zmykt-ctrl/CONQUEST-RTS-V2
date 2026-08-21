@@ -525,6 +525,13 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 			if camera.edgePan then "Defilement par les bords active." else "Defilement par les bords desactive.",
 			"info"
 		)
+		return
+	end
+
+	-- Messages rapides : la coordination d'alliance ne doit jamais demander
+	-- plus d'une touche.
+	if input.KeyCode == Enum.KeyCode.C then
+		hud:openSheet("chat", true)
 	end
 end)
 
@@ -549,6 +556,10 @@ end
 
 hud.onDiplomacyAction = function(action: string, targetSlot: number)
 	Remotes.get("DiplomacyOrder"):FireServer(action, targetSlot)
+end
+
+hud.onQuickChat = function(messageId: string, targetSlot: number?)
+	Remotes.get("QuickChat"):FireServer(messageId, targetSlot)
 end
 
 hud.onResearch = function()

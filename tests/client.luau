@@ -195,6 +195,7 @@ check("identite, ere, diplomatie et classement", function()
 		outgoing = { [4] = true },
 		embargoes = { [5] = true },
 		traitors = { [6] = true },
+		marks = { [2] = 7 }, -- l'allie designe la nation 7 comme cible
 	})
 	--[[
 		La diplomatie reste joignable apres le retrait du classement.
@@ -222,6 +223,12 @@ check("identite, ere, diplomatie et classement", function()
 
 	hud:selectFaction(nil)
 	assert(not hud.diploDrawer.Visible, "la fiche reste ouverte apres deselection")
+
+	-- La nation 7 est designee comme cible par l'allie : la fiche doit le dire,
+	-- c'est l'information qui declenche une rupture avant la frappe.
+	hud:selectFaction(7)
+	assert(string.find(hud.diploStatus.Text, "\u{2691}") ~= nil, "la marque de cible n'apparait pas sur la fiche")
+	hud:selectFaction(nil)
 
 	for era = 1, 5 do
 		hud.era = era
@@ -321,6 +328,53 @@ check("un seul sous-menu ouvert a la fois", function()
 	assert(hud.territoryPanel.Visible and not hud.sheets.build.Visible, "la fiche de territoire n'est pas exclusive")
 	assert(openCount() == 1, `{openCount()} sous-menus ouverts avec la fiche de territoire`)
 	hud:setMode("attack")
+end)
+
+check("messages rapides : catalogue, designation de cible et envoi", function()
+	local sent = {}
+	hud.onQuickChat = function(id, targetSlot)
+		table.insert(sent, { id = id, target = targetSlot })
+	end
+
+	local function buttonWithText(text)
+		for _, child in hud.chatBody:GetChildren() do
+			if child:IsA("TextButton") and child.Text == text then
+				return child
+			end
+		end
+		return nil
+	end
+
+	hud:openSheet("chat")
+	assert(hud.sheets.chat.Visible, "la feuille de messages ne s'ouvre pas")
+
+	-- Un message sans cible part immediatement.
+	hud.chatCategory = "social"
+	hud:refreshChatSheet()
+	local gg = buttonWithText("Bien joue !")
+	assert(gg, "le message social n'est pas dans le catalogue affiche")
+	gg.Activated:Fire()
+	assert(#sent == 1 and sent[1].id == "social_gg" and sent[1].target == nil, "le message sans cible n'est pas parti")
+	assert(not hud.sheets.chat.Visible, "la feuille ne se referme pas apres l'envoi")
+
+	-- Un message avec cible demande une designation en deux temps.
+	hud:openSheet("chat")
+	hud.chatCategory = "attaque"
+	hud:refreshChatSheet()
+	local attack = buttonWithText("Attaquez ... !")
+	assert(attack, "l'appel a l'attaque n'est pas affiche")
+	attack.Activated:Fire()
+	assert(hud.chatPending ~= nil, "la designation de cible ne s'ouvre pas")
+
+	-- Choisir la nation 3 dans la liste des cibles.
+	local target = buttonWithText("Nation3")
+	assert(target, "la nation cible n'est pas listee")
+	hud.chatSentAt = 0 -- neutralise l'anti-spam local pour le test
+	target.Activated:Fire()
+	assert(
+		#sent == 2 and sent[2].id == "attack_target" and sent[2].target == 3,
+		"le message cible n'est pas parti avec sa cible"
+	)
 end)
 
 --[[

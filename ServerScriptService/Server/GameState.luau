@@ -148,6 +148,9 @@ export type GameState = typeof(setmetatable(
 		allianceCooldowns: { [number]: { [number]: number } },
 		requests: { [number]: { [number]: number } }, -- from -> to -> expiry tick
 		embargoes: { [number]: { [number]: true } },
+		-- Cibles designees pour l'alliance : marqueur -> faction marquee.
+		targetMarks: { [number]: number },
+		quickChatSent: { [number]: number },
 		dirty: { [number]: true },
 		buildingDirty: { [number]: true },
 		freeSlots: { number },
@@ -195,6 +198,11 @@ function GameState.new(seed: number): GameState
 	self.allianceExtensions = {}
 	self.requests = {}
 	self.embargoes = {}
+	-- Cibles designees pour l'alliance : marqueur -> faction marquee. Voir
+	-- Diplomacy.setTargetMark et le message rapide "Attaquez {target}".
+	self.targetMarks = {}
+	-- Anti-spam des messages rapides : dernier tick d'envoi par faction.
+	self.quickChatSent = {}
 	self.dirty = {}
 	self.buildingDirty = {}
 	self.nextEntityId = 1

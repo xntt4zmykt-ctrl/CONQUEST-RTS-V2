@@ -30,6 +30,7 @@ local NAMES = {
 	"BoatOrder", -- (targetTileIndex)
 	"NukeOrder", -- (targetTileIndex, nukeKind)
 	"DiplomacyOrder", -- (action: string, targetSlot: number)
+	"QuickChat", -- (messageId: string, targetSlot: number?) : message rapide predefini
 	"ResearchOrder", -- () : avancer d'une ere
 	"JoinRequest", -- (nationId: number, modeId: string) : deploiement depuis le menu
 }

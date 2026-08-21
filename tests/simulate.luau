@@ -29,6 +29,7 @@ local Placement = __require("Placement")
 local RailPath = __require("RailPath")
 local Format = __require("Format")
 local Leaderstats = __require("Leaderstats")
+local QuickChat = __require("QuickChat")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -1664,6 +1665,83 @@ do
 					fail("mirv — la pluie d'ogives ne laisse aucun degat")
 				end
 			end
+		end
+	end
+end
+
+--[[
+	Messages rapides et marquage de cible.
+
+	La coordination d'alliance repose sur deux proprietes invisibles en jeu
+	normal : le texte substitue bien le nom de la cible, et la marque n'est
+	livree qu'a ceux qui doivent la voir — soi-meme et ses allies, jamais a la
+	victime.
+]]
+do
+	-- Chaque message qui exige une cible doit contenir le trou "{target}",
+	-- sinon il serait envoye avec un placeholder brut.
+	for _, entry in QuickChat.MESSAGES do
+		local hasHole = string.find(entry.text, "{target}", 1, true) ~= nil
+		if entry.needsTarget and not hasHole then
+			fail(`quick chat — {entry.id} exige une cible sans trou dans son texte`)
+		end
+		if not entry.needsTarget and hasHole then
+			fail(`quick chat — {entry.id} a un trou mais n'exige pas de cible`)
+		end
+	end
+
+	local entry = QuickChat.get("attack_target")
+	if not entry or not entry.mark then
+		fail("quick chat — l'appel a l'attaque ne designe plus sa cible")
+	else
+		local text = QuickChat.format(entry, "Vodark")
+		if text ~= "Attaquez Vodark !" then
+			fail(`quick chat — substitution inattendue : {text}`)
+		end
+	end
+
+	local markState = GameState.new(6161)
+	local a = markState:addPlayer(nil, "Marqueur", Random.new(71), 0)
+	local b = markState:addPlayer(nil, "Allie", Random.new(72), 0)
+	local c = markState:addPlayer(nil, "Victime", Random.new(73), 0)
+	if not a or not b or not c then
+		fail("marquage — impossible de creer les factions de test")
+	else
+		Diplomacy.request(markState, a.slot, b.slot)
+		Diplomacy.accept(markState, a.slot, b.slot)
+
+		if Diplomacy.setTargetMark(markState, a.slot, a.slot) then
+			fail("marquage — on peut se designer soi-meme comme cible")
+		end
+		if not Diplomacy.setTargetMark(markState, a.slot, c.slot) then
+			fail("marquage — la designation est refusee")
+		end
+
+		local mine = Diplomacy.viewFor(markState, a.slot)
+		local allyView = Diplomacy.viewFor(markState, b.slot)
+		local victimView = Diplomacy.viewFor(markState, c.slot)
+		if mine.marks[a.slot] ~= c.slot then
+			fail("marquage — l'auteur ne voit pas sa propre marque")
+		end
+		if allyView.marks[a.slot] ~= c.slot then
+			fail("marquage — l'allie ne voit pas la marque")
+		end
+		if victimView.marks[a.slot] ~= nil then
+			fail("marquage — la victime voit la marque qui la vise")
+		end
+
+		-- Une seconde designation sur la meme cible retire la marque.
+		Diplomacy.setTargetMark(markState, a.slot, c.slot)
+		if markState.targetMarks[a.slot] ~= nil then
+			fail("marquage — la marque ne se retire pas au second geste")
+		end
+
+		-- Une marque dont la cible disparait est oubliee.
+		Diplomacy.setTargetMark(markState, a.slot, c.slot)
+		markState.players[c.slot] = nil
+		Diplomacy.step(markState)
+		if markState.targetMarks[a.slot] ~= nil then
+			fail("marquage — une marque survit a la disparition de sa cible")
 		end
 	end
 end

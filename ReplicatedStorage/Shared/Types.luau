@@ -45,6 +45,8 @@ export type Diplomacy = {
 	outgoing: { [number]: boolean },
 	embargoes: { [number]: boolean },
 	traitors: { [number]: boolean },
+	-- Marquages de cible visibles : marqueur -> faction marquee (moi + allies).
+	marks: { [number]: number },
 }
 
 export type BoatSnapshot = {

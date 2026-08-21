@@ -20,6 +20,7 @@ local Nations = require(ReplicatedStorage.Shared.Nations)
 local GameModes = require(ReplicatedStorage.Shared.GameModes)
 local WorldSpace = require(ReplicatedStorage.Shared.WorldSpace)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
+local QuickChat = require(ReplicatedStorage.Shared.QuickChat)
 
 -- init.server.luau devient le Script "Server" ; les modules voisins en sont
 -- les enfants, pas les freres.
@@ -605,11 +606,81 @@ diplomacyOrder.OnServerEvent:Connect(function(player: Player, action: any, targe
 		ok, message = Diplomacy.setEmbargo(state, slot, targetSlot, true)
 	elseif action == "unembargo" then
 		ok, message = Diplomacy.setEmbargo(state, slot, targetSlot, false)
+	elseif action == "markTarget" then
+		ok, message = Diplomacy.setTargetMark(state, slot, targetSlot)
 	else
 		return
 	end
 
 	reply(player, ok, message)
+end)
+
+--=============================================================================
+-- Messages rapides
+--=============================================================================
+
+--[[
+	Un message predefini, jamais de texte libre : le catalogue est la seule
+	source, ce qui ferme d'office insultes, liens et contournements de filtre.
+	La portee decide qui voit le message — coordination d'alliance ou annonce
+	publique — et certains messages designent leur cible pour toute l'alliance.
+]]
+local quickChatEvent = Remotes.get("QuickChat")
+
+quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any)
+	local slot = slotOf(player)
+	if not slot or matchPhase ~= "playing" then
+		return
+	end
+	if typeof(messageId) ~= "string" then
+		return
+	end
+	local entry = QuickChat.get(messageId)
+	if not entry then
+		return
+	end
+
+	-- Anti-spam : silencieux, un refus bavard serait lui-meme du spam.
+	local last = state.quickChatSent[slot]
+	if last and state.tick - last < QuickChat.COOLDOWN then
+		return
+	end
+
+	local targetName: string? = nil
+	if entry.needsTarget then
+		if not isInteger(targetSlot) or targetSlot == slot then
+			reply(player, false, "Ce message demande une cible.")
+			return
+		end
+		local target = state.players[targetSlot]
+		if not target then
+			reply(player, false, "Cette faction n'existe plus.")
+			return
+		end
+		targetName = target.name
+	end
+
+	state.quickChatSent[slot] = state.tick
+
+	local ps = state.players[slot]
+	local message = `\u{1F4AC} {if ps then ps.name else "?"} : {QuickChat.format(entry, targetName)}`
+	if entry.alliesOnly then
+		state:notify(message, "info", slot)
+		local allySet = state.alliances[slot]
+		if allySet then
+			for other in allySet do
+				state:notify(message, "info", other)
+			end
+		end
+	else
+		state:notify(message, "info")
+	end
+
+	-- Les messages d'appel a l'attaque designent leur cible pour toute
+	-- l'alliance : le texte et la marque ne se contredisent jamais.
+	if entry.mark and isInteger(targetSlot) then
+		Diplomacy.setTargetMark(state, slot, targetSlot)
+	end
 end)
 
 --=============================================================================

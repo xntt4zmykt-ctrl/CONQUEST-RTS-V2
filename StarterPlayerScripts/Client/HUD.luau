@@ -38,6 +38,7 @@ local Doctrines = require(Shared:WaitForChild("Doctrines"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
 local Eras = require(Shared:WaitForChild("Eras"))
 local Format = require(Shared:WaitForChild("Format"))
+local QuickChat = require(Shared:WaitForChild("QuickChat"))
 local SoundManager = require(script.Parent.SoundManager)
 
 local C = Theme.color
@@ -244,7 +245,7 @@ function HUD.new(parent: ScreenGui): HUD
 	self.parkPills = {}
 	self.buildingCounts = {}
 	self.troopGrowth = 0
-	self.diplomacy = { allies = {}, incoming = {}, outgoing = {}, embargoes = {}, traitors = {} }
+	self.diplomacy = { allies = {}, incoming = {}, outgoing = {}, embargoes = {}, traitors = {}, marks = {} }
 	self.roster = {}
 	self.ranked = {}
 	self.feedEntries = {}
@@ -282,6 +283,7 @@ function HUD.new(parent: ScreenGui): HUD
 	self:buildProfileSheet()
 	self:buildBuildSheet()
 	self:buildArsenalSheet()
+	self:buildChatSheet()
 	self:buildTerritorySheet()
 	self:buildDoctrineModal()
 
@@ -450,6 +452,7 @@ function HUD.buildDiplomacySheet(self: HUD)
 		{ id = "extend", text = "Prolonger", color = C.ally, order = 6 },
 		{ id = "donateGold", text = "Don or", color = C.warning, order = 7 },
 		{ id = "donateTroops", text = "Don troupes", color = C.info, order = 8 },
+		{ id = "markTarget", text = "\u{2691} Cible", color = C.danger, order = 9 },
 	}
 
 	for _, action in actionDefs do
@@ -739,6 +742,22 @@ function HUD.buildSessionBar(self: HUD)
 		self:openSheet("profile", true)
 	end)
 	self.sheetButtons.profile = settings
+
+	--[[
+		Messages rapides.
+
+		Le free-chat ne coordonne pas une alliance multilingue ; des messages
+		predefinis, si. Le bouton vit dans la barre de session, a portee de
+		pouce du classement ou l'on designe les cibles.
+	]]
+	local chat = button(bar, "\u{1F4AC}", T.small)
+	chat.AnchorPoint = Vector2.new(1, 0.5)
+	chat.Position = UDim2.new(1, -(S.sm + 52), 0.5, 0)
+	chat.Size = UDim2.fromOffset(22, 20)
+	chat.Activated:Connect(function()
+		self:openSheet("chat", true)
+	end)
+	self.sheetButtons.chat = chat
 
 	--[[
 		Sortie.
@@ -1408,6 +1427,138 @@ function HUD.buildArsenalSheet(self: HUD)
 end
 
 --=============================================================================
+-- Sous-menu : Messages rapides
+--=============================================================================
+
+--[[
+	Le catalogue predefini, modele OpenFront : pas de texte libre, donc pas
+	d'insulte ni de barriere de langue. Deux temps seulement — on choisit un
+	message, et s'il exige une cible, on la designe dans la liste des nations.
+]]
+function HUD.buildChatSheet(self: HUD)
+	local sheet = Theme.panel("Messages", self.layers.sheets)
+	sheet.AnchorPoint = Vector2.new(0.5, 1)
+	sheet.Position = UDim2.new(0.5, 0, 1, -SHEET_BOTTOM)
+	sheet.Size = UDim2.fromOffset(SHEET_WIDTH, 150)
+	self:registerSheet("chat", sheet)
+
+	local title = Theme.label(sheet, "MESSAGES", T.tiny, C.textFaint)
+	title.Position = UDim2.fromOffset(S.md, S.sm)
+	title.Size = UDim2.new(1, -S.md * 2, 0, 12)
+
+	-- Onglets de categories, a gauche.
+	local tabs = Instance.new("Frame")
+	tabs.BackgroundTransparency = 1
+	tabs.Position = UDim2.fromOffset(S.md, 26)
+	tabs.Size = UDim2.fromOffset(86, 116)
+	tabs.Parent = sheet
+	Theme.list(tabs, Enum.FillDirection.Vertical, S.xs)
+
+	self.chatTabs = {}
+	for i, category in QuickChat.CATEGORIES do
+		local tab = button(tabs, category.name, T.tiny)
+		tab.LayoutOrder = i
+		tab.Size = UDim2.new(1, 0, 0, 18)
+		tab.Activated:Connect(function()
+			self.chatCategory = category.id
+			self.chatPending = nil
+			self:refreshChatSheet()
+		end)
+		self.chatTabs[category.id] = tab
+	end
+
+	-- Zone des messages, a droite : reconstruite a chaque changement
+	-- d'onglet, elle est trop simple pour meriter un recyclage.
+	local body = Instance.new("Frame")
+	body.BackgroundTransparency = 1
+	body.Position = UDim2.fromOffset(S.md + 94, 26)
+	body.Size = UDim2.new(1, -S.md * 2 - 94, 1, -34)
+	body.Parent = sheet
+	self.chatBody = body
+
+	self.chatCategory = QuickChat.CATEGORIES[1].id
+	self.chatPending = nil
+	self.chatSentAt = 0
+	self:refreshChatSheet()
+end
+
+function HUD.refreshChatSheet(self: HUD)
+	for _, child in self.chatBody:GetChildren() do
+		child:Destroy()
+	end
+	for id, tab in self.chatTabs do
+		setSelected(tab, id == self.chatCategory)
+	end
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.5, -3, 0, 24)
+	grid.CellPadding = UDim2.fromOffset(6, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = self.chatBody
+
+	-- Deuxieme temps : la designation de la cible du message choisi.
+	local pending = self.chatPending
+	if pending then
+		local back = button(self.chatBody, "\u{2190} Retour", T.tiny)
+		back.LayoutOrder = 0
+		back.Activated:Connect(function()
+			self.chatPending = nil
+			self:refreshChatSheet()
+		end)
+
+		local order = 0
+		for slot, entry in self.roster do
+			if slot ~= self.mySlot then
+				order += 1
+				local b = button(self.chatBody, entry.name, T.tiny)
+				b.LayoutOrder = order
+				b.TextColor3 = Theme.factionColor(slot)
+				b.Activated:Connect(function()
+					self:sendQuickChat(pending, slot)
+				end)
+			end
+		end
+		return
+	end
+
+	local order = 0
+	for _, entry in QuickChat.MESSAGES do
+		if entry.category == self.chatCategory then
+			order += 1
+			-- Le trou de la cible se lit "..." dans le catalogue : le joueur
+			-- sait qu'il devra la designer au clic.
+			local label = string.gsub(entry.text, "{target}", "...")
+			local b = button(self.chatBody, label, T.tiny)
+			b.LayoutOrder = order
+			b.TextXAlignment = Enum.TextXAlignment.Left
+			b.Activated:Connect(function()
+				if entry.needsTarget then
+					self.chatPending = entry
+					self:refreshChatSheet()
+				else
+					self:sendQuickChat(entry, nil)
+				end
+			end)
+		end
+	end
+end
+
+function HUD.sendQuickChat(self: HUD, entry: QuickChat.Message, targetSlot: number?)
+	-- Garde-fou local : le serveur reste autoritaire sur l'anti-spam, mais le
+	-- joueur merite un retour immediat plutot qu'un silence.
+	if os.clock() - self.chatSentAt < QuickChat.COOLDOWN / Config.TICK_RATE then
+		self:notify("Patiente un instant avant de renvoyer un message.", "info")
+		return
+	end
+	self.chatSentAt = os.clock()
+	self.chatPending = nil
+	self:openSheet(nil)
+	if self.onQuickChat then
+		self.onQuickChat(entry.id, targetSlot)
+	end
+end
+
+--=============================================================================
 -- Sous-menu : Territoire
 --=============================================================================
 
@@ -1934,6 +2085,9 @@ end
 
 function HUD.setDiplomacy(self: HUD, diplomacy: Types.Diplomacy)
 	local hadIncoming = next(self.diplomacy.incoming) ~= nil
+	-- Un client d'une version anterieure peut recevoir une vue sans marques :
+	-- normaliser plutot que planter sur une table absente.
+	diplomacy.marks = diplomacy.marks or {}
 	self.diplomacy = diplomacy
 
 	-- Une proposition d'alliance recue est une sollicitation directe : elle
@@ -1995,6 +2149,24 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	if embargoed then
 		status ..= "  \u{2716} embargo"
 	end
+
+	-- Marquages de cible visibles sur cette faction : les miens et ceux de mes
+	-- allies. Savoir qu'on est designe est aussi une information — elle invite
+	-- a rompre l'alliance avant la frappe.
+	local markers: { string } = {}
+	for marker, target in d.marks do
+		if target == slot then
+			local name = if marker == self.mySlot
+				then "moi"
+				elseif self.roster[marker] then self.roster[marker].name
+				else "?"
+			table.insert(markers, name)
+		end
+	end
+	if #markers > 0 then
+		status ..= `  \u{2691} cible de {table.concat(markers, ", ")}`
+	end
+
 	self.diploStatus.Text = status
 	self.diploStatus.TextColor3 = if allied then C.ally elseif entry.betrayals > 0 then C.warning else C.textMuted
 
@@ -2008,6 +2180,9 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	self.diploButtons.extend.Visible = allied
 	self.diploButtons.donateGold.Visible = allied
 	self.diploButtons.donateTroops.Visible = allied
+	-- Designer un allie comme cible n'a aucun sens : la marque sert a
+	-- coordonner une frappe, pas a decorer un pacte.
+	self.diploButtons.markTarget.Visible = not allied
 end
 
 --=============================================================================
