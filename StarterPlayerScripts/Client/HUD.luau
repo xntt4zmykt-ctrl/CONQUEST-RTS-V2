@@ -1369,11 +1369,11 @@ function HUD.buildArsenalSheet(self: HUD)
 	list.Parent = sheet
 	Theme.list(list, Enum.FillDirection.Horizontal, S.sm)
 
-	for kind = 1, 2 do
+	for kind = 1, #Config.NUKE_STATS do
 		local stats = Config.NUKE_STATS[kind]
 		local card = button(list, "", T.small)
 		card.LayoutOrder = kind
-		card.Size = UDim2.fromOffset(220, 74)
+		card.Size = UDim2.fromOffset(190, 74)
 
 		local glyph = Theme.label(card, "\u{2622}", 18, C.nuclear)
 		glyph.Position = UDim2.fromOffset(S.sm, S.sm)
@@ -1383,7 +1383,12 @@ function HUD.buildArsenalSheet(self: HUD)
 		name.Position = UDim2.fromOffset(S.sm + 26, 10)
 		name.Size = UDim2.new(1, -S.sm - 26, 0, 14)
 
-		local detail = Theme.label(card, `Rayon {stats.radius} tuiles`, T.tiny, C.textFaint)
+		-- Le MIRV ne decrit pas un rayon mais une pluie d'ogives : c'est cette
+		-- saturation que le joueur achete, pas un cratere.
+		local detailText = if stats.warheads
+			then `{stats.warheads} ogives, rayon {stats.warheadRadius}`
+			else `Rayon {stats.radius} tuiles`
+		local detail = Theme.label(card, detailText, T.tiny, C.textFaint)
 		detail.Position = UDim2.fromOffset(S.sm + 26, 26)
 		detail.Size = UDim2.new(1, -S.sm - 26, 0, 12)
 		detail.FontFace = F.medium

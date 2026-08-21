@@ -601,12 +601,30 @@ Config.SILO_COOLDOWN = 90 -- ticks
 Config.NUKE = {
 	ATOM = 1,
 	HYDROGEN = 2,
+	MIRV = 3,
 }
 
 Config.NUKE_STATS = {
 	[1] = { radius = 9, troopKill = 0.30, cost = 550, name = "Bombe atomique" },
 	[2] = { radius = 20, troopKill = 0.55, cost = 1400, name = "Bombe H" },
+	-- Le MIRV ne fait pas de craterre unique : a mi-parcours il se scinde en
+	-- ogives independantes qui retombent sur le territoire de la victime,
+	-- chacune interceptable separement. C'est l'arme ultime du jeu de
+	-- reference — chere, tardive, mais sans parade totale.
+	[3] = {
+		radius = 0,
+		troopKill = 0,
+		cost = 2600,
+		name = "MIRV",
+		warheads = 6,
+		spread = 16,
+		warheadRadius = 5,
+		warheadTroopKill = 0.12,
+	},
 }
+
+-- Point de la trajectoire ou le MIRV libere ses ogives (fraction du vol).
+Config.MIRV_SEPARATION = 0.55
 
 --=============================================================================
 -- Diplomatie

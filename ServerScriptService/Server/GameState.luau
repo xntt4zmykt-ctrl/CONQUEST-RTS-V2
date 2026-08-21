@@ -108,6 +108,11 @@ export type Missile = {
 	ty: number,
 	progress: number,
 	speed: number,
+	-- Ogive issue d'une scission de MIRV : porte sa propre puissance, car
+	-- NUKE_STATS decrit le missile lance, pas les ogives qu'il libere.
+	warhead: boolean?,
+	radius: number?,
+	troopKill: number?,
 }
 
 export type Building = {

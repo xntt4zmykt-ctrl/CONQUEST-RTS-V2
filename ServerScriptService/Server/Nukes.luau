@@ -172,6 +172,94 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 end
 
 --=============================================================================
+-- Scission du MIRV
+--=============================================================================
+
+--[[
+	A mi-parcours, le MIRV libere ses ogives, modele OpenFront : chaque ogive
+	devient un missile a part entiere, avec sa propre cible choisie SUR le
+	territoire de la victime, et chacune peut etre interceptee separement —
+	c'est ce qui rend une batterie SAM precieuse meme contre l'arme ultime.
+
+	Les cibles sont re-validees a l'instant de la scission : si la victime a
+	perdu du terrain pendant le vol, les ogives ne frappent pas des tuiles
+	qu'elle ne possede plus.
+]]
+local function splitMirv(state: GameState, missile: GameState.Missile, rng: Random)
+	local stats = Config.NUKE_STATS[Config.NUKE.MIRV]
+	local bx, by = math.floor(missile.tx), math.floor(missile.ty)
+	local victim = if MapGen.inBounds(bx, by)
+		then buffer.readu8(state.owner, MapGen.toIndex(bx, by))
+		else NEUTRAL
+
+	local targets: { Vector2 } = {}
+	local spread = stats.spread
+	local minGap = 4
+
+	for _ = 1, stats.warheads * 30 do
+		if #targets >= stats.warheads then
+			break
+		end
+		local nx = bx + rng:NextInteger(-spread, spread)
+		local ny = by + rng:NextInteger(-spread, spread)
+		if not MapGen.inBounds(nx, ny) then
+			continue
+		end
+		local index = MapGen.toIndex(nx, ny)
+		if not state:isLand(index) then
+			continue
+		end
+		if victim ~= NEUTRAL and buffer.readu8(state.owner, index) ~= victim then
+			continue
+		end
+		local tooClose = false
+		for _, t in targets do
+			if math.abs(t.X - nx) + math.abs(t.Y - ny) < minGap then
+				tooClose = true
+				break
+			end
+		end
+		if tooClose then
+			continue
+		end
+		table.insert(targets, Vector2.new(nx, ny))
+	end
+
+	-- La victime a disparu ou n'a plus de terre dans la zone : les ogives
+	-- retombent sur le point vise, comme un tir non guide.
+	if #targets == 0 then
+		table.insert(targets, Vector2.new(bx, by))
+	end
+
+	for _, t in targets do
+		table.insert(state.missiles, {
+			id = state:nextId(),
+			slot = missile.slot,
+			kind = Config.NUKE.MIRV,
+			warhead = true,
+			x = missile.x,
+			y = missile.y,
+			sx = missile.x,
+			sy = missile.y,
+			tx = t.X,
+			ty = t.Y,
+			progress = 0,
+			-- Les ogives retombent plus vite que le porteur ne montait : la
+			-- fenetre d'interception est courte, c'est le prix de la saturation.
+			speed = Config.MISSILE_SPEED * 1.8,
+			radius = stats.warheadRadius,
+			troopKill = stats.warheadTroopKill,
+		})
+	end
+
+	local owner = state.players[missile.slot]
+	state:notify(
+		`\u{2622} Le MIRV {if owner then `de {owner.name} ` else ""}se scinde en {#targets} ogives !`,
+		"alert"
+	)
+end
+
+--=============================================================================
 -- Detonation
 --=============================================================================
 
@@ -181,7 +269,10 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 		return
 	end
 
-	local radius = stats.radius
+	-- Une ogive porte sa propre puissance ; un missile complet celle de sa
+	-- fiche. Voir splitMirv.
+	local radius = missile.radius or stats.radius
+	local troopKill = missile.troopKill or stats.troopKill
 	local cx, cy = math.floor(missile.tx), math.floor(missile.ty)
 
 	-- Pertes humaines : proportionnelles a la part du territoire touche, pour
@@ -225,7 +316,7 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 		local victim = state.players[slot]
 		if victim then
 			local share = tilesHit / math.max(1, victim.tiles + tilesHit)
-			local loss = victim.troops * stats.troopKill * math.min(1, share * 3)
+			local loss = victim.troops * troopKill * math.min(1, share * 3)
 			victim.troops = math.max(0, victim.troops - loss)
 			state:notify(`\u{2622} Ton territoire a ete frappe — {math.floor(loss)} pertes.`, "bad", slot)
 		end
@@ -260,10 +351,19 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 			continue
 		end
 
+		-- Le porteur MIRV n'explose jamais entier : a mi-parcours il libere
+		-- ses ogives et disparait. Intercepter le porteur avant la scission
+		-- reste la seule parade totale.
+		if missile.kind == Config.NUKE.MIRV and not missile.warhead and missile.progress >= Config.MIRV_SEPARATION then
+			splitMirv(state, missile, rng)
+			table.remove(state.missiles, i)
+			continue
+		end
+
 		if missile.progress >= 1 then
 			local stats = Config.NUKE_STATS[missile.kind]
 			Nukes.detonate(state, missile)
-			onExplosion(missile.tx, missile.ty, if stats then stats.radius else 8)
+			onExplosion(missile.tx, missile.ty, missile.radius or (if stats then stats.radius else 8))
 			table.remove(state.missiles, i)
 		end
 	end

@@ -13,6 +13,7 @@
 
 local Config = __require("Config")
 local MapGen = __require("MapGen")
+local Eras = __require("Eras")
 local GameState = __require("GameState")
 local Buildings = __require("Buildings")
 local Navy = __require("Navy")
@@ -1592,6 +1593,77 @@ do
 		local cap = giftState:maxTroops(b)
 		if b.troops > cap then
 			fail("dons — le receveur depasse son plafond de troupes")
+		end
+	end
+end
+
+--[[
+	Le MIRV.
+
+	L'arme ultime ne fait pas un cratere mais une pluie : a mi-parcours, le
+	porteur se scinde en ogives independantes qui retombent sur le territoire
+	de la victime. Le test verifie la scission elle-meme — c'est elle qui
+	distingue le MIRV d'une bombe plus grosse.
+]]
+do
+	local mirvState = GameState.new(8888)
+	local a = mirvState:addPlayer(nil, "Stratege", Random.new(61), 0)
+	local b = mirvState:addPlayer(nil, "Cible", Random.new(62), 0)
+	if not a or not b then
+		fail("mirv — impossible de creer les factions de test")
+	else
+		local siloTile: number? = nil
+		local targetTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			local owner = buffer.readu8(mirvState.owner, index)
+			if not siloTile and owner == a.slot then
+				siloTile = index
+			elseif not targetTile and owner == b.slot then
+				targetTile = index
+			end
+		end
+		if not siloTile or not targetTile then
+			fail("mirv — territoires de test introuvables")
+		else
+			mirvState.buildings[siloTile] =
+				{ kind = Config.BUILDING.SILO, slot = a.slot, level = 1, links = {}, cooldown = 0 }
+			a.siloCount = 1
+			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
+			a.gold = 5000
+			b.troops = 10000
+
+			local ok = Nukes.launch(mirvState, a.slot, targetTile, Config.NUKE.MIRV)
+			if not ok then
+				fail("mirv — le tir est refuse")
+			elseif a.gold ~= 5000 - Config.NUKE_STATS[Config.NUKE.MIRV].cost then
+				fail("mirv — le cout du tir n'est pas preleve")
+			else
+				local rng = Random.new(7)
+				local tilesBefore, troopsBefore = b.tiles, b.troops
+				local splitSeen = 0
+				local steps = 0
+				while #mirvState.missiles > 0 and steps < 800 do
+					Nukes.step(mirvState, rng, function() end)
+					steps += 1
+					local warheads = 0
+					for _, missile in mirvState.missiles do
+						if missile.warhead then
+							warheads += 1
+						end
+					end
+					splitSeen = math.max(splitSeen, warheads)
+				end
+
+				if splitSeen < 2 then
+					fail(`mirv — le porteur ne s'est jamais scinde (ogives vues : {splitSeen})`)
+				end
+				if #mirvState.missiles ~= 0 then
+					fail("mirv — des ogives ne retombent jamais")
+				end
+				if b.tiles >= tilesBefore and b.troops >= troopsBefore then
+					fail("mirv — la pluie d'ogives ne laisse aucun degat")
+				end
+			end
 		end
 	end
 end

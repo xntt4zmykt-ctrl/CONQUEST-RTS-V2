@@ -481,9 +481,14 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 		return
 	end
 
-	local kind = if ps.gold >= Config.NUKE_STATS[Config.NUKE.HYDROGEN].cost
-		then Config.NUKE.HYDROGEN
-		else Config.NUKE.ATOM
+	-- Le bot prend l'arme la plus puissante qu'il peut payer : le MIRV est
+	-- l'aboutissement de toute sa phase economique, pas un luxe inemploye.
+	local kind = Config.NUKE.ATOM
+	if ps.gold >= Config.NUKE_STATS[Config.NUKE.MIRV].cost then
+		kind = Config.NUKE.MIRV
+	elseif ps.gold >= Config.NUKE_STATS[Config.NUKE.HYDROGEN].cost then
+		kind = Config.NUKE.HYDROGEN
+	end
 
 	if ps.gold < Config.NUKE_STATS[kind].cost then
 		return

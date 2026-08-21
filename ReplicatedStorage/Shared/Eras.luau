@@ -151,10 +151,10 @@ function Eras.requiredFor(buildingKind: number): number
 	return eraForBuilding[buildingKind] or 1
 end
 
--- La bombe H demande une ere de plus que la bombe atomique : le palier final
--- doit rester un evenement rare, pas une simple montee de gamme.
+-- La bombe H et le MIRV demandent une ere de plus que la bombe atomique : le
+-- palier final doit rester un evenement rare, pas une simple montee de gamme.
 function Eras.requiredForNuke(nukeKind: number): number
-	return if nukeKind == Config.NUKE.HYDROGEN then 5 else 4
+	return if nukeKind == Config.NUKE.ATOM then 4 else 5
 end
 
 return Eras
