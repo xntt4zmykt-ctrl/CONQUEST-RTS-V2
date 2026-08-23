@@ -1103,6 +1103,198 @@ do
 end
 
 --[[
+	Rancune : une faction retient qui l'a frappee.
+
+	C'est une regle de COMPORTEMENT, donc invisible pour tous les autres
+	invariants : si elle disparait, les comptes de tuiles, l'or et les fronts
+	restent parfaitement corrects. Seul le sens de la partie s'evapore — les
+	guerres n'ont plus de cause, et le joueur ne fait plus le lien entre son
+	agression et la riposte.
+]]
+do
+	local grudgeState = GameState.new(4711)
+	local raider = grudgeState:addPlayer(nil, "Agresseur", Random.new(21), 0)
+	local victim = grudgeState:addPlayer(nil, "Victime", Random.new(22), 0)
+	if not raider or not victim then
+		fail("rancune — impossible de creer les factions de test")
+	else
+		if grudgeState:holdsGrudge(victim.slot, raider.slot) then
+			fail("rancune — une faction en veut a quelqu'un qui ne lui a rien fait")
+		end
+
+		victim.grudges[raider.slot] = grudgeState.tick + Config.GRUDGE_DURATION
+		if not grudgeState:holdsGrudge(victim.slot, raider.slot) then
+			fail("rancune — une agression n'est pas retenue")
+		end
+
+		-- Elle n'est pas reciproque : l'agresseur n'a rien subi.
+		if grudgeState:holdsGrudge(raider.slot, victim.slot) then
+			fail("rancune — l'agresseur en veut a sa propre victime")
+		end
+
+		-- Elle expire, et la lecture purge au passage : sans cette purge la
+		-- table grossit d'une entree par agresseur et ne se vide jamais.
+		grudgeState.tick += Config.GRUDGE_DURATION
+		if grudgeState:holdsGrudge(victim.slot, raider.slot) then
+			fail("rancune — une rancune expiree tient toujours")
+		end
+		if victim.grudges[raider.slot] ~= nil then
+			fail("rancune — l'entree expiree reste dans la table")
+		end
+
+		--[[
+			Une faction eliminee ne laisse pas de rancune derriere elle.
+
+			Sinon un bot garderait une dette envers un slot recycle par une
+			nouvelle faction, et attaquerait un inconnu sans raison.
+		]]
+		victim.grudges[raider.slot] = grudgeState.tick + Config.GRUDGE_DURATION
+		grudgeState:removePlayer(raider.slot)
+		if victim.grudges[raider.slot] ~= nil then
+			fail("rancune — la rancune survit a la faction qui l'avait provoquee")
+		end
+	end
+end
+
+--[[
+	Forme du front de conquete.
+
+	Une offensive doit avancer comme une VAGUE : les cases prises forment une
+	tache d'un seul tenant, accrochee au territoire de l'assaillant. Avant, la
+	file etait un ensemble depile avec `next()`, dont l'ordre est arbitraire —
+	le moteur grignotait donc des cases sans rapport les unes avec les autres et
+	laissait des tuiles orphelines au milieu du territoire ennemi.
+
+	Rien dans les autres invariants ne le voyait : le compte de tuiles, le cout
+	en troupes et les ensembles frontieres etaient tous parfaitement corrects.
+	Seule la forme etait absurde, et la forme est ce que le joueur regarde.
+]]
+do
+	local frontState = GameState.new(20260901)
+	local attacker = frontState:addPlayer(nil, "Assaillant", Random.new(1), 0)
+	local defender = frontState:addPlayer(nil, "Defenseur", Random.new(2), 0)
+	if not attacker or not defender then
+		fail("front — impossible de creer les factions de test")
+	else
+		local cx, cy = MapGen.fromIndex(attacker.capitalTile :: number)
+
+		-- Un large bandeau au defenseur, colle au territoire de l'assaillant.
+		local given = 0
+		for dy = -18, 18 do
+			for dx = 4, 26 do
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local index = MapGen.toIndex(nx, ny)
+					if frontState:isLand(index) then
+						frontState:setOwner(index, defender.slot)
+						given += 1
+					end
+				end
+			end
+		end
+		for dy = -18, 18 do
+			for dx = -6, 3 do
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local index = MapGen.toIndex(nx, ny)
+					if frontState:isLand(index) then
+						frontState:setOwner(index, attacker.slot)
+					end
+				end
+			end
+		end
+
+		--[[
+			Le rapport de force est calibre pour une conquete PARTIELLE.
+
+			C'est la seule situation ou la forme se mesure : une offensive qui
+			avale tout le territoire donne 100 % de cohesion quelle que soit sa
+			logique, et une offensive qui prend deux cases n'a pas de forme du
+			tout. Les deux cas passaient avec l'ancien code.
+		]]
+		attacker.troops = 90000
+		defender.troops = 60000
+
+		local before: { [number]: true } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(frontState.owner, index) == defender.slot then
+				before[index] = true
+			end
+		end
+
+		frontState:launchAttack(attacker.slot, defender.slot)
+		for _ = 1, 20 do
+			frontState:stepAttacks()
+		end
+
+		local taken: { [number]: true } = {}
+		local count = 0
+		for index in before do
+			if buffer.readu8(frontState.owner, index) == attacker.slot then
+				taken[index] = true
+				count += 1
+			end
+		end
+
+		if count < 20 or count > given - 20 then
+			fail(`front — conquete de {count}/{given} tuiles : le cas de test ne mesure plus une forme`)
+		else
+			-- 1. Aucune tuile orpheline : chaque prise touche une autre prise.
+			local orphans = 0
+			local probe = table.create(4, 0)
+			for index in taken do
+				local touching = false
+				local n = MapGen.neighbors(index, probe)
+				for k = 1, n do
+					if taken[probe[k]] then
+						touching = true
+						break
+					end
+				end
+				if not touching then
+					orphans += 1
+				end
+			end
+			if orphans > 0 then
+				fail(`front — {orphans} tuile(s) prise(s) isolee(s) : l'avancee saute au lieu de progresser`)
+			end
+
+			--[[
+				2. La tache reste compacte.
+
+				Mesure : rayon moyen autour du barycentre des prises. Une avancee
+				en vague sur ~68 tuiles tient sous 7 ; l'ancien tirage arbitraire
+				etalait les memes prises sur un rayon de 9 a 10 pour deux fois
+				moins de cases.
+			]]
+			local sumX, sumY = 0, 0
+			for index in taken do
+				local x, y = MapGen.fromIndex(index)
+				sumX += x
+				sumY += y
+			end
+			local mx, my = sumX / count, sumY / count
+			local spread = 0
+			for index in taken do
+				local x, y = MapGen.fromIndex(index)
+				spread += math.sqrt((x - mx) ^ 2 + (y - my) ^ 2)
+			end
+			local radius = spread / count
+
+			-- Rayon d'un disque de meme aire : la reference geometrique du plus
+			-- compact possible. On tolere 1,8 fois cette valeur.
+			local ideal = math.sqrt(count / math.pi)
+			if radius > ideal * 1.8 then
+				fail(
+					`front — rayon moyen {string.format("%.1f", radius)} pour {count} tuiles `
+						.. `(compact = {string.format("%.1f", ideal)}) : l'avancee s'eparpille`
+				)
+			end
+		end
+	end
+end
+
+--[[
 	Trace des voies : alignement sur la grille et economie de virages.
 
 	Ce sont exactement les proprietes qu'un rendu ne trahit jamais tout seul. Une
@@ -1778,12 +1970,50 @@ do
 			end
 
 			local before = victim.tiles
+			victim.gold = 4000
+			heir.gold = 500
 			collapseState:collapseFaction(victim.slot, heir.slot)
 			if victim.tiles >= before or victim.tiles > 0 then
 				fail(`effondrement — la victime conserve {victim.tiles} tuiles sur {before}`)
 			end
 			if touched > 0 and heir.tiles <= touched then
 				fail("effondrement — l'assaillant n'a rien recupere du territoire partage")
+			end
+
+			--[[
+				Le butin de mise a mort.
+
+				Achever une faction est l'effort le plus long du jeu ; sans butin,
+				sa seule recompense etait une ligne dans le fil de notifications.
+				Rien ne planterait si ce transfert disparaissait — le jeu
+				continuerait, simplement plus plat.
+			]]
+			if heir.gold <= 500 then
+				fail("effondrement — achever une faction ne rapporte rien au vainqueur")
+			end
+			if victim.gold >= 4000 then
+				fail("effondrement — la victime garde son tresor apres avoir ete achevee")
+			end
+
+			-- Un bot est depouille entierement ; un humain de moitie seulement,
+			-- pour que sa defaite ne soit pas une aubaine pour son bourreau.
+			local looted = heir.gold - 500
+			local expected = math.floor(4000 * Config.CONQUEST_PLUNDER_BOT)
+			if looted ~= expected then
+				fail(`effondrement — butin de {looted} au lieu de {expected}`)
+			end
+
+			--[[
+				Le butin doit etre localise, sinon le "+X or" flotte au milieu de
+				nulle part. La file est ce que le serveur envoie aux clients.
+			]]
+			local loot = collapseState.plunders[#collapseState.plunders]
+			if not loot then
+				fail("effondrement — aucun butin n'est signale aux clients")
+			elseif loot.slot ~= heir.slot or loot.gold ~= expected then
+				fail(`effondrement — butin signale a {loot.slot} pour {loot.gold}`)
+			elseif loot.tile < 0 or loot.tile >= Config.TILE_COUNT then
+				fail("effondrement — le butin est signale sur une tuile inexistante")
 			end
 		end
 	end

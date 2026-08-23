@@ -87,7 +87,8 @@ local hud = HUD.new(screenGui)
 local victory = VictoryScreen.new(screenGui)
 local intro = Intro.new(screenGui)
 local menu = MainMenu.new(screenGui)
-
+-- Le menu affiche l'identite Roblox du joueur : drapeau choisi + pseudo.
+menu:setPlayer(player.DisplayName)
 
 -- L'interface de jeu reste masquee tant que le joueur n'est pas deploye.
 hud.root.Visible = false
@@ -481,6 +482,36 @@ end)
 
 -- Raccourcis clavier : les modes sont les actions les plus repetees de la
 -- partie, les atteindre a la souris a chaque fois casse le rythme.
+--[[
+	Les chiffres arment un BATIMENT, plus un mode.
+
+	Les modes vivent dans le menu radial depuis qu'il existe ; garder les
+	chiffres pour eux revenait a doubler un geste deja disponible et a priver
+	les batiments du raccourci que le HUD affiche desormais en exposant sur
+	chaque case. Un raccourci ecrit a l'ecran et qui ne fait rien est pire que
+	pas de raccourci du tout.
+]]
+local BUILD_KEYS: { [Enum.KeyCode]: number } = {}
+do
+	local digits = {
+		Enum.KeyCode.One,
+		Enum.KeyCode.Two,
+		Enum.KeyCode.Three,
+		Enum.KeyCode.Four,
+		Enum.KeyCode.Five,
+		Enum.KeyCode.Six,
+		Enum.KeyCode.Seven,
+		Enum.KeyCode.Eight,
+		Enum.KeyCode.Nine,
+	}
+	for order, def in BuildingDefs.BUILDABLE do
+		local key = digits[order]
+		if key then
+			BUILD_KEYS[key] = def.id
+		end
+	end
+end
+
 local MODE_KEYS: { [Enum.KeyCode]: HUD.Mode } = {
 	[Enum.KeyCode.One] = "attack",
 	[Enum.KeyCode.Two] = "boat",
@@ -490,6 +521,14 @@ local MODE_KEYS: { [Enum.KeyCode]: HUD.Mode } = {
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 	if processed then
+		return
+	end
+
+	-- Le batiment passe avant le mode : `setBuildKind` bascule deja en mode
+	-- Construire, donc les deux gestes n'en font qu'un.
+	local kind = BUILD_KEYS[input.KeyCode]
+	if kind then
+		hud:setBuildKind(kind)
 		return
 	end
 
@@ -623,6 +662,9 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 		end
 	end
 	mySlot = slot
+	if overlay then
+		overlay:setLocalSlot(slot)
+	end
 	roster = initialRoster
 	myCapital = capital
 	matchPhase = "playing"
@@ -648,6 +690,9 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	local built = WorldRenderer.new(seed)
 	world = built
 	overlay = Overlay.new(built.root, built.terrain)
+	-- Aussi pose ici : l'identite peut arriver AVANT que le monde soit
+	-- construit, auquel cas la couche n'existait pas encore pour la recevoir.
+	overlay:setLocalSlot(mySlot)
 	effects = Effects.new(built.root, built.terrain)
 	preview = PlacementPreview.new(built.root, built.terrain)
 	factionLabels = FactionLabels.new(built.root, built.terrain)
@@ -787,6 +832,11 @@ end)
 
 Remotes.get("MatchUpdate").OnClientEvent:Connect(function(match)
 	hud:setMatch(match)
+	-- Le menu suit la meme diffusion : il annonce le salon en cours tant que le
+	-- joueur n'a pas encore rejoint.
+	if menu then
+		menu:setLobby(match)
+	end
 
 	if match.phase == "ended" then
 		matchPhase = "ended"
@@ -822,6 +872,24 @@ Remotes.get("Sfx").OnClientEvent:Connect(function(name: string)
 		camera:punch(0.2)
 	elseif name == "buildPlace" then
 		camera:punch(0.14)
+	end
+end)
+
+--[[
+	Butin de mise a mort : le "+X or" qui recompense la conquete.
+
+	Il reutilise l'affichage des livraisons plutot que d'en inventer un second :
+	le joueur a deja appris ce que veut dire un chiffre dore qui monte, et deux
+	langages visuels pour la meme idee seraient deux fois plus a apprendre.
+]]
+Remotes.get("Plunder").OnClientEvent:Connect(function(tile: number, slot: number, gold: number)
+	local o = overlay
+	if not o then
+		return
+	end
+	o:goldPopup(tile, gold)
+	if slot == mySlot then
+		SoundManager.play("capitalFallen")
 	end
 end)
 

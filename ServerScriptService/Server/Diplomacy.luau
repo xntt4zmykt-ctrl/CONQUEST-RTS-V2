@@ -15,6 +15,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local QuickChat = require(ReplicatedStorage.Shared.QuickChat)
 local GameState = require(script.Parent.GameState)
 
 type GameState = GameState.GameState
@@ -249,6 +250,89 @@ function Diplomacy.donateTroops(state: GameState, from: number, to: number, amou
 	b.troops += received
 	state:notifyBetween(`\u{2694} {a.name} envoie {math.floor(received)} troupes a {b.name}.`, "good", from, to)
 	return true, nil
+end
+
+--=============================================================================
+-- Messages rapides
+--=============================================================================
+
+--[[
+	Diffuse un message rapide. Renvoie true s'il est effectivement parti.
+
+	Cette fonction vit ici plutot que dans le gestionnaire reseau parce que les
+	bots doivent l'emprunter aussi. Tant qu'elle etait enfermee dans le
+	gestionnaire, seul un humain pouvait parler — et une carte ou onze factions
+	sur douze sont muettes ne ressemble pas a une partie, elle ressemble a un
+	tableur qui bouge.
+
+	Le refus est silencieux : un message d'erreur sur un anti-spam serait
+	lui-meme du spam.
+]]
+function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: string, targetSlot: number?): boolean
+	local entry = QuickChat.get(messageId)
+	if not entry then
+		return false
+	end
+
+	local last = state.quickChatSent[slot]
+	if last and state.tick - last < QuickChat.COOLDOWN then
+		return false
+	end
+
+	--[[
+		On ne radote pas.
+
+		Le cooldown seul laissait passer la meme phrase sur la meme cible en
+		boucle : tant qu'une guerre dure, la raison de la dire reste vraie. Le
+		fil se remplissait alors d'un seul message repete, et tout le reste —
+		trahisons, alertes, politesse — passait dessous sans etre vu.
+	]]
+	local key = `{messageId}:{targetSlot or 0}`
+	local previous = state.quickChatLast[slot]
+	if previous == key and last and state.tick - last < Config.QUICKCHAT_REPEAT_TICKS then
+		return false
+	end
+
+	local speaker = state.players[slot]
+	if not speaker then
+		return false
+	end
+
+	local targetName: string? = nil
+	if entry.needsTarget then
+		if not targetSlot or targetSlot == slot then
+			return false
+		end
+		local target = state.players[targetSlot]
+		if not target then
+			return false
+		end
+		targetName = target.name
+	end
+
+	state.quickChatSent[slot] = state.tick
+	state.quickChatLast[slot] = key
+
+	local message = `\u{1F4AC} {speaker.name} : {QuickChat.format(entry, targetName)}`
+	if entry.alliesOnly then
+		state:notify(message, "info", slot)
+		local allySet = state.alliances[slot]
+		if allySet then
+			for other in allySet do
+				state:notify(message, "info", other)
+			end
+		end
+	else
+		state:notify(message, "info")
+	end
+
+	-- Un appel a l'attaque designe sa cible pour toute l'alliance : le texte et
+	-- la marque ne doivent jamais se contredire.
+	if entry.mark and targetSlot then
+		Diplomacy.setTargetMark(state, slot, targetSlot)
+	end
+
+	return true
 end
 
 --=============================================================================

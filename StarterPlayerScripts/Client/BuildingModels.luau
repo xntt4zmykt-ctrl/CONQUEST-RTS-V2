@@ -72,17 +72,35 @@ local cylinder: (Instance, Vector3, Vector3, Color3) -> Part
 -- Usine : hall metallique, toiture en sheds, cheminees et quai de chargement.
 -- La silhouette horizontale la distingue de la ville, tandis que les deux
 -- cheminees restent visibles de loin.
-local function buildFactory(model: Model, color: Color3, _level: number?)
-	block(model, Vector3.new(10, 0.7, 8), Vector3.new(0, 0.35, 0), DARK, Enum.Material.Concrete)
-	block(model, Vector3.new(8.8, 4.2, 6.6), Vector3.new(-0.3, 2.8, 0), color, Enum.Material.Metal)
+local function buildFactory(model: Model, color: Color3, level: number?)
+	--[[
+		La silhouette suit le niveau, comme celle de la ville.
 
-	-- Toit industriel en dents de scie.
-	for i = -1, 1 do
-		local roof = block(model, Vector3.new(2.7, 0.35, 7), Vector3.new(i * 2.8 - 0.3, 5.25, 0), STEEL, Enum.Material.Metal)
-		roof.CFrame = CFrame.new(i * 2.8 - 0.3, 5.25, 0) * CFrame.Angles(0, 0, math.rad(-12))
+		Une usine se stacke : cliquer a cote d'une usine existante la fait monter
+		d'un palier au lieu d'en poser une seconde, et son debit double. Tant que
+		le modele ignorait ce niveau, deux usines de rendement tres different
+		etaient strictement identiques a l'ecran — le chiffre flottant au-dessus
+		etait le SEUL indice, sur une carte ou l'on lit d'abord les formes.
+
+		La halle grandit et gagne une dent de scie par palier : la lecture reste
+		"c'est une usine", en plus imposant.
+	]]
+	local tier = math.clamp(level or 1, 1, 3)
+	local hallHeight = 4.2 + (tier - 1) * 1.6
+	local roofY = 0.7 + hallHeight
+
+	block(model, Vector3.new(10, 0.7, 8), Vector3.new(0, 0.35, 0), DARK, Enum.Material.Concrete)
+	block(model, Vector3.new(8.8, hallHeight, 6.6), Vector3.new(-0.3, 0.7 + hallHeight / 2, 0), color, Enum.Material.Metal)
+
+	-- Toit industriel en dents de scie : une de plus a chaque palier.
+	local teeth = 1 + tier
+	for i = 1, teeth do
+		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
+		local roof = block(model, Vector3.new(2.3, 0.35, 7), Vector3.new(x, roofY, 0), STEEL, Enum.Material.Metal)
+		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.Angles(0, 0, math.rad(-12))
 	end
 
-	local chimneyA = cylinder(model, Vector3.new(9, 1.15, 1.15), Vector3.new(2.7, 8.5, -1.8), STEEL)
+	local chimneyA = cylinder(model, Vector3.new(9 + (tier - 1) * 2, 1.15, 1.15), Vector3.new(2.7, roofY + 3.3, -1.8), STEEL)
 	chimneyA.Name = "Chimney"
 	local smoke = Instance.new("Smoke")
 	smoke.Color = Color3.fromRGB(145, 155, 166)
@@ -196,18 +214,36 @@ end
 	Port : une jetee, un entrepot et une grue. La grue est ce qui distingue
 	instantanement un port d'une ville, meme sans couleur.
 ]]
-local function buildPort(model: Model, color: Color3, _level: number?)
+local function buildPort(model: Model, color: Color3, level: number?)
+	-- Meme regle que l'usine : le niveau se voit. Un port de niveau 3 arme trois
+	-- fois plus de convois, sa silhouette doit le dire.
+	local tier = math.clamp(level or 1, 1, 3)
+	local mast = 8 + (tier - 1) * 2
+
 	block(model, Vector3.new(9, 1, 6), Vector3.new(0, 0.5, 0), CONCRETE)
 	block(model, Vector3.new(4, 4, 4), Vector3.new(-2.5, 3, 0), color)
 
 	-- Grue : mat vertical + fleche horizontale + cable
-	block(model, Vector3.new(0.7, 8, 0.7), Vector3.new(2.5, 5, 0), DARK, Enum.Material.Metal)
-	local boom = block(model, Vector3.new(6, 0.6, 0.6), Vector3.new(4.2, 8.6, 0), DARK, Enum.Material.Metal)
+	block(model, Vector3.new(0.7, mast, 0.7), Vector3.new(2.5, 1 + mast / 2, 0), DARK, Enum.Material.Metal)
+	local boomY = 1 + mast + 0.6
+	local boom = block(model, Vector3.new(6, 0.6, 0.6), Vector3.new(4.2, boomY, 0), DARK, Enum.Material.Metal)
 	boom.Name = "PortCraneBoom"
-	local cable = block(model, Vector3.new(0.25, 3, 0.25), Vector3.new(6.5, 6.8, 0), DARK, Enum.Material.Metal)
+	local cable = block(model, Vector3.new(0.25, 3, 0.25), Vector3.new(6.5, boomY - 1.8, 0), DARK, Enum.Material.Metal)
 	cable.Name = "PortCraneCable"
 
-	local beacon = block(model, Vector3.new(0.8, 0.8, 0.8), Vector3.new(2.5, 9.2, 0), color)
+	-- Conteneurs empiles sur le quai : un rang par palier. C'est le detail qui
+	-- distingue un port actif d'un ponton vide.
+	for i = 1, tier do
+		block(
+			model,
+			Vector3.new(2.2, 1.1, 1.6),
+			Vector3.new(-3.2 + (i % 2) * 0.5, 1.55 + (i - 1) * 1.2, 2.1),
+			if i % 2 == 0 then WARNING else STEEL,
+			Enum.Material.Metal
+		)
+	end
+
+	local beacon = block(model, Vector3.new(0.8, 0.8, 0.8), Vector3.new(2.5, boomY + 0.6, 0), color)
 	beacon.Name = "PortBeacon"
 	beacon.Material = Enum.Material.Neon
 end
@@ -366,10 +402,26 @@ function BuildingModels.create(kind: number, color: Color3, position: Vector3, l
 		block(model, Vector3.new(3, 6, 3), Vector3.new(0, 3, 0), color)
 	end
 
-	-- Les modeles sont construits autour de l'origine puis deplaces d'un bloc :
-	-- c'est ce qui permet d'ecrire chaque forme en coordonnees locales lisibles.
+	--[[
+		Mise a l'echelle du monde, puis translation.
+
+		Chaque modele est dessine en coordonnees lisibles autour de l'origine, a
+		l'echelle d'origine du jeu. On applique le facteur ici, en un seul
+		endroit, plutot que de multiplier quatre-vingts nombres dans les
+		constructeurs — qui resteraient alors justes uniquement pour une taille
+		de tuile donnee.
+
+		L'ordre compte : on met a l'echelle AVANT de translater, sinon la
+		position dans le monde serait multipliee elle aussi et le batiment
+		partirait a l'autre bout de la carte.
+	]]
+	local scale = Config.WORLD_SCALE
 	for _, part in model:GetChildren() do
 		if part:IsA("BasePart") then
+			if scale ~= 1 then
+				part.Size *= scale
+				part.CFrame = (part.CFrame - part.Position) + part.Position * scale
+			end
 			part.CFrame = part.CFrame + position
 			part:SetAttribute("RestCFrame", part.CFrame)
 		end
@@ -493,10 +545,28 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 end
 
 
+--[[
+	Hauteur du modele, pour poser l'etiquette juste au-dessus.
+
+	Elle suit le niveau pour les trois batiments a paliers. Sans cela,
+	l'etiquette d'une usine de niveau 3 se retrouvait plantee au milieu de sa
+	propre cheminee — le modele avait grandi, pas la reference.
+]]
 function BuildingModels.heightOf(kind: number, level: number?): number
+	return BuildingModels.authoredHeightOf(kind, level) * Config.WORLD_SCALE
+end
+
+-- Hauteur a l'echelle d'origine, avant application du facteur de monde.
+function BuildingModels.authoredHeightOf(kind: number, level: number?): number
+	local tier = math.clamp(level or 1, 1, 3)
 	if kind == B.CITY then
-		local cityLevel = math.clamp(level or 1, 1, Config.CITY_MAX_LEVEL)
-		return if cityLevel == 1 then 11 elseif cityLevel == 2 then 16 else 28
+		return if tier == 1 then 11 elseif tier == 2 then 16 else 28
+	end
+	if kind == B.FACTORY then
+		return (HEIGHTS[B.FACTORY] or 13) + (tier - 1) * 3.6
+	end
+	if kind == B.PORT then
+		return (HEIGHTS[B.PORT] or 9.5) + (tier - 1) * 2
 	end
 	return HEIGHTS[kind] or 8
 end
@@ -508,7 +578,11 @@ end
 ]]
 function BuildingModels.recolor(model: Model, previous: Color3, color: Color3)
 	for _, part in model:GetChildren() do
-		if part:IsA("BasePart") and part.Color == previous then
+		if not part:IsA("BasePart") then
+			continue
+		end
+
+		if part.Color == previous then
 			part.Color = color
 		end
 	end

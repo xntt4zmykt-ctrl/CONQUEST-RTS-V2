@@ -277,48 +277,110 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 		return
 	end
 
-	-- Les compteurs sont plafonnes explicitement : sans plafond, un bot riche
-	-- retire indefiniment le meme batiment (315 batteries pour 8 silos).
-	local wanted: number
-	local roll = rng:NextNumber()
+	--[[
+		Que construire ? Le plus gros manque, rapporte a son prix.
 
+		Voir Config.BOT_STRUCTURE_PLAN pour le pourquoi de la table de ratios.
+		Ici on ne fait que la parcourir et garder le meilleur rapport
+		manque / cout percu.
+	]]
+	--[[
+		Le nombre de villes visees est SOUS-lineaire, comme le plafond de troupes.
+
+		Une courbe lineaire (tuiles / 190) reintroduirait tout droit la boucle
+		d'emballement cassee ailleurs : plus de terres, plus de villes, donc plus
+		de troupes et d'or, donc plus de terres. Le meme exposant que le plafond
+		de troupes garde les deux courbes coherentes — un empire dix fois plus
+		grand ne vaut ni dix fois plus d'armee, ni dix fois plus de villes.
+	]]
+	local desiredCities = math.max(1, ps.tiles ^ Config.MAX_TROOPS_TILE_EXPONENT / Config.BOT_CITY_DIVISOR)
+
+	local wanted: number? = nil
+	local bestScore = 0
+
+	for _, plan in Config.BOT_STRUCTURE_PLAN do
+		if ps.era < plan.minEra then
+			continue
+		end
+
+		local owned = ps.buildingCounts[plan.kind] or 0
+		-- Les villes se calent sur le territoire ; tout le reste se cale sur les
+		-- villes, qui sont le vrai coeur d'un empire.
+		local target = if plan.kind == B.CITY then desiredCities else cityCount * plan.perCity
+
+		--[[
+			Penchant stable, propre a chaque bot.
+
+			Tire du slot et du type de batiment, donc identique du debut a la fin
+			de la partie : c'est ce qui produit un voisin marchand et un voisin
+			militariste la ou la cascade donnait douze jumeaux.
+		]]
+		local leaning = 0.75 + ((ps.slot * 37 + plan.kind * 11) % 50) / 100
+		local deficit = target * leaning - owned
+		if deficit <= 0 then
+			continue
+		end
+
+		--[[
+			On compare des RETARDS RELATIFS, pas des manques rapportes au prix.
+
+			Premiere version : `manque / prix`. Le rapport est dimensionnellement
+			biaise vers le pas cher — mesure sur un bot d'ere 3 : la base navale
+			a 323 d'or l'emportait a 0,0044 contre l'usine a 1 768 d'or, notee
+			0,0018, alors que l'usine lui manquait davantage. Resultat : zero
+			usine sur toute la carte.
+
+			Ici le score dit "a quel point suis-je en retard sur cet axe", ce qui
+			est comparable d'un batiment a l'autre quel que soit son prix. Le
+			cout n'intervient plus que comme frein a la repetition (costBias) et
+			comme condition d'achat, verifiee plus bas.
+		]]
+		local score = (deficit / target) / (1 + plan.costBias * owned)
+
+		if score > bestScore then
+			bestScore = score
+			wanted = plan.kind
+		end
+	end
+
+	--[[
+		La ville passe avant tout le reste.
+
+		C'est une regle explicite du jeu de reference, et l'avoir omise a coute
+		une phase entiere. Le score `manque / prix` favorise mecaniquement le pas
+		cher : une ville vaut huit bunkers, donc le bunker gagne meme avec un
+		manque bien plus faible. Mesure sans cette regle : 22 ports et 30 bunkers
+		pour 76 villes, et PLUS AUCUNE faction n'atteignait l'ere atomique —
+		donc zero silo, zero frappe, la fin de partie disparaissait.
+
+		La ville n'est pas un batiment parmi d'autres : c'est elle qui porte la
+		population, l'or, et les conditions d'ere. On la construit des qu'il en
+		manque une et qu'on peut se la payer ; le reste se partage l'excedent.
+	]]
+	if wanted ~= B.CITY then
+		local cities = ps.buildingCounts[B.CITY] or 0
+		if cities < desiredCities then
+			local cityPrice = Buildings.priceFor(state, ps.slot, B.CITY)
+			if ps.gold - reserve >= cityPrice then
+				wanted = B.CITY
+			end
+		end
+	end
+
+	--[[
+		Le premier silo echappe a la regle.
+
+		Il n'est pas un investissement parmi d'autres : c'est lui qui ouvre toute
+		la phase nucleaire. Le laisser au jeu des ratios revient a ne jamais le
+		construire, son prix ecrasant le manque d'un seul exemplaire.
+	]]
 	if nukesUp and ps.siloCount < 1 then
 		wanted = B.SILO
-		reserve = 0 -- le silo est lui-meme l'objectif de l'epargne
-	elseif
-		ps.era >= 3
-		and (ps.buildingCounts[B.FACTORY] or 0) < math.min(3, math.max(1, cityCount // 2))
-	then
-		-- L'industrie suit naturellement l'urbanisation : une premiere usine a
-		-- l'ere 3, puis jusqu'a trois reseaux logistiques dans un grand empire.
-		wanted = B.FACTORY
 		reserve = 0
-	elseif ps.buildingCounts[B.CITY] == nil or (ps.buildingCounts[B.CITY] or 0) < 8 then
-		-- Les villes sont la condition d'ere la plus exigeante : les prioriser
-		-- evite que le bot reste bloque a un palier faute d'un seul batiment.
-		wanted = B.CITY
-		reserve = 0
-	elseif (ps.buildingCounts[B.DEFENSE] or 0) < 2 and ps.era >= 2 then
-		wanted = B.DEFENSE
-		reserve = 0
-	elseif ps.portCount == 0 then
-		-- Le tout premier port passe avant le reste : c'est lui qui ouvre les
-		-- routes commerciales, et donc qui rend l'embargo jouable. Laisse en
-		-- priorite basse, la simulation ne produisait que deux ports sur toute
-		-- la carte et la diplomatie economique restait lettre morte.
-		wanted = B.PORT
-	elseif nukesUp and ps.samCount < 2 and roll < 0.5 then
-		wanted = B.SAM
-	elseif (ps.buildingCounts[B.NAVAL_BASE] or 0) < 2 and ps.era >= 2 and roll < 0.3 then
-		-- Une cote sans base navale laisse passer toutes les invasions : les
-		-- bots doivent la defendre, sinon le porte-avions ne sert que le joueur.
-		wanted = B.NAVAL_BASE
-	elseif ps.portCount < 3 and roll < 0.45 then
-		wanted = B.PORT
-	elseif roll < 0.78 then
-		wanted = B.CITY
-	else
-		wanted = B.DEFENSE
+	end
+
+	if not wanted then
+		return
 	end
 
 	local price = Buildings.priceFor(state, ps.slot, wanted)
@@ -424,6 +486,75 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	end
 end
 
+--[[
+	Le bot parle.
+
+	C'est le levier de ressenti le moins cher du jeu : onze factions muettes sur
+	douze donnent l'impression d'un tableur qui bouge, pas d'une partie. Le
+	catalogue de messages existait deja et seul un humain pouvait s'en servir.
+
+	L'ordre compte, et il est celui de l'urgence : un bot qui se fait demolir
+	appelle a l'aide avant de faire de la politique, et fait de la politique
+	avant de dire bonjour. Sans cet ordre, l'anti-spam laisserait passer la
+	politesse et avalerait l'appel au secours.
+
+	Rien n'est dit gratuitement : chaque message est declenche par un fait de
+	jeu verifiable, jamais par un simple tirage. Un bot qui bavarde sans raison
+	se repere en deux minutes et devient du bruit.
+]]
+local function decideChat(state: GameState, ps: GameState.PlayerState, rng: Random)
+	if rng:NextNumber() > Config.BOT_CHAT_CHANCE then
+		return
+	end
+
+	local slot = ps.slot
+
+	-- 1. A l'aide : on se fait prendre du territoire par quelqu'un, maintenant.
+	local worst, worstUntil = nil, 0
+	for other, until_ in ps.grudges do
+		if until_ > worstUntil and state.players[other] then
+			worst, worstUntil = other, until_
+		end
+	end
+	if worst then
+		local allies = state.alliances[slot]
+		local hasAlly = allies ~= nil and next(allies) ~= nil
+		-- Avec des allies on demande du renfort, seul on designe la menace a
+		-- toute la carte : dans les deux cas on cherche a ne pas mourir seul.
+		if hasAlly then
+			if Diplomacy.sendQuickChat(state, slot, "help_defend", worst) then
+				return
+			end
+		elseif Diplomacy.sendQuickChat(state, slot, "attack_target", worst) then
+			return
+		end
+	end
+
+	-- 2. Denoncer un traitre : la reputation est une arme, et elle ne coute rien.
+	for other, target in state.players do
+		if other ~= slot and target.traitorUntil > state.tick then
+			if Diplomacy.sendQuickChat(state, slot, "warn_traitor", other) then
+				return
+			end
+			break
+		end
+	end
+
+	-- 3. Designer le leader. Un bot ne previent pas quand c'est LUI le leader —
+	-- ce serait se denoncer soi-meme.
+	local leader = dominantLeader(state)
+	if leader and leader ~= slot then
+		if Diplomacy.sendQuickChat(state, slot, "warn_big", leader) then
+			return
+		end
+	end
+
+	-- 4. Politesse d'ouverture, tant que personne n'a encore de vrai territoire.
+	if state.tick < Config.BOT_CHAT_GREETING_TICKS then
+		Diplomacy.sendQuickChat(state, slot, "social_luck", nil)
+	end
+end
+
 local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Random)
 	if ps.troops < Config.MIN_BOAT_TROOPS * 4 then
 		return
@@ -522,12 +653,96 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 		return
 	end
 
-	-- Une tuile quelconque du territoire vise, tiree depuis sa frontiere.
-	for index in target.border do
-		if rng:NextNumber() < 0.25 then
-			Nukes.launch(state, ps.slot, index, kind)
-			return
+	--[[
+		Choisir OU frapper, au lieu de tirer sur une tuile de frontiere au hasard.
+
+		Deux regles, dans cet ordre :
+
+		  1. **Ne pas tirer dans le vide.** Une frappe qui atterrit sous un SAM
+		     ennemi est de l'or jete : le missile est intercepte et le bot
+		     recommencera au prochain tour, indefiniment. On verifie donc la
+		     couverture AVANT de payer.
+		  2. **Viser ce qui fait mal.** Une tuile entouree de batiments vaut bien
+		     plus qu'un bout de frontiere vide. Le bot compte les batiments dans
+		     le rayon de l'explosion et garde la meilleure tuile trouvee.
+
+		Si tout le territoire vise est couvert, on ne renonce pas : on frappe la
+		batterie elle-meme. C'est la suppression avant l'assaut — le SAM tombe,
+		et la vraie frappe passera au tour suivant.
+	]]
+	local samRange2 = Config.SAM_RANGE * Config.SAM_RANGE
+	local sams = Buildings.samsOf(state, bestSlot)
+
+	local function coveredBy(index: number): number?
+		local x, y = MapGen.fromIndex(index)
+		for _, samIndex in sams do
+			local sx, sy = MapGen.fromIndex(samIndex)
+			local dx, dy = sx - x, sy - y
+			if dx * dx + dy * dy <= samRange2 then
+				return samIndex
+			end
 		end
+		return nil
+	end
+
+	--[[
+		Emprise reelle de l'arme choisie.
+
+		Le MIRV declare un rayon de zero : il ne creuse pas un cratere unique, il
+		se scinde en ogives dispersees. Prendre son `radius` tel quel donnait un
+		score d'impact nul sur l'arme la plus chere du jeu — le bot la lancait
+		donc sur la premiere tuile venue. Son emprise, c'est sa dispersion plus
+		le rayon d'une ogive.
+	]]
+	local stats = Config.NUKE_STATS[kind]
+	local blastRadius = stats.radius
+	if blastRadius <= 0 then
+		blastRadius = (stats.spread or 0) + (stats.warheadRadius or 0)
+	end
+	local blast2 = blastRadius * blastRadius
+
+	local bestTile: number? = nil
+	local bestValue = -1
+	local shielded: number? = nil
+	local examined = 0
+
+	for index in target.border do
+		-- La frontiere d'un grand empire compte des milliers de tuiles : on en
+		-- echantillonne assez pour choisir, pas assez pour couter un tick.
+		examined += 1
+		if examined > 90 then
+			break
+		end
+
+		local guard = coveredBy(index)
+		if guard then
+			shielded = shielded or guard
+			continue
+		end
+
+		local x, y = MapGen.fromIndex(index)
+		local value = 0
+		for other, building in state.buildings do
+			if building.slot == bestSlot then
+				local bx, by = MapGen.fromIndex(other)
+				local dx, dy = bx - x, by - y
+				if dx * dx + dy * dy <= blast2 then
+					value += building.level
+				end
+			end
+		end
+
+		if value > bestValue then
+			bestValue = value
+			bestTile = index
+		end
+	end
+
+	if bestTile then
+		Nukes.launch(state, ps.slot, bestTile, kind)
+	elseif shielded then
+		-- Tout est couvert : on abat le parapluie avant d'essayer la ville.
+		Nukes.launch(state, ps.slot, shielded, kind)
 	end
 end
 
@@ -569,6 +784,23 @@ local function decideAttack(state: GameState, ps: GameState.PlayerState, rng: Ra
 			-- Cible d'autant plus attirante qu'elle est faible par tuile.
 			local density = target.troops / math.max(1, target.tiles)
 			score = 100 / (1 + density) + contactTiles * 0.5
+
+			--[[
+				La riposte passe avant le calcul d'opportunite.
+
+				Sans ce terme, un bot qui vient de perdre deux cents tuiles
+				repartait a la recherche de la cible la plus rentable — souvent
+				quelqu'un d'autre. Le joueur ne faisait alors jamais le lien entre
+				son agression et ce qui lui tombait dessus, et la partie ne
+				racontait rien.
+
+				Le poids est volontairement superieur a l'ecart de score entre
+				deux voisins ordinaires : une rancune fraiche doit l'emporter,
+				pas juste peser.
+			]]
+			if state:holdsGrudge(ps.slot, other) then
+				score += Config.GRUDGE_ATTACK_BONUS
+			end
 
 			if coalitionActive then
 				if other == leader and other ~= ps.slot then
@@ -619,6 +851,7 @@ function Bots.step(state: GameState, rng: Random)
 		decideAttack(state, ps, rng)
 		decideBuild(state, ps, rng)
 		decideDiplomacy(state, ps, rng)
+		decideChat(state, ps, rng)
 		decideNavy(state, ps, rng)
 		decideNuke(state, ps, rng)
 	end

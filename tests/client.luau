@@ -15,6 +15,7 @@ local MapGen = __require("MapGen")
 local Nations = __require("Nations")
 local GameModes = __require("GameModes")
 local BuildingDefs = __require("BuildingDefs")
+local Eras = __require("Eras")
 
 local failures = 0
 
@@ -85,6 +86,34 @@ check("selection de chaque nation et de chaque mode", function()
 	end
 end)
 
+--[[
+	Salon : le menu annonce la partie qui tourne vraiment.
+
+	Le bandeau ne s'affiche que sur le mode en cours, et son texte change avec la
+	phase. Rien ne planterait s'il se posait sur la mauvaise carte ou s'il
+	restait affiche apres la fin — il annoncerait juste une partie qui n'existe
+	pas, ce qu'aucune erreur ne signale.
+]]
+check("salon : la carte en direct suit la partie du serveur", function()
+	local first = GameModes.LIST[1]
+
+	-- Sans annonce du serveur, la carte ne promet aucune partie.
+	menu:setLobby(nil)
+	assert(string.find(menu.liveTitle.Text, "Aucune") ~= nil, `sans donnee : "{menu.liveTitle.Text}"`)
+
+	-- En attente : c'est le remplissage qui compte.
+	menu:setLobby({ mode = first.id, phase = "waiting", players = 7, maxPlayers = 48, timeLeft = 900 })
+	assert(string.find(menu.liveMeta.Text, "7/48") ~= nil, `en attente : "{menu.liveMeta.Text}"`)
+
+	-- En jeu : c'est le temps restant. Rejoindre a deux minutes de la fin n'a
+	-- pas le meme sens qu'a vingt.
+	menu:setLobby({ mode = first.id, phase = "playing", players = 12, maxPlayers = 48, timeLeft = 125 })
+	assert(string.find(menu.liveMeta.Text, "2 min 05") ~= nil, `en jeu : "{menu.liveMeta.Text}"`)
+
+	menu:setLobby({ mode = first.id, phase = "ended", players = 3, maxPlayers = 48, timeLeft = 0 })
+	assert(string.find(menu.liveTitle.Text, "termin") ~= nil, `fin : "{menu.liveTitle.Text}"`)
+end)
+
 check("fermeture puis reouverture du menu", function()
 	menu:close()
 	menu:open()
@@ -116,17 +145,16 @@ check("construction du HUD", function()
 	hud = HUD.new(screenGui)
 end)
 
-check("tous les modes et toutes les classes de construction", function()
+check("tous les modes et tous les batiments", function()
 	for _, mode in { "attack", "boat", "build", "nuke" } do
 		hud:setMode(mode)
 	end
-	for _, class in BuildingDefs.CLASSES do
-		hud:setBuildClass(class.id)
-	end
+	-- Les classes de construction ont disparu avec la palette : armer un
+	-- batiment se fait par sa case ou son raccourci, sans onglet intermediaire.
 	for _, def in BuildingDefs.BUILDABLE do
-		hud.buildKind = def.id
-		hud:refreshPalettes()
+		hud:setBuildKind(def.id)
 	end
+	hud:refreshPalettes()
 end)
 
 check("identite, ere, diplomatie et classement", function()
@@ -159,7 +187,18 @@ check("identite, ere, diplomatie et classement", function()
 	assert(string.find(hud.frontStatus.Text, "2 FRONTS") ~= nil, "les fronts actifs ne sont pas affiches")
 	assert(string.find(hud.tilesLabel.Text, "3") ~= nil, "les routes logistiques ne sont pas affichees")
 	assert(string.find(hud.goldLabel.Text, "+12.0/s") ~= nil, "le revenu logistique n'est pas affiche")
-	assert(hud.buildPriceLabels[Config.BUILDING.CITY].Text == "243 or", "le vrai prix de construction n'est pas affiche")
+	--[[
+		Le prix reel suit le batiment arme, dans l'aide contextuelle.
+
+		C'etait la seule information que la palette apportait en propre. En la
+		supprimant sans verifier ceci, on aurait retire du jeu la reponse a
+		"combien ca coute" sans que rien ne le signale.
+	]]
+	hud:setBuildKind(Config.BUILDING.CITY)
+	assert(
+		string.find(hud.hintLabel.Text, "243 or") ~= nil,
+		`le prix reel n'apparait pas dans l'aide : "{hud.hintLabel.Text}"`
+	)
 
 	--[[
 		Tous les chiffres du bandeau passent par Format.
@@ -299,13 +338,23 @@ check("un seul sous-menu ouvert a la fois", function()
 		return open
 	end
 
-	-- Armer un mode ouvre sa feuille et referme celle d'avant.
+	--[[
+		Construire n'ouvre plus RIEN.
+
+		Sa palette a ete retiree : elle offrait une troisieme facon de choisir un
+		batiment, apres la rangee du panneau de controle et la page "Batir" du
+		menu radial, en occupant un tiers de l'ecran en permanence.
+	]]
+	-- On part d'un ecran propre : armer Construire ne FERME plus rien puisqu'il
+	-- n'ouvre plus rien, donc une feuille laissee ouverte par l'etape precedente
+	-- resterait la et fausserait le compte.
+	hud:openSheet(nil)
 	hud:setMode("build")
-	assert(hud.sheets.build.Visible, "le mode Construire n'ouvre pas sa palette")
-	assert(openCount() == 1, `{openCount()} sous-menus ouverts apres Construire`)
+	assert(hud.sheets.build == nil, "la palette de construction existe encore")
+	assert(openCount() == 0, `{openCount()} sous-menus ouverts apres Construire`)
 
 	hud:setMode("nuke")
-	assert(hud.sheets.nuke.Visible and not hud.sheets.build.Visible, "l'arsenal ne remplace pas la palette")
+	assert(hud.sheets.nuke.Visible, "l'arsenal ne s'ouvre pas")
 	assert(openCount() == 1, `{openCount()} sous-menus ouverts apres Frappe`)
 
 	-- Armer deux fois le meme mode ne doit pas refermer sa feuille.
@@ -325,7 +374,7 @@ check("un seul sous-menu ouvert a la fois", function()
 	-- Selectionner un territoire prend la place de toute autre feuille.
 	hud:setMode("build")
 	hud:selectTerritory(4242, 0, "Plaines", nil)
-	assert(hud.territoryPanel.Visible and not hud.sheets.build.Visible, "la fiche de territoire n'est pas exclusive")
+	assert(hud.territoryPanel.Visible, "la fiche de territoire ne s'ouvre pas")
 	assert(openCount() == 1, `{openCount()} sous-menus ouverts avec la fiche de territoire`)
 	hud:setMode("attack")
 end)
@@ -422,23 +471,129 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		assert(node.Name ~= "Modes", "la rangee de modes est encore construite")
 	end
 
-	--- 3. L'engagement vit dans le panneau de controle. ----------------------
-	local track = hud.ratioFill.Parent
-	assert(track.Parent == hud.controlPanel, "le curseur d'engagement n'est pas dans le panneau de controle")
+	--[[
+		3. L'engagement vit dans le panneau de controle.
+
+		On remonte la chaine de parents au lieu de compter les niveaux : la
+		version precedente supposait une profondeur exacte, et un simple
+		regroupement interne — ajouter un rail autour du remplissage — la faisait
+		echouer alors que rien n'avait bouge a l'ecran.
+	]]
+	local function descendsFrom(node, ancestor): boolean
+		local current = node
+		for _ = 1, 8 do
+			if current == nil then
+				return false
+			end
+			if current == ancestor then
+				return true
+			end
+			current = current.Parent
+		end
+		return false
+	end
+	assert(
+		descendsFrom(hud.ratioFill, hud.controlPanel),
+		"le curseur d'engagement n'est pas dans le panneau de controle"
+	)
+	assert(
+		descendsFrom(hud.ratioKnob, hud.controlPanel),
+		"la bille du curseur n'est pas dans le panneau de controle"
+	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
 	-- jeu de reference — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
+	--[[
+		Le libelle d'engagement dit DEUX choses : la part, et ce qu'elle vaut.
+
+		L'ancienne assertion ne cherchait que le pourcentage. Elle serait donc
+		restee verte si le nombre de troupes reellement engagees avait disparu —
+		or c'est lui qu'on regarde avant de lancer une offensive, pas la part.
+	]]
 	hud:setRatio(0.5)
-	assert(string.find(hud.ratioReadout.Text, "50 ") ~= nil, `engagement affiche "{hud.ratioReadout.Text}"`)
+	local readout = hud.ratioReadout.Text
+	assert(string.find(readout, "50%%") ~= nil, `engagement sans pourcentage : "{readout}"`)
+	assert(string.find(readout, "%(") ~= nil, `engagement sans troupes engagees : "{readout}"`)
 
 	--- 4. Coin haut droit : chrono, ere, sorties. ---------------------------
 	assert(hud.timerLabel.Parent == hud.sessionBar, "le chrono n'est pas dans la barre de session")
 	hud:setMatch({ phase = "playing", stage = "combat", timeLeft = 25, restartIn = 0 })
 	assert(hud.timerLabel.Text == "00:25", `chrono affiche "{hud.timerLabel.Text}" au lieu de "00:25"`)
 
-	--- 5. Parc de batiments : une pastille par type constructible. ----------
+	--[[
+		5. Rangee de batiments : raccourci, icone, compteur, et l'etat de verrou.
+
+		Le raccourci affiche est la partie qui peut mentir en silence — il reste
+		dessine que la touche fasse quelque chose ou non. On verifie donc qu'il
+		existe pour chaque case ET que la case reagit au clic, faute de quoi le
+		HUD annoncerait un geste qui n'aboutit nulle part.
+	]]
+	for _, def in BuildingDefs.BUILDABLE do
+		local parts = hud.parkSlots[def.id]
+		assert(parts ~= nil, `aucune case pour {def.name}`)
+		assert(parts.key.Text ~= "", `la case de {def.name} n'affiche pas son raccourci`)
+	end
+
+	-- Un batiment verrouille par l'ere reste VISIBLE mais grise : le masquer
+	-- ferait changer la longueur de la rangee en cours de partie, et le joueur
+	-- perdrait la position qu'il vient d'apprendre.
+	--[[
+		Le grisage doit atteindre les DEUX sortes de glyphe.
+
+		Trois batiments portent une image televersee, cinq portent encore un
+		glyphe de repli. Une image se grise par ImageTransparency, un texte par
+		TextTransparency — ecrire la mauvaise propriete ne leve aucune erreur, le
+		glyphe reste simplement allume alors qu'il est verrouille. Sans cette
+		lecture par type, la moitie de la rangee pourrait cesser de reagir sans
+		que rien ne le signale.
+	]]
+	local function glyphDim(parts): number
+		if parts.glyph:IsA("ImageLabel") then
+			return parts.glyph.ImageTransparency or 0
+		end
+		return parts.glyph.TextTransparency or 0
+	end
+
+	hud.gold = 1000000
+	hud.era = 1
+	hud:refreshParkSlots()
+	local locked, unlocked, images = 0, 0, 0
+	for id, parts in hud.parkSlots do
+		assert(parts.button.Visible ~= false, "une case verrouillee est masquee au lieu d'etre grisee")
+		if parts.glyph:IsA("ImageLabel") then
+			images += 1
+			assert(parts.glyph.Image ~= "", `l'icone de {id} est vide`)
+		end
+		if hud.era >= Eras.requiredFor(id) then
+			unlocked += 1
+		else
+			locked += 1
+			assert(glyphDim(parts) > 0, `{id} est verrouille mais s'affiche en pleine lumiere`)
+		end
+	end
+	assert(locked > 0 and unlocked > 0, "l'ere 1 ne separe plus les batiments verrouilles des autres")
+	assert(images > 0, "aucune case n'utilise d'icone televersee")
+
+	-- Et le verrou se leve quand l'ere avance, sinon il resterait ferme toute
+	-- la partie sur un batiment pourtant debloque.
+	hud.era = 5
+	hud:refreshParkSlots()
+	for _, parts in hud.parkSlots do
+		assert(glyphDim(parts) == 0, "un batiment debloque et payable reste grise")
+	end
+
+	-- Trop cher grise aussi, mais differemment de verrouille : les deux ne
+	-- disent pas la meme chose au joueur.
+	hud.gold = 0
+	hud:refreshParkSlots()
+	for _, parts in hud.parkSlots do
+		assert(glyphDim(parts) > 0, "un batiment hors budget s'affiche comme disponible")
+	end
+	hud.gold = 1000000
+
+	--- 5b. Parc de batiments : une pastille par type constructible. ----------
 	hud:setBuildingCounts({ [Config.BUILDING.CITY] = 3 })
 	assert(hud.parkPills[Config.BUILDING.CITY].Text == "3", "le compteur de villes n'est pas repercute")
 	assert(hud.parkPills[Config.BUILDING.SILO].Text == "0", "un type absent n'affiche pas zero")
@@ -551,6 +706,17 @@ check("pose et capture de chaque type de batiment", function()
 		return count, sample
 	end
 
+	--[[
+		On se place dans le cas d'une usine posee EN COURS DE PARTIE.
+
+		A la connexion, `animateFrom` bloque volontairement les chantiers : voir
+		trente voies ramper en meme temps a l'arrivee serait absurde. Le banc
+		venant de creer la couche, il tombe par defaut dans ce cas-la — et
+		testerait donc precisement la situation ou l'animation ne doit PAS
+		exister.
+	]]
+	overlay.animateFrom = 0
+
 	-- Une usine est une gare : elle trace une voie vers chaque gare a portee.
 	factoryEntry.links = { cityIndex, cityIndex + 300, cityIndex + 700 }
 	overlay:applyBuildingDelta({ factoryEntry })
@@ -576,6 +742,51 @@ check("pose et capture de chaque type de batiment", function()
 			dx < 0.001 or dz < 0.001,
 			`segment {i} de la route part en diagonale (dx={dx}, dz={dz})`
 		)
+	end
+
+	--[[
+		La voie se construit progressivement, elle n'apparait pas d'un bloc.
+
+		Rien ne leverait d'erreur si le chantier disparaissait : la route
+		s'afficherait simplement finie des la premiere image, et personne ne
+		verrait la difference sans comparer deux parties cote a cote.
+
+		On mesure la longueur cumulee des chaussees, qui doit croitre puis se
+		stabiliser — c'est la seule trace observable de l'animation.
+	]]
+	local function pavedLength(): number
+		local total = 0
+		for _, route in overlay.routes do
+			if route.factory == factoryEntry.index then
+				for _, part in route.model:GetChildren() do
+					if part.Name == "Road" and part.Size then
+						total += part.Size.Z
+					end
+				end
+			end
+		end
+		return total
+	end
+
+	local atStart = pavedLength()
+	overlay:stepInterpolation(0.2)
+	local partway = pavedLength()
+	assert(
+		partway > atStart,
+		`la voie ne s'allonge pas : {atStart} puis {partway}`
+	)
+
+	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
+	-- libere — sinon il resterait a tourner pour rien a chaque image.
+	for _ = 1, 30 do
+		overlay:stepInterpolation(0.2)
+	end
+	local finished = pavedLength()
+	assert(finished > partway, "la voie ne se termine jamais")
+	for _, route in overlay.routes do
+		if route.factory == factoryEntry.index then
+			assert(route.construction == nil, "le chantier tourne encore apres la fin de la voie")
+		end
 	end
 
 	-- Perdre une ville doit retirer sa route, pas les laisser s'accumuler.
@@ -608,6 +819,67 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	overlay:applyBuildingDelta(deltas)
 	assert(next(overlay.routes) == nil, "une route detruite reste affichee")
+end)
+
+--[[
+	Silhouettes procédurales : le niveau doit se voir.
+
+	Ville, port et usine se stackent — cliquer a cote d'un exemplaire existant le
+	fait monter d'un palier au lieu d'en poser un second, et son rendement suit.
+	Tant que le modele ignorait ce niveau, deux batiments de rendement tres
+	different etaient identiques a l'ecran, et le chiffre flottant au-dessus
+	restait le seul indice sur une carte ou l'on lit d'abord les formes.
+
+	Aucune erreur ne serait levee si la regle disparaissait : le batiment
+	s'afficherait, simplement toujours au meme gabarit.
+]]
+check("modeles procéduraux : le palier change la silhouette", function()
+	local Building = __require("BuildingModels")
+
+	local function summit(kind: number, level: number): (number, number)
+		local model = Building.create(kind, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), level)
+		local top, parts = 0, 0
+		for _, part in model:GetChildren() do
+			if part.Size then
+				parts += 1
+				local height = part.Position.Y + part.Size.Y / 2
+				if height > top then
+					top = height
+				end
+			end
+		end
+		return top, parts
+	end
+
+	for _, kind in { Config.BUILDING.CITY, Config.BUILDING.FACTORY, Config.BUILDING.PORT } do
+		local lowTop, lowParts = summit(kind, 1)
+		local highTop, highParts = summit(kind, 3)
+		local def = BuildingDefs.get(kind)
+		local name = if def then def.name else tostring(kind)
+
+		assert(lowParts > 0, `{name} : le modele de niveau 1 ne produit aucune Part`)
+		assert(
+			highTop > lowTop + 0.5,
+			`{name} : niveau 3 culmine a {highTop} contre {lowTop} au niveau 1 — le palier ne se voit pas`
+		)
+
+		--[[
+			Le budget de Parts est une contrainte reelle, pas une preference.
+
+			Le module l'annonce en tete : une partie compte plusieurs dizaines de
+			batiments, et le terrain en consomme deja des milliers. Un modele qui
+			double de complexite au niveau 3 ferait tomber les images sur mobile
+			exactement quand la partie devient interessante.
+		]]
+		assert(highParts <= 18, `{name} : {highParts} Parts au niveau 3, budget depasse`)
+
+		-- L'etiquette flottante doit suivre : sinon elle se plante au milieu du
+		-- batiment qui vient de grandir.
+		assert(
+			Building.heightOf(kind, 3) > Building.heightOf(kind, 1),
+			`{name} : la hauteur de reference ne suit pas le palier`
+		)
+	end
 end)
 
 check("apercu de placement pour chaque batiment", function()
@@ -918,6 +1190,64 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
 end)
 
+--[[
+	Le "+X or" d'une livraison.
+
+	Toute la chaine existait deja et fonctionnait cote serveur — mesure sur une
+	partie : 669 colis arrives. Ce qui manquait etait a l'affichage, et rien ne
+	pouvait le voir : un popup trop discret s'affiche sans erreur.
+]]
+check("livraison : le gain s'affiche sur la gare", function()
+	overlay:setLocalSlot(1)
+
+	local function popups(): number
+		local n = 0
+		for _, node in overlay.root:GetChildren() do
+			if node.Name == "GoldPopup" then
+				n += 1
+			end
+		end
+		return n
+	end
+
+	local before = popups()
+	overlay:onTradeEvent("arrival", 3000, 0, 1, 1240)
+	assert(popups() == before + 1, "l'arrivee d'un colis n'affiche rien")
+
+	-- Le chiffre est formate comme partout ailleurs, et porte son unite.
+	local latest
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "GoldPopup" then
+			latest = node
+		end
+	end
+	local board = latest:FindFirstChild("Board")
+	local label = board and board:FindFirstChildWhichIsA("TextLabel")
+	assert(label ~= nil, "le popup n'a pas de texte")
+	assert(label.Text == "+1.24K or", `le popup affiche "{label.Text}" au lieu de "+1.24K or"`)
+
+	--[[
+		Notre livraison se lit plus fort que celle du voisin.
+
+		Sept cents colis arrivent en dix minutes sur une carte peuplee. Les
+		afficher tous pareil noyait le seul chiffre qui compte pour le joueur.
+	]]
+	local mineSize = board.Size.Y.Offset
+	overlay:onTradeEvent("arrival", 3100, 0, 2, 1240)
+	local other
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "GoldPopup" and node ~= latest then
+			other = node
+		end
+	end
+	local otherBoard = other and other:FindFirstChild("Board")
+	assert(otherBoard ~= nil, "la livraison d'un rival n'affiche rien")
+	assert(
+		otherBoard.Size.Y.Offset < mineSize,
+		"la livraison d'un rival s'affiche aussi fort que la notre"
+	)
+end)
+
 check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
 		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
@@ -1095,7 +1425,9 @@ check("barre tactile : modes, recentrage et feuilles decalees", function()
 	assert(hud.touchBar == nil, "la barre tactile existe sur un appareil a clavier")
 	assert(next(hud.modeButtons) == nil, "des boutons de mode existent sans tactile")
 
-	local sheetOffsetBefore = hud.sheets.build.Position.Y.Offset
+	-- La palette de construction ayant disparu, l'arsenal sert de temoin : c'est
+	-- desormais la feuille du bas qui doit remonter au-dessus de la barre.
+	local sheetOffsetBefore = hud.sheets.nuke.Position.Y.Offset
 
 	hud.touchOnly = true
 	hud:buildTouchBar()
@@ -1118,7 +1450,7 @@ check("barre tactile : modes, recentrage et feuilles decalees", function()
 
 	--- Les feuilles du bas passent au-dessus de la barre. ----------------------
 	assert(
-		hud.sheets.build.Position.Y.Offset < sheetOffsetBefore,
+		hud.sheets.nuke.Position.Y.Offset < sheetOffsetBefore,
 		"la palette de construction reste sous la barre tactile"
 	)
 

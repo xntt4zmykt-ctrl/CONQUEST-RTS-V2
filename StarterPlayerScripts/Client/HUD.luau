@@ -64,9 +64,60 @@ local FEED_ENTRY_HEIGHT = 21
 ]]
 
 -- Panneau de controle, bas centre : deux lignes de commande et le parc.
-local CONTROL_WIDTH = 500
-local CONTROL_HEIGHT = 96
-local CONTROL_ROW_H = 24
+--[[
+	Largeur DERIVEE de la rangee de batiments, jamais choisie.
+
+	Elle etait figee a 500 px pour une rangee qui n'en occupe que 428 : le
+	panneau trainait donc 72 px de vide a droite, et la comparaison cote a cote
+	avec la reference le montrait immediatement — leurs cases remplissent leur
+	panneau, les notres flottaient dedans.
+
+	Deriver la largeur du contenu rend ce vide impossible, et un batiment ajoute
+	ou retire elargit le panneau au lieu de deregler la rangee.
+]]
+-- Case de la rangee de batiments. Resserree apres comparaison cote a cote : la
+-- reference tient dix cases dans la largeur ou nous en mettions huit, et ses
+-- cases sont sensiblement plus courtes que les notres.
+--[[
+	Densite : le defaut qui faisait "cheap", et il ne tenait pas aux couleurs.
+
+	Mesure cote a cote : notre panneau faisait 396 x 106 px, le leur est deux
+	fois plus large que haut a contenu comparable. Leurs cases sont NETTEMENT
+	plus larges que hautes ; les notres etaient presque carrees, ce qui les
+	faisait lire comme une grille de tuiles au lieu d'une bande d'outils.
+
+	Une interface de strategie parait soignee quand elle est dense. Chaque pixel
+	d'air en trop la fait paraitre amateur, quelle que soit la qualite du reste.
+]]
+local SLOT_WIDTH = 44
+local SLOT_HEIGHT = 26
+-- Meme taille d'icone que la reference (`w-4` = 16 px). A 26 px de haut, une
+-- icone de 18 ne laissait plus de place au raccourci en exposant.
+local SLOT_ICON = 16
+
+-- Marge du panneau et interligne. Resserres avec les cases : garder 8 px
+-- d'interligne autour de rangees plus courtes aurait annule le gain.
+local PANEL_PAD = 6
+local ROW_GAP = 3
+local CONTROL_WIDTH = #BuildingDefs.BUILDABLE * SLOT_WIDTH
+	+ (#BuildingDefs.BUILDABLE - 1) * Theme.space.xs
+	+ PANEL_PAD * 2
+--[[
+	Hauteur DERIVEE des trois rangees, jamais recopiee.
+
+	Elle etait ecrite en dur a 96. En passant la rangee de batiments de 28 a
+	40 px pour y loger le raccourci, elle debordait du panneau — sans aucune
+	erreur, puisque rien ne verifie qu'un enfant tient dans son parent. Le
+	calcul rend ce genre de decalage impossible.
+]]
+local CONTROL_HEIGHT = PANEL_PAD * 2 + 24 * 2 + ROW_GAP * 2 + SLOT_HEIGHT
+local CONTROL_ROW_H = 24 -- `h-6` de la reference
+-- `px-1.5` : le libelle est pose SUR la jauge, nom a gauche et valeur a droite.
+local GAUGE_PAD = 6
+
+-- Curseur d'engagement : un filet mince, et une bille qui le deborde.
+local SLIDER_RAIL = 6
+local SLIDER_KNOB = 14
 -- Ligne de basse que les feuilles a la demande ne franchissent jamais :
 -- panneau de controle + respiration.
 local DECK_BOTTOM = S.sm + CONTROL_HEIGHT + S.sm
@@ -194,6 +245,25 @@ end
 	cote sur la meme ligne : dix rectangles pleins forment un bloc opaque, dix
 	contours restent une rangee ou chaque element se compte.
 ]]
+--[[
+	Pastille "icone + compteur".
+
+	Les dimensions ne sont pas choisies : elles sont relevees sur le jeu de
+	reference, dont la feuille de style les fixe a `w-12 h-7` (48x28 px) avec
+	une icone `w-4 h-4` (16 px), une bordure de 1 px et un rayon de 6 px. Nos
+	35x18 precedents etaient une estimation, et c'est exactement le genre
+	d'ecart qui fait qu'une interface parait bricolee sans qu'on sache dire
+	pourquoi.
+
+	Reste un ecart qu'aucune mesure ne comblera : leur glyphe est une image
+	dessinee, le notre un caractere unicode. Voir PILL_ICON.
+]]
+local PILL_WIDTH = 48
+local PILL_HEIGHT = 28
+
+local PILL_ICON = 16
+local PILL_PAD = 4
+
 local function pill(parent: GuiObject, symbol: string, tint: Color3): (Frame, TextLabel)
 	local chip = Instance.new("Frame")
 	chip.Name = "Pill"
@@ -204,15 +274,15 @@ local function pill(parent: GuiObject, symbol: string, tint: Color3): (Frame, Te
 	Theme.corner(chip, Theme.radius.sm)
 	Theme.stroke(chip, tint, 1)
 
-	local glyph = Theme.label(chip, symbol, T.tiny, tint)
-	glyph.Position = UDim2.fromOffset(4, 0)
-	glyph.Size = UDim2.new(0, 12, 1, 0)
+	local glyph = Theme.label(chip, symbol, T.small, tint)
+	glyph.Position = UDim2.fromOffset(PILL_PAD, 0)
+	glyph.Size = UDim2.new(0, PILL_ICON, 1, 0)
 	glyph.TextXAlignment = Enum.TextXAlignment.Center
 
-	local value = Theme.label(chip, "0", T.tiny, C.textFaint)
+	local value = Theme.label(chip, "0", T.small, C.textFaint)
 	value.AnchorPoint = Vector2.new(1, 0)
-	value.Position = UDim2.new(1, -4, 0, 0)
-	value.Size = UDim2.new(1, -20, 1, 0)
+	value.Position = UDim2.new(1, -PILL_PAD, 0, 0)
+	value.Size = UDim2.new(1, -(PILL_ICON + PILL_PAD * 2), 1, 0)
 	value.TextXAlignment = Enum.TextXAlignment.Right
 	value.FontFace = F.medium
 
@@ -237,12 +307,11 @@ function HUD.new(parent: ScreenGui): HUD
 	self.era = 1
 	self.eraProgress = 0
 	self.modeButtons = {}
-	self.buildButtons = {}
-	self.buildPriceLabels = {}
 	self.buildPrices = {}
 	self.nukeButtons = {}
 	self.diploButtons = {}
 	self.parkPills = {}
+	self.parkSlots = {}
 	self.buildingCounts = {}
 	self.troopGrowth = 0
 	self.diplomacy = { allies = {}, incoming = {}, outgoing = {}, embargoes = {}, traitors = {}, marks = {} }
@@ -251,7 +320,6 @@ function HUD.new(parent: ScreenGui): HUD
 	self.feedEntries = {}
 	self.feedCounter = 0
 	self.feedGroups = {}
-	self.buildClass = BuildingDefs.CLASSES[1].id
 	self.landTiles = FALLBACK_LAND_TILES
 	self.tutorialStep = 0
 	self.tutorialStartTiles = 0
@@ -281,7 +349,6 @@ function HUD.new(parent: ScreenGui): HUD
 	self:buildMissionStrip()
 	self:buildFeed()
 	self:buildProfileSheet()
-	self:buildBuildSheet()
 	self:buildArsenalSheet()
 	self:buildChatSheet()
 	self:buildTerritorySheet()
@@ -494,9 +561,9 @@ function HUD.buildControlPanel(self: HUD)
 	panel.Size = UDim2.fromOffset(CONTROL_WIDTH, CONTROL_HEIGHT)
 	self.controlPanel = panel
 
-	local row1Y = S.sm
-	local row2Y = S.sm + CONTROL_ROW_H + S.xs
-	local row3Y = row2Y + CONTROL_ROW_H + S.xs
+	local row1Y = PANEL_PAD
+	local row2Y = PANEL_PAD + CONTROL_ROW_H + ROW_GAP
+	local row3Y = row2Y + CONTROL_ROW_H + ROW_GAP
 
 	--- Cadence de population -------------------------------------------------
 	-- Le stock de troupes ne dit pas si l'empire monte ou s'effondre ; la
@@ -504,7 +571,7 @@ function HUD.buildControlPanel(self: HUD)
 	-- ne rapporte, plusieurs dizaines de secondes avant le compteur.
 	local rateChip = Instance.new("Frame")
 	rateChip.Name = "RateChip"
-	rateChip.Position = UDim2.fromOffset(S.sm, row1Y)
+	rateChip.Position = UDim2.fromOffset(PANEL_PAD, row1Y)
 	rateChip.Size = UDim2.fromOffset(86, CONTROL_ROW_H)
 	rateChip.BackgroundColor3 = C.surfaceRaised
 	rateChip.BackgroundTransparency = 0.4
@@ -513,8 +580,16 @@ function HUD.buildControlPanel(self: HUD)
 	Theme.corner(rateChip, Theme.radius.sm)
 	self.growthChipEdge = Theme.stroke(rateChip, C.ally, 1)
 
+	-- Un chevron monochrome plutot qu'un emoji : il rend la puce lisible comme
+	-- une PENTE et non comme un stock, et il s'affiche dans toutes les polices.
+	local rateMark = Theme.label(rateChip, "\u{25B2}", T.tiny, C.ally)
+	rateMark.Position = UDim2.fromOffset(8, 0)
+	rateMark.Size = UDim2.fromOffset(12, CONTROL_ROW_H)
+	rateMark.TextXAlignment = Enum.TextXAlignment.Center
+
 	local rate = Theme.label(rateChip, "+0/s", T.small, C.ally)
-	rate.Size = UDim2.fromScale(1, 1)
+	rate.Position = UDim2.fromOffset(20, 0)
+	rate.Size = UDim2.new(1, -26, 1, 0)
 	rate.TextXAlignment = Enum.TextXAlignment.Center
 	self.growthLabel = rate
 
@@ -549,20 +624,46 @@ function HUD.buildControlPanel(self: HUD)
 	committed.Parent = troopTrack
 	self.committedFill = committed
 
+	--[[
+		"armee / capacite" se lit d'un bloc, centre sur la jauge.
+
+		Nos deux nombres etaient pousses aux extremites opposees de la barre.
+		C'est lisible, mais ce n'est pas la meme information : deux valeurs
+		eloignees se comparent mal, alors qu'un "4.18K / 12.1K" centre se lit
+		comme un rapport. La reference les colle, et le symbole de troupes se
+		pose juste apres — c'est lui qui dit de quoi on parle.
+	]]
 	local troops = Theme.label(troopTrack, "0", T.body, C.text)
-	troops.Position = UDim2.fromOffset(S.sm, 0)
-	troops.Size = UDim2.new(0.5, -S.sm, 1, 0)
+	troops.AnchorPoint = Vector2.new(1, 0)
+	troops.Position = UDim2.new(0.5, -9, 0, 0)
+	troops.Size = UDim2.fromOffset(90, CONTROL_ROW_H)
+	troops.TextXAlignment = Enum.TextXAlignment.Right
 	troops.ZIndex = 2
 	self.troopsLabel = troops
 
+	local separator = Theme.label(troopTrack, "/", T.body, C.textMuted)
+	separator.AnchorPoint = Vector2.new(0.5, 0)
+	separator.Position = UDim2.new(0.5, 0, 0, 0)
+	separator.Size = UDim2.fromOffset(10, CONTROL_ROW_H)
+	separator.TextXAlignment = Enum.TextXAlignment.Center
+	separator.ZIndex = 2
+
 	local cap = Theme.label(troopTrack, "0", T.body, C.textMuted)
-	cap.AnchorPoint = Vector2.new(1, 0)
-	cap.Position = UDim2.new(1, -S.sm, 0, 0)
-	cap.Size = UDim2.new(0.5, -S.sm, 1, 0)
-	cap.TextXAlignment = Enum.TextXAlignment.Right
+	cap.Position = UDim2.new(0.5, 9, 0, 0)
+	cap.Size = UDim2.fromOffset(90, CONTROL_ROW_H)
+	cap.TextXAlignment = Enum.TextXAlignment.Left
 	cap.FontFace = F.medium
 	cap.ZIndex = 2
 	self.popCapLabel = cap
+
+	--[[
+		Pas de pictogramme dans la jauge.
+
+		La reference en met un ; le notre etait un emoji, que Gotham ne porte pas
+		— il s'affichait en carre noir sur la barre bleue. Un glyphe manquant est
+		strictement pire que pas de glyphe : il ressemble a un bug. On y
+		reviendra quand les icones seront des images.
+	]]
 
 	--- Or ---------------------------------------------------------------------
 	local purse = Instance.new("Frame")
@@ -593,21 +694,30 @@ function HUD.buildControlPanel(self: HUD)
 	self.goldScale = goldScale
 
 	--- Engagement : la puce dit combien part, le curseur decide ---------------
+	--[[
+		L'engagement s'annonce SANS cadre.
+
+		Un cadre autour de ce chiffre le mettait au meme rang que l'or et la
+		croissance, qui en ont un. Or ce n'est pas une ressource : c'est le
+		libelle du curseur pose juste a cote. Sans cadre, l'oeil relie
+		immediatement le chiffre au reglage qui le produit.
+	]]
 	local ratioChip = Instance.new("Frame")
 	ratioChip.Name = "RatioChip"
-	ratioChip.Position = UDim2.fromOffset(S.sm, row2Y)
+	ratioChip.Position = UDim2.fromOffset(PANEL_PAD, row2Y)
 	ratioChip.Size = UDim2.fromOffset(128, CONTROL_ROW_H)
-	ratioChip.BackgroundColor3 = C.surfaceRaised
-	ratioChip.BackgroundTransparency = 0.4
-	ratioChip.BorderSizePixel = 0
+	ratioChip.BackgroundTransparency = 1
 	ratioChip.Parent = panel
-	Theme.corner(ratioChip, Theme.radius.sm)
-	Theme.stroke(ratioChip, C.line, 1)
+
+	local blade = Theme.label(ratioChip, "\u{2694}", T.small, C.textMuted)
+	blade.Size = UDim2.fromOffset(18, CONTROL_ROW_H)
+	blade.TextXAlignment = Enum.TextXAlignment.Center
 
 	local readout = Theme.label(ratioChip, "", T.small, C.text)
-	readout.Size = UDim2.fromScale(1, 1)
-	readout.TextXAlignment = Enum.TextXAlignment.Center
-	readout.FontFace = F.medium
+	readout.Position = UDim2.fromOffset(20, 0)
+	readout.Size = UDim2.new(1, -20, 1, 0)
+	readout.TextXAlignment = Enum.TextXAlignment.Left
+	readout.FontFace = F.bold
 	self.ratioReadout = readout
 
 	self:buildEngagementSlider(panel, row2Y)
@@ -691,20 +801,156 @@ end
 	Overlay, que le HUD ne connait pas. Les compteurs restent donc a zero tant
 	que personne n'appelle setBuildingCounts.
 ]]
+--[[
+	Rangee de batiments : un bouton par type, avec son raccourci.
+
+	Trois informations dans une case de 48x40, et chacune repond a une question
+	differente : le chiffre en exposant dit COMMENT le poser au clavier, l'icone
+	dit QUOI, le compteur dit COMBIEN on en a deja.
+
+	Le chiffre en exposant n'est pas decoratif — c'est le raccourci reel. Les
+	touches 1 a 4 servaient aux modes ; les modes vivent desormais dans le menu
+	radial, donc les chiffres reviennent aux batiments, comme dans le jeu de
+	reference. Un raccourci affiche est un raccourci qu'on apprend sans le
+	chercher.
+
+	Un batiment verrouille par l'ere reste VISIBLE mais grise. Le masquer
+	donnerait une rangee dont la longueur change en cours de partie, et le joueur
+	perdrait la position qu'il vient d'apprendre.
+]]
 function HUD.buildParkRow(self: HUD, parent: GuiObject, offsetY: number)
 	local row = Instance.new("Frame")
 	row.Name = "Park"
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(S.sm, offsetY)
-	row.Size = UDim2.fromOffset(CONTROL_WIDTH - S.sm * 2, 18)
+	row.Position = UDim2.fromOffset(PANEL_PAD, offsetY)
+	row.Size = UDim2.fromOffset(CONTROL_WIDTH - PANEL_PAD * 2, SLOT_HEIGHT)
 	row.Parent = parent
 	Theme.list(row, Enum.FillDirection.Horizontal, S.xs)
 
 	for order, def in BuildingDefs.BUILDABLE do
-		local chip, value = pill(row, def.symbol, C.lineStrong)
-		chip.LayoutOrder = order
-		chip.Size = UDim2.fromOffset(35, 18)
+		local slot = Instance.new("TextButton")
+		slot.Name = `Slot{def.id}`
+		slot.LayoutOrder = order
+		slot.Size = UDim2.fromOffset(SLOT_WIDTH, SLOT_HEIGHT)
+		slot.BackgroundColor3 = C.surfaceRaised
+		slot.BackgroundTransparency = 0.45
+		slot.BorderSizePixel = 0
+		slot.AutoButtonColor = false
+		slot.Text = ""
+		slot.Parent = row
+		Theme.corner(slot, Theme.radius.sm)
+		Theme.stroke(slot, C.line, 1)
+
+		--[[
+			Le raccourci se SUPERPOSE, il ne prend pas de ligne.
+
+			Il occupait une bande en haut de la case, ce qui poussait l'icone et
+			le compteur vers le bas et obligeait a une case haute. Pose en
+			exposant dans le coin, il ne coute plus aucune hauteur — c'est ce qui
+			permet de passer de 40 a 34 px sans rien serrer.
+		]]
+		local key = Theme.label(slot, tostring(order % 10), T.tiny, C.textFaint)
+		key.Position = UDim2.fromOffset(3, 0)
+		key.Size = UDim2.fromOffset(9, 9)
+		key.TextXAlignment = Enum.TextXAlignment.Left
+
+		--[[
+			Icone et compteur forment un COUPLE, centre dans la case.
+
+			Ils etaient plaques aux deux bords opposes, ce qui les faisait lire
+			comme deux informations sans rapport separees par du vide. Colles, on
+			lit "trois usines" d'un seul coup d'oeil — c'est la disposition de la
+			reference, et c'est aussi ce qui permet de reduire la case.
+		]]
+		--[[
+			Une image si le batiment en a une, son glyphe sinon.
+
+			Tous n'ont pas encore leur icone televersee. Le repli n'est donc pas
+			une precaution theorique : cinq des huit cases affichent encore une
+			forme geometrique aujourd'hui. Les deux chemins doivent se teinter de
+			la meme facon, sinon la moitie de la rangee cesserait de reagir aux
+			verrous sans qu'aucune erreur ne le dise.
+
+			Le couple icone/compteur est centre sur la HAUTEUR de la case, pas
+			colle a son bas : c'est ce qui l'equilibre maintenant que le
+			raccourci ne mange plus de place en haut.
+		]]
+		local glyph: any
+		if def.icon then
+			local image = Instance.new("ImageLabel")
+			image.BackgroundTransparency = 1
+			image.Image = def.icon
+			-- Les icones sont blanches : la teinte vient d'ici, pas du fichier.
+			image.ImageColor3 = C.text
+			image.ScaleType = Enum.ScaleType.Fit
+			image.Parent = slot
+			glyph = image
+		else
+			glyph = Theme.label(slot, def.symbol, T.body, C.text)
+			glyph.TextXAlignment = Enum.TextXAlignment.Right
+		end
+		glyph.Name = "Glyph"
+		glyph.AnchorPoint = Vector2.new(1, 0.5)
+		glyph.Position = UDim2.new(0.5, 2, 0.5, 3)
+		glyph.Size = UDim2.fromOffset(SLOT_ICON, SLOT_ICON)
+
+		local value = Theme.label(slot, "0", T.small, C.textFaint)
+		value.AnchorPoint = Vector2.new(0, 0.5)
+		value.Position = UDim2.new(0.5, 5, 0.5, 3)
+		value.Size = UDim2.fromOffset(18, 18)
+		value.TextXAlignment = Enum.TextXAlignment.Left
+		value.FontFace = F.bold
+
+		slot.Activated:Connect(function()
+			self:setBuildKind(def.id)
+		end)
+
 		self.parkPills[def.id] = value
+		self.parkSlots[def.id] = { button = slot, glyph = glyph, key = key }
+	end
+
+	self:refreshParkSlots()
+end
+
+--[[
+	Grise les batiments que l'ere n'a pas encore ouverts.
+
+	Appele a la construction et a chaque changement d'ere : sans le second appel,
+	un batiment debloque en cours de partie resterait grise jusqu'a la fin, et
+	le joueur croirait ne pas y avoir droit.
+]]
+function HUD.refreshParkSlots(self: HUD)
+	for id, parts in self.parkSlots do
+		local def = BuildingDefs.get(id)
+		local unlocked = self.era >= Eras.requiredFor(id)
+		--[[
+			Deux raisons distinctes de griser, et elles ne disent pas la meme
+			chose : verrouille par l'ere veut dire "pas encore", trop cher veut
+			dire "pas maintenant". On les distingue par l'intensite plutot que
+			par la couleur — la rangee doit rester lisible d'un balayage.
+		]]
+		local price = self.buildPrices[id] or (if def then def.cost else math.huge)
+		local affordable = unlocked and self.gold >= price
+		local dim = if not unlocked then 0.6 elseif not affordable then 0.35 else 0
+
+		parts.button.BackgroundTransparency = if unlocked then 0.45 else 0.75
+		--[[
+			Une image se grise par ImageTransparency, un texte par
+			TextTransparency. Ecrire la mauvaise propriete ne leve rien : le
+			glyphe reste simplement en pleine lumiere alors qu'il est verrouille.
+		]]
+		if parts.glyph:IsA("ImageLabel") then
+			parts.glyph.ImageTransparency = dim
+		else
+			parts.glyph.TextTransparency = dim
+		end
+		parts.key.TextTransparency = math.max(dim, 0.15)
+		setSelected(parts.button, id == self.buildKind)
+
+		local count = self.parkPills[id]
+		if count then
+			count.TextTransparency = dim
+		end
 	end
 end
 
@@ -1065,31 +1311,60 @@ function HUD.buildEngagementSlider(self: HUD, parent: GuiObject, offsetY: number
 	track.AutoButtonColor = false
 	track.Position = UDim2.fromOffset(S.sm + 128 + S.xs, offsetY)
 	track.Size = UDim2.fromOffset(CONTROL_WIDTH - S.sm * 2 - 128 - S.xs, CONTROL_ROW_H)
-	track.BackgroundColor3 = C.glass
+	--[[
+		Rail fin et bille ronde, comme la reference.
+
+		Le rail ne fait plus toute la hauteur de la ligne : c'est un filet mince
+		centre verticalement, ce qui laisse la bille depasser au-dessus et en
+		dessous. Une bille qui deborde se saisit a l'oeil et au doigt ; un
+		curseur enferme dans son rail ne dit pas qu'il se deplace.
+
+		D'ou la disparition de ClipsDescendants : c'est lui qui rendait la bille
+		impossible. Il etait la pour contenir le remplissage — les coins arrondis
+		du rail s'en chargent aussi bien.
+	]]
+	--[[
+		Le rail est un FILET, pas une gouttiere.
+
+		La zone cliquable garde la hauteur d'une ligne — il faut pouvoir attraper
+		le curseur au doigt — mais elle est desormais invisible. Seul le filet se
+		voit. Auparavant la zone entiere etait peinte : on obtenait une grosse
+		barre grise qui pesait autant a l'oeil que la jauge d'armee au-dessus,
+		alors qu'elle ne porte qu'un reglage.
+	]]
+	track.BackgroundTransparency = 1
 	track.BorderSizePixel = 0
-	track.ClipsDescendants = true
 	track.Parent = parent
-	Theme.corner(track, Theme.radius.sm)
+
+	local rail = Instance.new("Frame")
+	rail.Name = "Rail"
+	rail.AnchorPoint = Vector2.new(0.5, 0.5)
+	rail.Position = UDim2.fromScale(0.5, 0.5)
+	rail.Size = UDim2.new(1, 0, 0, SLIDER_RAIL)
+	rail.BackgroundColor3 = C.surfaceBright
+	rail.BackgroundTransparency = 0.4
+	rail.BorderSizePixel = 0
+	rail.Parent = track
+	Theme.corner(rail, Theme.radius.pill)
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.fromScale(Config.DEFAULT_ATTACK_RATIO, 1)
-	fill.BackgroundColor3 = C.accentSoft
+	fill.BackgroundColor3 = C.accent
 	fill.BorderSizePixel = 0
-	fill.Parent = track
-	Theme.corner(fill, Theme.radius.sm)
+	fill.Parent = rail
+	Theme.corner(fill, Theme.radius.pill)
 	self.ratioFill = fill
 
-	-- Le curseur est un filet vertical plutot qu'une bille : sur un rail de la
-	-- hauteur d'une ligne de texte, une bille depasse et fait de la place a
-	-- une rangee de plus.
 	local knob = Instance.new("Frame")
+	knob.Name = "Knob"
 	knob.AnchorPoint = Vector2.new(0.5, 0.5)
 	knob.Position = UDim2.fromScale(Config.DEFAULT_ATTACK_RATIO, 0.5)
-	knob.Size = UDim2.fromOffset(2, 18)
+	knob.Size = UDim2.fromOffset(SLIDER_KNOB, SLIDER_KNOB)
 	knob.BackgroundColor3 = C.accent
 	knob.BorderSizePixel = 0
 	knob.ZIndex = 3
 	knob.Parent = track
+	Theme.corner(knob, Theme.radius.pill)
 	self.ratioKnob = knob
 
 	local function ratioFromInput(inputX: number)
@@ -1277,93 +1552,6 @@ end
 --=============================================================================
 -- Sous-menu : Construire
 --=============================================================================
-
---[[
-	Les trois classes sont des onglets d'une seule feuille, et non deux
-	palettes concurrentes se disputant le meme coin d'ecran.
-
-	Le classement par classe force une reponse a "je veux quoi maintenant" —
-	de l'argent, de la force, ou de l'avance technologique — avant de choisir
-	un batiment precis.
-]]
-function HUD.buildBuildSheet(self: HUD)
-	local sheet = Theme.panel("BuildSheet", self.layers.sheets)
-	sheet.AnchorPoint = Vector2.new(0.5, 1)
-	sheet.Position = UDim2.new(0.5, 0, 1, -SHEET_BOTTOM)
-	sheet.Size = UDim2.fromOffset(SHEET_WIDTH, 148)
-	self:registerSheet("build", sheet)
-	self.buildPalette = sheet
-
-	local tabs = Instance.new("Frame")
-	tabs.BackgroundTransparency = 1
-	tabs.Position = UDim2.fromOffset(S.md, S.sm)
-	tabs.Size = UDim2.new(1, -S.md * 2, 0, 22)
-	tabs.Parent = sheet
-	Theme.list(tabs, Enum.FillDirection.Horizontal, S.xs)
-
-	self.classTabs = {}
-	self.classPages = {}
-
-	local pages = Instance.new("Frame")
-	pages.BackgroundTransparency = 1
-	pages.Position = UDim2.fromOffset(S.md, 38)
-	pages.Size = UDim2.new(1, -S.md * 2, 1, -46)
-	pages.Parent = sheet
-
-	for i, class in BuildingDefs.CLASSES do
-		local tab = button(tabs, string.upper(class.name), T.tiny)
-		tab.LayoutOrder = i
-		tab.Size = UDim2.fromOffset(92, 22)
-		tab.Activated:Connect(function()
-			self:setBuildClass(class.id)
-		end)
-		self.classTabs[class.id] = tab
-
-		local page = Instance.new("Frame")
-		page.Name = class.id
-		page.BackgroundTransparency = 1
-		page.Size = UDim2.fromScale(1, 1)
-		page.Visible = false
-		page.Parent = pages
-		Theme.list(page, Enum.FillDirection.Horizontal, S.sm)
-		self.classPages[class.id] = page
-
-		for order, def in BuildingDefs.BY_CLASS[class.id] do
-			local card = button(page, "", T.small)
-			card.LayoutOrder = order
-			card.Size = UDim2.fromOffset(158, 96)
-
-			local glyph = Theme.label(card, def.symbol, 18, C.text)
-			glyph.Position = UDim2.fromOffset(S.sm, S.sm)
-			glyph.Size = UDim2.fromOffset(22, 22)
-
-			local name = Theme.label(card, def.name, T.small, C.text)
-			name.Position = UDim2.fromOffset(S.sm, 34)
-			name.Size = UDim2.new(1, -S.sm * 2, 0, 14)
-			name.TextTruncate = Enum.TextTruncate.AtEnd
-
-			local description = Theme.label(card, def.description, T.tiny, C.textFaint)
-			description.Position = UDim2.fromOffset(S.sm, 50)
-			description.Size = UDim2.new(1, -S.sm * 2, 0, 26)
-			description.FontFace = F.medium
-			description.TextWrapped = true
-			description.TextYAlignment = Enum.TextYAlignment.Top
-
-			local price = Theme.label(card, `{def.cost} or`, T.tiny, C.gold)
-			price.AnchorPoint = Vector2.new(0, 1)
-			price.Position = UDim2.new(0, S.sm, 1, -S.sm)
-			price.Size = UDim2.new(1, -S.sm * 2, 0, 12)
-			price.FontFace = F.bold
-			self.buildPriceLabels[def.id] = price
-
-			card.Activated:Connect(function()
-				self:setBuildKind(def.id)
-			end)
-
-			self.buildButtons[def.id] = card
-		end
-	end
-end
 
 --=============================================================================
 -- Sous-menu : Arsenal
@@ -1887,7 +2075,9 @@ end
 
 function HUD.refreshRatioReadout(self: HUD)
 	local committed = math.floor(self.troops * self.ratio)
-	self.ratioReadout.Text = `{math.floor(self.ratio * 100)} %  \u{2192}  {Format.compact(committed)}`
+	-- "16% (669)" : la part decide, le nombre entre parentheses est ce qu'elle
+	-- represente reellement. C'est le second qu'on regarde avant de lancer.
+	self.ratioReadout.Text = `{math.floor(self.ratio * 100)}% ({Format.compact(committed)})`
 end
 
 --[[
@@ -1904,6 +2094,7 @@ function HUD.setBuildingCounts(self: HUD, counts: { [number]: number })
 		label.Text = tostring(counts[id] or 0)
 		label.TextColor3 = if (counts[id] or 0) > 0 then C.text else C.textFaint
 	end
+	self:refreshParkSlots()
 end
 
 --[[
@@ -1948,12 +2139,20 @@ function HUD.setMode(self: HUD, mode: Mode)
 	-- ouvre l'arsenal, et les modes qui n'ont rien a choisir ne laissent rien
 	-- d'ouvert derriere eux.
 	if mode == "build" then
-		self:openSheet("build")
+		--[[
+			L'aide contextuelle porte desormais le PRIX.
+
+			C'etait la seule information que la palette apportait en propre. En la
+			mettant ici, elle apparait exactement au moment ou elle sert — quand
+			on vient d'armer un batiment — au lieu d'attendre dans un panneau
+			ouvert en permanence.
+		]]
 		local def = BuildingDefs.get(self.buildKind)
 		if def then
-			self.hintLabel.Text = `{def.name}  \u{00B7}  {def.description}`
+			local price = self.buildPrices[self.buildKind] or def.cost
+			self.hintLabel.Text = `{def.name}  \u{00B7}  {price} or  \u{00B7}  {def.description}`
 		end
-		self:refreshPalettes()
+		self:refreshParkSlots()
 	elseif mode == "nuke" then
 		self:openSheet("nuke")
 		self:refreshPalettes()
@@ -1961,7 +2160,7 @@ function HUD.setMode(self: HUD, mode: Mode)
 		if self.era < needed then
 			self.hintLabel.Text = `Arsenal verrouille : necessite l'ere {Eras.get(needed).name}.`
 		end
-	elseif self.activeSheet == "build" or self.activeSheet == "nuke" then
+	elseif self.activeSheet == "nuke" then
 		self:openSheet(nil)
 	end
 
@@ -1970,33 +2169,19 @@ function HUD.setMode(self: HUD, mode: Mode)
 	end
 end
 
-function HUD.setBuildClass(self: HUD, classId: string)
-	self.buildClass = classId
-	for id, tab in self.classTabs do
-		setSelected(tab, id == classId)
-	end
-	for id, page in self.classPages do
-		page.Visible = id == classId
-	end
-end
+--[[
+	Ce qu'on ne peut pas payer est grise.
 
--- Ce qu'on ne peut pas payer est grise : le joueur lit son budget sans avoir a
--- comparer des chiffres.
+	Ne concerne plus que l'arsenal : la palette de construction a ete retiree.
+	Elle offrait une TROISIEME facon de choisir un batiment, apres la rangee du
+	panneau de controle et la page "Batir" du menu radial — trois chemins vers
+	le meme geste, dont un occupait un tiers de l'ecran en permanence.
+
+	Ce qu'elle apportait seule, c'etait le PRIX. Il vit desormais dans l'aide
+	contextuelle au moment ou l'on arme un batiment, et l'inabordable se lit sur
+	la rangee elle-meme (voir refreshParkSlots).
+]]
 function HUD.refreshPalettes(self: HUD)
-	for id, b in self.buildButtons do
-		local def = BuildingDefs.get(id)
-		local unlocked = self.era >= Eras.requiredFor(id)
-		local realPrice = self.buildPrices[id] or (if def then def.cost else math.huge)
-		local affordable = def ~= nil and unlocked and self.gold >= realPrice
-		local priceLabel = self.buildPriceLabels[id]
-		if priceLabel then
-			priceLabel.Text = if realPrice < math.huge then `{realPrice} or` else "\u{2014}"
-			priceLabel.TextColor3 = if affordable then C.gold else C.textFaint
-		end
-		setSelected(b, id == self.buildKind)
-		b.BackgroundTransparency = if id == self.buildKind or affordable then 0 else 0.55
-	end
-
 	for kind, b in self.nukeButtons do
 		local stats = Config.NUKE_STATS[kind]
 		local affordable = self.gold >= stats.cost and self.era >= Eras.requiredForNuke(kind)
@@ -2273,7 +2458,10 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		local fillClamped = math.clamp(fillRatio, 0, 1)
 		self.troopsFill.Size = UDim2.fromScale(fillClamped, 1)
 		-- Plafond atteint : la population stagne, il faut depenser.
-		self.troopsFill.BackgroundColor3 = if fillRatio > 0.97 then C.warning else C.info
+		-- Seuil d'alerte du plafond d'armee. La reference le fixe a 80 % ; le
+		-- notre etait a 97 %, donc il ne prevenait qu'une fois le plafond
+		-- pratiquement atteint — soit trop tard pour en faire quoi que ce soit.
+		self.troopsFill.BackgroundColor3 = if fillRatio > Config.ARMY_LIMIT_WARNING then C.warning else C.info
 
 		-- Les troupes engagees sont deja sorties du pool : elles se dessinent
 		-- a la suite du remplissage, pour lire d'un coup ce qui defend encore

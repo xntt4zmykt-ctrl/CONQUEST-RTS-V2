@@ -72,15 +72,35 @@ Config.TERRAIN_COST = {
 -- TILE_SIZE studs de cote, donc le monde mesure 1024 x 640 studs : assez grand
 -- pour qu'un avatar s'y sente petit, assez compact pour le traverser.
 
-Config.TILE_SIZE = 4
+--[[
+	Echelle du monde.
+
+	TILE_SIZE est le seul bouton : tout ce qui est dessine en studs en derive.
+	Le monde a ete auteur a 4 studs par tuile — un personnage Roblox faisait
+	alors plus d'une tuile de haut, ce qui donnait la sensation de marcher sur
+	un damier de jouet.
+
+	WORLD_SCALE rapporte l'echelle courante a celle d'origine. Les modeles, les
+	frontieres, les routes et les effets sont ecrits une fois en coordonnees
+	lisibles puis multiplies par ce facteur — plutot que de reecrire cent
+	soixante-dix nombres a chaque changement.
+
+	Plafond dur : au-dela de 2048 studs une Part est rognee par Roblox sans
+	erreur. Le maillage borne donc ses dalles (voir GreedyMesh), ce qui coute
+	752 dalles au lieu de 441 a l'echelle x30 — negligeable.
+]]
+Config.TILE_SIZE = 12
+-- Echelle de reference : celle a laquelle toute la geometrie a ete dessinee.
+Config.AUTHORED_TILE_SIZE = 4
+Config.WORLD_SCALE = Config.TILE_SIZE / Config.AUTHORED_TILE_SIZE
 Config.WORLD_WIDTH = Config.MAP_WIDTH * Config.TILE_SIZE
 Config.WORLD_DEPTH = Config.MAP_HEIGHT * Config.TILE_SIZE
 
 -- Bordures invisibles cote serveur : l'avatar ne peut pas sortir du monde 3D
 -- et tomber sous la carte. Elles sont hors de la derniere tuile pour ne pas
 -- reduire la surface jouable.
-Config.WORLD_BORDER_THICKNESS = 4
-Config.WORLD_BORDER_HEIGHT = 80
+Config.WORLD_BORDER_THICKNESS = 4 * Config.WORLD_SCALE
+Config.WORLD_BORDER_HEIGHT = 80 * Config.WORLD_SCALE
 
 --[[
 	Altitude du terrain, en studs. **Une seule pour toute la terre ferme.**
@@ -106,7 +126,9 @@ Config.WORLD_BORDER_HEIGHT = 80
 	La table est construite en boucle plutot qu'ecrite a la main : neuf valeurs
 	identiques recopiees derivent tot ou tard, celle-ci ne le peut pas.
 ]]
-Config.LAND_HEIGHT = 4
+-- Epaisseur du sol, a l'echelle. Sans le facteur, une tuile de douze studs de
+-- cote n'aurait que quatre studs d'epaisseur : le monde deviendrait une feuille.
+Config.LAND_HEIGHT = 4 * Config.WORLD_SCALE
 
 Config.TERRAIN_HEIGHT = { [0] = 0 } -- ocean : pas de bloc, seulement le plan d'eau
 for kind = 1, 8 do
@@ -118,7 +140,7 @@ end
 -- altitude qui existe.
 Config.BASE_LAND_HEIGHT = Config.LAND_HEIGHT
 
-Config.OCEAN_LEVEL = 1.5
+Config.OCEAN_LEVEL = 1.5 * Config.WORLD_SCALE
 
 -- La carte est decoupee en chunks reconstruits independamment. Plus petit =
 -- reconstruction moins couteuse mais moins de fusion possible entre blocs ;
@@ -225,6 +247,11 @@ Config.GOLD_PER_CAPITAL = 0.08 -- par tick, par capitale tenue
 	La distance paie : une longue route rapporte plus, donc le commerce
 	lointain vaut le risque de traverser des eaux hostiles.
 ]]
+-- Vitesse de construction d'une voie, en studs par seconde. A vitesse constante
+-- plutot qu'a duree fixe : une voie de dix cases se batit vite, une de cent
+-- prend son temps. L'inverse donnerait l'impression que la longueur ne coute rien.
+Config.ROUTE_BUILD_SPEED = 110
+
 Config.TRADE_GOLD_BASE = 14 -- or verse a chaque port a l'arrivee d'un navire
 Config.TRADE_GOLD_PER_TILE = 0.22 -- supplement par tuile parcourue
 Config.TRADE_SHIP_INTERVAL = 45 -- ticks entre deux vagues de departs
@@ -370,6 +397,28 @@ Config.LARGE_ATTACKER_COST_EXPONENT = 0.35 -- compensation : il perd moins par t
 ]]
 Config.COLLAPSE_TILE_RATIO = 0.0025 -- part des terres sous laquelle on s'effondre
 Config.COLLAPSE_MIN_TILES = 24 -- plancher absolu, pour les tres petites cartes
+
+--=============================================================================
+-- Cadran de la fin du monde (anti-impasse)
+--=============================================================================
+
+--[[
+	Une faction sous la barre requise est marquee, saignee, puis emportee par
+	le rot. Les courbes vivent dans Shared/Doomsday pour que le client lise
+	les memes chiffres que le serveur.
+]]
+Config.DOOMSDAY = {
+	WARN_SECONDS = 20, -- le crane s'affiche avant toute saignee
+	DRAIN_START_PERCENT = 2, -- % du maximum de troupes perdu par seconde au debut
+	DRAIN_MAX_PERCENT = 8, -- ... et a plein regime
+	DRAIN_RAMP_SECONDS = 60, -- duree de la montee du taux
+	FLOOR_START_PERCENT = 40, -- plancher de troupes initial (% du maximum)
+	DRAIN_FLOOR_PERCENT = 5, -- plancher final, une fois effondre
+	FLOOR_DECAY_SECONDS = 45, -- duree de l'effondrement du plancher
+	ROT_DEATH_SECONDS = 90, -- le rot emporte la faction en 90 s, garanti
+	ROT_GRAIN_SECONDS = 8, -- ouverture granuleuse avant la croissance dendritique
+	ROT_SPECKLE_PERCENT = 2, -- trous d'ouverture, en % du territoire de depart
+}
 Config.COLLAPSE_MAX_PASSES = 24 -- garde-fou de la redistribution
 
 --=============================================================================
@@ -446,7 +495,28 @@ Config.CAPITAL_TROOP_LOSS = 0.45 -- part de la reserve perdue par l'ancien propr
 -- dix minutes a 400 d'or injectaient 18 000 d'or et faisaient exploser toute la
 -- progression technologique. La capitale doit valoir pour ce qu'elle retire a
 -- l'adversaire, pas pour ce qu'elle rapporte.
+-- Part du plafond d'armee au-dela de laquelle la jauge passe en alerte. Valeur
+-- de la reference : prevenir a 80 % laisse le temps de depenser, prevenir a
+-- 97 % ne fait que constater.
+Config.ARMY_LIMIT_WARNING = 0.8
+
 Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
+
+--[[
+	Butin de mise a mort : ce qu'on ramasse en achevant une faction.
+
+	Achever quelqu'un ne rapportait rien. Un joueur pouvait donc passer trois
+	minutes a demanteler un voisin et n'obtenir, en retour, qu'une ligne dans le
+	fil de notifications — la recompense de l'effort le plus long du jeu etait
+	invisible.
+
+	Les proportions viennent du jeu de reference : tout l'or d'un bot, la moitie
+	de celui d'un humain. L'asymetrie est deliberee — depouiller entierement un
+	joueur reel transformerait sa defaite en aubaine pour son bourreau, et
+	donnerait a tout le monde une raison de s'acharner sur le plus faible.
+]]
+Config.CONQUEST_PLUNDER_BOT = 1.0
+Config.CONQUEST_PLUNDER_HUMAN = 0.5
 
 Config.DEFENSE_RADIUS = 6
 Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le bord
@@ -651,6 +721,83 @@ Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est af
 	Le delai de carence apres la fin d'un pacte est ce qui empeche deux bots de
 	le resigner au tick suivant et de recreer le blocage.
 ]]
+--[[
+	Rancune : combien de temps un bot se souvient de qui l'a frappe.
+
+	C'etait le manque le plus profond de notre IA, et il ne se voyait pas dans le
+	code : nos bots recalculaient une cible optimale a chaque decision, sans
+	aucun souvenir de qui venait de leur prendre deux cents tuiles. Une partie ne
+	racontait donc rien — pas de rivalite, juste une suite d'etats optimaux.
+
+	Trente secondes, soit environ vingt decisions de bot : assez pour qu'une
+	riposte parte et aboutisse, trop court pour qu'un bot s'acharne toute la
+	partie sur un voisin devenu inoffensif.
+]]
+Config.GRUDGE_DURATION = 300 -- ticks
+-- Poids de la rancune dans le choix de cible. Volontairement eleve : une
+-- riposte doit l'emporter sur un calcul d'opportunite, sinon le joueur ne fait
+-- jamais le lien entre son agression et ce qui lui tombe dessus.
+Config.GRUDGE_ATTACK_BONUS = 140
+
+-- Bavardage des bots. Faible a dessein : le catalogue a son propre anti-spam,
+-- mais douze factions qui parlent chacune une fois sur huit decisions suffisent
+-- a peupler le fil sans le saturer.
+--[[
+	Plan de construction des bots : des ratios, pas des seuils.
+
+	Ce qui est remplace : une cascade de `elseif` avec des seuils en dur et des
+	`roll < 0.45`. Elle avait deux defauts que le jeu de reference evite.
+
+	D'abord, tous les bots suivaient la MEME cascade dans le MEME ordre — douze
+	empires batis a l'identique, ce qui se remarque en une partie. Ensuite un
+	seuil en dur ne s'adapte pas : "moins de 8 villes" veut dire la meme chose
+	pour un empire de cent tuiles et pour un empire de cinq mille.
+
+	Ici le bot compare ce qu'il POSSEDE a ce qu'il DEVRAIT posseder pour sa
+	taille, et achete l'ecart le plus criant rapporte au prix.
+
+	`perCity` : combien d'exemplaires pour une ville.
+	`costBias` : de combien le prix PERCU monte par exemplaire deja possede.
+	C'est ce second terme qui empeche un bot riche de couvrir la carte du meme
+	batiment — le manque peut rester, il finit par ne plus valoir son prix.
+]]
+-- Diviseur de la courbe SOUS-lineaire de villes visees : voir decideBuild, une
+-- courbe lineaire y reintroduisait l'emballement du leader.
+Config.BOT_CITY_DIVISOR = 8
+Config.BOT_STRUCTURE_PLAN = {
+	{ kind = Config.BUILDING.CITY, perCity = 1.0, costBias = 0.05, minEra = 1 },
+	--[[
+		Le port et l'usine partagent leur compteur d'inflation : chaque port rend
+		l'usine plus chere. Un ratio de port trop genereux etouffait donc l'axe
+		industriel — mesure : 20 ports et ZERO usine sur toute la carte. Les deux
+		valeurs se lisent ensemble, pas separement.
+	]]
+	{ kind = Config.BUILDING.PORT, perCity = 0.22, costBias = 0.20, minEra = 1 },
+	{ kind = Config.BUILDING.DEFENSE, perCity = 0.28, costBias = 0.16, minEra = 2 },
+	{ kind = Config.BUILDING.NAVAL_BASE, perCity = 0.16, costBias = 0.18, minEra = 2 },
+	-- Sans ere requise : le jeu ne la verrouille pas non plus (Eras.requiredFor
+	-- renvoie 1), et un plan plus strict que la regle du jeu est un piege.
+	{ kind = Config.BUILDING.FACTORY, perCity = 0.40, costBias = 0.10, minEra = 1 },
+	{ kind = Config.BUILDING.LAB, perCity = 0.20, costBias = 0.15, minEra = 3 },
+	{ kind = Config.BUILDING.SAM, perCity = 0.25, costBias = 0.20, minEra = 4 },
+	{ kind = Config.BUILDING.SILO, perCity = 0.15, costBias = 0.25, minEra = 4 },
+}
+
+Config.BOT_CHAT_CHANCE = 0.12
+Config.BOT_CHAT_GREETING_TICKS = 600
+
+--[[
+	Delai avant de pouvoir redire EXACTEMENT la meme chose de la meme faction.
+
+	L'anti-spam par simple cooldown ne suffisait pas : une fois la guerre
+	commencee, la rancune reste fraiche en permanence, donc le bot repetait son
+	appel a l'aide des que le delai tombait. Mesure sur trois mille ticks : 88 %
+	des messages emis etaient la meme phrase sur la meme cible.
+
+	Le fil doit rester lisible ; un message qu'on a deja lu n'apporte rien.
+]]
+Config.QUICKCHAT_REPEAT_TICKS = 900
+
 Config.ALLIANCE_DURATION = 3000 -- ticks, soit 5 minutes
 Config.ALLIANCE_COOLDOWN = 150 -- ticks avant de pouvoir resigner avec le meme camp
 

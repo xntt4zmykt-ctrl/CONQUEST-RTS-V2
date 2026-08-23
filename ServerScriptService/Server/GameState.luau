@@ -20,6 +20,7 @@ local MapGen = require(ReplicatedStorage.Shared.MapGen)
 local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local Eras = require(ReplicatedStorage.Shared.Eras)
+local Heap = require(ReplicatedStorage.Shared.Heap)
 
 local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
@@ -65,6 +66,9 @@ export type PlayerState = {
 	buildingCounts: { [number]: number },
 	betrayals: number,
 	traitorUntil: number,
+	-- Qui nous a frappe recemment : slot -> tick d'expiration de la rancune.
+	-- C'est la seule memoire qu'une faction garde d'une autre.
+	grudges: { [number]: number },
 	capturedTiles: number,
 	lostTiles: number,
 	capitalsCaptured: number,
@@ -76,7 +80,12 @@ export type Attack = {
 	attacker: number,
 	target: number,
 	troops: number,
-	frontier: { [number]: true },
+	-- File de priorite des tuiles au contact, pas un ensemble : c'est elle qui
+	-- decide de la FORME que prend l'avancee. Voir enqueueFront.
+	frontier: Heap.Heap,
+	-- Tuiles deja dans la file. Une meme tuile est atteinte par plusieurs
+	-- voisins ; sans ce garde elle serait empilee autant de fois.
+	queued: { [number]: true },
 	-- Tick a partir duquel le front se degage, si la retraite a ete ordonnee.
 	retreatAt: number?,
 }
@@ -151,12 +160,17 @@ export type GameState = typeof(setmetatable(
 		-- Cibles designees pour l'alliance : marqueur -> faction marquee.
 		targetMarks: { [number]: number },
 		quickChatSent: { [number]: number },
+		-- Dernier message emis par faction, pour ne pas radoter le meme.
+		quickChatLast: { [number]: string },
 		dirty: { [number]: true },
 		buildingDirty: { [number]: true },
 		freeSlots: { number },
 		nextEntityId: number,
 		capitalEvents: number,
 		sounds: { { name: string, only: number? } },
+		-- Butins de mise a mort en attente d'envoi : le client en fait un
+		-- "+X or" flottant sur le dernier territoire de la victime.
+		plunders: { { tile: number, slot: number, gold: number } },
 		mode: any,
 		events: { { text: string, kind: string, only: number? } },
 		combatUnlocked: boolean,
@@ -171,6 +185,9 @@ export type GameState = typeof(setmetatable(
 -- voisins doit utiliser son propre tampon.
 local scratch = table.create(4, 0)
 local borderScratch = table.create(4, 0)
+-- Troisieme tampon : frontPriority est appele depuis la boucle de stepAttacks,
+-- qui itere deja sur `scratch`. Le partager ecraserait la liste en cours.
+local priorityScratch = table.create(4, 0)
 
 --=============================================================================
 -- Construction
@@ -203,11 +220,13 @@ function GameState.new(seed: number): GameState
 	self.targetMarks = {}
 	-- Anti-spam des messages rapides : dernier tick d'envoi par faction.
 	self.quickChatSent = {}
+	self.quickChatLast = {}
 	self.dirty = {}
 	self.buildingDirty = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
 	self.sounds = {}
+	self.plunders = {}
 	self.events = {}
 	-- Commerce terrestre : un colis en route par usine, et le tick de reprise
 	-- apres livraison. Cles : index de tuile de l'usine. Voir Trade.luau.
@@ -823,6 +842,7 @@ function GameState.addPlayer(
 		buildingCounts = {},
 		betrayals = betrayals,
 		traitorUntil = 0,
+		grudges = {},
 		capturedTiles = 0,
 		lostTiles = 0,
 		capitalsCaptured = 0,
@@ -910,6 +930,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 	self.alliances[slot] = nil
+	for _, other in self.players do
+		other.grudges[slot] = nil
+	end
 	for _, set in self.allianceCooldowns do
 		set[slot] = nil
 	end
@@ -924,6 +947,29 @@ end
 --=============================================================================
 -- Offensives
 --=============================================================================
+
+--[[
+	Cette faction en veut-elle encore a celle-la ?
+
+	La lecture purge au passage : une rancune expiree est retiree plutot que
+	laissee a trainer. Sans cela la table ne se viderait jamais, et un bot
+	garderait rancune a une faction disparue depuis longtemps.
+]]
+function GameState.holdsGrudge(self: GameState, slot: number, against: number): boolean
+	local ps = self.players[slot]
+	if not ps then
+		return false
+	end
+	local until_ = ps.grudges[against]
+	if not until_ then
+		return false
+	end
+	if self.tick >= until_ then
+		ps.grudges[against] = nil
+		return false
+	end
+	return true
+end
 
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
 	local set = self.alliances[a]
@@ -1029,6 +1075,65 @@ function GameState.tileCost(self: GameState, index: number, attackerSlot: number
 end
 
 --[[
+	Ordre d'attaque d'une tuile — c'est ici que se joue la FORME du front.
+
+	Le probleme corrige : la file etait un ensemble, et le moteur piochait dedans
+	avec `next()`, dont l'ordre est arbitraire. Une offensive grignotait donc des
+	cases sans rapport les unes avec les autres, partout le long du contact — ce
+	qui donne l'impression que le jeu prend des blocs au hasard, parce que c'est
+	exactement ce qu'il faisait.
+
+	Trois termes, repris du jeu de reference, et chacun produit un comportement
+	que le joueur peut lire sur la carte :
+
+	  - **`+ tick`** — une tuile entree tot dans la file passe avant une tuile
+	    entree tard. A lui seul ce terme transforme le grignotage en VAGUE : le
+	    front avance de proche en proche au lieu de sauter.
+
+	  - **`- voisinsAMoi * 0.5`** — une tuile deja entouree passe en premier. Les
+	    poches et les enclaves sont donc avalees avant que le front ne pousse
+	    plus loin, ce qui donne des territoires d'un seul tenant plutot qu'une
+	    dentelle.
+
+	  - **`+ rugosite / 2`** — le relief difficile est conquis en dernier. Une
+	    offensive contourne naturellement une montagne au lieu de s'y jeter.
+
+	Le bruit deterministe (0 a 7) casse les egalites. Sans lui, des tuiles de
+	meme score seraient depilees dans l'ordre d'insertion et le front avancerait
+	en ligne parfaitement droite, ce qui se voit tout autant.
+]]
+local function frontPriority(self: GameState, index: number, attackerSlot: number): number
+	local n = MapGen.neighbors(index, priorityScratch)
+	local owned = 0
+	for i = 1, n do
+		if buffer.readu8(self.owner, priorityScratch[i]) == attackerSlot then
+			owned += 1
+		end
+	end
+
+	local terrain = buffer.readu8(self.terrain, index)
+	local roughness = Config.TERRAIN_COST[terrain] or 1
+
+	-- Bruit tire de la tuile et du tick plutot que d'un generateur partage : la
+	-- valeur reste identique sur deux serveurs partis de la meme graine, sans
+	-- avoir a faire circuler un etat aleatoire jusqu'ici.
+	local noise = (index * 2654435761 + self.tick * 40503) % 8
+
+	return (noise + 10) * (1 - owned * 0.5 + roughness / 2) + self.tick
+end
+
+--[[
+	Ajoute une tuile au front, si elle n'y est pas deja.
+]]
+local function enqueueFront(self: GameState, atk: Attack, index: number)
+	if atk.queued[index] then
+		return
+	end
+	atk.queued[index] = true
+	Heap.push(atk.frontier, index, frontPriority(self, index, atk.attacker))
+end
+
+--[[
 	Engage une offensive. Le corps expeditionnaire est preleve immediatement sur
 	la reserve : les troupes engagees ne defendent plus. C'est la decision
 	tactique centrale du jeu.
@@ -1072,30 +1177,30 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		return false, `Tu diriges deja {active} offensives. Termine ou renforce un front existant.`
 	end
 
-	local frontier: { [number]: true } = {}
-	local any = false
+	local attack: Attack = {
+		attacker = attackerSlot,
+		target = targetSlot,
+		troops = committed,
+		frontier = Heap.new(),
+		queued = {},
+	}
+
 	for index in attacker.border do
 		local n = MapGen.neighbors(index, scratch)
 		for i = 1, n do
 			local nb = scratch[i]
 			if buffer.readu8(self.owner, nb) == targetSlot and self:isLand(nb) then
-				frontier[nb] = true
-				any = true
+				enqueueFront(self, attack, nb)
 			end
 		end
 	end
 
-	if not any then
+	if Heap.isEmpty(attack.frontier) then
 		return false, "Aucun contact terrestre. Passe par la mer."
 	end
 
 	attacker.troops -= committed
-	table.insert(self.attacks, {
-		attacker = attackerSlot,
-		target = targetSlot,
-		troops = committed,
-		frontier = frontier,
-	})
+	table.insert(self.attacks, attack)
 	attacker.attacksLaunched += 1
 
 	-- L'assaillant voit la confirmation via la reponse a son ordre. La victime
@@ -1134,22 +1239,23 @@ end
 	tuile isolee, sans contact terrestre prealable.
 ]]
 function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSlot: number, troops: number, tile: number)
-	local frontier: { [number]: true } = { [tile] = true }
-
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			atk.troops += troops
-			atk.frontier[tile] = true
+			enqueueFront(self, atk, tile)
 			return
 		end
 	end
 
-	table.insert(self.attacks, {
+	local attack: Attack = {
 		attacker = attackerSlot,
 		target = targetSlot,
 		troops = troops,
-		frontier = frontier,
-	})
+		frontier = Heap.new(),
+		queued = {},
+	}
+	enqueueFront(self, attack, tile)
+	table.insert(self.attacks, attack)
 end
 
 --[[
@@ -1187,6 +1293,33 @@ function GameState.collapseFaction(self: GameState, victimSlot: number, captorSl
 	end
 	if #remaining == 0 then
 		return
+	end
+
+	--[[
+		Le butin se prend AVANT le demantelement.
+
+		Une fois les tuiles redistribuees, la victime n'a plus de territoire ou
+		afficher le "+X or" — et `stepElimination` peut l'avoir supprimee du
+		tableau des joueurs au meme tick. On saisit donc l'or et le lieu pendant
+		qu'ils existent encore.
+	]]
+	local victim = self.players[victimSlot]
+	local captor = self.players[captorSlot]
+	if victim and captor and victim.gold > 0 then
+		local share = if victim.isBot then Config.CONQUEST_PLUNDER_BOT else Config.CONQUEST_PLUNDER_HUMAN
+		local loot = math.floor(victim.gold * share)
+		if loot > 0 then
+			victim.gold -= loot
+			captor.gold += loot
+			-- La capitale si elle tient encore, sinon n'importe quelle tuile
+			-- restante : l'important est que le chiffre apparaisse SUR la
+			-- depouille, pas au milieu de nulle part.
+			local where = victim.capitalTile
+			if not where or buffer.readu8(self.owner, where) ~= victimSlot then
+				where = remaining[1]
+			end
+			table.insert(self.plunders, { tile = where, slot = captorSlot, gold = loot })
+		end
 	end
 
 	local collapseScratch = table.create(4, 0)
@@ -1273,11 +1406,11 @@ function GameState.stepAttacks(self: GameState)
 		local spent = 0
 
 		while spent < budget and captured < tileLimit do
-			local index = next(atk.frontier)
+			local index = Heap.pop(atk.frontier)
 			if not index then
 				break
 			end
-			atk.frontier[index] = nil
+			atk.queued[index] = nil
 
 			-- La tuile a pu changer de main depuis qu'elle est entree dans le front.
 			if buffer.readu8(self.owner, index) ~= atk.target then
@@ -1297,6 +1430,16 @@ function GameState.stepAttacks(self: GameState)
 
 			if defender then
 				defender.troops = math.max(0, defender.troops - cost * Config.DEFENDER_LOSS_RATIO)
+				--[[
+					La victime retient qui l'a frappee.
+
+					Ecrit a chaque tuile prise plutot qu'une fois par offensive :
+					c'est une seule ecriture dans une table de moins de douze
+					entrees, et cela garde la rancune fraiche tant que le front
+					avance — une offensive longue ne doit pas s'oublier en cours
+					de route.
+				]]
+				defender.grudges[atk.attacker] = self.tick + Config.GRUDGE_DURATION
 			end
 
 			self:setOwner(index, atk.attacker)
@@ -1305,7 +1448,7 @@ function GameState.stepAttacks(self: GameState)
 			for k = 1, n do
 				local nb = scratch[k]
 				if buffer.readu8(self.owner, nb) == atk.target and self:isLand(nb) then
-					atk.frontier[nb] = true
+					enqueueFront(self, atk, nb)
 				end
 			end
 		end
@@ -1318,7 +1461,7 @@ function GameState.stepAttacks(self: GameState)
 			table.insert(collapsing, { victim = atk.target, captor = atk.attacker })
 		end
 
-		if atk.troops <= 0 or next(atk.frontier) == nil then
+		if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 			attacker.troops += math.max(0, atk.troops) -- les survivants rentrent
 			table.remove(self.attacks, i)
 		end

@@ -54,6 +54,7 @@ local notify = Remotes.get("Notify")
 local explosion = Remotes.get("Explosion")
 local sfx = Remotes.get("Sfx")
 local tradeEvent = Remotes.get("TradeEvent")
+local plunderEvent = Remotes.get("Plunder")
 
 local attackOrder = Remotes.get("AttackOrder")
 local retreatOrder = Remotes.get("RetreatOrder")
@@ -192,6 +193,18 @@ local function flushEvents()
 		end
 	end
 	table.clear(state.sounds)
+
+	--[[
+		Butins de mise a mort.
+
+		Diffuse a tout le monde et pas seulement au vainqueur : voir une faction
+		se faire depouiller sous ses yeux est une information strategique — elle
+		dit qui vient de s'enrichir, et donc qui devient dangereux.
+	]]
+	for _, loot in state.plunders do
+		plunderEvent:FireAllClients(loot.tile, loot.slot, loot.gold)
+	end
+	table.clear(state.plunders)
 end
 
 --=============================================================================
@@ -640,47 +653,22 @@ quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, ta
 		return
 	end
 
-	-- Anti-spam : silencieux, un refus bavard serait lui-meme du spam.
-	local last = state.quickChatSent[slot]
-	if last and state.tick - last < QuickChat.COOLDOWN then
-		return
-	end
-
-	local targetName: string? = nil
+	-- La cible est validee ici parce qu'un humain merite un retour ; le refus
+	-- reste silencieux cote diffusion, ou seul l'anti-spam decide.
 	if entry.needsTarget then
 		if not isInteger(targetSlot) or targetSlot == slot then
 			reply(player, false, "Ce message demande une cible.")
 			return
 		end
-		local target = state.players[targetSlot]
-		if not target then
+		if not state.players[targetSlot] then
 			reply(player, false, "Cette faction n'existe plus.")
 			return
 		end
-		targetName = target.name
 	end
 
-	state.quickChatSent[slot] = state.tick
-
-	local ps = state.players[slot]
-	local message = `\u{1F4AC} {if ps then ps.name else "?"} : {QuickChat.format(entry, targetName)}`
-	if entry.alliesOnly then
-		state:notify(message, "info", slot)
-		local allySet = state.alliances[slot]
-		if allySet then
-			for other in allySet do
-				state:notify(message, "info", other)
-			end
-		end
-	else
-		state:notify(message, "info")
-	end
-
-	-- Les messages d'appel a l'attaque designent leur cible pour toute
-	-- l'alliance : le texte et la marque ne se contredisent jamais.
-	if entry.mark and isInteger(targetSlot) then
-		Diplomacy.setTargetMark(state, slot, targetSlot)
-	end
+	-- Une seule voie de diffusion, partagee avec les bots : deux copies de cette
+	-- logique auraient fini par ne plus dire la meme chose.
+	Diplomacy.sendQuickChat(state, slot, messageId, if isInteger(targetSlot) then targetSlot else nil)
 end)
 
 --=============================================================================
@@ -792,6 +780,22 @@ local function replicate()
 			timeLeft = if matchPhase == "waiting"
 				then activeMode.duration
 				else math.max(0, matchEndsAt - os.clock()),
+			--[[
+				Mode et frequentation : ce que le salon du menu doit afficher.
+
+				Le message portait deja l'etat de la partie mais ni son mode ni
+				son monde. Le menu ne pouvait donc annoncer qu'une carte morte —
+				trois modes decrits, aucun qui dise ce qui se joue vraiment ici.
+			]]
+			mode = activeMode.id,
+			players = (function()
+				local n = 0
+				for _ in slotByPlayer do
+					n += 1
+				end
+				return n
+			end)(),
+			maxPlayers = Config.MAX_PLAYERS,
 			winner = winnerSlot,
 			winnerName = winnerName,
 			restartIn = math.max(0, restartAt - os.clock()),

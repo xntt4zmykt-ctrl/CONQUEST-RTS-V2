@@ -197,7 +197,7 @@ function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, r
 		local index = MapGen.toIndex(math.floor(cx), math.floor(cy))
 		local base = WorldSpace.indexToWorld(index)
 		local ground = WorldSpace.surfaceHeight(self.terrain, index)
-		entry.anchor.CFrame = CFrame.new(base.X, ground + 6, base.Z)
+		entry.anchor.CFrame = CFrame.new(base.X, ground + 6 * Config.WORLD_SCALE, base.Z)
 
 		--[[
 			La largeur suit la racine du territoire, pas le territoire lui-meme.
@@ -207,7 +207,10 @@ function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, r
 			donne un rapport de dix, ce qui se lit encore comme une hierarchie
 			sans ecraser le reste.
 		]]
-		local span = math.clamp(math.sqrt(count) * 3.4, 14, 70)
+		-- Le libelle est mesure en studs : il doit grandir avec le monde, sinon
+		-- un nom de pays devient un point sur une carte trente fois plus large.
+		local k = Config.WORLD_SCALE
+		local span = math.clamp(math.sqrt(count) * 3.4, 14, 70) * k
 		entry.billboard.Size = UDim2.fromScale(span, span * 0.42)
 
 		local color = Theme.factionColor(slot)

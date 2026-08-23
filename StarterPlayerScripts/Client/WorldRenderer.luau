@@ -356,8 +356,9 @@ local function borderColor(slot: number): Color3
 end
 
 -- Epaisseur du liseré, et hauteur a laquelle il flotte au-dessus du sol.
-local BORDER_THICKNESS = 0.8
-local BORDER_LIFT = 0.05
+-- A l'echelle : un lisere de 0,8 stud disparait des que la tuile en fait douze.
+local BORDER_THICKNESS = 0.8 * Config.WORLD_SCALE
+local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 
 --[[
 	Trace le contour des territoires d'un chunk.
@@ -421,8 +422,8 @@ function WorldRenderer.buildChunkBorders(
 		part.BottomSurface = Enum.SurfaceType.Smooth
 		part.Color = borderColor(slot)
 		part.Size = if horizontal
-			then Vector3.new(length, 0.12, BORDER_THICKNESS)
-			else Vector3.new(BORDER_THICKNESS, 0.12, length)
+			then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
+			else Vector3.new(BORDER_THICKNESS, 0.12 * Config.WORLD_SCALE, length)
 		part.CFrame = CFrame.new(
 			(a.X + b.X) / 2 + dx * inset,
 			surface,

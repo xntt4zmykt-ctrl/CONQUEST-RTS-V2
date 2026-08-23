@@ -156,6 +156,23 @@ InstanceMT.__index = function(t, key)
 		faisait planter tout code qui borne une position a l'ecran — un cas
 		parfaitement legitime que le banc devait pouvoir exercer.
 	]]
+	--[[
+		Le lien CFrame/Position ne vaut QUE pour les objets 3D.
+
+		Sur un objet d'interface, `Position` est un UDim2 — dont le champ `X`
+		est un UDim, pas un nombre. Intercepter la clef pour tout le monde
+		transformait donc les positions d'interface en vecteurs et cassait
+		toute lecture de `Position.X.Offset`.
+	]]
+	if PART_CLASSES[rawget(t, "ClassName")] then
+		if key == "CFrame" then
+			return rawget(t, "_cframe")
+		end
+		if key == "Position" then
+			local cf = rawget(t, "_cframe")
+			return if cf then Vector3.new(cf.X, cf.Y, cf.Z) else nil
+		end
+	end
 	if key == "AbsoluteSize" then
 		return Vector2.new(1280, 720)
 	end
@@ -193,14 +210,29 @@ InstanceMT.__newindex = function(t, key, value)
 		return
 	end
 
-	-- Position et CFrame sont liees dans Roblox : ecrire l'une met l'autre a
-	-- jour. Sans ce lien, tout code qui pose un objet par CFrame puis lit sa
-	-- Position recoit nil, et le banc signale des erreurs qui n'existent pas
-	-- en jeu.
-	if key == "CFrame" and type(value) == "table" and value.X ~= nil then
-		rawset(t, "Position", Vector3.new(value.X, value.Y, value.Z))
-	elseif key == "Position" and type(value) == "table" and value.X ~= nil then
-		rawset(t, "CFrame", CFrame.new(value.X, value.Y, value.Z))
+	--[[
+		Position et CFrame sont liees dans Roblox : ecrire l'une met l'autre a
+		jour. On les range sous une clef privee et JAMAIS sous leur nom public.
+
+		La raison est un piege du langage : `__newindex` ne se declenche que si
+		la clef est absente de la table. La version precedente posait `CFrame`
+		par rawset, donc la deuxieme ecriture sur un meme objet contournait ce
+		bloc et laissait `Position` fige sur sa valeur initiale — silencieusement.
+
+		Consequence : tout test qui deplacait un objet APRES sa creation ne
+		mesurait plus rien. Il lisait la position de depart et la comparait a une
+		attente calculee sur cette meme position de depart, donc il passait quoi
+		que fasse le code teste. C'est exactement la panne qu'un banc est cense
+		rendre impossible.
+	]]
+	if PART_CLASSES[rawget(t, "ClassName")] and type(value) == "table" and value.X ~= nil then
+		if key == "CFrame" then
+			rawset(t, "_cframe", value)
+			return
+		elseif key == "Position" then
+			rawset(t, "_cframe", CFrame.new(value.X, value.Y, value.Z))
+			return
+		end
 	end
 
 	rawset(t, key, value)
@@ -213,6 +245,43 @@ InstanceMT.methods = {
 			table.insert(copy, child)
 		end
 		return copy
+	end,
+
+	--[[
+		Boite englobante d'un modele, calculee sur ses BaseParts.
+
+		Le banc en a besoin pour exercer la normalisation des modeles importes :
+		sans elle, tout le chemin d'import etait injouable hors de Studio et donc
+		livre sans qu'une seule ligne n'ait jamais ete executee.
+	]]
+	GetBoundingBox = function(self)
+		local minX, minY, minZ = math.huge, math.huge, math.huge
+		local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+		local found = false
+
+		local function visit(node)
+			for _, child in rawget(node, "_children") do
+				local size = rawget(child, "Size")
+				local position = child.Position
+				if size and position and size.X then
+					found = true
+					minX = math.min(minX, position.X - size.X / 2)
+					minY = math.min(minY, position.Y - size.Y / 2)
+					minZ = math.min(minZ, position.Z - size.Z / 2)
+					maxX = math.max(maxX, position.X + size.X / 2)
+					maxY = math.max(maxY, position.Y + size.Y / 2)
+					maxZ = math.max(maxZ, position.Z + size.Z / 2)
+				end
+				visit(child)
+			end
+		end
+		visit(self)
+
+		if not found then
+			return CFrame.new(Vector3.new(0, 0, 0)), Vector3.new(0, 0, 0)
+		end
+		return CFrame.new(Vector3.new((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2)),
+			Vector3.new(maxX - minX, maxY - minY, maxZ - minZ)
 	end,
 
 	GetDescendants = function(self)
@@ -292,8 +361,42 @@ InstanceMT.methods = {
 	Play = function() end,
 	Pause = function() end,
 	Stop = function() end,
+	--[[
+		Copie profonde, comme le vrai Clone.
+
+		Il renvoyait une coquille vide : ni enfants, ni proprietes, ni attributs.
+		Tout test portant sur du code qui clone un modele passait donc quoi que
+		fasse ce code — le clone etant vide, la boucle qui le parcourt ne
+		s'executait simplement jamais. C'est le meme piege qu'un Instance.new
+		qui avale ce qu'on lui ecrit.
+	]]
 	Clone = function(self)
-		return newInstance(rawget(self, "ClassName"))
+		local copy = newInstance(rawget(self, "ClassName"))
+
+		for key, value in pairs(self) do
+			local internal = key == "_children" or key == "_parent" or key == "_attributes"
+			-- Les signaux sont recrees par newInstance : les recopier ferait
+			-- partager les abonnes entre l'original et sa copie.
+			local isSignal = type(value) == "table" and rawget(value, "handlers") ~= nil
+			if not internal and not isSignal then
+				rawset(copy, key, value)
+			end
+		end
+
+		local attributes = rawget(self, "_attributes")
+		if attributes then
+			local copied = rawget(copy, "_attributes")
+			for key, value in attributes do
+				copied[key] = value
+			end
+		end
+
+		for _, child in rawget(self, "_children") do
+			local childCopy = InstanceMT.methods.Clone(child)
+			childCopy.Parent = copy
+		end
+
+		return copy
 	end,
 	GetPropertyChangedSignal = function()
 		return makeSignal()
@@ -497,6 +600,9 @@ end }
 NumberSequence = { new = function()
 	return {}
 end }
+NumberSequenceKeypoint = { new = function(time, value, envelope)
+	return { Time = time, Value = value, Envelope = envelope }
+end }
 TweenInfo = { new = function()
 	return {}
 end }
@@ -657,13 +763,29 @@ setmetatable(game, {
 
 script = newInstance("LocalScript")
 
+-- Rappels differes en attente. Voir task.delay et testFlushDelays.
+local pendingDelays: { { fn: any, args: any } } = {}
+
 task = {
 	spawn = function(fn, ...)
 		fn(...)
 	end,
+	--[[
+		`task.delay` MET EN FILE, il n'execute pas.
+
+		Il appelait la fonction immediatement, en ignorant le delai. Consequence :
+		tout objet cree puis detruit par un `task.delay` naissait et mourait dans
+		le meme appel, et aucun test ne pouvait l'observer — le banc voyait un
+		ecran vide la ou le jeu affiche quelque chose pendant une seconde et
+		demie.
+
+		Les rappels s'empilent ici et le banc les declenche quand il veut, avec
+		`testFlushDelays()`. Un test qui veut observer l'objet ne flushe pas ;
+		un test qui veut verifier le nettoyage flushe.
+	]]
 	delay = function(_, fn, ...)
 		if fn then
-			fn(...)
+			table.insert(pendingDelays, { fn = fn, args = table.pack(...) })
 		end
 	end,
 	wait = function() end,
@@ -676,6 +798,20 @@ task = {
 
 warn = function(...)
 	print("[warn]", ...)
+end
+
+--[[
+	Declenche les rappels differes accumules.
+
+	Les nouveaux rappels poses PENDANT le flush sont traites au tour suivant :
+	sans cette separation, un nettoyage qui se replanifie boucle indefiniment.
+]]
+function testFlushDelays()
+	local batch = pendingDelays
+	pendingDelays = {}
+	for _, entry in batch do
+		entry.fn(table.unpack(entry.args, 1, entry.args.n))
+	end
 end
 
 testReplicated = replicated

@@ -19,6 +19,16 @@ export type BuildingDef = {
 	id: number,
 	name: string,
 	symbol: string,
+	--[[
+		Icone televersee, si elle existe.
+
+		Le `symbol` reste la valeur de repli : tous les batiments n'ont pas
+		encore leur image, et un glyphe geometrique vaut mieux qu'une case vide.
+		Les icones sont **blanches sur fond transparent** pour pouvoir etre
+		teintees par le code (ImageColor3) — verrouillee, trop chere, selectionnee
+		— au lieu de demander un fichier par etat.
+	]]
+	icon: string?,
 	cost: number,
 	description: string,
 	coastalOnly: boolean,
@@ -60,6 +70,7 @@ BuildingDefs.LIST = {
 		class = Config.BUILD_CLASS.ECONOMY,
 		name = "Ville",
 		symbol = "\u{25C6}",
+		icon = "rbxassetid://93337869483061",
 		cost = 180,
 		description = "+900 population · evolue jusqu'a la megapole",
 		coastalOnly = false,
@@ -74,6 +85,7 @@ BuildingDefs.LIST = {
 		class = Config.BUILD_CLASS.ECONOMY,
 		name = "Port",
 		symbol = "\u{2693}",
+		icon = "rbxassetid://97420837111496",
 		cost = 240,
 		description = "Debarquements et routes commerciales",
 		coastalOnly = true,
@@ -82,6 +94,21 @@ BuildingDefs.LIST = {
 		maxLevel = 3,
 		popCapBonus = 0,
 		goldBonus = Config.GOLD_PER_PORT,
+	},
+	{
+		id = B.FACTORY,
+		class = Config.BUILD_CLASS.ECONOMY,
+		name = "Usine",
+		symbol = "\u{2699}",
+		icon = "rbxassetid://90043183233347",
+		cost = 520,
+		description = "Expedie des colis vers les gares proches : chaque livraison rapporte de l'or",
+		coastalOnly = false,
+		buildable = true,
+		upgradable = true,
+		maxLevel = 3,
+		popCapBonus = 0,
+		goldBonus = 0,
 	},
 	{
 		id = B.DEFENSE,
@@ -150,20 +177,6 @@ BuildingDefs.LIST = {
 		buildable = true,
 		upgradable = false,
 		maxLevel = 1,
-		popCapBonus = 0,
-		goldBonus = 0,
-	},
-	{
-		id = B.FACTORY,
-		class = Config.BUILD_CLASS.ECONOMY,
-		name = "Usine",
-		symbol = "\u{2699}",
-		cost = 520,
-		description = "Expedie des colis vers les gares proches : chaque livraison rapporte de l'or",
-		coastalOnly = false,
-		buildable = true,
-		upgradable = true,
-		maxLevel = 3,
 		popCapBonus = 0,
 		goldBonus = 0,
 	},

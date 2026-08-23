@@ -18,7 +18,24 @@
 	de la mesurer hors de Roblox.
 ]]
 
+local Config = require(script.Parent.Config)
+
 local GreedyMesh = {}
+
+--[[
+	Longueur maximale d'un rectangle, en tuiles.
+
+	Roblox refuse toute Part au-dela de 2048 studs de cote : au-dessus, elle est
+	simplement rognee, sans erreur ni avertissement. Notre plus longue dalle
+	mesure 96 tuiles, ce qui passait tant qu'une tuile faisait 4 studs — et
+	casserait silencieusement des qu'on agrandit l'echelle du monde.
+
+	Le plafond est calcule depuis TILE_SIZE plutot que fixe : il ne coute rien
+	quand l'echelle est petite (aucune dalle n'atteint la limite) et se resserre
+	tout seul quand elle grandit. Mesure a l'echelle x30 : 752 dalles au lieu de
+	441, pour un monde trente fois plus grand.
+]]
+local MAX_RUN = math.max(1, math.floor(2048 / Config.TILE_SIZE))
 
 export type Rect = {
 	x: number,
@@ -66,9 +83,9 @@ function GreedyMesh.rectangles(
 				continue
 			end
 
-			-- Extension horizontale.
+			-- Extension horizontale, bornee par la taille maximale d'une Part.
 			local width = 1
-			while x + width <= x1 do
+			while x + width <= x1 and width < MAX_RUN do
 				if consumed[localIndex(x + width, y)] or keyAt(x + width, y) ~= key then
 					break
 				end
@@ -78,7 +95,7 @@ function GreedyMesh.rectangles(
 			-- Extension verticale : la ligne entiere doit correspondre, sinon on
 			-- creerait un rectangle qui deborde sur une autre cle.
 			local depth = 1
-			while y + depth <= y1 do
+			while y + depth <= y1 and depth < MAX_RUN do
 				local rowMatches = true
 				for dx = 0, width - 1 do
 					if consumed[localIndex(x + dx, y + depth)] or keyAt(x + dx, y + depth) ~= key then

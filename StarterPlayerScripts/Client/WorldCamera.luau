@@ -31,8 +31,10 @@ WorldCamera.__index = WorldCamera
 
 export type WorldCamera = typeof(setmetatable({} :: any, WorldCamera))
 
-local MIN_DISTANCE = 40
-local MAX_DISTANCE = 900
+-- Distances a l'echelle du monde : a 40 studs d'un monde trois fois plus grand,
+-- la camera serait dans le sol, et a 900 elle n'en verrait qu'un tiers.
+local MIN_DISTANCE = 40 * Config.WORLD_SCALE
+local MAX_DISTANCE = 900 * Config.WORLD_SCALE
 local MIN_PITCH = math.rad(18)
 local MAX_PITCH = math.rad(82)
 

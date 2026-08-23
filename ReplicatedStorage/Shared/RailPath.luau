@@ -32,6 +32,7 @@
 
 local Config = require(script.Parent.Config)
 local MapGen = require(script.Parent.MapGen)
+local Heap = require(script.Parent.Heap)
 
 local RailPath = {}
 
@@ -65,67 +66,6 @@ local HEURISTIC_WEIGHT = 2
 	trace grossier.
 ]]
 local MAX_EXPANDED = 24000
-
---=============================================================================
--- Tas binaire
---=============================================================================
-
---[[
-	File de priorite sur tableaux plats.
-
-	Deux tableaux paralleles plutot qu'un tableau de tables : allouer un objet
-	par noeud visite ferait travailler le ramasse-miettes bien plus que l'A*
-	lui-meme sur un chemin de cent cases.
-]]
-type Heap = { nodes: { number }, costs: { number }, size: number }
-
-local function heapPush(heap: Heap, node: number, cost: number)
-	local i = heap.size + 1
-	heap.size = i
-	heap.nodes[i] = node
-	heap.costs[i] = cost
-
-	while i > 1 do
-		local parent = i // 2
-		if heap.costs[parent] <= heap.costs[i] then
-			break
-		end
-		heap.nodes[parent], heap.nodes[i] = heap.nodes[i], heap.nodes[parent]
-		heap.costs[parent], heap.costs[i] = heap.costs[i], heap.costs[parent]
-		i = parent
-	end
-end
-
-local function heapPop(heap: Heap): number?
-	if heap.size == 0 then
-		return nil
-	end
-	local top = heap.nodes[1]
-
-	heap.nodes[1] = heap.nodes[heap.size]
-	heap.costs[1] = heap.costs[heap.size]
-	heap.size -= 1
-
-	local i = 1
-	while true do
-		local left, right = i * 2, i * 2 + 1
-		local smallest = i
-		if left <= heap.size and heap.costs[left] < heap.costs[smallest] then
-			smallest = left
-		end
-		if right <= heap.size and heap.costs[right] < heap.costs[smallest] then
-			smallest = right
-		end
-		if smallest == i then
-			break
-		end
-		heap.nodes[smallest], heap.nodes[i] = heap.nodes[i], heap.nodes[smallest]
-		heap.costs[smallest], heap.costs[i] = heap.costs[i], heap.costs[smallest]
-		i = smallest
-	end
-
-	return top
-end
 
 --=============================================================================
 -- Recherche
@@ -195,13 +135,13 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 	-- le pas suivant est un virage.
 	local arrivedBy: { [number]: number } = {}
 
-	local heap: Heap = { nodes = {}, costs = {}, size = 0 }
-	heapPush(heap, from, 0)
+	local heap = Heap.new()
+	Heap.push(heap, from, 0)
 
 	local expanded = 0
 
-	while heap.size > 0 do
-		local current = heapPop(heap)
+	while not Heap.isEmpty(heap) do
+		local current = Heap.pop(heap)
 		if not current then
 			break
 		end
@@ -250,7 +190,7 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 				arrivedBy[neighbor] = delta
 
 				local remaining = math.abs(nx - goalX) + math.abs(ny - goalY)
-				heapPush(heap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
+				Heap.push(heap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
 			end
 		end
 	end

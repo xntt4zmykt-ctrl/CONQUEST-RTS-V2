@@ -18,6 +18,7 @@ local NAMES = {
 	"Notify", -- (text, kind)
 	"Explosion", -- (x, y, radius)
 	"Sfx", -- (soundName)
+	"Plunder", -- (tuile, slot du vainqueur, or) : le "+X or" de la mise a mort
 	"TradeEvent", -- ("dispatch", usine, gare, slot, trajetTicks) | ("arrival", gare, slot, or)
 
 	-- Client -> serveur

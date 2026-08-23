@@ -24,6 +24,7 @@ local UnitModels = require(script.Parent.UnitModels)
 local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local RailPath = require(Shared:WaitForChild("RailPath"))
+local Format = require(Shared:WaitForChild("Format"))
 local Types = require(Shared:WaitForChild("Types"))
 
 local Overlay = {}
@@ -44,6 +45,8 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	self.terrain = terrain
 	self.buildings = {}
 	self.counts = {}
+	-- Notre propre faction, pour distinguer nos livraisons de celles des autres.
+	self.mySlot = 0
 	self.routes = {}
 	self.units = {}
 	self.seen = {}
@@ -200,6 +203,42 @@ function Overlay.syncFactoryRoutes(self: Overlay, factoryIndex: number, links: {
 end
 
 --[[
+	Applique l'avancement d'un chantier de voie.
+
+	Un tronçon n'est visible que sur la portion deja construite : il grandit
+	depuis son origine au lieu de grandir depuis son centre, sinon la route
+	pousserait par les deux bouts a la fois.
+]]
+local function applyRouteProgress(construction: any, progress: number)
+	local covered = construction.total * math.clamp(progress, 0, 1)
+
+	for _, segment in construction.segments do
+		local visible = math.clamp(covered - segment.startsAt, 0, segment.length)
+		for _, layer in segment.layers do
+			local part = layer.part
+			--[[
+				La taille suit TOUJOURS l'avancement, meme a zero.
+
+				Premiere version : a l'arret on se contentait de rendre la Part
+				transparente en lui laissant sa longueur finale. Invisible a
+				l'ecran, donc sans consequence visuelle — mais l'etat mentait, et
+				tout ce qui lit la geometrie (un test, une mesure de budget, un
+				futur calcul d'emprise) voyait une route complete la ou il n'y
+				avait rien.
+			]]
+			local shown = math.max(0.01, visible * layer.ratio)
+			part.Size = Vector3.new(layer.width, layer.thickness, shown)
+			local centre = segment.origin + segment.direction * (visible - shown / 2)
+			part.CFrame = CFrame.lookAt(centre, centre + segment.direction) + Vector3.new(0, layer.lift, 0)
+			part.Transparency = if visible <= 0.01
+				then 1
+				elseif layer.ratio < 1 then 0.28
+				else 0
+		end
+	end
+end
+
+--[[
 	Trace une liaison logistique entre deux gares.
 
 	Le trace suit la grille : quatre directions, aucune diagonale, et le moins de
@@ -239,6 +278,17 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	local runs = RailPath.runs(tiles)
 	local tileSize = Config.TILE_SIZE
 
+	--[[
+		Les tronçons sont conserves pour pouvoir etre construits PROGRESSIVEMENT.
+
+		Une voie qui apparait d'un bloc ne dit pas qu'on vient de la batir : elle
+		a l'air d'avoir toujours ete la. En la faisant sortir de l'usine et
+		ramper vers la gare, le joueur voit son investissement se realiser — et
+		il voit surtout OU va sa route, ce qu'un trace fini ne raconte plus.
+	]]
+	local segments: { any } = {}
+	local totalLength = 0
+
 	for _, run in runs do
 		local a = worldAt(run.fromIndex)
 		local b = worldAt(run.toIndex)
@@ -251,14 +301,56 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		-- perpendiculaires laissent un trou carre visible dans le virage.
 		local length = span.Magnitude + tileSize
 		local frame = CFrame.lookAt(a + span * 0.5, b)
+		local direction = span.Unit
+		local origin = a - direction * (tileSize / 2)
 
-		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7, 0.12, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
+		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
+		-- sur une tuile qui en fait douze.
+		local k = Config.WORLD_SCALE
+		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
-		local asphalt = routePart(model, "Road", Vector3.new(1.9, 0.16, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
-		asphalt.CFrame = frame + Vector3.new(0, 0.08, 0)
-		local stripe = routePart(model, "CenterMark", Vector3.new(0.1, 0.2, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
+		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
+		asphalt.CFrame = frame + Vector3.new(0, 0.08 * k, 0)
+		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
-		stripe.CFrame = frame + Vector3.new(0, 0.18, 0)
+		stripe.CFrame = frame + Vector3.new(0, 0.18 * k, 0)
+
+		table.insert(segments, {
+			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
+			-- longueur est animee, et la bande centrale reste plus courte que
+			-- la chaussee qui la porte.
+			layers = {
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, lift = 0, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, lift = 0.08 * k, ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, lift = 0.18 * k, ratio = 0.58 },
+			},
+			origin = origin,
+			direction = direction,
+			length = length,
+			startsAt = totalLength,
+		})
+		totalLength += length
+	end
+
+	--[[
+		La construction ne se joue que pour une voie posee PENDANT la partie.
+
+		A la connexion, toutes les usines deja presentes creent leur voie d'un
+		coup ; les voir toutes ramper en meme temps serait absurde. C'est le meme
+		garde-fou que pour les chantiers de batiments.
+	]]
+	if #segments > 0 and totalLength > 0 and os.clock() >= self.animateFrom then
+		-- Vitesse constante plutot que duree fixe : une voie de dix cases se
+		-- construit vite, une de cent prend son temps. L'inverse donnerait
+		-- l'impression que la longueur ne coute rien.
+		local construction = {
+			progress = 0,
+			duration = math.clamp(totalLength / Config.ROUTE_BUILD_SPEED, 0.35, 3),
+			segments = segments,
+			total = totalLength,
+		}
+		applyRouteProgress(construction, 0)
+		self.pendingConstruction = construction
 	end
 
 	-- Le convoi suit les memes coins que la voie : il tourne a angle droit au
@@ -319,7 +411,10 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		path = path,
 		slot = slot,
 		delivery = nil,
+		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
+		construction = self.pendingConstruction,
 	}
+	self.pendingConstruction = nil
 end
 
 --[[
@@ -347,7 +442,7 @@ function Overlay.onTradeEvent(self: Overlay, action: string, a: number, b: numbe
 		}
 		route.truckModel.Parent = route.model
 	elseif action == "arrival" then
-		self:goldPopup(a, value)
+		self:goldPopup(a, value, slot == self.mySlot)
 	end
 end
 
@@ -356,7 +451,17 @@ end
 	reussie — le seul retour du commerce terrestre, exactement comme dans le
 	jeu de reference.
 ]]
-function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number)
+--[[
+	Notre slot, pour savoir quelles livraisons nous concernent.
+
+	Il n'est pas connu a la construction de la couche : le client apprend son
+	identite apres avoir rejoint. D'ou ce setter plutot qu'un parametre.
+]]
+function Overlay.setLocalSlot(self: Overlay, slot: number)
+	self.mySlot = slot
+end
+
+function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine: boolean?)
 	local base = WorldSpace.indexToWorld(tileIndex)
 	local y = WorldSpace.surfaceHeight(self.terrain, tileIndex)
 
@@ -368,12 +473,23 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number)
 	anchor.CanTouch = false
 	anchor.Transparency = 1
 	anchor.Size = Vector3.one
-	anchor.CFrame = CFrame.new(base.X, y + 7, base.Z)
+	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
 	anchor.Parent = self.root
 
+	--[[
+		Notre livraison se lit, celle du voisin se devine.
+
+		Sur une carte a vingt-six usines, sept cents colis arrivent en dix
+		minutes. Les afficher tous a la meme taille noyait le seul chiffre qui
+		compte pour le joueur — le sien — au milieu du bruit des autres. Les
+		livraisons etrangeres restent visibles, parce que voir un rival
+		s'enrichir est une information, mais elles ne se disputent plus
+		l'attention.
+	]]
+	local ours = mine ~= false
 	local board = Instance.new("BillboardGui")
 	board.Name = "Board"
-	board.Size = UDim2.fromOffset(90, 26)
+	board.Size = UDim2.fromOffset(if ours then 120 else 80, if ours then 32 else 22)
 	board.StudsOffset = Vector3.new(0, 1.5, 0)
 	board.AlwaysOnTop = true
 	board.Parent = anchor
@@ -382,14 +498,17 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number)
 	text.Size = UDim2.fromScale(1, 1)
 	text.BackgroundTransparency = 1
 	text.FontFace = Theme.font.display
-	text.TextSize = 18
+	text.TextSize = if ours then 22 else 15
 	text.TextColor3 = Theme.color.gold
-	text.TextStrokeTransparency = 0.6
-	text.Text = `+{gold}`
+	text.TextStrokeTransparency = if ours then 0.35 else 0.7
+	text.TextTransparency = if ours then 0 else 0.35
+	-- "+1.24K or" plutot que "+1240" : meme format que le reste du jeu, et
+	-- l'unite dit de quelle ressource il s'agit.
+	text.Text = `+{Format.compact(gold)} or`
 	text.Parent = board
 
 	local lift = TweenService:Create(anchor, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		CFrame = anchor.CFrame + Vector3.new(0, 5, 0),
+		CFrame = anchor.CFrame + Vector3.new(0, 5 * Config.WORLD_SCALE, 0),
 	})
 	lift:Play()
 	TweenService:Create(text, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
@@ -626,6 +745,26 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		flux economique reste lisible dans le monde, mais il dit desormais la
 		verite — un camion visible est un colis qui arrive, pas une decoration.
 	]]
+	--[[
+		Chantiers de voie : la route sort de l'usine et rampe vers la gare.
+
+		Pilote ici plutot que par des delais chaines : la boucle d'images est
+		deja le seul endroit ou le temps avance cote client, et un chantier
+		interrompu par une capture disparait avec sa route sans laisser de
+		minuterie orpheline derriere lui.
+	]]
+	for _, route in self.routes do
+		local construction = route.construction
+		if not construction then
+			continue
+		end
+		construction.progress += dt / construction.duration
+		applyRouteProgress(construction, construction.progress)
+		if construction.progress >= 1 then
+			route.construction = nil
+		end
+	end
+
 	for _, route in self.routes do
 		local delivery = route.delivery
 		if not delivery then
