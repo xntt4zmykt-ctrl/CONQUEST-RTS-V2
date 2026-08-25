@@ -195,7 +195,7 @@ function ChantierB.cancelOpposingFronts(state)
 	for i = 1, #state.attacks do
 		if doomed[i] then
 			continue
-	end
+		end
 		local a = state.attacks[i]
 		for j = i + 1, #state.attacks do
 			if doomed[j] then
@@ -312,7 +312,6 @@ function ChantierB.install(GameState, Nukes)
 				local humanGrowth = if ps.isBot then 1 else (Config.HUMAN_GROWTH_MULTIPLIER or 1.18)
 				ps.troops = math.min(maxTroops, ps.troops + toAdd * doctrine.growth * era.growth * humanGrowth)
 			end
-			-- or / gold part of original stepEconomy
 			local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
 			local income = territorial
 				+ ps.cityGoldBonus
@@ -322,7 +321,6 @@ function ChantierB.install(GameState, Nukes)
 			local humanGold = if ps.isBot then 1 else (Config.HUMAN_GOLD_MULTIPLIER or 1)
 			ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold
 		end
-		-- skip origStepEconomy (fully replaced for troops+gold core)
 		local _ = origStepEconomy
 	end
 
