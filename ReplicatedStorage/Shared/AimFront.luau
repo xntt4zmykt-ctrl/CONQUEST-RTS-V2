@@ -1,10 +1,12 @@
 --!strict
 --[[
-	Ancre une offensive sur la case cliquee (modele OpenFront sourceTile).
+	Sélection de cases = AttackExecution.addNeighbors / sourceTile OpenFront.
 
-	Sans ca, launchAttack empile TOUT le contact avec la cible : le front
-	mange tout le pourtour. Ici on ne garde que les cases de contact proches
-	du clic ; le tas s'etend ensuite voisin par voisin vers le point vise.
+	Land click : on ancre UNE case source (la case cliquée si elle touche
+	notre bordure, sinon le contact le plus proche). Pas de disque, pas de
+	biais distance. La direction vient de la formule OF :
+	  (noise+10) * (1 - voisinsAMoi*0.5 + mag/2) + tick
+	  mag = plaine 1 / highland 1.5 / montagne 2
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,27 +18,30 @@ local Heap = require(ReplicatedStorage.Shared.Heap)
 local AimFront = {}
 
 local scratch = table.create(4, 0)
-local SEED_RADIUS = 8
-local SEED_RADIUS2 = SEED_RADIUS * SEED_RADIUS
+local innerScratch = table.create(4, 0)
+
+function AimFront.terrainMag(terrain: number): number
+	local T = Config.TERRAIN
+	if terrain == T.MOUNTAIN or terrain == T.PEAK then
+		return 2
+	end
+	if terrain == T.HILLS or terrain == T.HIGHLAND then
+		return 1.5
+	end
+	return 1
+end
 
 function AimFront.priority(state, atk, index: number): number
-	local n = MapGen.neighbors(index, scratch)
+	local n = MapGen.neighbors(index, innerScratch)
 	local owned = 0
 	for i = 1, n do
-		if buffer.readu8(state.owner, scratch[i]) == atk.attacker then
+		if buffer.readu8(state.owner, innerScratch[i]) == atk.attacker then
 			owned += 1
 		end
 	end
-	local terrain = buffer.readu8(state.terrain, index)
-	local roughness = Config.TERRAIN_COST[terrain] or 1
+	local mag = AimFront.terrainMag(buffer.readu8(state.terrain, index))
 	local noise = (index * 2654435761 + state.tick * 40503) % 8
-	local base = (noise + 10) * (1 - owned * 0.5 + roughness / 2) + state.tick
-	if atk.aimX then
-		local x, y = MapGen.fromIndex(index)
-		local dx, dy = x - atk.aimX, y - atk.aimY
-		base += (dx * dx + dy * dy) * 0.45
-	end
-	return base
+	return (noise + 10) * (1 - owned * 0.5 + mag / 2) + state.tick
 end
 
 function AimFront.enqueue(state, atk, index: number)
@@ -45,6 +50,30 @@ function AimFront.enqueue(state, atk, index: number)
 	end
 	atk.queued[index] = true
 	Heap.push(atk.frontier, index, AimFront.priority(state, atk, index))
+end
+
+local function isTargetLand(state, index: number, targetSlot: number): boolean
+	return state:isLand(index) and buffer.readu8(state.owner, index) == targetSlot
+end
+
+local function touchesAttacker(state, index: number, attackerSlot: number): boolean
+	local n = MapGen.neighbors(index, scratch)
+	for i = 1, n do
+		if buffer.readu8(state.owner, scratch[i]) == attackerSlot then
+			return true
+		end
+	end
+	return false
+end
+
+function AimFront.addNeighbors(state, atk, tile: number)
+	local n = MapGen.neighbors(tile, scratch)
+	for i = 1, n do
+		local nb = scratch[i]
+		if isTargetLand(state, nb, atk.target) then
+			AimFront.enqueue(state, atk, nb)
+		end
+	end
 end
 
 function AimFront.focus(state, atk, aimTile: number)
@@ -65,14 +94,22 @@ function AimFront.focus(state, atk, aimTile: number)
 	atk.frontier = Heap.new()
 	atk.queued = {}
 
+	-- OF sourceTile : addNeighbors(source) seulement.
+	-- Si le clic est déjà une case cible au contact, c'est la source.
+	if isTargetLand(state, aimTile, atk.target) and touchesAttacker(state, aimTile, atk.attacker) then
+		AimFront.enqueue(state, atk, aimTile)
+		AimFront.addNeighbors(state, atk, aimTile)
+		return
+	end
+
+	-- Clic à l'intérieur / loin : une seule case de contact, la plus proche.
 	local bestDist = math.huge
 	local best: number? = nil
-
 	for index in attacker.border do
 		local n = MapGen.neighbors(index, scratch)
 		for i = 1, n do
 			local nb = scratch[i]
-			if buffer.readu8(state.owner, nb) == atk.target and state:isLand(nb) then
+			if isTargetLand(state, nb, atk.target) then
 				local x, y = MapGen.fromIndex(nb)
 				local dx, dy = x - ax, y - ay
 				local d = dx * dx + dy * dy
@@ -80,15 +117,13 @@ function AimFront.focus(state, atk, aimTile: number)
 					bestDist = d
 					best = nb
 				end
-				if d <= SEED_RADIUS2 then
-					AimFront.enqueue(state, atk, nb)
-				end
 			end
 		end
 	end
 
-	if Heap.isEmpty(atk.frontier) and best then
+	if best then
 		AimFront.enqueue(state, atk, best)
+		AimFront.addNeighbors(state, atk, best)
 	end
 end
 
