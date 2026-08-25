@@ -11,7 +11,6 @@ local Eras = require(ReplicatedStorage.Shared.Eras)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
-local Bots = require(script.Parent.Bots)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 ChantierB.install(GameState, Nukes)
 
@@ -31,25 +30,6 @@ do
 			return true, nil
 		end
 		return origLaunch(self, attackerSlot, targetSlot)
-	end
-
-	local origSpawnAll = Bots.spawnAll
-	function Bots.spawnAll(state, rng, n)
-		state._pendingBots = { rng = rng, n = n }
-	end
-
-	local origStep = GameState.step
-	function GameState.step(self)
-		local deployTicks = math.floor((Config.DEPLOY_DURATION or 15) / Config.TICK_DT)
-		if self._pendingBots and self.tick >= deployTicks then
-			local pending = self._pendingBots
-			self._pendingBots = nil
-			if self.autoPlacePending then
-				self:autoPlacePending(pending.rng)
-			end
-			origSpawnAll(self, pending.rng, pending.n)
-		end
-		return origStep(self)
 	end
 
 	Remotes.get("AttackOrder").OnServerEvent:Connect(function(player, index)
@@ -73,6 +53,28 @@ do
 			if ok then
 				ps.justClaimed = true
 			end
+		end
+	end)
+
+	task.defer(function()
+		local Bots = require(script.Parent.Bots)
+		local origSpawnAll = Bots.spawnAll
+		function Bots.spawnAll(state, rng, n)
+			state._pendingBots = { rng = rng, n = n }
+		end
+
+		local origStep = GameState.step
+		function GameState.step(self)
+			local deployTicks = math.floor((Config.DEPLOY_DURATION or 15) / Config.TICK_DT)
+			if self._pendingBots and self.tick >= deployTicks then
+				local pending = self._pendingBots
+				self._pendingBots = nil
+				if self.autoPlacePending then
+					self:autoPlacePending(pending.rng)
+				end
+				origSpawnAll(self, pending.rng, pending.n)
+			end
+			return origStep(self)
 		end
 	end)
 end
