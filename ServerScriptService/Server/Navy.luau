@@ -387,6 +387,7 @@ local function resolveTrade(state: GameState, boat)
 end
 
 local function syncCarriers(state: GameState)
+	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
 	local seen: { [number]: boolean } = {}
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
@@ -399,6 +400,13 @@ local function syncCarriers(state: GameState)
 			continue
 		end
 		boat.slot = base.slot
+		if boat.health == nil then
+			boat.health = maxHp
+			boat.maxHealth = maxHp
+		end
+		if boat.lastShellTick == nil then
+			boat.lastShellTick = 0
+		end
 		seen[boat.homeTile] = true
 	end
 	for index, building in state.buildings do
@@ -416,43 +424,109 @@ local function syncCarriers(state: GameState)
 				targetTile = index,
 				homeTile = index,
 				angle = (index % 360) * math.pi / 180,
+				health = maxHp,
+				maxHealth = maxHp,
+				lastShellTick = 0,
 			})
 		end
 	end
 end
 
+--[[
+	Warships (porte-avions / bases navales) — port OF WarshipExecution.
+
+	Priorité cibles : Transport > Warship > TradeShip.
+	Portée : WARSHIP_TARGET_RANGE (OF 130).
+	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (OF 20).
+	Pas pilotable : orbite autour de la base (design Conquest).
+]]
 local function stepCarriers(state: GameState)
+	local patrolR = Config.WARSHIP_PATROL_RANGE or Config.CARRIER_PATROL_RADIUS or 40
+	local targetR = Config.WARSHIP_TARGET_RANGE or Config.CARRIER_INTERCEPT_RANGE or 65
+	local targetR2 = targetR * targetR
+	local shellRate = Config.WARSHIP_SHELL_RATE or 20
+	local transportDmg = Config.WARSHIP_TRANSPORT_DAMAGE or 0.28
+	local tradeSink = Config.WARSHIP_TRADE_SINK or true
+	local warshipShell = Config.WARSHIP_SHELL_DAMAGE or 22
+
+	-- 1. Orbit patrol
 	for _, boat in state.boats do
 		if boat.kind ~= KIND_CARRIER then
 			continue
 		end
 		local hx, hy = MapGen.fromIndex(boat.homeTile)
-		boat.angle += Config.CARRIER_PATROL_SPEED
-		boat.x = hx + math.cos(boat.angle) * Config.CARRIER_PATROL_RADIUS
-		boat.y = hy + math.sin(boat.angle) * Config.CARRIER_PATROL_RADIUS
+		boat.angle = (boat.angle or 0) + (Config.CARRIER_PATROL_SPEED or 0.022)
+		boat.x = hx + math.cos(boat.angle) * patrolR
+		boat.y = hy + math.sin(boat.angle) * patrolR
 	end
-	for i = #state.boats, 1, -1 do
-		local target = state.boats[i]
-		if target.kind ~= KIND_TRANSPORT then
+
+	-- 2. Shell fire (rate-limited), OF priority
+	for _, carrier in state.boats do
+		if carrier.kind ~= KIND_CARRIER then
 			continue
 		end
-		for _, carrier in state.boats do
-			if carrier.kind ~= KIND_CARRIER or carrier.slot == target.slot then
+		if (carrier.health or 1) <= 0 then
+			continue
+		end
+		local last = carrier.lastShellTick or 0
+		if state.tick - last < shellRate then
+			continue
+		end
+
+		local best = nil
+		local bestPri = 99
+		local bestDist = math.huge
+
+		for _, target in state.boats do
+			if target.id == carrier.id then
+				continue
+			end
+			if target.slot == carrier.slot then
 				continue
 			end
 			if state:areAllied(carrier.slot, target.slot) then
 				continue
 			end
-			local dx = carrier.x - target.x
-			local dy = carrier.y - target.y
-			if dx * dx + dy * dy > Config.CARRIER_INTERCEPT_RANGE * Config.CARRIER_INTERCEPT_RANGE then
+
+			local pri
+			if target.kind == KIND_TRANSPORT then
+				pri = 0
+			elseif target.kind == KIND_CARRIER then
+				if (target.health or 0) <= 0 then
+					continue
+				end
+				pri = 1
+			elseif target.kind == KIND_TRADE then
+				pri = 2
+			else
 				continue
 			end
-			target.troops -= target.troops * Config.CARRIER_INTERCEPT_DAMAGE
-			if target.troops < Config.MIN_BOAT_TROOPS then
-				local owner = state.players[target.slot]
+
+			local dx = carrier.x - target.x
+			local dy = carrier.y - target.y
+			local d2 = dx * dx + dy * dy
+			if d2 > targetR2 then
+				continue
+			end
+			if pri < bestPri or (pri == bestPri and d2 < bestDist) then
+				best = target
+				bestPri = pri
+				bestDist = d2
+			end
+		end
+
+		if not best then
+			continue
+		end
+
+		carrier.lastShellTick = state.tick
+
+		if best.kind == KIND_TRANSPORT then
+			best.troops -= best.troops * transportDmg
+			if best.troops < Config.MIN_BOAT_TROOPS then
+				local owner = state.players[best.slot]
 				local defender = state.players[carrier.slot]
-				state:notify("Ton convoi a ete coule en mer.", "bad", target.slot)
+				state:notify("Ton convoi a ete coule en mer.", "bad", best.slot)
 				if defender then
 					state:notify(
 						`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
@@ -461,9 +535,62 @@ local function stepCarriers(state: GameState)
 					)
 				end
 				state:sound("boatLand")
+				best.troops = 0
+				best._sink = true
+			end
+		elseif best.kind == KIND_TRADE and tradeSink then
+			local defender = state.players[carrier.slot]
+			local owner = state.players[best.slot]
+			state:notify("Un convoi marchand a ete coule.", "bad", best.slot)
+			if defender then
+				state:notify(
+					`Ta flotte a pirate un convoi{if owner then ` de {owner.name}` else ""}.`,
+					"good",
+					carrier.slot
+				)
+			end
+			best._sink = true
+		elseif best.kind == KIND_CARRIER then
+			best.health = (best.health or 100) - warshipShell
+			if best.health <= 0 then
+				local owner = state.players[best.slot]
+				local defender = state.players[carrier.slot]
+				state:notify("Ton navire de guerre a ete coule.", "bad", best.slot)
+				if defender then
+					state:notify(
+						`Ta flotte a coule un navire ennemi{if owner then ` de {owner.name}` else ""}.`,
+						"good",
+						carrier.slot
+					)
+				end
+				state:sound("boatLand")
+				best._sink = true
+			end
+		end
+	end
+
+	-- 3. Remove sunk boats (not carriers tied to base unless health 0)
+	for i = #state.boats, 1, -1 do
+		local boat = state.boats[i]
+		if boat._sink then
+			if boat.kind == KIND_CARRIER then
+				-- Warship sunk: remove until base respawns next sync (delay via flag)
+				boat.health = 0
+				boat._sunkUntil = state.tick + (Config.WARSHIP_RESPAWN_TICKS or 300)
+				boat._sink = nil
+				-- Park at base while "dead"
+				local hx, hy = MapGen.fromIndex(boat.homeTile)
+				boat.x, boat.y = hx, hy
+			else
 				table.remove(state.boats, i)
 			end
-			break
+		elseif boat.kind == KIND_CARRIER and boat.health == 0 then
+			local untilTick = boat._sunkUntil or 0
+			if state.tick >= untilTick then
+				boat.health = boat.maxHealth or (Config.WARSHIP_MAX_HEALTH or 100)
+				boat._sunkUntil = nil
+				boat.lastShellTick = state.tick
+			end
 		end
 	end
 end
