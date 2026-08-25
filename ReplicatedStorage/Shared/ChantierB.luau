@@ -38,8 +38,24 @@ end
 function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defender: any, tile: number)
 	local terrain = buffer.readu8(state.terrain, tile)
 	local mag, speed = terrainMagSpeed(terrain)
-	local aura = buffer.readu8(state.defense, tile)
-	local posted = aura >= 40
+	-- OF defensePostRange : un bunker du défenseur à portée → bonus binaire.
+	local posted = false
+	if defender then
+		local cx, cy = MapGen.fromIndex(tile)
+		local r = Config.DEFENSE_RADIUS or 30
+		local r2 = r * r
+		local DEF = Config.BUILDING.DEFENSE
+		for index, building in state.buildings do
+			if building.kind == DEF and building.slot == defender.slot then
+				local bx, by = MapGen.fromIndex(index)
+				local dx, dy = bx - cx, by - cy
+				if dx * dx + dy * dy <= r2 then
+					posted = true
+					break
+				end
+			end
+		end
+	end
 	local fallout = state.fallout and state.fallout[tile] and state.fallout[tile] > state.tick
 
 	if defender then
@@ -52,9 +68,10 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 		local alt = 1.3 * defenderTroopLoss * (mag / 100) * traitorMod
 		local attackerTroopLoss = 0.6 * current + 0.4 * alt
 		local tilesPerTickUsed = within(defender.troops / (5 * math.max(1, attackTroops)), 0.2, 1.5) * speed * largeDef
+		-- OF: mag *= defensePostDefenseBonus (5), speed *= defensePostSpeedBonus (3)
 		if posted then
-			attackerTroopLoss *= 6
-			tilesPerTickUsed *= 3
+			attackerTroopLoss *= (Config.DEFENSE_POST_BONUS or 5)
+			tilesPerTickUsed *= (Config.DEFENSE_POST_SPEED_BONUS or 3)
 		end
 		if fallout then
 			attackerTroopLoss *= Config.FALLOUT_DEFENSE_MULT
@@ -143,8 +160,10 @@ function ChantierB.apply(cfg)
 	cfg.DEFENSE_DENSITY_K = 1.15
 	cfg.MAX_TILES_PER_TICK = 56
 	cfg.FRONT_TILES_PER_CONTACT = 2.4
-	cfg.DEFENSE_RADIUS = 8
+	cfg.DEFENSE_RADIUS = 30 -- OF defensePostRange()
 	cfg.DEFENSE_STRENGTH = 200
+	cfg.DEFENSE_POST_BONUS = 5 -- OF defensePostDefenseBonus
+	cfg.DEFENSE_POST_SPEED_BONUS = 3 -- OF defensePostSpeedBonus
 	cfg.DEFENSE_COST_DIVISOR = 42
 	cfg.RETREAT_LOSS = 0.25
 	cfg.MISSILE_SPEED = 14
