@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique + hooks chantier D/F/G/H.
+	Avancement technologique + hooks chantier D/F/G/H + BoatFront.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -14,7 +14,9 @@ local Nukes = require(script.Parent.Nukes)
 local Navy = require(script.Parent.Navy)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 local AimFront = require(ReplicatedStorage.Shared.AimFront)
+local BoatFront = require(ReplicatedStorage.Shared.BoatFront)
 ChantierB.install(GameState, Nukes)
+BoatFront.install(GameState)
 
 Config.MAX_BOATS_PER_PLAYER = 3
 Config.BOAT_TROOP_RATIO = 0.2
@@ -38,7 +40,7 @@ do
 
 		local already = false
 		for _, atk in self.attacks do
-			if atk.attacker == attackerSlot and atk.target == targetSlot then
+			if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
 				already = true
 				break
 			end
@@ -52,7 +54,7 @@ do
 		local ok, message = origLaunch(self, attackerSlot, targetSlot)
 		if ok and typeof(aim) == "number" and not already then
 			for _, atk in self.attacks do
-				if atk.attacker == attackerSlot and atk.target == targetSlot then
+				if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
 					AimFront.focus(self, atk, math.floor(aim))
 					break
 				end
