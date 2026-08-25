@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique + hooks chantier D/F/G/H + BoatFront.
+	Avancement technologique + hooks chantier D/F/G/H + BoatFront + Tribes.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,8 +15,24 @@ local Navy = require(script.Parent.Navy)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 local AimFront = require(ReplicatedStorage.Shared.AimFront)
 local BoatFront = require(ReplicatedStorage.Shared.BoatFront)
+local Tribes = require(script.Parent.Tribes)
 ChantierB.install(GameState, Nukes)
 BoatFront.install(GameState)
+
+-- Tribus PvE (OF TribeExecution) branchées sur Bots
+do
+	local Bots = require(script.Parent.Bots)
+	local origSpawn = Bots.spawnAll
+	function Bots.spawnAll(state, rng, count)
+		origSpawn(state, rng, count)
+		Tribes.spawnAll(state, rng, Config.TRIBE_COUNT or 6)
+	end
+	local origStep = Bots.step
+	function Bots.step(state, rng)
+		origStep(state, rng)
+		Tribes.step(state, rng)
+	end
+end
 
 Config.MAX_BOATS_PER_PLAYER = 3
 Config.BOAT_TROOP_RATIO = 0.2
