@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier B : attaque + socle de troupes + defense + nucleaire + doomsday.
+	Chantier B+C : attaque, socle, defense, nukes, doomsday, retraite, fallout.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -30,7 +30,7 @@ function ChantierB.apply(cfg)
 	cfg.DEFENSE_RADIUS = 8
 	cfg.DEFENSE_STRENGTH = 200
 	cfg.DEFENSE_COST_DIVISOR = 42
-	cfg.RETREAT_LOSS = 0
+	cfg.RETREAT_LOSS = 0.25
 	cfg.MISSILE_SPEED = 14
 	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
@@ -41,6 +41,8 @@ function ChantierB.apply(cfg)
 	cfg.NUKE_STATS[3].warheadTroopKill = 0.14
 	cfg.DOOMSDAY.WARN_SECONDS = 30
 	cfg.DOOMSDAY.ROT_DEATH_SECONDS = 120
+	cfg.FALLOUT_TICKS = 800
+	cfg.FALLOUT_DEFENSE_MULT = 3.2
 end
 
 local function frontPriority(state, index, attackerSlot): number
@@ -102,9 +104,12 @@ function ChantierB.cancelOpposingFronts(state)
 	end
 end
 
-function ChantierB.install(GameState)
+function ChantierB.install(GameState, Nukes)
 	if GameState.__chantierB then
 		ChantierB.apply(Config)
+		if Nukes and not GameState.__chantierFallout then
+			ChantierB.installFallout(GameState, Nukes)
+		end
 		return
 	end
 	GameState.__chantierB = true
@@ -115,6 +120,7 @@ function ChantierB.install(GameState)
 		local self = origNew(seed)
 		self.doomWarnedAt = {}
 		self.doomUnderSince = {}
+		self.fallout = {}
 		return self
 	end
 
@@ -132,6 +138,10 @@ function ChantierB.install(GameState)
 		end
 		local aura = buffer.readu8(self.defense, index)
 		cost *= 1 + aura / Config.DEFENSE_COST_DIVISOR
+		local untilTick = self.fallout and self.fallout[index]
+		if untilTick and untilTick > self.tick then
+			cost *= Config.FALLOUT_DEFENSE_MULT
+		end
 		cost /= self:doctrineOf(attackerSlot).attack
 		local attacker = self.players[attackerSlot]
 		if attacker then
@@ -217,6 +227,13 @@ function ChantierB.install(GameState)
 	local origStep = GameState.step
 	function GameState.step(self)
 		self:stepDoomsday()
+		if self.fallout then
+			for index, untilTick in self.fallout do
+				if untilTick <= self.tick then
+					self.fallout[index] = nil
+				end
+			end
+		end
 		return origStep(self)
 	end
 
@@ -291,6 +308,42 @@ function ChantierB.install(GameState)
 					end
 					self:setOwner(index, NEUTRAL)
 					ripped += 1
+				end
+			end
+		end
+	end
+
+	if Nukes then
+		ChantierB.installFallout(GameState, Nukes)
+	end
+end
+
+function ChantierB.installFallout(GameState, Nukes)
+	if GameState.__chantierFallout or not Nukes or not Nukes.detonate then
+		return
+	end
+	GameState.__chantierFallout = true
+	local orig = Nukes.detonate
+	function Nukes.detonate(state, missile)
+		orig(state, missile)
+		state.fallout = state.fallout or {}
+		local stats = Config.NUKE_STATS[missile.kind]
+		local radius = missile.radius or (if stats then stats.radius else 8)
+		if radius <= 0 then
+			radius = 5
+		end
+		local cx, cy = math.floor(missile.tx), math.floor(missile.ty)
+		local untilTick = state.tick + Config.FALLOUT_TICKS
+		for dy = -radius, radius do
+			for dx = -radius, radius do
+				if dx * dx + dy * dy <= radius * radius then
+					local nx, ny = cx + dx, cy + dy
+					if MapGen.inBounds(nx, ny) then
+						local index = MapGen.toIndex(nx, ny)
+						if state:isLand(index) then
+							state.fallout[index] = untilTick
+						end
+					end
 				end
 			end
 		end

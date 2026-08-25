@@ -9,8 +9,9 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
+local Nukes = require(script.Parent.Nukes)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
-ChantierB.install(GameState)
+ChantierB.install(GameState, Nukes)
 
 type GameState = GameState.GameState
 
