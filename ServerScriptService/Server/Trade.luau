@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Commerce terrestre, modele OpenFront — le pendant routier du commerce
-	maritime de Navy.
+	Commerce terrestre / trains — port OF FactoryExecution + TrainExecution
+	(colis sur le réseau de gares, or à l'arrivée).
 
 	Trois regles portent tout le systeme :
 
@@ -48,14 +48,15 @@ local function tileDistance(a: number, b: number): number
 end
 
 --[[
-	Or d'un colis : la distance paie, le niveau de l'usine est son debit, et le
-	chargement grossit avec le reseau desservi — une usine qui dessert dix
-	gares expedie des colis dix fois plus riches. La taille du chargement est
-	figee au depart : un reseau qui s'effondre en route ne vide pas un colis
-	deja parti, un reseau qui grandit ne le remplit pas retroactivement.
+	Or d'un "train" / colis — port OF TrainExecution (stops multiples).
+
+	Base + distance, × niveau usine, × liens (réseau), + bonus multi-arrêts
+	quand le cluster est large (équivalent OF tradeStopsVisited).
 ]]
 local function deliveryValue(distance: number, level: number, links: number): number
-	return (Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE) * level * links
+	local base = Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE
+	local stopBonus = 1 + math.min(0.8, (links - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+	return base * level * math.max(1, links) * stopBonus
 end
 
 --[[
@@ -84,13 +85,6 @@ local function dispatch(state: GameState, rng: Random, index: number, factory: G
 	onEvent("dispatch", index, target, factory.slot, travel)
 end
 
---[[
-	Le colis arrive a quai.
-
-	Tout est reverifie ici plutot qu'au depart : entre les deux, l'usine a pu
-	changer de main et la gare a pu tomber. Payer sur la foi des conditions de
-	depart recompenserait une route qui n'existe plus.
-]]
 local function resolve(state: GameState, index: number, delivery, onEvent: (string, number, number, number, number) -> ())
 	local factory = state.buildings[index]
 	if not factory or factory.kind ~= B.FACTORY or factory.slot ~= delivery.slot then
@@ -112,38 +106,32 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 end
 
 function Trade.step(state: GameState, rng: Random, onEvent: (string, number, number, number, number) -> ())
-	-- Menage : une usine detruite ou capturee emporte son colis avec elle.
+	-- Nettoyer les livraisons orphelines
 	for index, delivery in state.tradeDeliveries do
 		local factory = state.buildings[index]
 		if not factory or factory.kind ~= B.FACTORY or factory.slot ~= delivery.slot then
 			state.tradeDeliveries[index] = nil
-			state.tradeCooldowns[index] = nil
 		end
 	end
 
-	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
-	-- depend de l'ordre interne de la table, et deux serveurs partis de la
-	-- meme graine divergeraient des le premier colis.
-	local factories: { number } = {}
 	for index, building in state.buildings do
 		if building.kind == B.FACTORY then
-			table.insert(factories, index)
-		end
-	end
-	table.sort(factories)
-
-	for _, index in factories do
-		local factory = state.buildings[index]
-		local delivery = state.tradeDeliveries[index]
-		if delivery then
-			if state.tick >= delivery.arrivalTick then
-				resolve(state, index, delivery, onEvent)
-				state.tradeDeliveries[index] = nil
-				-- Le camion doit faire le retour avant de repartir.
-				state.tradeCooldowns[index] = state.tick + Config.TRUCK_COOLDOWN
+			local cooldownUntil = state.tradeCooldowns[index]
+			if cooldownUntil and state.tick < cooldownUntil then
+				continue
 			end
-		elseif state.tick >= (state.tradeCooldowns[index] or 0) then
-			dispatch(state, rng, index, factory, onEvent)
+
+			local factory = state.buildings[index]
+			local delivery = state.tradeDeliveries[index]
+			if delivery then
+				if state.tick >= delivery.arrivalTick then
+					resolve(state, index, delivery, onEvent)
+					state.tradeDeliveries[index] = nil
+					state.tradeCooldowns[index] = state.tick + Config.TRUCK_COOLDOWN
+				end
+			else
+				dispatch(state, rng, index, factory, onEvent)
+			end
 		end
 	end
 end
