@@ -165,6 +165,17 @@ function ChantierB.apply(cfg)
 	cfg.DEFENSE_POST_BONUS = 5 -- OF defensePostDefenseBonus
 	cfg.DEFENSE_POST_SPEED_BONUS = 3 -- OF defensePostSpeedBonus
 	cfg.DEFENSE_COST_DIVISOR = 42
+	-- Warships OF (WarshipExecution / DefaultConfig)
+	cfg.WARSHIP_PATROL_RANGE = 40 -- orbite (OF patrol 100, réduit map/feel)
+	cfg.WARSHIP_TARGET_RANGE = 65 -- OF targetting 130 → ~1/2 map scale feel
+	cfg.WARSHIP_SHELL_RATE = 20 -- OF warshipShellAttackRate
+	cfg.WARSHIP_MAX_HEALTH = 100
+	cfg.WARSHIP_SHELL_DAMAGE = 22
+	cfg.WARSHIP_TRANSPORT_DAMAGE = 0.28 -- part troupes par shell
+	cfg.WARSHIP_TRADE_SINK = true
+	cfg.WARSHIP_RESPAWN_TICKS = 300 -- 30s @ 10 tick/s
+	cfg.CARRIER_PATROL_RADIUS = 40 -- alias legacy
+	cfg.CARRIER_INTERCEPT_RANGE = 65
 	cfg.RETREAT_LOSS = 0.25
 	cfg.MISSILE_SPEED = 14
 	cfg.SAM_RANGE = 70
