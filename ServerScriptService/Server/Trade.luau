@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Commerce terrestre / trains — port OF FactoryExecution + TrainExecution
-	(colis sur le reseau de gares, or a l'arrivee).
+	Commerce terrestre, modele OpenFront — le pendant routier du commerce
+	maritime de Navy.
 
 	Trois regles portent tout le systeme :
 
@@ -49,7 +49,7 @@ end
 
 --[[
 	Or d'un "train" / colis — port OF TrainExecution (stops multiples).
-	Base + distance × niveau × liens + bonus multi-arrêts (tradeStopsVisited).
+	Base + distance × niveau × liens + bonus multi-arrêts.
 ]]
 local function deliveryValue(distance: number, level: number, links: number): number
 	local base = Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE
@@ -83,6 +83,13 @@ local function dispatch(state: GameState, rng: Random, index: number, factory: G
 	onEvent("dispatch", index, target, factory.slot, travel)
 end
 
+--[[
+	Le colis arrive a quai.
+
+	Tout est reverifie ici plutot qu'au depart : entre les deux, l'usine a pu
+	changer de main et la gare a pu tomber. Payer sur la foi des conditions de
+	depart recompenserait une route qui n'existe plus.
+]]
 local function resolve(state: GameState, index: number, delivery, onEvent: (string, number, number, number, number) -> ())
 	local factory = state.buildings[index]
 	if not factory or factory.kind ~= B.FACTORY or factory.slot ~= delivery.slot then
@@ -104,31 +111,37 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 end
 
 function Trade.step(state: GameState, rng: Random, onEvent: (string, number, number, number, number) -> ())
+	-- Menage : une usine detruite ou capturee emporte son colis avec elle.
 	for index, delivery in state.tradeDeliveries do
 		local factory = state.buildings[index]
 		if not factory or factory.kind ~= B.FACTORY or factory.slot ~= delivery.slot then
 			state.tradeDeliveries[index] = nil
+			state.tradeCooldowns[index] = nil
 		end
 	end
 
+	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
+	-- depend de l'ordre interne de la table, et deux serveurs partis de la
+	-- meme graine divergeraient des le premier colis.
+	local factories: { number } = {}
 	for index, building in state.buildings do
-		if building.kind ~= B.FACTORY then
-			continue
+		if building.kind == B.FACTORY then
+			table.insert(factories, index)
 		end
-		local cooldownUntil = state.tradeCooldowns[index]
-		if cooldownUntil and state.tick < cooldownUntil then
-			continue
-		end
+	end
+	table.sort(factories)
 
-		local factory = building
+	for _, index in factories do
+		local factory = state.buildings[index]
 		local delivery = state.tradeDeliveries[index]
 		if delivery then
 			if state.tick >= delivery.arrivalTick then
 				resolve(state, index, delivery, onEvent)
 				state.tradeDeliveries[index] = nil
+				-- Le camion doit faire le retour avant de repartir.
 				state.tradeCooldowns[index] = state.tick + Config.TRUCK_COOLDOWN
 			end
-		else
+		elseif state.tick >= (state.tradeCooldowns[index] or 0) then
 			dispatch(state, rng, index, factory, onEvent)
 		end
 	end
