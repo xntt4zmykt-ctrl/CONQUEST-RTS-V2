@@ -131,10 +131,22 @@ end
 --=============================================================================
 
 --[[
-	Chaque batterie SAM ennemie a portee tente une interception, une seule fois
-	par missile et sous reserve de son temps de recharge.
+	Interception SAM — port OF SAMLauncherExecution.
+
+	Un seul SAM engage chaque missile (OF : exclusivite de cible).
+	Choix = plus proche batterie prete dans SAM_RANGE (OF defaultSamRange 70).
+	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean
+	if missile.engaged then
+		return false
+	end
+
+	local range = Config.SAM_RANGE or 70
+	local range2 = range * range
+	local best = nil
+	local bestDist = math.huge
+
 	for index, building in state.buildings do
 		if building.kind ~= Config.BUILDING.SAM then
 			continue
@@ -151,21 +163,32 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 
 		local x, y = MapGen.fromIndex(index)
 		local dx, dy = x - missile.x, y - missile.y
-		if dx * dx + dy * dy > Config.SAM_RANGE * Config.SAM_RANGE then
+		local d2 = dx * dx + dy * dy
+		if d2 > range2 then
 			continue
 		end
-
-		building.cooldown = Config.SAM_COOLDOWN
-
-		if rng:NextNumber() < Config.SAM_INTERCEPT_CHANCE then
-			local owner = state.players[building.slot]
-			state:notify(
-				`\u{1F6E1} {if owner then owner.name else "Une batterie"} a intercepte un missile !`,
-				"good"
-			)
-			state:sound("samIntercept")
-			return true
+		if d2 < bestDist then
+			best = building
+			bestDist = d2
 		end
+	end
+
+	if not best then
+		return false
+	end
+
+	missile.engaged = true
+	best.cooldown = Config.SAM_COOLDOWN or 90
+
+	local chance = if Config.SAM_INTERCEPT_CHANCE ~= nil then Config.SAM_INTERCEPT_CHANCE else 1
+	if rng:NextNumber() < chance then
+		local owner = state.players[best.slot]
+		state:notify(
+			`\u{1F6E1} {if owner then owner.name else "Une batterie"} a intercepte un missile !`,
+			"good"
+		)
+		state:sound("samIntercept")
+		return true
 	end
 
 	return false
