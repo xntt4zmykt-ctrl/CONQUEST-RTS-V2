@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique + hooks chantier D/F.
+	Avancement technologique + hooks chantier D/F/G.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,6 +11,7 @@ local Eras = require(ReplicatedStorage.Shared.Eras)
 local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
+local Navy = require(script.Parent.Navy)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 ChantierB.install(GameState, Nukes)
 
@@ -34,6 +35,16 @@ do
 			return true, nil
 		end
 		return origLaunch(self, attackerSlot, targetSlot)
+	end
+
+	local origRetreat = GameState.retreatAttack
+	function GameState.retreatAttack(self, attackerSlot, targetSlot)
+		local ok, message = origRetreat(self, attackerSlot, targetSlot)
+		local n = Navy.retreatBoats(self, attackerSlot, targetSlot)
+		if n > 0 then
+			return true, `Retraite : front terrestre et {n} transport(s).`
+		end
+		return ok, message
 	end
 
 	Remotes.get("AttackOrder").OnServerEvent:Connect(function(player, index)
