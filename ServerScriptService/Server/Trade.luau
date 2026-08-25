@@ -1,7 +1,7 @@
 --!strict
 --[[
 	Commerce terrestre / trains — port OF FactoryExecution + TrainExecution
-	(colis sur le réseau de gares, or à l'arrivée).
+	(colis sur le reseau de gares, or a l'arrivee).
 
 	Trois regles portent tout le systeme :
 
@@ -49,9 +49,7 @@ end
 
 --[[
 	Or d'un "train" / colis — port OF TrainExecution (stops multiples).
-
-	Base + distance, × niveau usine, × liens (réseau), + bonus multi-arrêts
-	quand le cluster est large (équivalent OF tradeStopsVisited).
+	Base + distance × niveau × liens + bonus multi-arrêts (tradeStopsVisited).
 ]]
 local function deliveryValue(distance: number, level: number, links: number): number
 	local base = Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE
@@ -106,7 +104,6 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 end
 
 function Trade.step(state: GameState, rng: Random, onEvent: (string, number, number, number, number) -> ())
-	-- Nettoyer les livraisons orphelines
 	for index, delivery in state.tradeDeliveries do
 		local factory = state.buildings[index]
 		if not factory or factory.kind ~= B.FACTORY or factory.slot ~= delivery.slot then
@@ -115,23 +112,24 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	end
 
 	for index, building in state.buildings do
-		if building.kind == B.FACTORY then
-			local cooldownUntil = state.tradeCooldowns[index]
-			if cooldownUntil and state.tick < cooldownUntil then
-				continue
-			end
+		if building.kind ~= B.FACTORY then
+			continue
+		end
+		local cooldownUntil = state.tradeCooldowns[index]
+		if cooldownUntil and state.tick < cooldownUntil then
+			continue
+		end
 
-			local factory = state.buildings[index]
-			local delivery = state.tradeDeliveries[index]
-			if delivery then
-				if state.tick >= delivery.arrivalTick then
-					resolve(state, index, delivery, onEvent)
-					state.tradeDeliveries[index] = nil
-					state.tradeCooldowns[index] = state.tick + Config.TRUCK_COOLDOWN
-				end
-			else
-				dispatch(state, rng, index, factory, onEvent)
+		local factory = building
+		local delivery = state.tradeDeliveries[index]
+		if delivery then
+			if state.tick >= delivery.arrivalTick then
+				resolve(state, index, delivery, onEvent)
+				state.tradeDeliveries[index] = nil
+				state.tradeCooldowns[index] = state.tick + Config.TRUCK_COOLDOWN
 			end
+		else
+			dispatch(state, rng, index, factory, onEvent)
 		end
 	end
 end
