@@ -1,14 +1,6 @@
 --!strict
 --[[
 	Marine : debarquements et commerce maritime.
-
-	Sans elle, un joueur insulaire est en prison et un continent voisin est
-	imprenable — c'est la mecanique qui ouvre reellement la carte.
-
-	Les navires suivent un vrai chemin maritime calcule en BFS, pas une ligne
-	droite : un transport ne traverse jamais la terre, et une invasion est donc
-	reellement contournable et interceptable une fois qu'on ajoutera les
-	navires de guerre.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -31,19 +23,6 @@ local MAX_BFS_NODES = 24000
 
 local scratch = table.create(4, 0)
 
---=============================================================================
--- Recherche de route maritime
---=============================================================================
-
---[[
-	BFS depuis une tuile cotiere de depart jusqu'a une tuile cotiere d'arrivee,
-	en ne traversant que de l'ocean. Renvoie la liste des indices de tuiles a
-	suivre, arrivee comprise, ou nil s'il n'y a pas de route.
-
-	Le cout est borne par MAX_BFS_NODES : sur une carte de 40 000 tuiles c'est
-	quelques millisecondes, et ce n'est appele qu'au lancement d'un navire,
-	jamais dans la boucle de tick.
-]]
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
 
@@ -54,7 +33,6 @@ function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): {
 	local head = 1
 	local explored = 0
 
-	-- On amorce avec les cases d'ocean adjacentes au point de depart.
 	local n = MapGen.neighbors(fromTile, scratch)
 	for i = 1, n do
 		local nb = scratch[i]
@@ -78,14 +56,12 @@ function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): {
 			local nb = scratch[i]
 
 			if nb == toTile then
-				-- Arrivee : on remonte la chaine des parents.
 				local path = { toTile }
 				local node = current
 				while node ~= fromTile do
 					table.insert(path, node)
 					node = parent[node]
 				end
-				-- Le chemin a ete reconstruit a l'envers.
 				local reversed = table.create(#path)
 				for k = #path, 1, -1 do
 					table.insert(reversed, path[k])
@@ -104,8 +80,6 @@ function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): {
 	return nil
 end
 
--- Tuile cotiere possedee par `slot` la plus proche de `target`, point de depart
--- naturel d'un debarquement.
 function Navy.nearestOwnCoast(state: GameState, slot: number, target: number): number?
 	local tx, ty = MapGen.fromIndex(target)
 	local best: number? = nil
@@ -116,9 +90,6 @@ function Navy.nearestOwnCoast(state: GameState, slot: number, target: number): n
 		return nil
 	end
 
-	-- On balaie l'ensemble cotier maintenu par GameState, pas la frontiere :
-	-- une cote entouree de son propre territoire n'est pas une frontiere, et
-	-- la chercher la rendait injouable tout empire ayant absorbe son littoral.
 	for index in ps.coast do
 		local x, y = MapGen.fromIndex(index)
 		local dx, dy = x - tx, y - ty
@@ -131,10 +102,6 @@ function Navy.nearestOwnCoast(state: GameState, slot: number, target: number): n
 
 	return best
 end
-
---=============================================================================
--- Debarquements
---=============================================================================
 
 function Navy.countBoats(state: GameState, slot: number, kind: number): number
 	local count = 0
@@ -175,16 +142,18 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 		return false, "Les flottes ennemies sont protegees pendant la preparation."
 	end
 
-	if Navy.countBoats(state, slot, KIND_TRANSPORT) >= Config.MAX_BOATS_PER_PLAYER then
-		return false, "Tous tes transports sont deja en mer."
+	local cap = Config.MAX_BOATS_PER_PLAYER or 3
+	if Navy.countBoats(state, slot, KIND_TRANSPORT) >= cap then
+		return false, `Tous tes transports sont deja en mer ({cap} max).`
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local capacity = Config.BOAT_TROOP_RATIO * doctrine.boatCapacity
-	local troops = math.floor(ps.troops * math.min(capacity, 0.9))
+	-- OpenFront boatAttackAmount : troops / 5.
+	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end
+	troops = math.min(troops, math.floor(ps.troops))
 
 	local origin = Navy.nearestOwnCoast(state, slot, targetTile)
 	if not origin then
@@ -219,11 +188,6 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	return true, `Debarquement en route — {troops} troupes.`
 end
 
---[[
-	Resolution d'un debarquement. La tete de pont coute plus cher qu'une
-	avancee terrestre normale : arriver par la mer est un pari, pas un
-	raccourci.
-]]
 local function resolveLanding(state: GameState, boat: GameState.Boat)
 	local ps = state.players[boat.slot]
 	if not ps then
@@ -233,68 +197,39 @@ local function resolveLanding(state: GameState, boat: GameState.Boat)
 	local tile = boat.targetTile
 	local targetOwner = buffer.readu8(state.owner, tile)
 
+	-- OpenFront : arrivée sur sa propre cote = retraite, malus 25 %.
 	if targetOwner == boat.slot then
-		ps.troops += boat.troops -- la cote est devenue notre : les troupes rentrent
+		local loss = Config.BOAT_RETREAT_LOSS or 0.25
+		local survivors = math.floor(boat.troops * (1 - loss))
+		ps.troops += survivors
+		if boat.troops - survivors > 0 then
+			state:notify(`Retraite navale : {boat.troops - survivors} troupes perdues.`, "bad", boat.slot)
+		end
+		return
+	end
+
+	-- Allié entre-temps : les troupes rentrent intactes (OF isFriendly).
+	if targetOwner ~= NEUTRAL and state:areAllied(boat.slot, targetOwner) then
+		ps.troops += boat.troops
 		return
 	end
 
 	local defender = if targetOwner ~= NEUTRAL then state.players[targetOwner] else nil
-	local cost = state:tileCost(tile, boat.slot, defender) * Config.BOAT_LANDING_BONUS
 
-	if cost > boat.troops then
-		-- Debarquement repousse a la mer.
-		if defender then
-			defender.troops = math.max(0, defender.troops - boat.troops * 0.35)
-		end
-		state:notify(`Ton debarquement a ete repousse.`, "bad", boat.slot)
-		return
-	end
-
-	local remaining = boat.troops - cost
+	-- OF : conquer(dst) puis AttackExecution avec TOUTES les troupes du bateau.
+	state:setOwner(tile, boat.slot)
 	if defender then
-		defender.troops = math.max(0, defender.troops - cost * Config.DEFENDER_LOSS_RATIO)
 		state:notify(`{ps.name} a debarque sur ton territoire !`, "bad", defender.slot)
 	end
-
-	state:setOwner(tile, boat.slot)
-	state:seedBeachhead(boat.slot, targetOwner, remaining, tile)
+	state:seedBeachhead(boat.slot, targetOwner, boat.troops, tile)
 	state:notify(`Tete de pont etablie.`, "good", boat.slot)
 	state:sound("boatLand")
 end
 
---=============================================================================
--- Navires marchands
---=============================================================================
-
---[[
-	Commerce maritime, modele OpenFront.
-
-	Trois regles portent tout le systeme :
-
-	  1. Un port ne commerce **jamais** avec ses propres ports. L'or vient de
-	     l'etranger, ce qui fait d'un voisin cotier une ressource et pas
-	     seulement une menace.
-	  2. Il faut une route navigable reelle entre les deux ports. Un embargo,
-	     une mer fermee ou une distance excessive coupent la ligne.
-	  3. Les deux ports touchent, a l'arrivee. Couler un convoi prive donc deux
-	     factions a la fois, dont celle qui ne l'escortait pas.
-
-	Le niveau du port est son debit : chaque niveau tire une chance d'armer un
-	navire, exactement comme un port de niveau 3 tire trois fois dans le jeu de
-	reference.
-]]
-
--- Or verse a chaque extremite d'une route, selon sa longueur.
 local function tradeValue(distance: number): number
 	return Config.TRADE_GOLD_BASE + distance * Config.TRADE_GOLD_PER_TILE
 end
 
---[[
-	Le commerce est-il ouvert entre ces deux factions ?
-
-	L'embargo est unilateral dans les deux sens : il suffit qu'un seul camp
-	l'ait declare pour que la route soit morte.
-]]
 local function canTrade(state: GameState, a: number, b: number): boolean
 	if a == b then
 		return false
@@ -317,13 +252,6 @@ local function countTradeShips(state: GameState): number
 	return n
 end
 
---[[
-	Arme les convois du tick.
-
-	On collecte les ports une seule fois puis chaque port tire pour lui-meme :
-	un balayage par port couterait O(ports^2) sur une carte saturee, alors que
-	le partenaire se tire dans la liste deja construite.
-]]
 local function spawnTradeShips(state: GameState, rng: Random)
 	local ports: { { index: number, slot: number, level: number } } = {}
 	for index, building in state.buildings do
@@ -335,8 +263,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 		return
 	end
 
-	-- L'ordre d'iteration d'une table Luau n'est pas garanti. Sans tri, deux
-	-- serveurs partis de la meme graine divergeraient des le premier convoi.
 	table.sort(ports, function(a, b)
 		return a.index < b.index
 	end)
@@ -348,7 +274,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			return
 		end
 
-		-- Un tirage par niveau : le niveau du port EST son debit.
 		local armed = false
 		for _ = 1, source.level do
 			if rng:NextNumber() < Config.TRADE_SHIP_CHANCE then
@@ -360,13 +285,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			continue
 		end
 
-		--[[
-			Partenaires possibles, ponderes par niveau.
-
-			Un port etranger de niveau 3 apparait trois fois dans le tirage : les
-			grandes places commerciales attirent naturellement plus de trafic,
-			sans avoir a ecrire de regle pour le dire.
-		]]
 		local candidates: { number } = {}
 		for i, other in ports do
 			if canTrade(state, source.slot, other.slot) then
@@ -396,22 +314,12 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			path = path,
 			step = 1,
 			targetTile = target.index,
-			-- Port d'attache : il faut savoir qui paie a l'arrivee, et le
-			-- proprietaire du navire a pu changer entre-temps.
 			homeTile = source.index,
 		})
 		afloat += 1
 	end
 end
 
---[[
-	Le convoi arrive a bon port.
-
-	Tout est reverifie ici plutot qu'au depart : entre le depart et l'arrivee,
-	le port de destination a pu etre detruit, capture, ou un embargo a pu tomber.
-	Payer sur la foi des conditions de depart reviendrait a recompenser une
-	route qui n'existe plus.
-]]
 local function resolveTrade(state: GameState, boat: GameState.Boat)
 	local destination = state.buildings[boat.targetTile]
 	if not destination or destination.kind ~= Config.BUILDING.PORT then
@@ -442,18 +350,6 @@ local function resolveTrade(state: GameState, boat: GameState.Boat)
 	state:notify(`\u{1F6A2} Convoi de {seller.name} accoste : +{rounded} or.`, "good", buyer.slot)
 end
 
---=============================================================================
--- Porte-avions de patrouille
---=============================================================================
-
---[[
-	Synchronise la flotte de patrouille avec les bases navales.
-
-	Un porte-avions par base : on en cree un quand une base apparait, on le
-	retire quand elle disparait ou change de main. Passer par cette
-	reconciliation plutot que par des evenements evite toute flotte fantome
-	apres une capture ou une frappe nucleaire.
-]]
 local function syncCarriers(state: GameState)
 	local seen: { [number]: boolean } = {}
 
@@ -469,8 +365,6 @@ local function syncCarriers(state: GameState)
 			continue
 		end
 
-		-- La base a change de main : le porte-avions suit son nouveau
-		-- proprietaire plutot que de rester au service du vaincu.
 		boat.slot = base.slot
 		seen[boat.homeTile] = true
 	end
@@ -489,22 +383,12 @@ local function syncCarriers(state: GameState)
 				step = 1,
 				targetTile = index,
 				homeTile = index,
-				-- L'angle de depart derive de la tuile : deux bases voisines
-				-- n'ont pas leurs porte-avions superposes.
 				angle = (index % 360) * math.pi / 180,
 			})
 		end
 	end
 end
 
---[[
-	Patrouille et interception.
-
-	L'orbite est purement geometrique — pas de trajectoire a calculer, pas de
-	collision a resoudre. Un transport ennemi a portee perd une fraction de ses
-	troupes a chaque tick, et coule s'il descend sous le seuil d'embarquement :
-	longer une cote defendue coute cher, la contourner coute du temps.
-]]
 local function stepCarriers(state: GameState)
 	for _, boat in state.boats do
 		if boat.kind ~= KIND_CARRIER then
@@ -558,10 +442,6 @@ local function stepCarriers(state: GameState)
 	end
 end
 
---=============================================================================
--- Tick
---=============================================================================
-
 function Navy.step(state: GameState, rng: Random)
 	syncCarriers(state)
 	stepCarriers(state)
@@ -572,12 +452,10 @@ function Navy.step(state: GameState, rng: Random)
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
 		if boat.kind == KIND_CARRIER then
-			continue -- la patrouille est geree plus haut, sans chemin a suivre
+			continue
 		end
 		local speed = Config.BOAT_SPEED * state:doctrineOf(boat.slot).boatSpeed
 
-		-- Avance le long du chemin, en interpolant pour un mouvement fluide
-		-- cote client meme a 10 ticks/seconde.
 		local remaining = speed
 		while remaining > 0 and boat.step <= #boat.path do
 			local nextTile = boat.path[boat.step]

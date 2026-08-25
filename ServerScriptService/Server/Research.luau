@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique + hooks chantier D (spawn au clic).
+	Avancement technologique + hooks chantier D/F.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +13,10 @@ local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 ChantierB.install(GameState, Nukes)
+
+Config.MAX_BOATS_PER_PLAYER = 3
+Config.BOAT_TROOP_RATIO = 0.2
+Config.BOAT_RETREAT_LOSS = 0.25
 
 do
 	local origNew = GameState.new
