@@ -1,0 +1,4 @@
+{
+  "name": "Conquest RTS",
+  "install": "bash ./.cursor/install.sh"
+}
