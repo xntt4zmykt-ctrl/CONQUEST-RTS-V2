@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier B+C : attaque, socle, defense, nukes, doomsday, retraite, fallout.
+	Chantier B+C+D : combat, fallout, retraite, spawn au clic.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -43,6 +43,7 @@ function ChantierB.apply(cfg)
 	cfg.DOOMSDAY.ROT_DEATH_SECONDS = 120
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
+	cfg.DEPLOY_DURATION = 15
 end
 
 local function frontPriority(state, index, attackerSlot): number
@@ -104,11 +105,55 @@ function ChantierB.cancelOpposingFronts(state)
 	end
 end
 
+function ChantierB.stripTerritory(state, ps)
+	local slot = ps.slot
+	if ps.capitalTile then
+		state:destroyBuilding(ps.capitalTile)
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(state.owner, index) == slot then
+			state:setOwner(index, NEUTRAL)
+		end
+	end
+	ps.tiles = 1
+	ps.capitalTile = nil
+	ps.awaitingSpawn = true
+	ps.border = {}
+	ps.coast = {}
+end
+
+function ChantierB.placeDisk(state, slot, center)
+	local cx, cy = MapGen.fromIndex(center)
+	local r = Config.SPAWN_RADIUS
+	for dy = -r, r do
+		for dx = -r, r do
+			if dx * dx + dy * dy <= r * r then
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local idx = MapGen.toIndex(nx, ny)
+					if state:isLand(idx) and buffer.readu8(state.owner, idx) == NEUTRAL then
+						state:setOwner(idx, slot)
+					end
+				end
+			end
+		end
+	end
+	state:placeBuilding(center, Config.BUILDING.CAPITAL, slot)
+	local ps = state.players[slot]
+	if ps then
+		ps.capitalTile = center
+		ps.awaitingSpawn = false
+	end
+end
+
 function ChantierB.install(GameState, Nukes)
 	if GameState.__chantierB then
 		ChantierB.apply(Config)
 		if Nukes and not GameState.__chantierFallout then
 			ChantierB.installFallout(GameState, Nukes)
+		end
+		if not GameState.claimSpawn then
+			ChantierB.installSpawn(GameState)
 		end
 		return
 	end
@@ -313,8 +358,88 @@ function ChantierB.install(GameState, Nukes)
 		end
 	end
 
+	ChantierB.installSpawn(GameState)
+
 	if Nukes then
 		ChantierB.installFallout(GameState, Nukes)
+	end
+end
+
+function ChantierB.installSpawn(GameState)
+	if GameState.__chantierSpawn then
+		return
+	end
+	GameState.__chantierSpawn = true
+
+	local origAdd = GameState.addPlayer
+	function GameState.addPlayer(self, player, name, rng, betrayals)
+		local ps = origAdd(self, player, name, rng, betrayals)
+		if ps and typeof(player) == "Instance" then
+			ChantierB.stripTerritory(self, ps)
+		end
+		return ps
+	end
+
+	function GameState.claimSpawn(self, slot: number, index: number): (boolean, string?)
+		local ps = self.players[slot]
+		if not ps then
+			return false, "Faction inconnue."
+		end
+		if not ps.awaitingSpawn then
+			return false, "Tu as deja un territoire."
+		end
+		if index < 0 or index >= Config.TILE_COUNT then
+			return false, "Hors carte."
+		end
+		if not self:isLand(index) then
+			return false, "Choisis une terre."
+		end
+
+		local best = index
+		if buffer.readu8(self.owner, index) ~= NEUTRAL then
+			best = nil
+			local ox, oy = MapGen.fromIndex(index)
+			for r = 1, 6 do
+				for dy = -r, r do
+					for dx = -r, r do
+						local nx, ny = ox + dx, oy + dy
+						if MapGen.inBounds(nx, ny) then
+							local i = MapGen.toIndex(nx, ny)
+							if self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL then
+								best = i
+								break
+							end
+						end
+					end
+					if best then
+						break
+					end
+				end
+				if best then
+					break
+				end
+			end
+		end
+		if not best then
+			return false, "Aucune terre libre ici."
+		end
+
+		ps.tiles = 0
+		ChantierB.placeDisk(self, slot, best)
+		self:notify("Capitale posee. Colonise avant l'ouverture des frontieres.", "good", slot)
+		return true, "Territoire revendique."
+	end
+
+	function GameState.autoPlacePending(self, rng)
+		for slot, ps in self.players do
+			if ps.awaitingSpawn then
+				local center = self:findSpawn(rng)
+				if center then
+					ps.tiles = 0
+					ChantierB.placeDisk(self, slot, center)
+				end
+			end
+		end
 	end
 end
 

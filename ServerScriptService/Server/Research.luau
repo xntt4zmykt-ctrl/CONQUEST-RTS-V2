@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique.
+	Avancement technologique + hooks chantier D (spawn au clic).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,10 +8,76 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage.Shared.Config)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local Eras = require(ReplicatedStorage.Shared.Eras)
+local Remotes = require(ReplicatedStorage.Shared.Remotes)
 local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
 ChantierB.install(GameState, Nukes)
+
+do
+	local origNew = GameState.new
+	function GameState.new(seed: number)
+		local self = origNew(seed)
+		GameState.active = self
+		return self
+	end
+
+	local origLaunch = GameState.launchAttack
+	function GameState.launchAttack(self, attackerSlot, targetSlot)
+		local ps = self.players[attackerSlot]
+		if ps and ps.justClaimed then
+			ps.justClaimed = false
+			return true, nil
+		end
+		return origLaunch(self, attackerSlot, targetSlot)
+	end
+
+	Remotes.get("AttackOrder").OnServerEvent:Connect(function(player, index)
+		local state = GameState.active
+		if not state or typeof(index) ~= "number" then
+			return
+		end
+		local slot = nil
+		for s, ps in state.players do
+			if ps.player == player then
+				slot = s
+				break
+			end
+		end
+		if not slot then
+			return
+		end
+		local ps = state.players[slot]
+		if ps and ps.awaitingSpawn then
+			local ok = state:claimSpawn(slot, math.floor(index))
+			if ok then
+				ps.justClaimed = true
+			end
+		end
+	end)
+
+	task.defer(function()
+		local Bots = require(script.Parent.Bots)
+		local origSpawnAll = Bots.spawnAll
+		function Bots.spawnAll(state, rng, n)
+			state._pendingBots = { rng = rng, n = n }
+		end
+
+		local origStep = GameState.step
+		function GameState.step(self)
+			local deployTicks = math.floor((Config.DEPLOY_DURATION or 15) / Config.TICK_DT)
+			if self._pendingBots and self.tick >= deployTicks then
+				local pending = self._pendingBots
+				self._pendingBots = nil
+				if self.autoPlacePending then
+					self:autoPlacePending(pending.rng)
+				end
+				origSpawnAll(self, pending.rng, pending.n)
+			end
+			return origStep(self)
+		end
+	end)
+end
 
 type GameState = GameState.GameState
 
