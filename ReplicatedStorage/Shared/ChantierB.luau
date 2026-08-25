@@ -38,7 +38,6 @@ end
 function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defender: any, tile: number)
 	local terrain = buffer.readu8(state.terrain, tile)
 	local mag, speed = terrainMagSpeed(terrain)
-	-- OF defensePostRange : un bunker du défenseur à portée → bonus binaire.
 	local posted = false
 	if defender then
 		local cx, cy = MapGen.fromIndex(tile)
@@ -68,7 +67,6 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 		local alt = 1.3 * defenderTroopLoss * (mag / 100) * traitorMod
 		local attackerTroopLoss = 0.6 * current + 0.4 * alt
 		local tilesPerTickUsed = within(defender.troops / (5 * math.max(1, attackTroops)), 0.2, 1.5) * speed * largeDef
-		-- OF: mag *= defensePostDefenseBonus (5), speed *= defensePostSpeedBonus (3)
 		if posted then
 			attackerTroopLoss *= (Config.DEFENSE_POST_BONUS or 5)
 			tilesPerTickUsed *= (Config.DEFENSE_POST_SPEED_BONUS or 3)
@@ -144,8 +142,6 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 end
 
 function ChantierB.apply(cfg)
-	-- Socle troupes OF (Config.ts maxTroops / troopIncreaseRate / startManpower)
-	-- Constantes ~1/5 OF : sessions plus courtes + CCU Roblox (20 %).
 	cfg.START_TROOPS = 8000
 	cfg.HUMAN_START_TROOPS = 12000
 	cfg.BASE_MAX_TROOPS = 0
@@ -153,33 +149,34 @@ function ChantierB.apply(cfg)
 	cfg.MAX_TROOPS_TILE_EXPONENT = 0.6
 	cfg.MAX_TROOPS_LAND_BASE = 10000
 	cfg.CITY_TROOP_INCREASE = 50000
-	cfg.GROWTH_RATE = 0 -- remplacé par formule OF dans install
+	cfg.GROWTH_RATE = 0
 	cfg.MIN_GROWTH = 0
 	cfg.TILE_BASE_COST = 18
 	cfg.NEUTRAL_COST_MULT = 0.88
 	cfg.DEFENSE_DENSITY_K = 1.15
 	cfg.MAX_TILES_PER_TICK = 56
 	cfg.FRONT_TILES_PER_CONTACT = 2.4
-	cfg.DEFENSE_RADIUS = 30 -- OF defensePostRange()
+	cfg.DEFENSE_RADIUS = 30
 	cfg.DEFENSE_STRENGTH = 200
-	cfg.DEFENSE_POST_BONUS = 5 -- OF defensePostDefenseBonus
-	cfg.DEFENSE_POST_SPEED_BONUS = 3 -- OF defensePostSpeedBonus
+	cfg.DEFENSE_POST_BONUS = 5
+	cfg.DEFENSE_POST_SPEED_BONUS = 3
 	cfg.DEFENSE_COST_DIVISOR = 42
-	-- Warships OF (WarshipExecution / DefaultConfig)
-	cfg.WARSHIP_PATROL_RANGE = 40 -- orbite (OF patrol 100, réduit map/feel)
-	cfg.WARSHIP_TARGET_RANGE = 65 -- OF targetting 130 → ~1/2 map scale feel
-	cfg.WARSHIP_SHELL_RATE = 20 -- OF warshipShellAttackRate
+	cfg.WARSHIP_PATROL_RANGE = 40
+	cfg.WARSHIP_TARGET_RANGE = 65
+	cfg.WARSHIP_SHELL_RATE = 20
 	cfg.WARSHIP_MAX_HEALTH = 100
 	cfg.WARSHIP_SHELL_DAMAGE = 22
-	cfg.WARSHIP_TRANSPORT_DAMAGE = 0.28 -- part troupes par shell
+	cfg.WARSHIP_TRANSPORT_DAMAGE = 0.28
 	cfg.WARSHIP_TRADE_SINK = true
-	cfg.WARSHIP_RESPAWN_TICKS = 300 -- 30s @ 10 tick/s
-	cfg.CARRIER_PATROL_RADIUS = 40 -- alias legacy
+	cfg.WARSHIP_RESPAWN_TICKS = 300
+	cfg.CARRIER_PATROL_RADIUS = 40
 	cfg.CARRIER_INTERCEPT_RANGE = 65
 	cfg.RETREAT_LOSS = 0.25
 	cfg.MISSILE_SPEED = 14
+	-- SAM OF (defaultSamRange 70, SAMCooldown ~75)
 	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
+	cfg.SAM_COOLDOWN = 75
 	cfg.NUKE_STATS[1] = { radius = 12, troopKill = 0.38, cost = 550, name = "Bombe atomique" }
 	cfg.NUKE_STATS[2] = { radius = 32, troopKill = 0.62, cost = 1400, name = "Bombe H" }
 	cfg.NUKE_STATS[3].warheads = 8
@@ -190,7 +187,6 @@ function ChantierB.apply(cfg)
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
 	cfg.DEPLOY_DURATION = 15
-	-- Villes : bonus pop calqué sur CITY_TROOP_INCREASE (niveaux 1/2/3)
 	if cfg.CITY_LEVELS then
 		cfg.CITY_LEVELS[1].popCapBonus = 50000
 		cfg.CITY_LEVELS[2].popCapBonus = 100000
@@ -312,8 +308,6 @@ function ChantierB.install(GameState, Nukes)
 	GameState.__chantierB = true
 	ChantierB.apply(Config)
 
-	-- maxTroops OF : 2*(tiles^0.6*scale + landBase) + sum(city levels)*cityIncrease
-	-- bots / 3 comme OF. cityPopBonus déjà alimenté par CITY_LEVELS.
 	function GameState.maxTroops(self, ps)
 		local tiles = math.max(0, ps.tiles)
 		local fromLand = 2 * (tiles ^ Config.MAX_TROOPS_TILE_EXPONENT * Config.MAX_TROOPS_TILE_SCALE + Config.MAX_TROOPS_LAND_BASE)
@@ -325,7 +319,6 @@ function ChantierB.install(GameState, Nukes)
 		return math.max(1, maxT)
 	end
 
-	-- troopIncreaseRate OF : 10 + troops^0.73/4 * (1 - troops/max)
 	local origStepEconomy = GameState.stepEconomy
 	function GameState.stepEconomy(self)
 		for _, ps in self.players do
