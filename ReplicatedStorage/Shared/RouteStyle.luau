@@ -1,7 +1,6 @@
 --!strict
 --[[
-	Style des routes logistiques (2 Parts/tronçon : ballast + deck teinté).
-	Utilisé par Overlay.buildFactoryRoute pour remplacer shoulder/asphalt/néon.
+	Style des routes logistiques (2 Parts/tronçon).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
