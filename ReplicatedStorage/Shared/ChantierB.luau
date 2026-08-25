@@ -127,10 +127,17 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 end
 
 function ChantierB.apply(cfg)
-	cfg.START_TROOPS = 2800
-	cfg.BASE_MAX_TROOPS = 4500
-	cfg.HUMAN_START_TROOPS = 4800
-	cfg.GROWTH_RATE = 0.010
+	-- Socle troupes OF (Config.ts maxTroops / troopIncreaseRate / startManpower)
+	-- Constantes ~1/5 OF : sessions plus courtes + CCU Roblox (20 %).
+	cfg.START_TROOPS = 8000
+	cfg.HUMAN_START_TROOPS = 12000
+	cfg.BASE_MAX_TROOPS = 0
+	cfg.MAX_TROOPS_TILE_SCALE = 200
+	cfg.MAX_TROOPS_TILE_EXPONENT = 0.6
+	cfg.MAX_TROOPS_LAND_BASE = 10000
+	cfg.CITY_TROOP_INCREASE = 50000
+	cfg.GROWTH_RATE = 0 -- remplacé par formule OF dans install
+	cfg.MIN_GROWTH = 0
 	cfg.TILE_BASE_COST = 18
 	cfg.NEUTRAL_COST_MULT = 0.88
 	cfg.DEFENSE_DENSITY_K = 1.15
@@ -153,6 +160,12 @@ function ChantierB.apply(cfg)
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
 	cfg.DEPLOY_DURATION = 15
+	-- Villes : bonus pop calqué sur CITY_TROOP_INCREASE (niveaux 1/2/3)
+	if cfg.CITY_LEVELS then
+		cfg.CITY_LEVELS[1].popCapBonus = 50000
+		cfg.CITY_LEVELS[2].popCapBonus = 100000
+		cfg.CITY_LEVELS[3].popCapBonus = 150000
+	end
 end
 
 local function frontPriority(state, index, attackerSlot): number
@@ -182,7 +195,7 @@ function ChantierB.cancelOpposingFronts(state)
 	for i = 1, #state.attacks do
 		if doomed[i] then
 			continue
-		end
+	end
 		local a = state.attacks[i]
 		for j = i + 1, #state.attacks do
 			if doomed[j] then
@@ -268,6 +281,50 @@ function ChantierB.install(GameState, Nukes)
 	end
 	GameState.__chantierB = true
 	ChantierB.apply(Config)
+
+	-- maxTroops OF : 2*(tiles^0.6*scale + landBase) + sum(city levels)*cityIncrease
+	-- bots / 3 comme OF. cityPopBonus déjà alimenté par CITY_LEVELS.
+	function GameState.maxTroops(self, ps)
+		local tiles = math.max(0, ps.tiles)
+		local fromLand = 2 * (tiles ^ Config.MAX_TROOPS_TILE_EXPONENT * Config.MAX_TROOPS_TILE_SCALE + Config.MAX_TROOPS_LAND_BASE)
+		local fromCities = ps.cityPopBonus or 0
+		local maxT = fromLand + fromCities
+		if ps.isBot then
+			maxT = maxT / 3
+		end
+		return math.max(1, maxT)
+	end
+
+	-- troopIncreaseRate OF : 10 + troops^0.73/4 * (1 - troops/max)
+	local origStepEconomy = GameState.stepEconomy
+	function GameState.stepEconomy(self)
+		for _, ps in self.players do
+			local doctrine = Doctrines.get(ps.doctrine)
+			local era = Eras.accumulate(ps.era)
+			local maxTroops = self:maxTroops(ps)
+			if ps.troops < maxTroops then
+				local toAdd = 10 + (ps.troops ^ 0.73) / 4
+				local ratio = 1 - ps.troops / maxTroops
+				toAdd *= ratio
+				if ps.isBot then
+					toAdd *= 0.5
+				end
+				local humanGrowth = if ps.isBot then 1 else (Config.HUMAN_GROWTH_MULTIPLIER or 1.18)
+				ps.troops = math.min(maxTroops, ps.troops + toAdd * doctrine.growth * era.growth * humanGrowth)
+			end
+			-- or / gold part of original stepEconomy
+			local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
+			local income = territorial
+				+ ps.cityGoldBonus
+				+ ps.portLevels * Config.GOLD_PER_PORT
+				+ ps.capitalCount * Config.GOLD_PER_CAPITAL
+			local modeGold = if self.mode then self.mode.goldMultiplier else 1
+			local humanGold = if ps.isBot then 1 else (Config.HUMAN_GOLD_MULTIPLIER or 1)
+			ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold
+		end
+		-- skip origStepEconomy (fully replaced for troops+gold core)
+		local _ = origStepEconomy
+	end
 
 	local origNew = GameState.new
 	function GameState.new(seed: number)
