@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Avancement technologique + hooks chantier D/F/G.
+	Avancement technologique + hooks chantier D/F/G/H.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,6 +13,7 @@ local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
 local Navy = require(script.Parent.Navy)
 local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
+local AimFront = require(ReplicatedStorage.Shared.AimFront)
 ChantierB.install(GameState, Nukes)
 
 Config.MAX_BOATS_PER_PLAYER = 3
@@ -34,7 +35,30 @@ do
 			ps.justClaimed = false
 			return true, nil
 		end
-		return origLaunch(self, attackerSlot, targetSlot)
+
+		local already = false
+		for _, atk in self.attacks do
+			if atk.attacker == attackerSlot and atk.target == targetSlot then
+				already = true
+				break
+			end
+		end
+
+		local aim = if ps then ps.aimTile else nil
+		if ps then
+			ps.aimTile = nil
+		end
+
+		local ok, message = origLaunch(self, attackerSlot, targetSlot)
+		if ok and typeof(aim) == "number" and not already then
+			for _, atk in self.attacks do
+				if atk.attacker == attackerSlot and atk.target == targetSlot then
+					AimFront.focus(self, atk, math.floor(aim))
+					break
+				end
+			end
+		end
+		return ok, message
 	end
 
 	local origRetreat = GameState.retreatAttack
@@ -63,7 +87,11 @@ do
 			return
 		end
 		local ps = state.players[slot]
-		if ps and ps.awaitingSpawn then
+		if not ps then
+			return
+		end
+		ps.aimTile = math.floor(index)
+		if ps.awaitingSpawn then
 			local ok = state:claimSpawn(slot, math.floor(index))
 			if ok then
 				ps.justClaimed = true
