@@ -1,6 +1,7 @@
 --!strict
 --[[
-	Chantier B+C+D : combat, fallout, retraite, spawn au clic.
+	Chantier B-E : combat OpenFront (attackLogic / tilesPerTick / annexation),
+	fallout, retraite, spawn au clic.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -15,7 +16,115 @@ local Doomsday = require(ReplicatedStorage.Shared.Doomsday)
 local ChantierB = {}
 
 local NEUTRAL = Config.NEUTRAL_SLOT
+local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
+local annexScratch = table.create(4, 0)
+
+local function within(x: number, lo: number, hi: number): number
+	return math.clamp(x, lo, hi)
+end
+
+local function terrainMagSpeed(terrain: number): (number, number)
+	local T = Config.TERRAIN
+	if terrain == T.MOUNTAIN or terrain == T.PEAK then
+		return 120, 25
+	end
+	if terrain == T.HILLS or terrain == T.HIGHLAND then
+		return 100, 20
+	end
+	return 80, 16.5
+end
+
+function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defender: any, tile: number)
+	local terrain = buffer.readu8(state.terrain, tile)
+	local mag, speed = terrainMagSpeed(terrain)
+	local aura = buffer.readu8(state.defense, tile)
+	local posted = aura >= 40
+	local fallout = state.fallout and state.fallout[tile] and state.fallout[tile] > state.tick
+
+	if defender then
+		local tiles = math.max(1, defender.tiles)
+		local defenderTroopLoss = defender.troops / tiles
+		local ratio = within(defender.troops / math.max(1, attackTroops), 0.6, 2)
+		local traitorMod = if defender.traitorUntil and state.tick < defender.traitorUntil then 0.8 else 1
+		local largeDef = state:sizeDefenseFactor(defender)
+		local current = ratio * mag * 0.8 * largeDef * traitorMod
+		local alt = 1.3 * defenderTroopLoss * (mag / 100) * traitorMod
+		local attackerTroopLoss = 0.6 * current + 0.4 * alt
+		local tilesPerTickUsed = within(defender.troops / (5 * math.max(1, attackTroops)), 0.2, 1.5) * speed * largeDef
+		if posted then
+			attackerTroopLoss *= 6
+			tilesPerTickUsed *= 3
+		end
+		if fallout then
+			attackerTroopLoss *= Config.FALLOUT_DEFENSE_MULT
+		end
+		attackerTroopLoss /= state:doctrineOf(attacker.slot).attack
+		attackerTroopLoss *= Doctrines.get(defender.doctrine).defense
+		return attackerTroopLoss, defenderTroopLoss, tilesPerTickUsed
+	else
+		local attackerTroopLoss = if attacker.isBot then mag / 10 else mag / 5
+		local tilesPerTickUsed = within((2000 * math.max(10, speed)) / math.max(1, attackTroops), 5, 100)
+		if fallout then
+			attackerTroopLoss *= Config.FALLOUT_DEFENSE_MULT
+		end
+		return attackerTroopLoss, 0, tilesPerTickUsed
+	end
+end
+
+function ChantierB.attackTilesPerTick(attackTroops: number, defender: any, contact: number): number
+	local adj = math.max(1, contact)
+	if defender then
+		return within(((5 * attackTroops) / math.max(1, defender.troops)) * 2, 0.01, 0.5) * adj * 3
+	end
+	return adj * 2
+end
+
+function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, seed: number)
+	if defenderSlot == NEUTRAL then
+		return
+	end
+	local visited: { [number]: boolean } = {}
+	local queue = { seed }
+	visited[seed] = true
+	local head = 1
+	local pocket: { number } = {}
+	local enclosed = true
+	while head <= #queue do
+		local cur = queue[head]
+		head += 1
+		if buffer.readu8(state.owner, cur) ~= defenderSlot then
+			continue
+		end
+		table.insert(pocket, cur)
+		if #pocket > 280 then
+			return
+		end
+		local n = MapGen.neighbors(cur, annexScratch)
+		for i = 1, n do
+			local nb = annexScratch[i]
+			local owner = buffer.readu8(state.owner, nb)
+			if buffer.readu8(state.terrain, nb) == OCEAN then
+				enclosed = false
+				return
+			end
+			if owner ~= attackerSlot and owner ~= defenderSlot then
+				enclosed = false
+				return
+			end
+			if owner == defenderSlot and not visited[nb] then
+				visited[nb] = true
+				table.insert(queue, nb)
+			end
+		end
+	end
+	if not enclosed or #pocket == 0 then
+		return
+	end
+	for _, index in pocket do
+		state:setOwner(index, attackerSlot)
+	end
+end
 
 function ChantierB.apply(cfg)
 	cfg.START_TROOPS = 2800
@@ -170,30 +279,12 @@ function ChantierB.install(GameState, Nukes)
 	end
 
 	function GameState.tileCost(self, index: number, attackerSlot: number, defender: any): number
-		local terrain = buffer.readu8(self.terrain, index)
-		local cost = Config.TILE_BASE_COST * (Config.TERRAIN_COST[terrain] or 1)
-		if defender then
-			local density = defender.troops / math.max(1, defender.tiles)
-			cost *= 1 + density * Config.DEFENSE_DENSITY_K
-			cost *= Doctrines.get(defender.doctrine).defense
-			cost *= Eras.accumulate(defender.era).defense
-			cost *= self:sizeDefenseFactor(defender)
-		else
-			cost *= Config.NEUTRAL_COST_MULT
-		end
-		local aura = buffer.readu8(self.defense, index)
-		cost *= 1 + aura / Config.DEFENSE_COST_DIVISOR
-		local untilTick = self.fallout and self.fallout[index]
-		if untilTick and untilTick > self.tick then
-			cost *= Config.FALLOUT_DEFENSE_MULT
-		end
-		cost /= self:doctrineOf(attackerSlot).attack
 		local attacker = self.players[attackerSlot]
-		if attacker then
-			local _, costFactor = self:sizeAttackFactors(attacker)
-			cost *= costFactor
+		if not attacker then
+			return 18
 		end
-		return cost
+		local loss = select(1, ChantierB.attackLogic(self, math.max(1, attacker.troops), attacker, defender, index))
+		return math.max(1, loss)
 	end
 
 	local origStepAttacks = GameState.stepAttacks
@@ -214,12 +305,11 @@ function ChantierB.install(GameState, Nukes)
 				continue
 			end
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
-			local budget = atk.troops * Config.ATTACK_SPEND_RATE * speedFactor
-			local frontWidth = math.max(1, atk.frontier.size)
-			local tileLimit = math.clamp(math.floor(frontWidth * Config.FRONT_TILES_PER_CONTACT * speedFactor), 1, Config.MAX_TILES_PER_TICK)
-			local captured = 0
-			local spent = 0
-			while spent < budget and captured < tileLimit do
+			local contact = math.max(1, atk.frontier.size)
+			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
+			local guard = 0
+			while numTiles > 0 and guard < 80 do
+				guard += 1
 				local index = Heap.pop(atk.frontier)
 				if not index then
 					break
@@ -228,19 +318,19 @@ function ChantierB.install(GameState, Nukes)
 				if buffer.readu8(self.owner, index) ~= atk.target then
 					continue
 				end
-				local cost = self:tileCost(index, atk.attacker, defender)
-				if cost > atk.troops then
+				local attLoss, defLoss, used = ChantierB.attackLogic(self, atk.troops, attacker, defender, index)
+				if attLoss > atk.troops then
 					atk.troops = 0
 					break
 				end
-				atk.troops -= cost
-				spent += cost
-				captured += 1
+				atk.troops -= attLoss
+				numTiles -= used
 				if defender then
-					defender.troops = math.max(0, defender.troops - cost * Config.DEFENDER_LOSS_RATIO)
+					defender.troops = math.max(0, defender.troops - defLoss)
 					defender.grudges[atk.attacker] = self.tick + Config.GRUDGE_DURATION
 				end
 				self:setOwner(index, atk.attacker)
+				ChantierB.tryAnnex(self, atk.attacker, atk.target, index)
 				local n = MapGen.neighbors(index, scratch)
 				for k = 1, n do
 					local nb = scratch[k]
