@@ -1,18 +1,6 @@
 --!strict
 --[[
 	Avancement technologique.
-
-	L'ere d'un joueur est le seul verrou de progression du jeu : elle decide ce
-	qu'il peut construire, et notamment quand il accede a l'arme nucleaire.
-
-	L'ancien systeme deverrouillait le nucleaire quand 55 % des terres etaient
-	colonisees. C'etait une erreur : avec douze factions, ce seuil tombait en
-	moins d'une minute, et la course technologique n'existait pas. Ici, chaque
-	joueur paye et developpe son propre avancement, donc le rythme depend de ce
-	qu'il fait et non de ce que font les autres.
-
-	Les conditions ne sont volontairement pas que monetaires : exiger des villes
-	et des bunkers force a construire un empire, pas seulement a accumuler.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,17 +9,13 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local Eras = require(ReplicatedStorage.Shared.Eras)
 local GameState = require(script.Parent.GameState)
+local ChantierB = require(ReplicatedStorage.Shared.ChantierB)
+ChantierB.install(GameState)
 
 type GameState = GameState.GameState
 
 local Research = {}
 
---[[
-	Cout reel de la prochaine ere pour un joueur, remise des laboratoires
-	comprise. C'est ce que la Science apporte : elle ne debloque rien par
-	elle-meme, elle raccourcit la course technologique — donc investir tot dans
-	des laboratoires est un pari sur la duree de la partie.
-]]
 function Research.eraCost(state: GameState, slot: number): number
 	local ps = state.players[slot]
 	if not ps or ps.era >= Eras.MAX_ID then
@@ -44,11 +28,6 @@ function Research.eraCost(state: GameState, slot: number): number
 	return math.floor(Eras.get(ps.era + 1).cost * (1 - discount) * modeMultiplier)
 end
 
---[[
-	Renvoie (possible, raison). La raison est affichee telle quelle au joueur,
-	donc elle doit toujours indiquer ce qui manque exactement — "conditions non
-	remplies" n'aide personne a savoir quoi faire.
-]]
 function Research.canAdvance(state: GameState, slot: number): (boolean, string?)
 	local ps = state.players[slot]
 	if not ps then
@@ -97,9 +76,6 @@ function Research.advance(state: GameState, slot: number): (boolean, string?)
 	ps.gold -= Research.eraCost(state, slot)
 	ps.era += 1
 
-	-- Franchir le seuil atomique est un evenement public : les voisins doivent
-	-- pouvoir reagir avant que le premier missile parte, sinon la menace
-	-- nucleaire n'a aucune valeur diplomatique.
 	if ps.era >= 4 then
 		state:notify(`{next.symbol} {ps.name} entre dans l'ere {next.name} !`, "alert")
 	else
@@ -110,14 +86,6 @@ function Research.advance(state: GameState, slot: number): (boolean, string?)
 	return true, `Ere {next.name} atteinte.`
 end
 
---[[
-	Somme a mettre de cote pour la prochaine ere quand **seul l'or manque**.
-
-	Sans cette notion, un bot depense chaque piece des qu'il peut s'offrir un
-	batiment et n'atteint jamais un palier a cinq chiffres : la simulation ne
-	produisait plus aucun silo. Renvoie 0 tant qu'une autre condition bloque —
-	epargner avant d'avoir le territoire requis serait du gaspillage.
-]]
 function Research.goldReserveFor(state: GameState, slot: number): number
 	local ps = state.players[slot]
 	if not ps or ps.era >= Eras.MAX_ID then
@@ -138,11 +106,6 @@ function Research.goldReserveFor(state: GameState, slot: number): number
 	return Research.eraCost(state, slot)
 end
 
---[[
-	Progression vers l'ere suivante, entre 0 et 1, pour la barre d'interface.
-	On prend le minimum des trois criteres : c'est celui qui bloque, et donc le
-	seul chiffre utile a afficher.
-]]
 function Research.progress(state: GameState, slot: number): number
 	local ps = state.players[slot]
 	if not ps or ps.era >= Eras.MAX_ID then
