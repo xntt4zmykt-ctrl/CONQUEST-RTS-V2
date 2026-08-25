@@ -48,14 +48,13 @@ local function tileDistance(a: number, b: number): number
 end
 
 --[[
-	Or d'un colis : la distance paie, le niveau de l'usine est son debit, et le
-	chargement grossit avec le reseau desservi — une usine qui dessert dix
-	gares expedie des colis dix fois plus riches. La taille du chargement est
-	figee au depart : un reseau qui s'effondre en route ne vide pas un colis
-	deja parti, un reseau qui grandit ne le remplit pas retroactivement.
+	Or d'un "train" / colis — port OF TrainExecution (stops multiples).
+	Base + distance × niveau × liens + bonus multi-arrêts.
 ]]
 local function deliveryValue(distance: number, level: number, links: number): number
-	return (Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE) * level * links
+	local base = Config.TRUCK_GOLD_BASE + distance * Config.TRUCK_GOLD_PER_TILE
+	local stopBonus = 1 + math.min(0.8, (links - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+	return base * level * math.max(1, links) * stopBonus
 end
 
 --[[

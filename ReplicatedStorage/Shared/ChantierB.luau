@@ -1,7 +1,6 @@
 --!strict
 --[[
-	Chantier B-E : combat OpenFront (attackLogic / tilesPerTick / annexation),
-	fallout, retraite, spawn au clic.
+	Chantier B-E : combat OpenFront, fallout, spawn, warships, SAM, tribus config.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -104,7 +103,6 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	visited[seed] = true
 	local head = 1
 	local pocket: { number } = {}
-	local enclosed = true
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -120,11 +118,9 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			local nb = annexScratch[i]
 			local owner = buffer.readu8(state.owner, nb)
 			if buffer.readu8(state.terrain, nb) == OCEAN then
-				enclosed = false
 				return
 			end
 			if owner ~= attackerSlot and owner ~= defenderSlot then
-				enclosed = false
 				return
 			end
 			if owner == defenderSlot and not visited[nb] then
@@ -133,7 +129,7 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			end
 		end
 	end
-	if not enclosed or #pocket == 0 then
+	if #pocket == 0 then
 		return
 	end
 	for _, index in pocket do
@@ -173,7 +169,6 @@ function ChantierB.apply(cfg)
 	cfg.CARRIER_INTERCEPT_RANGE = 65
 	cfg.RETREAT_LOSS = 0.25
 	cfg.MISSILE_SPEED = 14
-	-- SAM OF (defaultSamRange 70, SAMCooldown ~75)
 	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
 	cfg.SAM_COOLDOWN = 75
@@ -187,6 +182,13 @@ function ChantierB.apply(cfg)
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
 	cfg.DEPLOY_DURATION = 15
+	-- Tribus OF (TribeSpawner)
+	cfg.TRIBE_COUNT = 6
+	cfg.TRIBE_START_TROOPS = 4000
+	-- Trains / commerce (TrainExecution feel)
+	cfg.TRUCK_GOLD_BASE = 14
+	cfg.TRUCK_GOLD_PER_TILE = 1.5
+	cfg.TRAIN_STOP_BONUS = 0.12
 	if cfg.CITY_LEVELS then
 		cfg.CITY_LEVELS[1].popCapBonus = 50000
 		cfg.CITY_LEVELS[2].popCapBonus = 100000
@@ -327,8 +329,7 @@ function ChantierB.install(GameState, Nukes)
 			local maxTroops = self:maxTroops(ps)
 			if ps.troops < maxTroops then
 				local toAdd = 10 + (ps.troops ^ 0.73) / 4
-				local ratio = 1 - ps.troops / maxTroops
-				toAdd *= ratio
+				toAdd *= (1 - ps.troops / maxTroops)
 				if ps.isBot then
 					toAdd *= 0.5
 				end
@@ -336,10 +337,7 @@ function ChantierB.install(GameState, Nukes)
 				ps.troops = math.min(maxTroops, ps.troops + toAdd * doctrine.growth * era.growth * humanGrowth)
 			end
 			local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
-			local income = territorial
-				+ ps.cityGoldBonus
-				+ ps.portLevels * Config.GOLD_PER_PORT
-				+ ps.capitalCount * Config.GOLD_PER_CAPITAL
+			local income = territorial + ps.cityGoldBonus + ps.portLevels * Config.GOLD_PER_PORT + ps.capitalCount * Config.GOLD_PER_CAPITAL
 			local modeGold = if self.mode then self.mode.goldMultiplier else 1
 			local humanGold = if ps.isBot then 1 else (Config.HUMAN_GOLD_MULTIPLIER or 1)
 			ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold
@@ -462,8 +460,7 @@ function ChantierB.install(GameState, Nukes)
 		self.doomWarnedAt = self.doomWarnedAt or {}
 		self.doomUnderSince = self.doomUnderSince or {}
 		local cfg = Config.DOOMSDAY
-		local leaderSlot = nil
-		local leaderTiles = 0
+		local leaderSlot, leaderTiles = nil, 0
 		for slot, ps in self.players do
 			if ps.tiles > leaderTiles then
 				leaderTiles = ps.tiles
@@ -501,8 +498,7 @@ function ChantierB.install(GameState, Nukes)
 			if quota <= 0 or ps.tiles <= 0 then
 				continue
 			end
-			local ripped = 0
-			local toStrip: { number } = {}
+			local ripped, toStrip = 0, {}
 			for index = 0, Config.TILE_COUNT - 1 do
 				if buffer.readu8(self.owner, index) == slot then
 					table.insert(toStrip, index)
@@ -527,7 +523,6 @@ function ChantierB.install(GameState, Nukes)
 	end
 
 	ChantierB.installSpawn(GameState)
-
 	if Nukes then
 		ChantierB.installFallout(GameState, Nukes)
 	end
@@ -538,7 +533,6 @@ function ChantierB.installSpawn(GameState)
 		return
 	end
 	GameState.__chantierSpawn = true
-
 	local origAdd = GameState.addPlayer
 	function GameState.addPlayer(self, player, name, rng, betrayals)
 		local ps = origAdd(self, player, name, rng, betrayals)
@@ -547,7 +541,6 @@ function ChantierB.installSpawn(GameState)
 		end
 		return ps
 	end
-
 	function GameState.claimSpawn(self, slot: number, index: number): (boolean, string?)
 		local ps = self.players[slot]
 		if not ps then
@@ -562,7 +555,6 @@ function ChantierB.installSpawn(GameState)
 		if not self:isLand(index) then
 			return false, "Choisis une terre."
 		end
-
 		local best = index
 		if buffer.readu8(self.owner, index) ~= NEUTRAL then
 			best = nil
@@ -591,13 +583,11 @@ function ChantierB.installSpawn(GameState)
 		if not best then
 			return false, "Aucune terre libre ici."
 		end
-
 		ps.tiles = 0
 		ChantierB.placeDisk(self, slot, best)
 		self:notify("Capitale posee. Colonise avant l'ouverture des frontieres.", "good", slot)
 		return true, "Territoire revendique."
 	end
-
 	function GameState.autoPlacePending(self, rng)
 		for slot, ps in self.players do
 			if ps.awaitingSpawn then
