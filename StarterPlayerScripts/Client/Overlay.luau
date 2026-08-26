@@ -70,6 +70,14 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	root.Parent = parent
 	self.root = root
 
+	-- V78 : rotation cylindre plat cuite une fois (recette V75 footprintRot /
+	-- feel N130). Plus de CFrame.Angles a chaque spawn navire.
+	-- fromEulerAnglesYXZ(0, 0, rad(90)) ≡ Angles(0, 0, 90°) (rx=0, ry=0 → Z seul).
+	-- Y + 0.12 inchange. Tween Size/Transparency inchange. Skip missiles
+	-- inchange. LandingSplash / DeliveryPulse inchanges (leftover V79 / V80).
+	-- Distinct de V77 (Preview hover). Distinct de V75 (Preview, pas Overlay).
+	self.wakeRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+
 	return self
 end
 
@@ -742,7 +750,8 @@ local function trackUnit(
 			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
 			wake.Shape = Enum.PartType.Cylinder
 			wake.Transparency = 0.34
-			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+			-- V78 : translation * rot cuit. Plus de CFrame.Angles spawn.
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * self.wakeRot
 			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.16, 9, 9),
 				Transparency = 1,
@@ -796,6 +805,7 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
 				splash.Shape = Enum.PartType.Cylinder
 				splash.Transparency = 0.18
+				-- Leftover V79 : CFrame.Angles despawn (feel N131, Y + 0.14).
 				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
 				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 					Size = Vector3.new(0.18, 15, 15),
