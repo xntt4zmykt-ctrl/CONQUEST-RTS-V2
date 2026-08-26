@@ -3458,6 +3458,200 @@ do
 end
 
 do
+	-- Missiles inbound : removePlayer annule une ogive visee sur le disparu
+	-- (contrat B). Pas de remboursement. Le slot recycle n'herite pas le crater.
+	local state = GameState.new(9800)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(111), 0)
+	local victim = state:addPlayer(nil, "Cible", Random.new(112), 0)
+	if not bomber or not victim then
+		fail("nuke inbound — spawn impossible")
+	else
+		local target = victim.capitalTile
+		if not target then
+			fail("nuke inbound — capitale victime introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			bomber.gold = 5000
+			bomber.troops = 8000
+			table.insert(state.missiles, {
+				id = 1,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.5,
+				speed = Config.MISSILE_SPEED,
+			})
+			local goldBefore = bomber.gold
+			local gone = victim.slot
+			state:removePlayer(gone)
+			if #state.missiles ~= 0 then
+				fail(`nuke inbound — {#state.missiles} missile(s) encore en vol`)
+			elseif bomber.gold ~= goldBefore then
+				fail(`nuke inbound — or du tireur {bomber.gold} (remboursement ?)`)
+			else
+				local heir = state:addPlayer(nil, "Heritier", Random.new(113), 0)
+				if not heir then
+					fail("nuke inbound — recycle impossible")
+				else
+					local troopsBefore = heir.troops
+					for _ = 1, 40 do
+						Nukes.step(state, Random.new(9), function() end)
+					end
+					if heir.troops < troopsBefore then
+						fail(`nuke inbound — heritier frappe ({troopsBefore} -> {heir.troops})`)
+					else
+						print("nuke inbound : ogive annulee, pas de remboursement, heritier intact")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Une frappe deja visee sur un tiers survit au recycle d'un autre slot.
+	local state = GameState.new(9801)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(114), 0)
+	local bystander = state:addPlayer(nil, "Temoin", Random.new(115), 0)
+	local marked = state:addPlayer(nil, "Marque", Random.new(116), 0)
+	if not bomber or not bystander or not marked then
+		fail("nuke third-party — spawn impossible")
+	else
+		local target = marked.capitalTile
+		if not target then
+			fail("nuke third-party — capitale introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			table.insert(state.missiles, {
+				id = 2,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.2,
+				speed = Config.MISSILE_SPEED,
+			})
+			state:removePlayer(bystander.slot)
+			if #state.missiles ~= 1 then
+				fail(`nuke third-party — missile tiers retire ({#state.missiles} restant)`)
+			elseif state.missiles[1].slot ~= bomber.slot then
+				fail("nuke third-party — mauvais missile conserve")
+			else
+				print("nuke third-party : frappe visee sur un tiers conservee")
+			end
+		end
+	end
+end
+
+do
+	-- Le tireur qui part perd ses missiles (comme ses fronts terre).
+	local state = GameState.new(9802)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Part", Random.new(117), 0)
+	local victim = state:addPlayer(nil, "Reste", Random.new(118), 0)
+	if not bomber or not victim then
+		fail("nuke attacker leave — spawn impossible")
+	else
+		local target = victim.capitalTile or 0
+		local tx, ty = MapGen.fromIndex(target)
+		table.insert(state.missiles, {
+			id = 3,
+			slot = bomber.slot,
+			kind = Config.NUKE.ATOM,
+			x = tx,
+			y = ty,
+			sx = tx,
+			sy = ty,
+			tx = tx,
+			ty = ty,
+			progress = 0.3,
+			speed = Config.MISSILE_SPEED,
+		})
+		local gone = bomber.slot
+		state:removePlayer(gone)
+		for _, missile in state.missiles do
+			if missile.slot == gone then
+				fail("nuke attacker leave — missile du disparu encore en vol")
+				break
+			end
+		end
+		print("nuke attacker leave : missiles du tireur detruits")
+	end
+end
+
+do
+	-- N31 : findSeaPath poole reste deterministe (meme trajet, appels successifs).
+	local seaState = GameState.new(31415)
+	local coastal: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1 do
+		if seaState:isLand(index) and MapGen.isCoastal(seaState.terrain, index) then
+			table.insert(coastal, index)
+			if #coastal >= 400 then
+				break
+			end
+		end
+	end
+	local fromTile: number? = nil
+	local toTile: number? = nil
+	for _, first in coastal do
+		for _, second in coastal do
+			if first ~= second then
+				local path = Navy.findSeaPath(seaState, first, second)
+				if path and #path >= 2 then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+		end
+		if fromTile then
+			break
+		end
+	end
+	if not fromTile or not toTile then
+		fail("findSeaPath pool — aucune paire cotiere reliee")
+	else
+		local p1 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p2 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p3 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local function same(a: { number }?, b: { number }?): boolean
+			if not a or not b or #a ~= #b then
+				return false
+			end
+			for i = 1, #a do
+				if a[i] ~= b[i] then
+					return false
+				end
+			end
+			return true
+		end
+		if not p1 or not same(p1, p2) or not same(p1, p3) then
+			fail("findSeaPath pool — trajet non deterministe entre appels successifs")
+		else
+			local back = Navy.findSeaPath(seaState, toTile, fromTile)
+			local again = Navy.findSeaPath(seaState, fromTile, toTile)
+			if not same(p1, again) then
+				fail("findSeaPath pool — parent scratch pollue apres un autre trajet")
+			elseif not back then
+				fail("findSeaPath pool — trajet inverse introuvable")
+			else
+				print(`findSeaPath pool : {#p1} tuiles, 4 appels identiques`)
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
