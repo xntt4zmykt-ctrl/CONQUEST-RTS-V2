@@ -897,6 +897,30 @@ check("pose et capture de chaque type de batiment", function()
 		`la voie ne s'allonge pas : {atStart} puis {partway}`
 	)
 
+	-- N110 : lift cuit dans layer.origin. Deux frames pendant le chantier :
+	-- Parts stables, Y asphalt ≠ shoulder. Leftover N109 (câble) est dans
+	-- modeles procéduraux. Recette visual V61, portee pas mergee.
+	assert(sample and sample.construction, "chantier absent a mi-voie")
+	local function namedPart(model, name)
+		for _, child in model:GetChildren() do
+			if child.Name == name then
+				return child
+			end
+		end
+		return nil
+	end
+	local road = namedPart(sample.model, "Road")
+	local shoulder = namedPart(sample.model, "Shoulder")
+	local mark = namedPart(sample.model, "CenterMark")
+	assert(road and shoulder and mark, "calques de voie absents")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift chaussee = accotement")
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(namedPart(sample.model, "Road"), road), "Road recree")
+	assert(rawequal(namedPart(sample.model, "Shoulder"), shoulder), "Shoulder recree")
+	assert(rawequal(namedPart(sample.model, "CenterMark"), mark), "CenterMark recree")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres interpolation")
+
 	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
 	-- libere — sinon il resterait a tourner pour rien a chaque image.
 	for _ = 1, 30 do
@@ -1026,6 +1050,23 @@ check("modeles procéduraux : le palier change la silhouette", function()
 			`{name} : la hauteur de reference ne suit pas le palier`
 		)
 	end
+
+	-- N109 : câble Y depuis rest, plus de Vector3.new. Leftover N107/N108
+	-- (houle / feuillage) reste dans construction du monde. Radar / flag /
+	-- boom inchanges. Factory sans câble : animate ne lève pas.
+	-- Recette visual V60, portee pas mergee.
+	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	Building.animate(factory, 1, 1 / 60)
+	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local cable = port:FindFirstChild("PortCraneCable")
+	assert(cable and cable.CFrame, "PORT sans câble")
+	local rest = cable:GetAttribute("RestCFrame")
+	assert(rest, "câble sans RestCFrame")
+	local restY = rest.Y
+	Building.animate(port, 1, 1 / 60)
+	Building.animate(port, 2, 1 / 60)
+	assert(rawequal(port:FindFirstChild("PortCraneCable"), cable), "Part câble recreee")
+	assert(cable.CFrame.Y ~= restY, "câble n'a pas bouge")
 end)
 
 check("apercu de placement pour chaque batiment", function()
