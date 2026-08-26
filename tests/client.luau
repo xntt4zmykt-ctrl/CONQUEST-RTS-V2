@@ -1354,8 +1354,11 @@ check("navires, missiles et interpolation", function()
 	assert(overlay.units[3].targetX == 50 and overlay.units[3].targetY == 55, "missile target non mute")
 	assert(rawequal(overlay.units[3], missileUnit), "missile unit non recycle")
 	local beforeX = overlay.units[3].currentX
+	local beforeY = overlay.units[3].currentY
+	-- V56 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover V55.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
+	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
