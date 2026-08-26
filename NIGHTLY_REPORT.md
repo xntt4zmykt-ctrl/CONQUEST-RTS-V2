@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 41)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 42)
 
-Déclencheur : ouverture de la **PR #125** (`cursor/analyse-nocturne-du-codebase-5c7e`) — câble PORT, lift voie, specs N111–N112.
+Déclencheur : ouverture de la **PR #128** (`cursor/analyse-nocturne-du-codebase-04e7`) — `applyRouteProgress` nombres, `dirtyHead`, specs N113–N114.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-04e7`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#125.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-846c`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#128.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `applyRouteProgress` interpolle `cx, cy, cz` en nombres (N111). `stepRebuilds` consomme via `dirtyHead` (N112). Câble (N109), lift (N110), houle (N107), feuillage (N108), camion (N105) et recycle Ground/Border (N106) restent.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `applyRouteProgress` compose `CFrame.new(cx, cy, cz) * segment.rot` (N113). `stepRebuilds` compacte le préfixe consommé de `dirtyQueue` au seuil 32 (N114). Nombres (N111), `dirtyHead` (N112), câble (N109), lift (N110), houle (N107), feuillage (N108), camion lerp (N105) et recycle Ground/Border (N106) restent.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #125 (passe 40) : claims vérifiés.** Câble PORT Y nombres (N109) ; lift cuit dans `layer.origin` (N110). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #128 (passe 41) : claims vérifiés.** Interpolation nombres `ox/dx` (N111) ; curseur `dirtyHead` (N112). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #125 a documenté (N111, N112)**.
+Cette passe a **livré ce que #128 a documenté (N113, N114)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #125
+## 2. Revue PR #128
 
-| Claim #125 | Réalité à l’ouverture |
+| Claim #128 | Réalité à l’ouverture |
 |---|---|
-| `BuildingModels.animate` câble (N109) | Oui. Y en nombres depuis `RestCFrame`, un `CFrame.new`. Plus de `Vector3.new` 60 Hz. Amplitude 0.35. Radar / flag / boom `CFrame.Angles` inchangés. Recette visual V60, pas merger `a0d3`. |
-| `applyRouteProgress` lift (N110) | Oui. `layer.origin` cuit à la pose. Hot path sans `+ Vector3.new(0, lift, 0)`. LookAt conservé. Recette visual V61, pas merger `3e1a`. |
-| Specs N111–N112 | **Corrigés ici.** N111 = ox/oy/oz + dx/dy/dz, interpolation nombres (recette visual V62 déjà fermée sur `65f4` — **porté, pas mergé**). N112 = `dirtyHead` + truncate, plus de `table.remove(1)`. |
+| `applyRouteProgress` nombres (N111) | Oui. `layer.ox/oy/oz` + `segment.dx/dy/dz` cuits à la pose. Hot path : `cx = ox + dx*t`. LookAt encore 60 Hz (leftover N113). Recette visual V62, pas merger `65f4`. |
+| `stepRebuilds` `dirtyHead` (N112) | Oui. Curseur + `table.clear` quand la file est consommée. Plus de `table.remove(1)`. Préfixe mort tant que la vague n’est pas rattrapée (leftover N114). |
+| Specs N113–N114 | **Corrigés ici.** N113 = `segment.rot` cuit, `CFrame.new * rot` (recette visual V63 déjà fermée sur `f5e9` — **porté, pas mergé**). N114 = compact in-place seuil 32, pas de `table.remove`. |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #123 (`d317` / `46a1`), feel jusqu’à #125, visuelles #39/…/#124 (`65f4` V62) / `f5e9` (V63 `segment.rot` **fermé** + leftover V64). **#125 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#123) reste distincte. Ne pas merger visual `f5e9` / `65f4` / `3e1a` ni hardening `d317` / `46a1` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #127 (`46a1` / `e488`), feel jusqu’à #128, visuelles #39/…/#126 (`f5e9` V63 **fermé**) / `3062` (V64 camion `segRot` **fermé** + leftover V65 unités lookAt). **#128 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#127) reste distincte. Ne pas merger visual `3062` / `f5e9` / `65f4` ni hardening `e488` / `46a1` sans rebase.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N111–N112 du rapport #125.
+Feel #19 inchangé. Pas de réinvention : N113–N114 du rapport #128.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `applyRouteProgress` arithmétique Vector3 60 Hz (N111) | `Overlay.luau` (`buildFactoryRoute` calques + `applyRouteProgress`), `tests/client.luau` (asserts dans le check pose/capture existant) | Leftover N110. Cuire `layer.ox/oy/oz` et `segment.dx/dy/dz` à la pose. Hot path : `t = visible - shown / 2` ; `cx, cy, cz = ox + dx*t, …` ; `CFrame.lookAt(Vector3.new(cx,cy,cz), Vector3.new(cx+dx,…))`. LookAt conservé. `part.Size` = API. Lift / câble / camion / houle / feuillage **inchangés** (N110/N109/N105/N107/N108). Recette visual V62 déjà sur `65f4`, **pas** merger. Cosmétique (pose). 0 chantier → zéro alloc. |
-| `stepRebuilds` `table.remove(1)` O(n) (N112) | `WorldRenderer.luau` (`new` + `stepRebuilds`), `tests/client.luau` (asserts dans construction + deltas existants) | Leftover N106. Curseur `dirtyHead`, truncate `table.clear` quand la file est consommée. Plus de `table.remove`. `markChunkDirty` / `table.insert` inchangés. Recycle Ground/Border **inchangé** (N106). `meshKeyAt` **inchangé** (N104). Houle / feuillage **inchangés** (N107/N108). Pas d’autorité (file client). 0 dirty → zéro travail. |
+| `applyRouteProgress` lookAt deux Vector3 60 Hz (N113) | `Overlay.luau` (`buildFactoryRoute` calques + `applyRouteProgress`), `tests/client.luau` (asserts dans le check pose/capture existant) | Leftover N111. Cuire `segment.rot = CFrame.lookAt(Vector3.zero, direction)` à la pose. Hot path : `CFrame.new(cx, cy, cz) * segment.rot`. Plus de `CFrame.lookAt` 60 Hz. `part.Size` = API. Nombres / lift / câble / camion / houle / feuillage / unités **inchangés** (N111/N110/N109/N105/N107/N108/N103). Recette visual V63 déjà sur `f5e9`, **pas** merger. Cosmétique (pose). 0 chantier → zéro alloc. |
+| `dirtyQueue` préfixe consommé non compacté (N114) | `WorldRenderer.luau` (`stepRebuilds` + `DIRTY_COMPACT_HEAD=32`), `tests/client.luau` (asserts dans construction + deltas existants) | Leftover N112. Après la boucle budget, si `dirtyHead > 32` et file non vide : copie in-place des restants vers l’index 1, nil du surplus, `dirtyHead = 1`. Plus de `table.remove`. Drain complet N112 **inchangé**. Recycle Ground/Border **inchangé** (N106). Pas d’autorité (file client). 0 dirty → zéro travail. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), lookAt chantier deux Vector3 (**N113**), compact préfixe `dirtyQueue` (**N114**). `PlacementPreview.resolve` ctx déjà **N92**. `self.ranked` inner déjà **N97**. Overlay `trackUnit` extra déjà **N98**. Hover déjà **N99**. `rankByTiles` déjà **N100**. `targetX` déjà **N101**. `BORDER_PASSES` déjà **N102**. lookAt unités déjà **N103**. `meshKeyAt` déjà **N104**. Camion déjà **N105**. Parts Ground déjà **N106**. Houle déjà **N107**. Feuillage déjà **N108**. Câble déjà **N109**. Lift déjà **N110**. `else {}` overlay-nil hors passe.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), lookAt camion deux Vector3 (**N115**), lookAt unités deux Vector3 (**N116**). `PlacementPreview.resolve` ctx déjà **N92**. `self.ranked` inner déjà **N97**. Overlay `trackUnit` extra déjà **N98**. Hover déjà **N99**. `rankByTiles` déjà **N100**. `targetX` déjà **N101**. `BORDER_PASSES` déjà **N102**. lookAt unités déjà **N103**. `meshKeyAt` déjà **N104**. Camion lerp déjà **N105**. Parts Ground déjà **N106**. Houle déjà **N107**. Feuillage déjà **N108**. Câble déjà **N109**. Lift déjà **N110**. Nombres déjà **N111**. `dirtyHead` déjà **N112**. `else {}` overlay-nil hors passe.
 
 ---
 
@@ -80,53 +80,53 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, spawn via `navalBasesBySlot` (N65). Ciblage obus = `carrierBuf`/`targetBuf` recyclés **(N67)**. Pas de spatial hash.
 - **Posted bunker** = index `bunkersBySlot`. **Posted SAM** = `samsBySlot`. **Posted SILO** = `silosBySlot`. **Posted FACTORY** = `factoriesBySlot`. **Tous** = `buildingsBySlot`. **PORT** = `portsByTile`. **Posted NAVAL_BASE** = `navalBasesBySlot`.
 - **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). Playing 10 Hz ; lobby vide et ended → 1 Hz.
-- Overlay `stepInterpolation` X/Z monde + un `lookAt` unités (**N103**) **et** camion (**N105**). `rebuildChunk` hisse `meshKeyAt` (**N104**) et recycle Ground/Border par chunk (**N106**). Houle océan (**N107**) et feuillage (**N108**) = nombres + un `CFrame.new`. Câble PORT (**N109**) = nombres + un `CFrame.new`. Lift voie (**N110**) cuit dans `layer.origin`. Arithmétique `origin + direction * t` **fermée** (**N111**). `table.remove(dirtyQueue, 1)` **fermé** (**N112**). LookAt chantier deux Vector3 encore 60 Hz (**N113**). Préfixe consommé de `dirtyQueue` non compacté tant que la file n’est pas vide (**N114**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- Overlay `stepInterpolation` X/Z monde + un `lookAt` unités (**N103**) **et** camion lerp (**N105**). `rebuildChunk` hisse `meshKeyAt` (**N104**) et recycle Ground/Border par chunk (**N106**). Houle océan (**N107**) et feuillage (**N108**) = nombres + un `CFrame.new`. Câble PORT (**N109**) = nombres + un `CFrame.new`. Lift voie (**N110**) cuit dans `layer.origin`. Arithmétique `origin + direction * t` **fermée** (**N111**). `table.remove(dirtyQueue, 1)` **fermé** (**N112**). LookAt chantier **fermé** (**N113**). Compact préfixe `dirtyQueue` **fermé** (**N114**). LookAt camion deux Vector3 encore 60 Hz (**N115**). LookAt unités deux Vector3 encore 60 Hz (**N116**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N113–N114)
+## 5. Issues worker-ready (nouveaux, N115–N116)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N112 = faits. N22 = **N67 fait**. N27 = doc only. **V62 / N111** fermés ici (portés, pas mergés ; V62 déjà livré visuel `65f4`). **N112** fermé ici (pas d’équivalent visuel). **V63** fermé visuel `f5e9` — leftover feel = **N113** (porter `segment.rot`, ne pas merger).
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N114 = faits. N22 = **N67 fait**. N27 = doc only. **V63 / N113** fermés ici (portés, pas mergés ; V63 déjà livré visuel `f5e9`). **N114** fermé ici (pas d’équivalent visuel). **V64** fermé visuel `3062` — leftover feel = **N115** (porter `route.segRot`, ne pas merger). **V65** ouvert visuel — leftover feel = **N116**.
 
 ---
 
-### ISSUE-N113 — `applyRouteProgress` lookAt deux Vector3 60 Hz (feel)
+### ISSUE-N115 — Overlay camion lookAt deux Vector3 60 Hz (feel)
 
-**Priorité :** P3 alloc client chantier. Leftover explicite de N111 (lerp nombres). Distinct de N111 (nombres déjà), de N110 (lift déjà) et de N105 (camion **livraison** — lookAt conservé). Recette visual V63 **fermée** sur `f5e9` (passe 46, PR visual #124+) — **porter la recette, ne pas merger**. Ne pas toucher WorldRenderer (N112/N106) ni BuildingModels (N109).
+**Priorité :** P3 alloc client livraison. Leftover explicite de N113 (chantier `segment.rot` déjà). Distinct de N113 (voie en pose), de N105 (camion **lerp** déjà en nombres) et de N103 (unités lookAt — le look **change** chaque frame tant que `mag > 0.01`, pas la même recette). Recette visual V64 **fermée** sur `3062` (passe 47 visual, PR visual #126+) — **porter la recette, ne pas merger**. Ne pas toucher WorldRenderer (N114/N112/N106) ni BuildingModels (N109).
 
-**Problème :** N111 ferme `origin + direction * t`. Reste, **par calque de voie en chantier, à chaque frame** : `CFrame.lookAt(Vector3.new(cx, cy, cz), Vector3.new(cx+dx, cy+dy, cz+dz))`. Deux allocs Vector3 **en plus** du `Size = Vector3.new` (API, inévitable). La direction est constante (grille HV, cuit N111) : l’orientation peut être posée **une fois**. Distinct de N111 (lerp nombres), de N110 (lift), de N105 (camion déjà en nombres + lookAt conservé), de N103 (unités lookAt conservé). Recette : cuire `segment.rot` à la construction, composer `CFrame.new(cx, cy, cz) * rot`.
+**Problème :** N113 ferme le lookAt chantier. Reste, **par camion en livraison, à chaque frame** : `CFrame.lookAt(Vector3.new(px, py, pz), Vector3.new(px+dx, py+dy, pz+dz))`. Deux allocs Vector3 **en plus** du `CFrame.Angles` roues (rotation réelle, inévitable). La direction d’un segment de `route.path` est constante (grille HV, assertée au banc, Y lift identique aux deux bouts). Distinct de N113 (chantier `segment.rot`), de N105 (lerp nombres camion), de N103 (unités). Recette : cuire `route.segRot[i] = CFrame.lookAt(Vector3.zero, path[i+1] - path[i])` à `buildFactoryRoute` (après le `path`), composer `CFrame.new(px, py, pz) * route.segRot[segmentIndex]`.
 
-**Pourquoi 20K CCU :** leftover N111. 8 clients × 60 Hz × N voies en chantier (0.35–3 s, pas tout le match) × 3 calques × 2 Vector3 lookAt. Pas d’autorité (pose cosmétique). Changer `dx/dy/dz` sans adapter le look casserait l’assiette. 0 chantier (`construction == nil`) → zéro alloc (déjà `continue`).
+**Pourquoi 20K CCU :** leftover N113. 8 clients × 60 Hz × camions en livraison (pas tout le match) × 2 Vector3 lookAt. Pas d’autorité (pose cosmétique). Changer `path` sans adapter `segRot` casserait l’assiette au virage. 0 livraison (`delivery == nil`) → zéro alloc (déjà `continue`).
 
 **Worker :**
 
-1. Dans `buildFactoryRoute` seulement, poser `segment.rot = CFrame.lookAt(Vector3.zero, direction)` **une fois** (direction déjà cuit N111 ; grille HV donc un axe ≈ 0). Dans `applyRouteProgress` : garder `t` / `cx, cy, cz` (N111) ; poser `part.CFrame = CFrame.new(cx, cy, cz) * segment.rot`. Plus de `CFrame.lookAt` 60 Hz. `part.Size = Vector3.new(...)` **inchangé**. `layer.ox/oy/oz` / `segment.dx/dy/dz` **inchangés** (N111). `layer.origin` / `segment.direction` **peuvent rester**. Radar / flag / boom / câble **inchangés** (N109 déjà). Camion / houle / feuillage / unités **inchangés** (N105/N107/N108/N103). Extra missile **inchangé** (N98). `targetX` **inchangé** (N101). Lift cuit **inchangé** (N110). Interpolation nombres **inchangée** (N111). File dirtyHead **inchangée** (N112).
-2. Ne **pas** éditer `BuildingModels.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `WorldSpace.luau`. Ne pas recycler explosion / wake / splash (événement). Ne pas changer `ROUTE_BUILD_SPEED` / durée 0.35–3 s. Après N111. Recette visual V63 **fermée** sur `f5e9` — porter `segment.rot`, pas merger visual.
-3. Ne pas porter Overlay camion (N105 déjà) ni houle (N107) ni feuillage (N108) ni câble (N109) ni lift (N110) ni lerp nombres (N111 déjà) ni dirtyHead (N112 déjà). Ne pas convertir Radar / Flag / Boom (rotation visible). Ne pas « fermer » `Size` (API). Ne pas « fermer » les lookAt unités / camion (N103/N105 — leftover API distinct, pas N113).
-4. Test : banc client « pose et capture de chaque type de batiment » **doit rester vert** : leftover N111 (`ox`/`dx` nombres, `oy` asphalt ≠ shoulder) **et** leftover N110 (deux `stepInterpolation` → `rawequal` Parts, Y asphalt ≠ shoulder) **et** leftover N105 (dispatch → Parent + pulse) **et** leftover N109 (câble Y ≠ rest, Part stable) **doivent rester verts**. `pavedLength` croît, chantier nil après 30 × 0.2 s. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé. `CFrame.new(cx, cy, cz) * rot` : l’assiette (look −Z le long de `direction`) doit rester identique à `lookAt(centre, centre+dir)`.
-5. Fichiers : `Overlay.luau` (`buildFactoryRoute` calques + `applyRouteProgress` seulement). `tests/client.luau` **seulement si** un assert dans le check pose/capture existant (ne **pas** ajouter un 36e). `BuildingModels.luau` **non**. `WorldRenderer.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur ni visual `f5e9`.
+1. Dans `buildFactoryRoute` seulement, **après** le `path` : poser `segRot` tableau, `segRot[i] = CFrame.lookAt(Vector3.zero, path[i+1] - path[i])` pour `i = 1 .. #path-1`. Stocker `segRot` sur le record `self.routes[...]`. Dans la boucle `route.delivery` de `stepInterpolation` : garder lerp `px/py/pz` (N105) ; poser `frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]`. Plus de `CFrame.lookAt` 60 Hz camion. `CFrame.Angles` roues **inchangé**. `piece.offset` **inchangé**. Construction initiale `truckPart` lookAt `from→to` **peut rester** (une fois, pas 60 Hz). Chantier `segment.rot` **inchangé** (N113). Nombres / lift / câble / houle / feuillage / unités **inchangés** (N111/N110/N109/N107/N108/N103). Extra missile **inchangé** (N98). `targetX` **inchangé** (N101). File dirtyHead / compact **inchangés** (N112/N114).
+2. Ne **pas** éditer `BuildingModels.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `WorldSpace.luau`. Ne pas recycler explosion / wake / splash (événement). Ne pas changer la durée de livraison (`trajetTicks`). Après N113. Recette visual V64 **fermée** sur `3062` — porter `segRot`, pas merger visual.
+3. Ne pas porter Overlay chantier (N113 déjà) ni houle (N107) ni feuillage (N108) ni câble (N109) ni lift (N110) ni lerp nombres (N111 déjà) ni dirtyHead (N112 déjà) ni compact (N114 déjà). Ne pas convertir Radar / Flag / Boom (rotation visible). Ne pas « fermer » `Size` chantier (API). Ne pas « fermer » le lookAt unités (N103 / leftover N116 — look change chaque frame, pas cuisable par segment HV).
+4. Test : banc client « pose et capture de chaque type de batiment » **doit rester vert** : leftover N113 (`rot` origine, `rawequal` après deux frames) **et** leftover N111 (`ox`/`dx` nombres, `oy` asphalt ≠ shoulder) **et** leftover N110 (deux `stepInterpolation` → `rawequal` Parts, Y asphalt ≠ shoulder) **et** leftover N105 (dispatch → Parent + pulse) **et** leftover N109 (câble Y ≠ rest, Part stable) **doivent rester verts**. Après N115 : `segRot[segmentIndex]` `rawequal` d’un frame à l’autre tant que le camion reste sur le même segment. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé. `CFrame.new(px, py, pz) * rot` : l’assiette (look −Z le long du segment HV) doit rester identique à `lookAt(pos, pos+d)`. Virage à angle droit : `segmentIndex` change → `segRot` du nouveau segment, pas une interpolation d’assiette.
+5. Fichiers : `Overlay.luau` (`buildFactoryRoute` path + boucle `route.delivery` de `stepInterpolation` seulement). `tests/client.luau` **seulement si** un assert dans le check pose/capture existant (ne **pas** ajouter un 36e). `BuildingModels.luau` **non**. `WorldRenderer.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur ni visual `3062`.
 
-**Contraintes :** pas de RemoteFunction. Recette visual V63 (`segment.rot`, fermée sur `f5e9`). **N113 feel ≠ N111 (lerp) ≠ N112 (dirtyHead) ≠ visual V63 (déjà livré visuel, ne pas merger).** Non réentrant. Ne pas fusionner avec N114 dans le même worker.
+**Contraintes :** pas de RemoteFunction. Recette visual V64 (`segRot`, fermée sur `3062`). **N115 feel ≠ N113 (chantier rot) ≠ N114 (compact) ≠ N105 (camion lerp) ≠ visual V64 (déjà livré visuel, ne pas merger).** Non réentrant. Ne pas fusionner avec N116 dans le même worker.
 
 ---
 
-### ISSUE-N114 — `dirtyQueue` préfixe consommé non compacté (feel)
+### ISSUE-N116 — Overlay unités lookAt deux Vector3 60 Hz (feel)
 
-**Priorité :** P3 mémoire client file. Leftover explicite de N112 (curseur — truncate seulement quand `dirtyHead > #queue`). Distinct de N112 (plus de `table.remove`) et de N106 (recycle Parts déjà). Pas d’équivalent visuel V63 (V63 = Overlay lookAt). Ne pas toucher Overlay (N113/N111) ni BuildingModels (N109).
+**Priorité :** P3 alloc client unités. Leftover explicite de N103 (lookAt unique déjà, mais deux Vector3 par unité par frame). Distinct de N115 (camion **livraison**, direction HV cuisable) et de N113 (chantier). Recette visual V65 **ouverte** (leftover après V64 camion sur `3062` — le look **change** chaque frame tant que `mag > 0.01`, pas la même recette que `segRot`). Ne pas toucher WorldRenderer ni BuildingModels.
 
-**Problème :** N112 avance `dirtyHead` et ne `table.clear` que lorsque la file est **entièrement** consommée. Pendant une vague (p95 dirty chunks = 7 au banc 6000 ticks, budget = 3 / frame), la file ne se vide pas : le préfixe `1 .. dirtyHead-1` reste alloué, `table.insert` allonge la fin, et `#dirtyQueue` croît jusqu’à la fin de la vague. Distinct de N112 (identité du curseur), de N106 (identité des Parts), de N2 (skip payload). Recette : compact in-place des restants vers l’index 1 quand `dirtyHead > 32` (ou `dirtyHead * 2 > #queue`), puis `dirtyHead = 1`. Pas de `table.remove(1)`.
+**Problème :** N103 hisse un seul `CFrame.lookAt` par unité. Reste, **par unité interpolée, à chaque frame** : `CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX+lookX, py, worldZ+lookZ))`. Deux allocs Vector3 **en plus** du `CFrame.Angles` roulis navire (rotation réelle, inévitable). Immobile (`mag <= 0.01`) : `lookX=0`, `lookZ=-1` → équivalent à `CFrame.new(worldX, py, worldZ)` (regard −Z). En mouvement : le look suit `targetX - currentX` **chaque frame**, donc **pas** cuisable à la pose (contrairement au camion N115 / chantier N113). Distinct de N115 (HV constant), de N105 (camion lerp), de N113 (chantier).
 
-**Pourquoi 20K CCU :** leftover N112. 8 clients × vagues de conquête (maxChanged = 479 tuiles) × préfixe mort qui ne se libère que quand le budget rattrape la file. Pas d’autorité (file client). Un compact qui saute un index laisserait un trou visuel (chunk sale jamais reconstruit) ou un flash (chunk reconstruit deux fois). File vide → déjà truncate N112.
+**Pourquoi 20K CCU :** leftover N103. 8 clients × 60 Hz × (navires + missiles visibles, quelques dizaines) × 2 Vector3 lookAt. Pas d’autorité (pose cosmétique). Unifier le cas immobile sur `CFrame.new` coupe les allocs hors déplacement. Forcer une rot cuite casserait le suivi de cible. 0 unité → zéro alloc.
 
 **Worker :**
 
-1. Dans `WorldRenderer.stepRebuilds` seulement, **après** la boucle budget, si `dirtyHead > 1` et `dirtyHead <= #queue` et `dirtyHead > 32` : copier `queue[dirtyHead..#]` vers `1..n`, nil le surplus, `dirtyHead = 1`. Ne **pas** compact à chaque frame (coût O(restants) inutile si la tête avance de 3). Ne **pas** `table.remove`. `table.clear` du drain complet **inchangé** (N112). `markChunkDirty` / `table.insert` **inchangés**. `rebuildChunk` recycle Ground/Border **inchangé** (N106). `meshKeyAt` **inchangé** (N104). Houle / feuillage **inchangés** (N107/N108).
-2. Ne **pas** éditer `Overlay.luau` / `BuildingModels.luau` / `UnitModels.luau` / `HUD.luau` / `WorldSpace.luau` / `GreedyMesh.luau`. Ne pas porter N113 (lookAt chantier). Après N112. Pas de recette visual — V63 est Overlay.
-3. Ne pas fusionner Ground et Border. Ne pas Destroy le folder. `partCount` inchangé. Océan / SeaFloor / glints / foliage hors file. Seuil 32 = ~10 frames de budget 3 ; ne pas descendre à 1 (compact O(n) chaque frame = pire que N112).
-4. Test : banc client « construction du monde 3D » **et** « deltas de terrain et conquetes classees » **et** « vagues de conquete » **doivent rester verts**. Leftover N112 (`dirtyHead == 1` et `#dirtyQueue == 0` après drain construction) **et** leftover N106 (`partCount` / Ground recyclé) **et** leftover N107/N108 (houle + feuillage) **doivent rester verts**. Deux `applyDelta` successifs → chunks reconstruits, pas de Part orpheline. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
-5. Fichiers : `WorldRenderer.luau` (`stepRebuilds` seulement, éventuellement constante `DIRTY_COMPACT_HEAD`). `tests/client.luau` **seulement si** un assert dans le check construction ou deltas existant (ne **pas** ajouter un 36e). `Overlay.luau` **non**. `BuildingModels.luau` **non**. **Ne pas** éditer le serveur.
+1. Dans `Overlay.stepInterpolation` boucle `self.units` seulement : garder lerp `currentX/Y` (N101) et X/Z monde (N103). Si `mag <= 0.01` : `frame = CFrame.new(worldX, py, worldZ)` (plus de lookAt, regard −Z). Si `mag > 0.01` : **conserver** `CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX+lookX, py, worldZ+lookZ))` — ne **pas** cuire une rot (look change). `CFrame.Angles` roulis navire **inchangé** (`mag > 0.01 and not unit.isMissile`). `UnitModels.place` **inchangé**. Extra missile **inchangé** (N98). `targetX` **inchangé** (N101). Camion / chantier / câble / houle / feuillage **inchangés** (N115 leftover / N113 / N109 / N107 / N108). File dirty **inchangée** (N114).
+2. Ne **pas** éditer `UnitModels.luau` / `BuildingModels.luau` / `WorldRenderer.luau` / `HUD.luau` / `WorldSpace.luau`. Ne pas porter N115 (camion `segRot`) dans ce worker. Après N103. Pas de recette visual fermée — V64 est camion ; V56/N103 ont laissé le lookAt.
+3. Ne pas convertir le lookAt **en mouvement** (orientation live). Ne pas « fermer » `Size` flamme missile (API, `UnitModels`). Ne pas toucher explosion / wake / splash (événement). Ne pas merger visual `1dbb` / `f5e9`.
+4. Test : banc client « navires, missiles et interpolation » **doit rester vert** : leftover N103 (lerp `currentX`/`currentY` sous lookAt unique, navire `extra == nil`, `retreatTinted` conservé) **et** leftover N101 (`targetX`) **et** leftover N98 (extra `rawequal`) **doivent rester verts**. Immobile : pas d’erreur `CFrame.new`. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+5. Fichiers : `Overlay.luau` (boucle `self.units` de `stepInterpolation` seulement). `tests/client.luau` **seulement si** un assert dans le check navires existant (ne **pas** ajouter un 36e). `UnitModels.luau` **non**. `WorldRenderer.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. Compact seuil, pas `table.remove(1)`, pas de deque module. **N114 feel ≠ N113 (lookAt Overlay) ≠ N112 (curseur) ≠ N106 (recycle Parts).** Non réentrant : synchrone, un chunk à la fois. Ne pas fusionner avec N113 dans le même worker.
+**Contraintes :** pas de RemoteFunction. Immobile = `CFrame.new` ; mouvement = lookAt conservé. **N116 feel ≠ N115 (camion HV) ≠ N113 (chantier) ≠ N103 (lookAt unique déjà).** Non réentrant. Ne pas fusionner avec N115 dans le même worker.
 
 ---
 
@@ -135,7 +135,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; câble → **N109 fait** ; lift → **N110 fait** ; nombres chantier → **N111 fait** ; dirtyHead → **N112 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; lookAt chantier → **N113 fait** ; compact dirty → **N114 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -143,7 +143,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; câble → **N109 fait** ; lift → **N110 fait** ; nombres → **N111 fait** ; dirtyHead → **N112 fait**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; lookAt chantier → **N113 fait** ; compact → **N114 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -159,13 +159,13 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert (serveur rate-limite ; client n’envoie jamais) |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34–N110 | (voir rapport #125) | — | **faits** |
-| N111 | `applyRouteProgress` arithmétique Vector3 60 Hz | P3 | **fait** cette passe (nombres ox/dx, recette visual V62) |
-| N112 | `stepRebuilds` `table.remove(dirtyQueue, 1)` O(n) | P3 | **fait** cette passe (curseur + truncate) |
-| N113 | `applyRouteProgress` lookAt deux Vector3 60 Hz | P3 | **nouveau** (`segment.rot`, recette visual V63 fermée sur `f5e9`) |
-| N114 | `dirtyQueue` préfixe consommé non compacté | P3 | **nouveau** (compact seuil 32, pas de recette visual) |
+| N34–N112 | (voir rapport #128) | — | **faits** |
+| N113 | `applyRouteProgress` lookAt deux Vector3 60 Hz | P3 | **fait** cette passe (`segment.rot`, recette visual V63) |
+| N114 | `dirtyQueue` préfixe consommé non compacté | P3 | **fait** cette passe (compact seuil 32) |
+| N115 | Overlay camion lookAt deux Vector3 60 Hz | P3 | **nouveau** (`route.segRot`, recette visual V64 fermée sur `3062`) |
+| N116 | Overlay unités lookAt deux Vector3 60 Hz | P3 | **nouveau** (immobile `CFrame.new` ; mouvement lookAt conservé ; leftover visual V65) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -196,9 +196,9 @@ Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / 
 | `RAIL_RANGE` | 56 | n/a | oui (N84) |
 | `COLLAPSE_MIN_TILES` | 100 | 100 | oui (N86 wrap, N88 scan) |
 | `SPAWN_RADIUS` | 3 | n/a | oui (N93 banc `keep=8`, N94 strip, N55 isolation) |
-| `CHUNK_REBUILDS_PER_FRAME` | 3 | n/a | oui (N102/N104/N106/N112 leftover compact N114) |
+| `CHUNK_REBUILDS_PER_FRAME` | 3 | n/a | oui (N102/N104/N106/N112/N114 compact seuil 32) |
 | `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde, N103 X/Z, N105 TRUCK_LIFT monde) |
-| `ROUTE_BUILD_SPEED` | — | n/a | oui (N110 lift, N111 nombres, leftover N113 lookAt) |
+| `ROUTE_BUILD_SPEED` | — | n/a | oui (N110 lift, N111 nombres, N113 rot) |
 
 ---
 
@@ -218,32 +218,32 @@ allyBuf : bot sans pacte, next nil (N91)
 validTiles : deux resolve CITY, tile identique (N90)
 destroyBuf : leftover A→B, CITY B survit (N89)
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.72
+metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.33 p95TickMs=0.74
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `construction du monde 3D` (N112 `dirtyHead == 1` et `#dirtyQueue == 0` après drain ; N106 leftover `partCount` / Ground recyclé ; N107 deux `step(1/60)` → `#oceanRipples` stable, `rawequal` Part, CFrame X ou Z ≠ `base` ; N108 deux `step` → CFrame.Y couronne ≠ `base`) ; `pose et capture de chaque type de batiment` (N111 `ox`/`dx` nombres, `oy` asphalt ≠ shoulder ; N110 deux `stepInterpolation` pendant chantier → Parts Road/Shoulder/CenterMark `rawequal`, CFrame.Y asphalt ≠ shoulder ; N105 dispatch → camion parenté, interpolation, arrivée `Parent = nil` + pulse) ; `modeles procéduraux` (N109 `Building.create(PORT)` + deux `animate` → `rawequal` Part câble, CFrame.Y ≠ `RestCFrame.Y` ; `animate(FACTORY)` 0 câble sans erreur) ; `deltas de terrain et conquetes classees` (N112 `dirtyHead >= 1` après deux `stepRebuilds`) ; `navires, missiles et interpolation` (N98 extra `rawequal`, N101 `targetX`, N103 lerp `currentX`/`currentY` sous lookAt unique, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` inchangé. `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `init.client.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
+Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact 40 chunks → `dirtyHead == 1` et `#dirtyQueue == 7` puis drain ; leftover N112 `dirtyHead == 1` et `#dirtyQueue == 0` après drain initial ; N106 leftover `partCount` / Ground recyclé ; N107 deux `step(1/60)` → `#oceanRipples` stable, `rawequal` Part, CFrame X ou Z ≠ `base` ; N108 deux `step` → CFrame.Y couronne ≠ `base`) ; `pose et capture de chaque type de batiment` (N113 `rot` à l’origine, `rawequal` après deux frames ; N111 `ox`/`dx` nombres, `oy` asphalt ≠ shoulder ; N110 deux `stepInterpolation` pendant chantier → Parts Road/Shoulder/CenterMark `rawequal`, CFrame.Y asphalt ≠ shoulder ; N105 dispatch → camion parenté, interpolation, arrivée `Parent = nil` + pulse) ; `modeles procéduraux` (N109 `Building.create(PORT)` + deux `animate` → `rawequal` Part câble, CFrame.Y ≠ `RestCFrame.Y` ; `animate(FACTORY)` 0 câble sans erreur) ; `deltas de terrain et conquetes classees` (N114 `dirtyHead <= 32` tant que la file vit ; leftover N112 curseur) ; `navires, missiles et interpolation` (N98 extra `rawequal`, N101 `targetX`, N103 lerp `currentX`/`currentY` sous lookAt unique, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` inchangé. `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `init.client.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass41.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass42.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N111/N112 sont des hoists numériques / curseur client vérifiés par le banc headless.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N113/N114 sont un hoist d’orientation / compact client vérifiés par le banc headless.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N111 n’ajoute **pas** de require (nombres locaux dans Overlay). N112 n’ajoute **pas** de require (`dirtyHead` local dans WorldRenderer). N113 restera dans `Overlay.applyRouteProgress`. N114 restera dans `WorldRenderer.stepRebuilds`.
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N113 n’ajoute **pas** de require (`segment.rot` local dans Overlay). N114 n’ajoute **pas** de require (`DIRTY_COMPACT_HEAD` local dans WorldRenderer). N115 restera dans `Overlay.buildFactoryRoute` / `stepInterpolation`. N116 restera dans `Overlay.stepInterpolation` unités.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
 
 Piège N64 (toujours vrai) : ne **pas** référencer `IS_STATION` depuis `refreshRailNetwork` — le `local` est déclaré plus bas, la closure verrait `nil` au runtime.
 
-Piège N111 : interpoler `ox+dx*t` en nombres. Ne pas « fermer » `CFrame.lookAt(Vector3, Vector3)` (API, leftover N113). Recette visual V62 déjà sur `65f4` — porter, ne pas merger. `layer.origin` / `segment.direction` peuvent rester (construction). Ne pas changer `ROUTE_BUILD_SPEED`.
+Piège N113 : cuire `segment.rot` une fois. `CFrame.new(cx, cy, cz) * rot` doit garder l’assiette look −Z. Recette visual V63 déjà sur `f5e9` — porter, ne pas merger. `part.Size = Vector3.new` reste (API). Ne pas changer `ROUTE_BUILD_SPEED`.
 
-Piège N112 : curseur `dirtyHead`, `table.clear` seulement quand `head > #queue`. Ne pas `table.remove(1)`. Ne pas casser `markChunkDirty` / `self.dirty[chunk]`. Recycle Parts N106 **inchangé**. Stale (`dirty` déjà nil) saute sans compter le budget, comme avant.
+Piège N114 : compact seuil 32, pas à chaque frame. Ne pas `table.remove(1)`. Ne pas compact sous `dirtyHead == 1`. Drain complet N112 **inchangé**. Copie avant nil du surplus (pas de trou). Recycle Parts N106 **inchangé**. Stale (`dirty` déjà nil) saute sans compter le budget, comme avant.
 
-Piège N113 (à venir) : cuire `segment.rot` une fois. `CFrame.new(cx, cy, cz) * rot` doit garder l’assiette look −Z. Recette visual V63 déjà sur `f5e9` — porter, ne pas merger.
+Piège N115 (à venir) : cuire `route.segRot` par segment de `path`, pas une rot unique. Virage = changement d’index, pas slerp. Recette visual V64 déjà sur `3062` — porter, ne pas merger. Roues `CFrame.Angles` **conservées**.
 
-Piège N114 (à venir) : compact seuil, pas à chaque frame. Ne pas `table.remove(1)`. Ne pas compact sous `dirtyHead == 1`. Drain complet N112 **inchangé**.
+Piège N116 (à venir) : immobile = `CFrame.new` (regard −Z). Mouvement = lookAt conservé (look change). Ne pas cuire une rot unité. Roulis `CFrame.Angles` **conservé**. `UnitModels.place` **non** édité.
