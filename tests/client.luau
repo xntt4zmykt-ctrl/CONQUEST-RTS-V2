@@ -1628,6 +1628,11 @@ check("navires, missiles et interpolation", function()
 end)
 
 check("vagues de conquete", function()
+	-- N134 : conquestPulse ring fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Hauteur Y = 3. Caps flash inchanges. Leftover N95 applyDelta pools
+	-- (check deltas), leftover N133 overlay:explosion, leftover N132 pulse
+	-- doivent rester verts. Recette visual V75 leftover evenements, pas
+	-- merger. Overlay / WorldRenderer inchanges.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
