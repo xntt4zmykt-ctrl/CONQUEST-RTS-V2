@@ -54,6 +54,12 @@ local BOT_NAMES = {
 
 local botSlots: { number } = {}
 local scratch = table.create(4, 0)
+-- V35 : contacts frontaliers recycles. Appels sequentiels (decideDiplomacy
+-- x2, decideNavy, decideAttack) — jamais imbriques. Map, pas array :
+-- table.clear, pas de truncate. Slot sans joueur / sans frontiere → vide.
+-- Recette feel N80. Pas reentrant — ne pas appeler pendant qu'un
+-- appelant itere encore.
+local contactBuf: { [number]: number } = {}
 -- V27 : flatten buildingsBySlot une fois par visee (pas × 90 tuiles).
 -- Arrays paralleles, pas un spatial hash. Non reentrant — decideNuke
 -- est unique par bot par tick. blastValue (banc V22) reutilise le meme pool.
@@ -84,11 +90,12 @@ end
 --=============================================================================
 
 -- Factions au contact terrestre, avec la longueur du front partage.
-local function neighborFactions(state: GameState, slot: number): { [number]: number }
+-- V35 : Bots.neighborFactions + contactBuf (recette samsOf / N68 / N80).
+function Bots.neighborFactions(state: GameState, slot: number): { [number]: number }
+	table.clear(contactBuf)
 	local ps = state.players[slot]
-	local contacts: { [number]: number } = {}
 	if not ps then
-		return contacts
+		return contactBuf
 	end
 
 	for index in ps.border do
@@ -98,13 +105,13 @@ local function neighborFactions(state: GameState, slot: number): { [number]: num
 			if state:isLand(nb) then
 				local other = buffer.readu8(state.owner, nb)
 				if other ~= slot then
-					contacts[other] = (contacts[other] or 0) + 1
+					contactBuf[other] = (contactBuf[other] or 0) + 1
 				end
 			end
 		end
 	end
 
-	return contacts
+	return contactBuf
 end
 
 -- Puissance percue d'une faction : ce que le bot compare avant d'attaquer.
@@ -555,7 +562,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 			and mine > theirs * 2.2
 			and rng:NextNumber() < 0.25
 		then
-			local contacts = neighborFactions(state, slot)
+			local contacts = Bots.neighborFactions(state, slot)
 			if contacts[ally] and contacts[ally] > 4 then
 				Diplomacy.breakAlliance(state, slot, ally)
 				return
@@ -567,7 +574,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	-- Jamais au leader quand une coalition est active : s'abriter derriere le
 	-- geant revient a lui offrir la partie.
 	if rng:NextNumber() < 0.3 then
-		local contacts = neighborFactions(state, slot)
+		local contacts = Bots.neighborFactions(state, slot)
 		for other in contacts do
 			if other ~= NEUTRAL and not allies[other] and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
@@ -658,7 +665,7 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 		return
 	end
 
-	local contacts = neighborFactions(state, ps.slot)
+	local contacts = Bots.neighborFactions(state, ps.slot)
 	local hasLandTarget = false
 	for other in contacts do
 		if other ~= NEUTRAL or contacts[NEUTRAL] then
@@ -850,7 +857,7 @@ local function decideAttack(state: GameState, ps: GameState.PlayerState, rng: Ra
 		return
 	end
 
-	local contacts = neighborFactions(state, ps.slot)
+	local contacts = Bots.neighborFactions(state, ps.slot)
 	local bestTarget: number? = nil
 	local bestScore = -math.huge
 	local leader, coalitionActive = dominantLeader(state)
