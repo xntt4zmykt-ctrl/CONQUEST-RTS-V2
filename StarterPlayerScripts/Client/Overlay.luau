@@ -34,6 +34,13 @@ export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
 local colorFor = Theme.factionColor
 local DARK = Color3.fromRGB(29, 35, 43)
+-- V56 : conversion tuile → monde en nombres (meme formule que WorldSpace.tileToWorld).
+-- Le helper allouerait un Vector3 par unite / frame ; il reste le point unique
+-- serveur / batiments / splash — on ne le change pas.
+local TILE = Config.TILE_SIZE
+local HALF_W = Config.WORLD_WIDTH / 2
+local HALF_D = Config.WORLD_DEPTH / 2
+local TILE_HALF = TILE / 2
 
 --=============================================================================
 -- Construction
@@ -656,7 +663,8 @@ end
 -- V55 : targetX/Y + currentX/Y nombres (recette extra mute). Vector2 immuable
 -- aurait force un Vector2.new a chaque lot (10 Hz) et a chaque lerp (60 Hz).
 -- Insert : poser les quatre nombres une fois. Update : muter targetX/Y.
--- Distinct de V52 (extra) / V54 (HUD sort) / Vector3-CFrame 60 Hz (hors passe).
+-- Distinct de V52 (extra) / V54 (HUD sort). V56 ferme Vector3/CFrame 60 Hz
+-- dans stepInterpolation (unites), pas ici.
 -- Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
 local function trackUnit(
 	self: Overlay,
@@ -849,7 +857,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		unit.currentY += (unit.targetY - unit.currentY) * alpha
 
 		local x, y = unit.currentX, unit.currentY
-		local ground = WorldSpace.tileToWorld(x, y)
+		-- V56 : X/Z monde en nombres. Plus de tileToWorld / Vector3.Unit /
+		-- CFrame.new(position) par unite. Un seul lookAt. Immobile = regard -Z
+		-- (meme pose que CFrame.new(x,y,z)). Extra missile inchange (V52).
+		local worldX = x * TILE - HALF_W + TILE_HALF
+		local worldZ = y * TILE - HALF_D + TILE_HALF
 
 		local height
 		if unit.isMissile then
@@ -868,21 +880,17 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		end
 
 		local bob = if unit.isMissile then 0 else math.sin(now * 2.4 + unit.phase) * 0.24
-		local position = Vector3.new(ground.X, height + bob, ground.Z)
+		local py = height + bob
 		local dx = unit.targetX - unit.currentX
 		local dy = unit.targetY - unit.currentY
 		local mag = math.sqrt(dx * dx + dy * dy)
-
-		if mag > 0.01 then
-			local look = Vector3.new(dx, 0, dy).Unit
-			local frame = CFrame.lookAt(position, position + look)
-			if not unit.isMissile then
-				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
-			end
-			UnitModels.place(unit.visual, frame, now + unit.phase, mag)
-		else
-			UnitModels.place(unit.visual, CFrame.new(position), now + unit.phase, 0)
+		local lookX = if mag > 0.01 then dx else 0
+		local lookZ = if mag > 0.01 then dy else -1
+		local frame = CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX + lookX, py, worldZ + lookZ))
+		if mag > 0.01 and not unit.isMissile then
+			frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
 		end
+		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)
 	end
 end
 
