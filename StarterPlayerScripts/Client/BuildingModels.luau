@@ -593,15 +593,31 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 		end
 
 		if child.Name == "Radar" then
-			child.CFrame = rest * CFrame.Angles(0, time * 1.45, 0)
+			-- V70 : translation * yaw. RestCFrame de ces trois pieces
+			-- est une translation pure (block() pose CFrame.new(offset),
+			-- create ajoute position — rotation identite). Donc
+			-- rest * Angles(rx,ry,rz) ≡ CFrame.new(rest.X,Y,Z) *
+			-- fromEulerAnglesYXZ(rx,ry,rz). fromEulerAnglesYXZ ≡ Angles
+			-- ici : Radar/Boom n'ont que Y ; Flag a ry=0 donc X puis Z.
+			-- Plus de CFrame.Angles 60 Hz. Amplitude / frequences
+			-- inchangees. Cable Y inchange (V60). Camera focusX inchangee
+			-- (V69). Roues camion / roulis navire inchanges.
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, time * 1.45, 0)
 		elseif child.Name == "CapitalFlag" then
-			child.CFrame = rest * CFrame.Angles(math.sin(time * 2.4) * 0.045, 0, math.sin(time * 1.7) * 0.035)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(
+					math.sin(time * 2.4) * 0.045,
+					0,
+					math.sin(time * 1.7) * 0.035
+				)
 		elseif child.Name == "PortCraneBoom" then
-			child.CFrame = rest * CFrame.Angles(0, math.sin(time * 0.35) * 0.12, 0)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, math.sin(time * 0.35) * 0.12, 0)
 		elseif child.Name == "PortCraneCable" then
 			-- V60 : Y en nombres depuis rest. Plus de Vector3.new 60 Hz
 			-- (rest + offset). Un CFrame.new. Amplitude 0.35 conservee.
-			-- Radar / flag / boom Angles inchanges (rotation reelle).
+			-- Radar / flag / boom : V70 (rotation, pas translation).
 			-- Feuillage / houle / camion / unites inchanges (V59/V58/V57/V56).
 			child.CFrame = CFrame.new(
 				rest.X,
