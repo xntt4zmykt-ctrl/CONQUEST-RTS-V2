@@ -1519,16 +1519,31 @@ check("camera strategique", function()
 	camera:setMode("overview")
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
+	-- V67 : offset (0,0,d) en nombres. pitch=0 yaw=0 → (0,0,d), Z == focus.Z + distance.
+	-- Leftover V66 (pose translation * rotation) reste. Leftover V65 (yaw unites)
+	-- reste dans le check navires. Leftover V64 (segRot camion) reste dans le
+	-- check pose/capture. Lerp focus leftover V68.
+	camera.pitch = 0
+	camera.targetPitch = 0
+	camera.yaw = 0
+	camera.targetYaw = 0
 	camera:step(1 / 60)
-	-- V66 : pose = translation * rotation, plus de lookAt deux Vector3.
-	-- Stub VectorToWorldSpace = identite, shake 0 → oeil = focus + (0,0,distance).
-	-- Leftover V65 (yaw unites) reste dans le check navires. Leftover V64
-	-- (segRot camion) reste dans le check pose/capture.
 	local pose = camera.camera.CFrame
 	assert(type(pose.X) == "number", "camera CFrame absent")
 	assert(pose.X == camera.focus.X, "oeil X hors focus")
 	assert(pose.Y == camera.focus.Y, "oeil Y hors focus")
 	assert(pose.Z == camera.focus.Z + camera.distance, "oeil Z hors offset")
+	camera.pitch = math.rad(58)
+	camera.targetPitch = math.rad(58)
+	camera:step(1 / 60)
+	pose = camera.camera.CFrame
+	local d = camera.distance
+	local ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
+	local oy = d * math.sin(camera.pitch)
+	local oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
+	assert(pose.X == camera.focus.X + ox, "oeil X hors formule")
+	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors formule")
+	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors formule")
 	camera:punch(1)
 	assert(camera.shake > 0, "punch n'arme pas le shake")
 	camera:step(1 / 60)
