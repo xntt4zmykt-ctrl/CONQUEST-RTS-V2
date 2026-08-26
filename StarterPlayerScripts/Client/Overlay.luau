@@ -756,7 +756,15 @@ local function trackUnit(
 			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
 			wake.Shape = Enum.PartType.Cylinder
 			wake.Transparency = 0.34
-			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+			-- N130 : insert navire LaunchWake. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- Offset Y OCEAN_LEVEL + 0.12 inchange. Garde not isMissile
+			-- inchangee. Tween Size/Transparency + task.delay Destroy
+			-- inchanges. Distinct footprint N129 (60 Hz hover). Distinct
+			-- roulis N125. Distinct splash/pulse/shockwave (leftover).
+			-- Recette visual V75 leftover evenements Overlay. stepInterpolation
+			-- non touche. UnitModels / PlacementPreview inchanges.
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.16, 9, 9),
 				Transparency = 1,

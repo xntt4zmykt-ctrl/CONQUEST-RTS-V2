@@ -1593,6 +1593,10 @@ check("navires, missiles et interpolation", function()
 	-- N128 : UnitModels.place flag fromEulerAnglesYXZ (pas CFrame.Angles).
 	-- Leftover N127 radar euler doit rester vert. Recette visual V73
 	-- leftover, portee pas mergee.
+	-- N130 : LaunchWake insert fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Leftover N128/N127 pieces, leftover N125 roulis, leftover N116
+	-- immobile, leftover N129 apercu doivent rester verts. Recette visual
+	-- V75 leftover evenements Overlay. stepInterpolation inchange.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
