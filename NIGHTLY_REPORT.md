@@ -1,28 +1,30 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 33)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 34)
 
-Déclencheur : ouverture de la **PR #102** (`cursor/analyse-nocturne-du-codebase-71d9`) — `stripTerritory` `table.clear`, specs N75–N76.
+Déclencheur : ouverture de la **PR #104** (`cursor/analyse-nocturne-du-codebase-5f6c`) — `Nukes.detonate` hashes, specs N77–N78.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-5f6c`.
-Base : PR #16 (`cursor/p0-framework-hardening-5b2e`). Cette passe est un **sur-ensemble de #102**.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#102. Pas d’outil Slack.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-a0f9`.
+Base : PR #16 (`cursor/p0-framework-hardening-5b2e`). Cette passe est un **sur-ensemble de #104**.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#104. Pas d’outil Slack.
 
-Ligne parallèle **feel** (#19/#21/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48/#51/#53/#56/#59/#62 + d425 + df65 + 2157 + 5c74 + e735 + 7c38 + 1fb3 + 5bf6 + 741d + 55ba + 4876 + cc42 + 2f5d + b62d + 69f4 + 07c6 + 2b37 + e277 + 1e43 + a963 + **d74d passe 33**) : ne pas merger sur cette branche sans rebase. Les numéros N40+ feel (settledHumans, seq, N52–N98…) ne sont **pas** les N40–N78 de ce rapport. Cette passe **ferme** hardening N76 (`Nukes.detonate` hashes). Seq obligatoire (feel N41) et `targetSlot` (feel N49/N53) ne sont pas portés. **Pas** de `TRAIN_STOP_BONUS` dans `railIncome` (feel N20 / N84 — volontaire). Feel N94 (`table.clear` border/coast) = N74 **déjà fermé**. N75 (scan cadran) **reste ouvert** — contrat A trop structurel pour un correctif « sûr » (index `setOwner` = autorité). Client hardening = **34/34** (feel 35/35 — Overlay `retreating`). Visual 36bc V52/V53 = ligne visuelle, pas ici.
+Ligne parallèle **feel** (#19/#21/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48/#51/#53/#56/#59/#62 + d425 + df65 + 2157 + 5c74 + e735 + 7c38 + 1fb3 + 5bf6 + 741d + 55ba + 4876 + cc42 + 2f5d + b62d + 69f4 + 07c6 + 2b37 + e277 + 1e43 + a963 + d74d + **c786 passe 34**) : ne pas merger sur cette branche sans rebase. Les numéros N40+ feel (settledHumans, seq, N52–N100…) ne sont **pas** les N40–N80 de ce rapport. Cette passe **ferme** hardening N77 (`splitMirv` visée) et N78 (`TickMetrics` Sample/`seen`). Seq obligatoire (feel N41) et `targetSlot` (feel N49/N53) ne sont pas portés. **Pas** de `TRAIN_STOP_BONUS` dans `railIncome` (feel N20 / N84 — volontaire). Feel N94 (`table.clear` border/coast) = N74 **déjà fermé**. N75 (scan cadran) **reste ouvert** — contrat A trop structurel pour un correctif « sûr » (index `setOwner` = autorité). Client hardening = **34/34** (feel 35/35 — Overlay `retreating`). Visual e3ed V54 = ligne visuelle, pas ici.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que des intentions + `JoinRequest`. `RequestSnapshot` n’est toujours jamais `FireServer` côté client (N4). DAG : `GameState` ne `require` ni Navy, ni Nukes, ni Trade, ni Bots, ni Buildings, ni Research, ni Diplomacy, ni Placement. `Buildings`, `Research`, `Diplomacy` require déjà `GameState` ; `Placement` require Shared only — ne pas inverser. `Nukes` require `GameState` + `Buildings` (pas l’inverse). N66 (`ctxBuf`) vit dans Buildings. N67 (`doomedBuf`) vit dans ChantierB (`install()` serveur seulement). N68 (`parkedBuf`) vit dans BoatFront. N69 (`collapseRemainBuf`) vit dans GameState. N70 (`destroyBuf`) vit dans GameState (`removePlayer`). N71 (`blockBuf` / `candBuf` / `queueBuf` / `visitMap` / `emptyTileBuf` / `placeScratch`) vit dans Placement (Shared, pas le ctx client). N72 (`allyBuf`) vit dans Bots. N73 (`stripBuf`) vit dans ChantierB (`install()` serveur seulement). N74 (`table.clear` border/coast) vit dans `ChantierB.stripTerritory` (hashes **par joueur**, pas un buf module). N76 (`tilesBeforeBuf` / `hitTilesBuf`) vit dans **Nukes** (`detonate` seulement).
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que des intentions + `JoinRequest`. `RequestSnapshot` n’est toujours jamais `FireServer` côté client (N4). DAG : `GameState` ne `require` ni Navy, ni Nukes, ni Trade, ni Bots, ni Buildings, ni Research, ni Diplomacy, ni Placement. `Buildings`, `Research`, `Diplomacy` require déjà `GameState` ; `Placement` require Shared only — ne pas inverser. `Nukes` require `GameState` + `Buildings` (pas l’inverse). `TickMetrics` require `Config` seulement. N66 (`ctxBuf`) vit dans Buildings. N67 (`doomedBuf`) vit dans ChantierB (`install()` serveur seulement). N68 (`parkedBuf`) vit dans BoatFront. N69 (`collapseRemainBuf`) vit dans GameState. N70 (`destroyBuf`) vit dans GameState (`removePlayer`). N71 (`blockBuf` / `candBuf` / `queueBuf` / `visitMap` / `emptyTileBuf` / `placeScratch`) vit dans Placement (Shared, pas le ctx client). N72 (`allyBuf`) vit dans Bots. N73 (`stripBuf`) vit dans ChantierB (`install()` serveur seulement). N74 (`table.clear` border/coast) vit dans `ChantierB.stripTerritory` (hashes **par joueur**, pas un buf module). N76 (`tilesBeforeBuf` / `hitTilesBuf`) vit dans **Nukes** (`detonate` seulement). N77 (`mirvTxBuf` / `mirvTyBuf`) vit dans **Nukes** (`splitMirv` seulement). N78 (`seenBuf` / `history` ring) vit dans **TickMetrics**.
 
-La PR #102 a bien fermé `stripTerritory` hashes (N74). Cette passe a **corrigé ce que #102 a spécifié** — `Nukes.detonate` allouait encore `tilesBefore = {}` / `hitTiles = {}` :
+La PR #104 a bien fermé `Nukes.detonate` hashes (N76). Cette passe a **corrigé ce que #104 a spécifié** — `splitMirv` allouait encore `targets = {}` + `Vector2`, et `TickMetrics.record` allouait encore un Sample + `seen` à 10 Hz :
 
 | Bug | Gravité | Statut |
 |---|---|---|
 | `ChantierB.stripTerritory` `border = {}` / `coast = {}` (N74) | **P3 alloc spawn** | **déjà fermé** (#102, `table.clear`) |
-| `Nukes.detonate` `tilesBefore` / `hitTiles` (N76) | **P3 alloc nuke** | **corrigé** (`tilesBeforeBuf` / `hitTilesBuf`, `table.clear`) |
+| `Nukes.detonate` `tilesBefore` / `hitTiles` (N76) | **P3 alloc nuke** | **déjà fermé** (#104, `tilesBeforeBuf` / `hitTilesBuf`) |
+| `splitMirv` `targets = {}` (N77) | **P3 alloc MIRV** | **corrigé** (`mirvTxBuf` / `mirvTyBuf`, `table.clear`) |
+| `TickMetrics.record` Sample + `seen` (N78) | **P3 alloc metrics** | **corrigé** (`seenBuf` + ring Sample, pas `remove(1)`) |
 | `stepDoomsday` scan O(TILE_COUNT) (N9 / N75) | **P2 cadran** | **ouvert** (index compact — leftover N73 ; contrat A trop structurel ici) |
-| `splitMirv` `targets = {}` (N77) | **P3 alloc MIRV** | **ouvert** (leftover post-N76) |
-| `TickMetrics.record` Sample + `seen` (N78) | **P3 alloc metrics** | **ouvert** (10 Hz instrumentation) |
+| `TickMetrics.snapshot` 4 arrays (N79) | **P3 alloc metrics** | **ouvert** (leftover post-N78) |
+| `TickMetrics.reset` droppe le pool Sample (N80) | **P3 alloc metrics** | **ouvert** (leftover post-N78) |
 | `retreatBoats` filtre `owner[targetTile]` courant | **P2 marine** | **ouvert** (reste de N28 ; feel d425/df65 a la recette) |
 | `seedBeachhead` insert toujours un nouvel `Attack` | **P2 cap** | **ouvert** (N29) |
 | `findSpawn` ignore splash / fallout (N33) | **P3 nucléaire** | **ouvert** (feel d425/df65 a C1+C2 + `isSpawnSafe`) |
@@ -31,23 +33,24 @@ La PR #102 a bien fermé `stripTerritory` hashes (N74). Cette passe a **corrigé
 
 Banc headless (`./tests/run.sh`) : voir section 7.
 
-- Serveur : 5 seeds + invariants + P0 + gardes #17–#102 + allyBuf (N72) + stripBuf (N73) + stripTerritory hashes (N74) + detonate hashes (N76).
+- Serveur : 5 seeds + invariants + P0 + gardes #17–#104 + allyBuf (N72) + stripBuf (N73) + stripTerritory hashes (N74) + detonate hashes (N76) + splitMirv hashes (N77) + TickMetrics ring (N78).
 - Client : **34/34 OK** (inchangé).
 - **Factions observées : 18** (toujours 12 + 6 tribus). ISSUE-N12 ouvert.
 
 ---
 
-## 2. Revue PR #102
+## 2. Revue PR #104
 
-**À merger** (`stripTerritory` `table.clear` + specs N75–N76), sous réserve que cette passe 33 parte avec : **`Nukes.detonate` allouait encore `tilesBefore = {}` / `hitTiles = {}`**.
+**À merger** (`Nukes.detonate` hashes + specs N77–N78), sous réserve que cette passe 34 parte avec : **`splitMirv` allouait encore `targets = {}` / `Vector2`, et `TickMetrics.record` allouait encore Sample + `seen` à 10 Hz**.
 
-Points encore vrais après #102 :
+Points encore vrais après #104 :
 
-| Claim #102 | Réalité après passe 33 |
+| Claim #104 | Réalité après passe 34 |
 |---|---|
-| N74 `stripTerritory` `table.clear` | confirmé |
+| N76 `Nukes.detonate` hashes | confirmé |
+| N77 `splitMirv` `targets` | **fermé ici** (rawequal, leftover ocean `# == 1`, pas de Vector2) |
+| N78 `TickMetrics.record` Sample/`seen` | **fermé ici** (rawequal `seenBuf`, ring 601, `formatReport` parseable) |
 | N75 `stepDoomsday` scan O(TILE_COUNT) | **ouvert** (ferme N9 si A ou C ; A trop structurel ici) |
-| N76 `Nukes.detonate` hashes | **fermé ici** (rawequal, leftover ocean `next` nil, snapshot avant crater) |
 | N33 `findSpawn` splash / fallout | **ouvert** |
 | N28 retraite après flip / `targetSlot` | **ouvert** |
 | N29 `seedBeachhead` no-merge | specs only, inchangé (banc N68 documente 3 Attack) |
@@ -55,11 +58,11 @@ Points encore vrais après #102 :
 | Banc Classique = 18 factions | inchangé (N12) |
 | N10.8 bateau allié = retraite 25 % | inchangé |
 
-`init.server.luau` et `Persistence` restent **exclus du bundle**. Le helper `MatchLifecycle` est **dans** le bundle (37 modules serveur). `snapshotBoats` / `snapshotMissiles` / `flushOwnerDelta` / `flushBuildingDelta` / `frontHudForReplicate` / `playerStatsForReplicate` sont **dans** le bundle (`GameState`). `pricesFor` / `contextFor` vivent dans **Buildings**. `progress` ne alloue plus `ratios` (N58). `Diplomacy.viewFor` recycle `viewBuf[slot]` (N59). `Diplomacy.step` recycle `expiredBuf` (N60). `neighborFactions` recycle `contactBuf` (N61). `gatherSites` recycle `siteBuf` (N62). `stepElimination` recycle `elimBuf` (N63). `findSeaPath` recycle `pathWalkBuf` (N64) — le tableau rendu au bateau **reste unique**. `refreshRailNetwork` recycle `stationBuf` (N65) — `building.links` **reste unique**. `Buildings.contextFor` recycle `ctxBuf` (N66) — pas le ctx client. `ChantierB` recycle `doomedBuf` / `collapsingBuf` (N67). `BoatFront.launchAttack` recycle `parkedBuf` (N68). `collapseFaction` recycle `collapseRemainBuf` / `collapseLeftBuf` (N69). `removePlayer` recycle `destroyBuf` (N70). `Placement.validTiles` recycle blockers/candidates (N71). `decideDiplomacy` recycle `allyBuf` (N72). `stepDoomsday` recycle `stripBuf` (N73). `stripTerritory` `table.clear` in-place (N74). Scan cadran encore O(carte) (N9 / N75). `Nukes.detonate` recycle `tilesBeforeBuf` / `hitTilesBuf` (N76). `splitMirv` alloue encore `targets` (N77). `TickMetrics.record` alloue encore (N78).
+`init.server.luau` et `Persistence` restent **exclus du bundle**. Le helper `MatchLifecycle` est **dans** le bundle (37 modules serveur). `snapshotBoats` / `snapshotMissiles` / `flushOwnerDelta` / `flushBuildingDelta` / `frontHudForReplicate` / `playerStatsForReplicate` sont **dans** le bundle (`GameState`). `pricesFor` / `contextFor` vivent dans **Buildings**. `progress` ne alloue plus `ratios` (N58). `Diplomacy.viewFor` recycle `viewBuf[slot]` (N59). `Diplomacy.step` recycle `expiredBuf` (N60). `neighborFactions` recycle `contactBuf` (N61). `gatherSites` recycle `siteBuf` (N62). `stepElimination` recycle `elimBuf` (N63). `findSeaPath` recycle `pathWalkBuf` (N64) — le tableau rendu au bateau **reste unique**. `refreshRailNetwork` recycle `stationBuf` (N65) — `building.links` **reste unique**. `Buildings.contextFor` recycle `ctxBuf` (N66) — pas le ctx client. `ChantierB` recycle `doomedBuf` / `collapsingBuf` (N67). `BoatFront.launchAttack` recycle `parkedBuf` (N68). `collapseFaction` recycle `collapseRemainBuf` / `collapseLeftBuf` (N69). `removePlayer` recycle `destroyBuf` (N70). `Placement.validTiles` recycle blockers/candidates (N71). `decideDiplomacy` recycle `allyBuf` (N72). `stepDoomsday` recycle `stripBuf` (N73). `stripTerritory` `table.clear` in-place (N74). Scan cadran encore O(carte) (N9 / N75). `Nukes.detonate` recycle `tilesBeforeBuf` / `hitTilesBuf` (N76). `splitMirv` recycle `mirvTxBuf` / `mirvTyBuf` (N77). `TickMetrics.record` recycle `seenBuf` + ring Sample (N78). `snapshot` alloue encore 4 arrays (N79). `reset` droppe encore le pool (N80).
 
-PR #101 (feel passe 33, `d74d`) ne doit pas être mergée par-dessus #16/#102 sans rebase. Seq / `targetSlot` / hover `SpawnHint` / Overlay `retreating` / `TRAIN_STOP_BONUS` HUD / `previewCtx` restent feel-only. Visual 36bc V52/V53 = ligne visuelle, pas ici.
+PR #101 / #105 (feel / visual) ne doivent pas être mergées par-dessus #16/#104 sans rebase. Seq / `targetSlot` / hover `SpawnHint` / Overlay `retreating` / `TRAIN_STOP_BONUS` HUD / `previewCtx` restent feel-only. Visual e3ed V54 = ligne visuelle, pas ici.
 
-On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43, #46, #49, #52, #55, #58, #60, #63, #66, #70, #73, #76, #80, #83, #85, #88, #91, #95, #98 et #102 au profit de celle-ci (sur-ensemble hardening).
+On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43, #46, #49, #52, #55, #58, #60, #63, #66, #70, #73, #76, #80, #83, #85, #88, #91, #95, #98, #102 et #104 au profit de celle-ci (sur-ensemble hardening).
 
 ---
 
@@ -67,9 +70,10 @@ On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43, 
 
 | Bug | Fichiers | Pourquoi |
 |---|---|---|
-| `Nukes.detonate` alloc `tilesBefore = {}` / `hitTiles = {}` | `Nukes.detonate`, `tests/simulate.luau` | Deux hashes module-level, `table.clear` **avant** fill. `rawequal` des deux hashes sur deux booms. Boom A : `hitTilesBuf[A] >= 1`, `tilesBeforeBuf[A] == ps.tiles` **avant** crater. Boom océan / hors carte : `next(hitTilesBuf) == nil` (un leftover taxerait A). Formule `share` / `troopKill` / rayon / cratère 0.55 / `setOwner` NEUTRAL **inchangés**. Contrat B inbound (N30) **inchangé**. Wrap `installFallout` conserve l’écriture fallout. Recette spec #102 N76. Ne ferme **pas** N75 (scan) ni N77 (`splitMirv`). |
+| `splitMirv` alloc `targets = {}` + `Vector2` | `Nukes.splitMirv`, `tests/simulate.luau` | Deux arrays module-level `mirvTxBuf` / `mirvTyBuf`, `table.clear` **avant** fill. `rawequal` des deux arrays sur deux scissions. Porteur land : `# >= 1`, ogives == `#`. Porteur océan / hors carte : `# == 1` (fallback point visé), pas de leftover du premier. Loi `spread` / `minGap=4` / `speed * 1.8` / `warheadRadius` **inchangées**. Records `state.missiles[]` **uniques**. Contrat B inbound (N30) **inchangé**. Recette spec #104 N77. Ne ferme **pas** N75 ni N78. |
+| `TickMetrics.record` Sample + `seen` 10 Hz | `TickMetrics.luau`, `tests/simulate.luau` | `seenBuf` hash module, `table.clear` **avant** fill. Early-out delta nil **conservé** (pas de clear). Ring `history[1..HISTORY_CAP]` + write index, **pas** `table.remove(history, 1)`. 601 `record` → `#history == 600`, `rawequal` du Sample. `formatReport` encore parseable (`ticks=`). Totaux / `HISTORY_CAP` / percentiles **inchangés**. Recette spec #104 N78. Ne ferme **pas** N79 (`snapshot` arrays) ni N80 (`reset` droppe le pool). |
 
-**Non modifié (volontaire) :** N1–N75 restant, reste de N28 (`targetSlot`). N10.8. Cap beachheads (N5 / N29). `tryAnnex` océan. `SAM_INTERCEPT_CHANCE=1` après apply. Pas de `require(Navy)` / `require(Nukes)` / `require(Trade)` / `require(Bots)` / `require(Buildings)` / `require(Research)` / `require(Diplomacy)` / `require(Placement)` depuis GameState. Pas de contrat C spawn (N33). Pas de seq obligatoire (feel N41). Pas de spatial hash warships. Buffer `defense` **alloué** mais plus écrit. Pas de `TRAIN_STOP_BONUS` dans `railIncome` (N18 / feel N20). Scan cadran encore O(carte) (N9 / N75) — contrat A (`tilesBySlot` dans `setOwner`) trop structurel : un index déréglé vs `owner` = pourriture du mauvais camp. `splitMirv` encore alloué (N77). `TickMetrics.record` encore alloué (N78). Pas de `retreating` Overlay (feel N56 historique). Debit `captures`/`pops` **non** remplacé par feel `guard < 80`. `PlacementPreview` / `tests/client.luau` **non** édités. Skip AFK cadran **conservé**.
+**Non modifié (volontaire) :** N1–N76 restant, reste de N28 (`targetSlot`). N10.8. Cap beachheads (N5 / N29). `tryAnnex` océan. `SAM_INTERCEPT_CHANCE=1` après apply. Pas de `require(Navy)` / `require(Nukes)` / `require(Trade)` / `require(Bots)` / `require(Buildings)` / `require(Research)` / `require(Diplomacy)` / `require(Placement)` depuis GameState. Pas de contrat C spawn (N33). Pas de seq obligatoire (feel N41). Pas de spatial hash warships. Buffer `defense` **alloué** mais plus écrit. Pas de `TRAIN_STOP_BONUS` dans `railIncome` (N18 / feel N20). Scan cadran encore O(carte) (N9 / N75) — contrat A (`tilesBySlot` dans `setOwner`) trop structurel : un index déréglé vs `owner` = pourriture du mauvais camp. `snapshot` encore alloué (N79). `reset` droppe encore le pool Sample (N80). Pas de `retreating` Overlay (feel N56 historique). Debit `captures`/`pops` **non** remplacé par feel `guard < 80`. `PlacementPreview` / `tests/client.luau` **non** édités. Skip AFK cadran **conservé**. Ogives MIRV **non** poolées (possession).
 
 ---
 
@@ -96,9 +100,9 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead + p
 - **Enclaves** = `ChantierB.tryAnnex` **après** `setOwner` : BFS depuis les voisins défenseur du seed. Océan = abort.
 - **Porte-avions** = `syncCarriers` **événementiel** (`_carriersDirty`, NAVAL_BASE seulement) + spawn via `navalBasesBySlot` (N48). Ciblage obus = listes recyclées (N39), pas nested sur tout `state.boats`.
 - **Commerce maritime** = `portsByTile` incrémental (PORT seulement, N40). Vague plafonnée **avant** flatten. `canTrade` = embargo-only.
-- **Réplication** : hot path → `fireDeployed`. `MatchUpdate` / `RosterUpdate` / Notify-Sfx globaux → `FireAllClients` (N26). Snapshot navires = `GameState.snapshotBoats` (`boatSnapBuf`, N51). Snapshot missiles = `GameState.snapshotMissiles` (`missileSnapBuf`, N52). Owner delta = `dirtyIndexBuf` (N53), buffer outbound **neuf**. BuildingDelta = `buildingSnapBuf` (N54), `links` live. HUD fronts = `frontHudForReplicate` (N55), appelé **une** fois depuis N57. `buildPrices` = `Buildings.pricesFor` (N56). Records stats = `playerStatsForReplicate` (N57). `Research.progress` min courant (N58). `Diplomacy.viewFor` recycle par slot (N59). `Diplomacy.step` recycle `expiredBuf` (N60). `neighborFactions` recycle `contactBuf` (N61). `gatherSites` recycle `siteBuf` (N62). `stepElimination` recycle `elimBuf` (N63). `findSeaPath` `pathWalkBuf` (N64, retour unique). `refreshRailNetwork` `stationBuf` (N65). `contextFor` `ctxBuf` (N66). Combat `doomedBuf`/`collapsingBuf` (N67). `parkedBuf` (N68). `collapseRemainBuf` (N69). Snapshot destroy `destroyBuf` (N70). `validTiles` blockers (N71). `allyBuf` (N72). `stripBuf` (N73). `stripTerritory` `table.clear` (N74). Scan cadran encore O(carte) (N9 / N75). `Nukes.detonate` `tilesBeforeBuf`/`hitTilesBuf` (N76). `splitMirv` encore alloué (N77). `TickMetrics.record` encore alloué (N78).
+- **Réplication** : hot path → `fireDeployed`. `MatchUpdate` / `RosterUpdate` / Notify-Sfx globaux → `FireAllClients` (N26). Snapshot navires = `GameState.snapshotBoats` (`boatSnapBuf`, N51). Snapshot missiles = `GameState.snapshotMissiles` (`missileSnapBuf`, N52). Owner delta = `dirtyIndexBuf` (N53), buffer outbound **neuf**. BuildingDelta = `buildingSnapBuf` (N54), `links` live. HUD fronts = `frontHudForReplicate` (N55), appelé **une** fois depuis N57. `buildPrices` = `Buildings.pricesFor` (N56). Records stats = `playerStatsForReplicate` (N57). `Research.progress` min courant (N58). `Diplomacy.viewFor` recycle par slot (N59). `Diplomacy.step` recycle `expiredBuf` (N60). `neighborFactions` recycle `contactBuf` (N61). `gatherSites` recycle `siteBuf` (N62). `stepElimination` recycle `elimBuf` (N63). `findSeaPath` `pathWalkBuf` (N64, retour unique). `refreshRailNetwork` `stationBuf` (N65). `contextFor` `ctxBuf` (N66). Combat `doomedBuf`/`collapsingBuf` (N67). `parkedBuf` (N68). `collapseRemainBuf` (N69). Snapshot destroy `destroyBuf` (N70). `validTiles` blockers (N71). `allyBuf` (N72). `stripBuf` (N73). `stripTerritory` `table.clear` (N74). Scan cadran encore O(carte) (N9 / N75). `Nukes.detonate` `tilesBeforeBuf`/`hitTilesBuf` (N76). `splitMirv` `mirvTxBuf`/`mirvTyBuf` (N77). `TickMetrics.record` `seenBuf` + ring Sample (N78). `snapshot` encore alloué (N79).
 - **DataStore** : `settledHumans` avant destruction du PlayerState. `endMatch` grave via `MatchLifecycle.endMatchRecords`. `Persistence.record` max-merge inchangé (N6).
-- **Require** : DAG. Pas de cycle. `MatchLifecycle` → Config seulement. `Tribes` → `Bots` (export `humanTargetProtected` seulement). `Navy` → `GameState` (unidirectionnel). `Nukes` → `GameState` + `Buildings`. `Trade` → `GameState`. `Bots` → `GameState` (pas l’inverse). `Buildings` → `GameState` (pas l’inverse — N56/N66 vivent dans Buildings). `Research` → `GameState` (pas l’inverse). `Diplomacy` → `GameState` (pas l’inverse). `Placement` → Shared only (N71 — **ne pas** require Placement depuis GameState). `ChantierB`/`BoatFront`/`AimFront` dans ReplicatedStorage (formules visibles client, `install()` serveur seulement).
+- **Require** : DAG. Pas de cycle. `MatchLifecycle` → Config seulement. `Tribes` → `Bots` (export `humanTargetProtected` seulement). `Navy` → `GameState` (unidirectionnel). `Nukes` → `GameState` + `Buildings`. `Trade` → `GameState`. `Bots` → `GameState` (pas l’inverse). `Buildings` → `GameState` (pas l’inverse — N56/N66 vivent dans Buildings). `Research` → `GameState` (pas l’inverse). `Diplomacy` → `GameState` (pas l’inverse). `Placement` → Shared only (N71 — **ne pas** require Placement depuis GameState). `TickMetrics` → Config seulement (N78). `ChantierB`/`BoatFront`/`AimFront` dans ReplicatedStorage (formules visibles client, `install()` serveur seulement).
 - **BFS mer** : `visitBuf` + `parentScratch` + `queueScratch` + `pathWalkBuf` module-level. Un seul chemin en vol à la fois (Navy n’est pas réentrant). Résultat path **unique** (copie inverse, N64).
 - **BFS annex** : `annexVisitBuf` + `annexQueue` + `annexPocket` module-level. Un seul `tryAnnex` en vol à la fois (combat n’est pas réentrant).
 - **Gares** : `stationBuf` + `railParentBuf` / `railXsBuf` / `railYsBuf` + maps grappe. Truncate **avant** sort. `building.links` unique (N65).
@@ -112,12 +116,14 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead + p
 - **Rot cadran** : `stripBuf` array module-level. Truncate avant arrachage, reset après slot (N73). `ChantierB.stripBuf` exposé banc. Scan O(carte) **reste** (N9 / N75).
 - **Strip spawn** : `table.clear(ps.border)` / `table.clear(ps.coast)` in-place (N74). Hashes **par joueur**.
 - **Crater nuke** : `tilesBeforeBuf` / `hitTilesBuf` hashes module-level (N76). `table.clear` **avant** fill. `Nukes.tilesBeforeBuf` / `Nukes.hitTilesBuf` exposés banc. Non réentrant — `Nukes.step` détone en série. Wrap `installFallout` après orig.
+- **Visée MIRV** : `mirvTxBuf` / `mirvTyBuf` arrays module-level (N77). `table.clear` **avant** fill. `Nukes.mirvTxBuf` / `Nukes.mirvTyBuf` exposés banc. Non réentrant — `Nukes.step` scinde en série. Ogives = records **neufs**.
+- **Metrics** : `seenBuf` hash + ring `history[1..HISTORY_CAP]` (N78). `table.clear(seenBuf)` **avant** fill (delta non-nil seulement). `TickMetrics.seenBuf` / `TickMetrics.history` exposés banc. `snapshot` encore alloué (N79). `reset` `table.clear(history)` droppe le pool (N80).
 
 ---
 
 ## 5. Issues worker-ready (à créer dans GitHub)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N78 restent ouverts** sauf N19 partiel, N21 **fermé**, N24 remplacé par N31 (**fermé**), N30–N32 **fermés**, N34–N74 **fermés**, N76 **fermé**. N28 est **partiel** (inbound fermé). Ci-dessous les **nouveaux** tickets + N75 + le reste de N28 / N29 / N33.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N80 restent ouverts** sauf N19 partiel, N21 **fermé**, N24 remplacé par N31 (**fermé**), N30–N32 **fermés**, N34–N74 **fermés**, N76–N78 **fermés**. N28 est **partiel** (inbound fermé). Ci-dessous les **nouveaux** tickets + N75 + le reste de N28 / N29 / N33.
 
 ---
 
@@ -130,7 +136,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead + p
 1. `retreatAttack(A, B)` ne rappelle **pas** une invasion si la côte a déjà changé de main (neutre, tiers).
 2. Le wrapper `SystemsBootstrap.retreatAttack` appelle `retreatBoats` même si `origRetreat` a dit « déjà ordonnée » : un 2e geste peut encore rappeler des bateaux tardifs (parfois voulu) avec le message « front terrestre et N transport(s) ».
 
-Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats` filtre l’intention (fallback `owner[targetTile]`), wrap 2e geste rappelle les tardifs, `Navy.step` auto-retraite si `owner[targetTile] ~= targetSlot`. **Porter, ne pas réinventer.** Distinct de N10.8 et du fix inbound. Distinct de N35 (`destSlot` convoi ≠ `targetSlot` invasion). Distinct de N40 / N44–N76 (index / snapshots / HUD / `progress` / `viewFor` / `expired` / contacts / sites / elim / path / rail / ctx / doomed / parked / collapse / destroy / validTiles / allyBuf / stripBuf / strip hashes / detonate hashes, **fermés** ou **specs**).
+Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats` filtre l’intention (fallback `owner[targetTile]`), wrap 2e geste rappelle les tardifs, `Navy.step` auto-retraite si `owner[targetTile] ~= targetSlot`. **Porter, ne pas réinventer.** Distinct de N10.8 et du fix inbound. Distinct de N35 (`destSlot` convoi ≠ `targetSlot` invasion). Distinct de N40 / N44–N78 (index / snapshots / HUD / `progress` / `viewFor` / `expired` / contacts / sites / elim / path / rail / ctx / doomed / parked / collapse / destroy / validTiles / allyBuf / stripBuf / strip hashes / detonate hashes / splitMirv / TickMetrics, **fermés** ou **specs**).
 
 **Pourquoi 20K CCU :** late-game invasions + flip de côte le même tick que la retraite.
 
@@ -141,7 +147,7 @@ Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats
 3. Test : invasion en mer vs B → flip de la côte à un tiers → `retreatAttack(A, B)` rappelle le transport. Second test : wrapper 2e geste, trancher si les bateaux tardifs doivent partir.
 4. Fichiers : `Navy.luau` (`launchInvasion`, `retreatBoats`), éventuellement `SystemsBootstrap.retreatAttack`, `tests/simulate.luau`. Recette feel : branche `d425` / `df65`.
 
-**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N22). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % déjà livré). Ne pas recâbler N35 (convois, `kind==2`). Pas d’équilibrage. **N28 hardening ≠ N28 feel (RequestSnapshot mort).** Ne pas porter AimFront ni seq. Ne pas recâbler N50–N76.
+**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N22). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % déjà livré). Ne pas recâbler N35 (convois, `kind==2`). Pas d’équilibrage. **N28 hardening ≠ N28 feel (RequestSnapshot mort).** Ne pas porter AimFront ni seq. Ne pas recâbler N50–N78.
 
 ---
 
@@ -170,7 +176,7 @@ Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats
 
 **Problème :** après le contrat B (ogive visée sur le disparu **annulée**), il reste : une frappe **déjà visée sur un voisin** dont le cratère recouvre l’ancien capital / le `SPAWN_RADIUS` de `findSpawn`. `addPlayer` choisit un disque terrestre libre, sans lire `state.missiles` ni `state.fallout`. L’héritier spawn, `Nukes.step` explose, SAM de l’héritier n’existait pas au `engaged`.
 
-Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSafe` partagé `findSpawn` / `claimSpawn`, refuse crater ogive **et** `state.fallout[index] > tick`. **Porter, ne pas réinventer.** Contrat B (N30) déjà livré ici : ne pas l’ouvrir. Isolation disque clic (feel N55) = ticket **feel**, pas celui-ci. N76 (`detonate` hashes) **fermé** : ne pas le mixer.
+Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSafe` partagé `findSpawn` / `claimSpawn`, refuse crater ogive **et** `state.fallout[index] > tick`. **Porter, ne pas réinventer.** Contrat B (N30) déjà livré ici : ne pas l’ouvrir. Isolation disque clic (feel N55) = ticket **feel**, pas celui-ci. N76 (`detonate` hashes) **fermé** : ne pas le mixer. N77 (`splitMirv`) **fermé** : ne pas le mixer.
 
 **Pourquoi 20K CCU :** moins chaud que N30 (il faut un voisin sous missile + spawn coincé dans le rayon).
 
@@ -180,13 +186,13 @@ Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSa
 2. Test : A tire sur C (capitale), `removePlayer(B)`, forcer le spawn de l’héritier dans le rayon (tuiles libres), `Nukes.step`. Assert selon C1/C2/C3.
 3. Fichiers : `GameState.findSpawn` / `addPlayer`, éventuellement `Nukes`, `tests/simulate.luau`. Recette feel : branche `d425` / `df65`.
 
-**Contraintes :** ne pas annuler une frappe tiers (régression `nuke third-party`). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Ne pas porter isolation clic (feel N55) dans le même PR. Ne pas recâbler N50–N76. Ne pas mixer N76 (`tilesBeforeBuf` — leftover alloc, **déjà fermé**).
+**Contraintes :** ne pas annuler une frappe tiers (régression `nuke third-party`). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Ne pas porter isolation clic (feel N55) dans le même PR. Ne pas recâbler N50–N78. Ne pas mixer N76 (`tilesBeforeBuf` — leftover alloc, **déjà fermé**) ni N77 (`mirvTxBuf` — **déjà fermé**).
 
 ---
 
 ### ISSUE-N75 — `stepDoomsday` scanne encore `0..TILE_COUNT-1` par camp qui saigne
 
-**Priorité :** P2 cadran / perf. Leftover explicite de N9 et de N73 (« ne pas remplacer le scan 40 960 — ticket suivant »). Distinct de N73 (`stripBuf` liste temporaire, **déjà fermé**) et de N74 (`stripTerritory` hashes spawn, **déjà fermé**). Ne pas toucher `rotQuota`. **N75 hardening ≠ N75 feel historique (`pricesFor`).** Visual V13 décrit le même trou. **Non livré en passe 33** : contrat A (`tilesBySlot` maintenu dans `setOwner`) est un index d’autorité — un déréglage vs `owner` pourrit le mauvais camp. Trop structurel pour un correctif « sûr » à côté de N76.
+**Priorité :** P2 cadran / perf. Leftover explicite de N9 et de N73 (« ne pas remplacer le scan 40 960 — ticket suivant »). Distinct de N73 (`stripBuf` liste temporaire, **déjà fermé**) et de N74 (`stripTerritory` hashes spawn, **déjà fermé**). Ne pas toucher `rotQuota`. **N75 hardening ≠ N75 feel historique (`pricesFor`).** Visual V13 décrit le même trou. **Non livré en passe 34** : contrat A (`tilesBySlot` maintenu dans `setOwner`) est un index d’autorité — un déréglage vs `owner` pourrit le mauvais camp. Trop structurel pour un correctif « sûr » à côté de N77/N78.
 
 **Problème :** même avec `stripBuf` recyclé, chaque slot sous quota (10 Hz, late-game plusieurs camps) re-scanne `Config.TILE_COUNT` (40 960) jusqu’à `quota * 4` hits. Un shard 18 factions en cadran = jusqu’à ~17 scans linéaires / tick. Il n’existe pas d’index compact tuiles-par-slot : `ps.tiles` est un compteur, `ps.border` / `ps.coast` ne couvrent pas l’intérieur. N73 a volontairement laissé ce scan.
 
@@ -199,61 +205,72 @@ Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSa
 3. Test : bancs N73 stripBuf / doomsday recycle / AFK **doivent rester verts**. Ajouter : un camp sous quota → même `ripped` / `tiles` qu’aujourd’hui (déterminisme seed). Deux camps. `setOwner` d’une tuile intérieure met à jour l’index (rot la trouve, `ps.tiles` vs buffer). Client **34/34**. 6000 ticks. Mesurer `avgTickMs` cadran vs HEAD.
 4. Fichiers : `GameState.setOwner` (si A), `ChantierB.stepDoomsday`, éventuellement `stripTerritory` (N74 est **fermé** — ne pas le mixer), `tests/simulate.luau`. Recette visuelle V13 si elle existe plus tard — **ne pas inventer un spatial hash**.
 
-**Contraintes :** pas de RemoteFunction. **N75 hardening ≠ N73 (`stripBuf`, déjà fait) ≠ N74 (`border`/`coast`, **déjà fait**) ≠ N76 (`detonate`, **déjà fait**) ≠ N9 (umbrella — ce ticket **ferme** N9 si A ou C).** Ne pas changer `rotQuota` / drain / WARN. Ne pas scanner `buildings`. Overlay n’itère pas l’index. Un index déréglé vs `owner` = pourriture du mauvais camp (invariants `tiles` vs buffer le verront). Ne pas `require(ChantierB)` depuis GameState. Ne pas mixer avec N77 (`splitMirv`) ni N78 (`TickMetrics`).
+**Contraintes :** pas de RemoteFunction. **N75 hardening ≠ N73 (`stripBuf`, déjà fait) ≠ N74 (`border`/`coast`, **déjà fait**) ≠ N76 (`detonate`, **déjà fait**) ≠ N77 (`splitMirv`, **déjà fait**) ≠ N78 (`TickMetrics`, **déjà fait**) ≠ N9 (umbrella — ce ticket **ferme** N9 si A ou C).** Ne pas changer `rotQuota` / drain / WARN. Ne pas scanner `buildings`. Overlay n’itère pas l’index. Un index déréglé vs `owner` = pourriture du mauvais camp (invariants `tiles` vs buffer le verront). Ne pas `require(ChantierB)` depuis GameState. Ne pas mixer avec N79 (`snapshot`) ni N80 (`reset` pool).
 
 ---
 
 ### ISSUE-N76 — `Nukes.detonate` hashes — **FERMÉ** (passe 33)
 
-`tilesBeforeBuf` / `hitTilesBuf` module-level. `table.clear` avant fill. Banc : rawequal, snapshot avant crater, leftover ocean `next` nil. Ne pas rouvrir. Ne pas partager `samBuf` / `blastX` / `destroyBuf`. Wrap `installFallout` inchangé.
+`tilesBeforeBuf` / `hitTilesBuf` module-level. `table.clear` avant fill. Banc : rawequal, snapshot avant crater, leftover ocean `next` nil. Ne pas rouvrir. Ne pas partager `samBuf` / `blastX` / `destroyBuf` / `mirvTxBuf`. Wrap `installFallout` inchangé.
 
 ---
 
-### ISSUE-N77 — `splitMirv` alloue `targets = {}` par scission
+### ISSUE-N77 — `splitMirv` `targets` — **FERMÉ** (passe 34)
 
-**Priorité :** P3 alloc MIRV. Leftover explicite de N76 (« ne pas modifier `splitMirv` — ticket suivant »). Distinct de N76 (`detonate` hashes, **déjà fermé**) et de N54 feel historique (MIRV bus `radius=0`). Visual n’a pas ce ticket.
+`mirvTxBuf` / `mirvTyBuf` arrays module-level. `table.clear` avant fill. Pas de `Vector2`. Banc : rawequal deux scissions, leftover océan `# == 1` fallback point visé. Ogives restent des records neufs. Ne pas rouvrir. Ne pas partager `tilesBeforeBuf` / `hitTilesBuf` (N76).
 
-**Problème :** à `progress >= MIRV_SEPARATION` (0.55), `splitMirv` fait `targets: { Vector2 } = {}` puis jusqu’à `warheads * 30` essais (`NextInteger` dans `spread`) et `table.insert(targets, Vector2.new(nx, ny))`. Un MIRV produit jusqu’à `warheads` (6) `Vector2` + la table, abandonnés au GC **après** avoir copié `tx`/`ty` dans les ogives. Late-game plusieurs MIRV le même tick = alloc burst. Un leftover sans truncate / `table.clear` re-viserait les ogives du porteur précédent (cibles fantômes — autorité). Les records `state.missiles[]` **restent uniques** (possession, comme `boat.path` N64) — ne pas les pooler ici.
+---
 
-**Pourquoi 20K CCU :** tempête nucléaire = le tick nuke est déjà le plus cher après le cadran (N75) et le combat. Recycle de la liste de visée ramène l’alloc à zéro par scission (hors ogives, nécessaires). Pas d’autorité si truncate **avant** fill. Loi `spread` / `minGap=4` / fallback point visé **inchangée**.
+### ISSUE-N78 — `TickMetrics.record` Sample/`seen` — **FERMÉ** (passe 34)
+
+`seenBuf` hash module + ring `history[1..HISTORY_CAP]`. Early-out delta nil conservé. Banc : rawequal `seenBuf`, 601 `record` → `# == 600`, Sample recyclé, `formatReport` parseable. Ne pas rouvrir. Leftover `snapshot` arrays → N79. Leftover `reset` droppe le pool → N80.
+
+---
+
+### ISSUE-N79 — `TickMetrics.snapshot` alloue 4 arrays + table de retour
+
+**Priorité :** P3 alloc instrumentation. Leftover explicite de N78 (« ne pas mixer `snapshot` — lifetime différent, `table.sort` dans `percentile` mute »). Distinct de N78 (Sample/`seen`, **déjà fermé**) et de N2 (delta stats HUD). Distinct de N53 (`dirtyIndexBuf` — buffer outbound **neuf**, déjà fermé). **N79 hardening ≠ N79 feel historique (`Diplomacy.step` expired).**
+
+**Problème :** `TickMetrics.snapshot` (appelé par `formatReport`, logs périodiques `init.server`) fait `table.create(#history, 0)` × 4 (`changed` / `bytes` / `ms` / `chunks`) puis une table de retour `{ samples, totals, p95, p99 }` avec deux nested. `percentile` **mute** via `table.sort`. ~1 700 shards × (log 60 s) × 4 arrays de 600 nombres. Moins chaud que N78 (10 Hz) mais le leftover naturel après le ring.
+
+**Pourquoi 20K CCU :** l’instrumentation ne doit pas ré-allouer 2 400 nombres à chaque rapport. Recycle 4 arrays module-level, overwrite `1..#history`, truncate leftover. Pas d’autorité : TickMetrics ne mute pas `GameState`. Format de `formatReport` **inchangé**.
 
 **Worker :**
 
-1. Array module-level `mirvTargetBuf` (nombres `tx`/`ty` parallèles **ou** records recyclés — **pas** `Vector2` si on peut s’en passer : `txBuf`/`tyBuf` deux arrays, copie dans l’ogive). `table.clear` / truncate **avant** fill. Exposer `Nukes.mirvTargetBuf` (ou les deux arrays) pour le banc. Pas de RemoteFunction. Ne pas `table.clone`. Ne pas partager `tilesBeforeBuf` / `hitTilesBuf` (N76) / `samBuf` / `blastX`.
-2. Ne pas modifier `detonate` (N76 **fermé**). Ne pas changer `warheads` / `spread` / `minGap` / `speed * 1.8` / `warheadRadius`. Les ogives restent des records **neufs** dans `state.missiles` (possession). Non réentrant — un seul `splitMirv` en vol (`Nukes.step` série). Skip AFK cadran **conservé**. Contrat B inbound (N30) **inchangé**.
-3. Test : bancs nuke inbound / third-party / silosBySlot / tryLaunch / **N76 detonate hashes** **doivent rester verts**. Ajouter : deux `splitMirv` (forcer `progress >= MIRV_SEPARATION` sur un porteur, pas une ogive) → `rawequal` de la porteuse. Leftover truncate : un 2e MIRV avec 0 cible valide (océan / hors carte, fallback 1 point) → `# == 1`, pas de `Vector2` du premier. Client **34/34**. 6000 ticks.
-4. Fichiers : `Nukes.luau` (`splitMirv` seulement), `tests/simulate.luau` (bloc court à côté du banc N76). Pas de recette feel — **ne pas inventer un spatial hash visée**.
+1. Quatre arrays module-level `changedBuf` / `bytesBuf` / `msBuf` / `chunksBuf`, `table.create(HISTORY_CAP, 0)`. Overwrite `1..#history`. Truncate leftover `#history+1..#buf` **avant** `percentile` (un leftover d’un run plus long fausserait p95). Exposer les 4 pour le banc. Pas de RemoteFunction.
+2. **Ne pas** recycler la table de retour ni `p95`/`p99` dans le même PR — leftover **N80 si on y va après le pool reset**, ou rester sur N80 = pool `reset`. `percentile` mute : après sort, les bufs ne sont plus en ordre d’historique. Le prochain `snapshot` **doit** tout réécrire (pas un early-out « déjà plein »). Ne pas `require(TickMetrics)` depuis GameState.
+3. Test : bancs N78 ring / seenBuf / formatReport `ticks=` **doivent rester verts**. Ajouter : deux `snapshot` → `rawequal` des 4 arrays. Après 3 `record` puis 601 `record` (history pleine) → leftover au-delà de 600 absent (`[601] == nil`). Client **34/34**. 6000 ticks. Ne **pas** appeler `reset` avant le `formatReport` du run principal.
+4. Fichiers : `TickMetrics.luau` (`snapshot` seulement), `tests/simulate.luau` (bloc court **après** le formatReport du run, comme N78). Pas de recette feel.
 
-**Contraintes :** pas de RemoteFunction. **N77 hardening ≠ N76 (`detonate`, déjà fait) ≠ N33 (splash spawn) ≠ N30 (inbound cancel) ≠ N54 feel (MIRV bus).** Overlay lit `Explosion` RemoteEvent + snapshot missiles (N52), pas cette liste. Un leftover `targets` = ogives sur les mauvaises tuiles (invariants owner / third-party le verront). Ne pas porter `retreating`. Ne pas recâbler N28/N29. Ne pas mixer N75 (scan cadran) ni N78 (`TickMetrics`).
+**Contraintes :** pas de RemoteFunction. **N79 hardening ≠ N78 (`record`/`seen`, déjà fait) ≠ N80 (`reset` pool) ≠ N53 (`dirtyIndexBuf`) ≠ N2 (stats HUD).** Overlay n’lit pas TickMetrics. Ne pas changer `HISTORY_CAP` / percentiles. Ne pas mixer N75 / N77. `init.server` hors bundle — le helper est **dans** le bundle (déjà testé). Ne pas porter `retreating`.
 
 ---
 
-### ISSUE-N78 — `TickMetrics.record` alloue Sample + `seen` à 10 Hz
+### ISSUE-N80 — `TickMetrics.reset` droppe le pool Sample (`table.clear(history)`)
 
-**Priorité :** P3 alloc instrumentation. Leftover trouvé en revue N76 (le banc 6000 ticks appelle `TickMetrics.record` **chaque** tick, `init.server` aussi). Distinct de N76 (crater) et de N2 (delta stats HUD). Distinct de N53 (`dirtyIndexBuf` — buffer outbound **neuf**, déjà fermé). **N78 hardening ≠ N78 feel historique (`viewFor`).**
+**Priorité :** P3 alloc instrumentation. Leftover explicite de N78 (`reset` → `table.clear` / index 0, **volontaire** dans N78 pour ne pas mixer). Distinct de N78 (ring pendant le match, **déjà fermé**) et de N79 (`snapshot` arrays). **N80 hardening ≠ N80 feel historique (`Bots.neighborFactions`).**
 
-**Problème :** `TickMetrics.record` fait `sample = { tick, changedTiles, dirtyChunks, deltaBytes, tickMs }` **à chaque tick**, `table.insert(history)`, et au-delà de `HISTORY_CAP=600` un `table.remove(history, 1)` O(n). `dirtyChunksFromDelta` (delta non-nil) fait `seen: { [number]: boolean } = {}` par appel. `snapshot` / `formatReport` allouent 4 arrays + table de retour (rare, logs). ~1 700 shards × 10 Hz × Sample + éventuellement `seen`.
+**Problème :** `TickMetrics.reset` (chaque `startMatch` / `runMatch`) fait `table.clear(history)` : les jusqu’à 600 records Sample **recyclés pendant le match** sont abandonnés au GC. Le match suivant ré-alloue 600 tables. ~1 700 shards × N matchs / heure × 600 tables. N78 a volontairement `table.clear` pour borner le contrat (index 0, pas de Sample fantôme d’un match précédent dans `snapshot`).
 
-**Pourquoi 20K CCU :** l’instrumentation ne doit pas être le 4e poste du tick (après cadran N75, combat, nuke). Recycle Sample + `seenBuf` + ring buffer (pas `remove(1)`). Pas d’autorité : TickMetrics ne mute pas `GameState`. Format de `formatReport` **inchangé** (le banc parse `ticks=` / `avgTickMs=`).
+**Pourquoi 20K CCU :** un shard enchaîne les matchs (10–25 min). Garder le pool (count=0, **sans** `table.clear` des records) ramène l’alloc match-to-match à zéro. Pas d’autorité. Un leftover Sample non réécrit = p95 d’un match mort (le banc N78 601 `record` après reset le verrait si on oublie d’overwrite).
 
 **Worker :**
 
-1. `seenBuf` hash module-level, `table.clear` **avant** fill dans `dirtyChunksFromDelta`. Early-out delta nil **conservé** (pas de clear inutile). Exposer `TickMetrics.seenBuf` pour le banc.
-2. Pool Sample : ring `history[1..HISTORY_CAP]` + write index, **pas** `table.remove(history, 1)`. Réécrire les champs du record recyclé. `reset` → `table.clear` / index 0.
-3. `snapshot` : leftover **N79** si on recycle aussi les 4 arrays — **ne pas mixer** (lifetime différent, `table.sort` dans `percentile` mute). Pas de RemoteFunction. Ne pas `require(TickMetrics)` depuis GameState.
-4. Test : deux `record` avec un delta owner 1 tuile → `rawequal(seenBuf)`. 601 `record` → `#history == 600`, `rawequal` d’un Sample recyclé (pas 601 tables). `formatReport` encore parseable (`ticks=`). Banc 6000 ticks + N76 **verts**. Client **34/34**.
-5. Fichiers : `TickMetrics.luau`, `tests/simulate.luau` (bloc court, pas le run principal). Pas de recette feel.
+1. `reset` : `historyCount = 0`, `historyWrite = 0`, totaux à 0. **Ne pas** `table.clear(history)` — les records restent. `#history` après reset doit être **0** pour `snapshot` / `formatReport` (sinon p95 du match mort). Options : (A) truncate `history[i] = nil` pour `i = 1..oldCount` **sans** détruire les records — les garder dans un `samplePool` parallèle ; (B) garder `history` dense et faire lire `snapshot` `1..historyCount` (pas `#history`) — **alors** mettre à jour N78 tests (`#history == 600` → `historyCount`). **Un seul.** Recommandé : B + exposer `TickMetrics.historyCount`. Pas de RemoteFunction.
+2. Ne pas modifier `record` / `seenBuf` (N78 **fermé**) sauf si B exige `snapshot` itère `historyCount`. Ne pas mixer N79 (`snapshot` arrays) — si B change l’itération, N79 overwrite `1..historyCount`. `formatReport` encore parseable. Early-out delta nil **conservé**.
+3. Test : bancs N78 **doivent rester verts** (adapter `#history` si B). Ajouter : `record` × 10, `reset`, `record` × 1 → `rawequal` du Sample `[1]` (pas une 11e table). `snapshot.samples == 1` (pas 10 fantômes). `formatReport` `ticks=1`. Client **34/34**. 6000 ticks. Ne **pas** appeler `reset` avant le formatReport du run principal.
+4. Fichiers : `TickMetrics.luau` (`reset` + éventuellement `snapshot` itération), `tests/simulate.luau` (bloc court à côté de N78, après formatReport). Pas de recette feel.
 
-**Contraintes :** pas de RemoteFunction. **N78 hardening ≠ N76 (`detonate`) ≠ N53 (`dirtyIndexBuf`) ≠ N2 (stats HUD).** Overlay n’lit pas TickMetrics. Ne pas changer `HISTORY_CAP` / percentiles. Ne pas mixer N75 / N77. `init.server` hors bundle — le helper est **dans** le bundle (déjà testé).
+**Contraintes :** pas de RemoteFunction. **N80 hardening ≠ N78 (ring pendant le match, déjà fait) ≠ N79 (`snapshot` arrays) ≠ N53.** Overlay n’lit pas TickMetrics. Ne pas changer `HISTORY_CAP`. Ne pas mixer N75 / N77. Un Sample fantôme après reset = p95 d’un match mort (le banc `samples == 1` le verra).
 
 ---
 
-## 5b. N1–N78 encore ouverts ou fermés (passes 2–33)
+## 5b. N1–N80 encore ouverts ou fermés (passes 2–34)
 
-| ID | Titre | Prio | Note passe 33 |
+| ID | Titre | Prio | Note passe 34 |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | + `SAM_INTERCEPT_CHANCE` 0.55→1 ; clés mortes `FRONT_TILES_PER_CONTACT`, `CITY_TROOP_INCREASE` |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | `replicate()` envoie stats+unités complets à 10 Hz ; bateaux → **N51 fermé** ; missiles → **N52 fermé** ; indices dirty → **N53 fermé** ; bâtiments → **N54 fermé** ; HUD fronts → **N55 fermé** ; `buildPrices` → **N56 fermé** ; records stats → **N57 fermé** ; `progress` → **N58 fermé** ; `viewFor` → **N59 fermé** ; `expired` → **N60 fermé** ; contacts → **N61 fermé** ; sites → **N62 fermé** ; elim → **N63 fermé** ; path → **N64 fermé** ; rail → **N65 fermé** ; ctx → **N66 fermé** ; doomed → **N67 fermé** ; parked → **N68 fermé** ; collapse → **N69 fermé** ; destroy → **N70 fermé** ; validTiles → **N71 fermé** ; allyBuf → **N72 fermé** ; stripBuf → **N73 fermé** ; strip hashes → **N74 fermé** ; detonate hashes → **N76 fermé** ; reste skip-si-inchangé ; metrics Sample → **N78** |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | `replicate()` envoie stats+unités complets à 10 Hz ; bateaux → **N51 fermé** ; missiles → **N52 fermé** ; indices dirty → **N53 fermé** ; bâtiments → **N54 fermé** ; HUD fronts → **N55 fermé** ; `buildPrices` → **N56 fermé** ; records stats → **N57 fermé** ; `progress` → **N58 fermé** ; `viewFor` → **N59 fermé** ; `expired` → **N60 fermé** ; contacts → **N61 fermé** ; sites → **N62 fermé** ; elim → **N63 fermé** ; path → **N64 fermé** ; rail → **N65 fermé** ; ctx → **N66 fermé** ; doomed → **N67 fermé** ; parked → **N68 fermé** ; collapse → **N69 fermé** ; destroy → **N70 fermé** ; validTiles → **N71 fermé** ; allyBuf → **N72 fermé** ; stripBuf → **N73 fermé** ; strip hashes → **N74 fermé** ; detonate hashes → **N76 fermé** ; splitMirv → **N77 fermé** ; metrics Sample/`seen` → **N78 fermé** ; reste skip-si-inchangé ; snapshot arrays → **N79** ; reset pool → **N80** |
 | N3 | Timebase tick vs `os.clock()` | P1 | combat/match = clock ; sim = tick |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | `RequestSnapshot` **jamais** `FireServer` côté client |
 | N5 | Cap beachheads (`MAX_ACTIVE_ATTACKS`) | P2 | park `isBeachhead` → hors cap land ; **2 beachheads parked + 1 terre = 3** — voir N29 ; alloc parked → **N68 fermé** |
@@ -261,7 +278,7 @@ Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSa
 | N7 | Matchmaking MemoryStore / Teleport | P2 | absent du tree |
 | N8 | Combat mort `GameState.stepAttacks` | P2 | refund + retraite `RETREAT_LOSS` alignés ; le reste du corps est mort ; `tileCost` lit encore `defense` (buffer plus écrit) ; wrap vivant → **N67 fermé** ; `collapseFaction` remaining → **N69 fermé** |
 | N9 | `stepDoomsday` O(TILE_COUNT) | P2 | timers slot maintenant purgés ; liste temporaire → **N73 fermé** ; hashes spawn → **N74 fermé** ; le scan rot est toujours O(tuiles) → **N75** |
-| N10 | Divers P3 | P3 | donations gold sans plafond ; `pendingMode` last-writer ; README SmoothTerrain ; `contextFor` → **N66 fermé** ; `validTiles` → **N71 fermé** ; `stripTerritory` hashes → **N74 fermé** ; `detonate` hashes → **N76 fermé** ; `splitMirv` → **N77** ; metrics → **N78** |
+| N10 | Divers P3 | P3 | donations gold sans plafond ; `pendingMode` last-writer ; README SmoothTerrain ; `contextFor` → **N66 fermé** ; `validTiles` → **N71 fermé** ; `stripTerritory` hashes → **N74 fermé** ; `detonate` hashes → **N76 fermé** ; `splitMirv` → **N77 fermé** ; metrics Sample → **N78 fermé** ; snapshot arrays → **N79** ; reset pool → **N80** |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | debit = `attackTilesPerTick` × speed, **captures<80 pops<160** |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 observé) | P1 | `Bots.spawnAll` wrap + `Tribes.spawnAll(6)` hors budget |
 | N13 | Parité ère / cost factor `attackLogic` | P2 | doctrines oui ; `Eras.accumulate` et `sizeAttackFactors` coût **non** |
@@ -287,13 +304,15 @@ Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSa
 | N33 | `findSpawn` splash / fallout | P3 | specs only (recette feel N50/N52). **≠ N33 feel (BOAT_LANDING_BONUS).** |
 | N34–N74 | (index / snapshots / HUD / diplomatie / bots / combat wrap / pose) | — | **tous fermés** (passes 11–32). Voir rapport #102. |
 | N75 | `stepDoomsday` scan O(TILE_COUNT) | P2 | specs only. Leftover N9 / N73. Ferme N9 si contrat A ou C. **Non livré ici** (A trop structurel). **≠ N75 feel historique (`pricesFor`).** |
-| N76 | `Nukes.detonate` `tilesBefore` / `hitTiles` | P3 | **fermé**. Leftover silo/SAM index. `splitMirv` targets → leftover **N77**. **≠ N76 feel historique (`stats[slot]`).** |
-| N77 | `splitMirv` `targets = {}` | P3 | specs only. Leftover N76. **≠ N77 feel historique (`progress` min).** |
-| N78 | `TickMetrics.record` Sample + `seen` | P3 | specs only. 10 Hz instrumentation. `snapshot` arrays → leftover N79 si on y va. **≠ N78 feel historique (`viewFor`).** |
+| N76 | `Nukes.detonate` `tilesBefore` / `hitTiles` | P3 | **fermé** (passe 33). **≠ N76 feel historique (`stats[slot]`).** |
+| N77 | `splitMirv` `targets = {}` | P3 | **fermé**. Leftover N76. **≠ N77 feel historique (`progress` min).** |
+| N78 | `TickMetrics.record` Sample + `seen` | P3 | **fermé**. 10 Hz instrumentation. `snapshot` arrays → leftover **N79**. `reset` pool → leftover **N80**. **≠ N78 feel historique (`viewFor`).** |
+| N79 | `TickMetrics.snapshot` 4 arrays | P3 | specs only. Leftover N78. **≠ N79 feel historique (`expired`).** |
+| N80 | `TickMetrics.reset` droppe le pool Sample | P3 | specs only. Leftover N78. **≠ N80 feel historique (`neighborFactions`).** |
 
 N10.8 (refund allié bateau 100 % vs `BOAT_RETREAT_LOSS`) : **inchangé**. `Navy.step` convertit encore un transport allié en retraite (25 %). `Diplomacy.accept` ne rappelle pas les bateaux ; le tick Navy suivant taxe 25 %. `resolveLanding` allié = 100 % si le check mid-transit est contourné.
 
-P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `startMatch` suffit) ; disconnect mid-match **vivant** = `Persistence.record(..., false)` 0 XP (chemin distinct de N37 ; éliminé puis leave **grave** le snapshot) ; wrap `launchAttack` n’applique `AimFront.focus` que si le couple n’existait pas (renfort = pas de re-visée — feel N36). Spatial hash warships (contrat A de N39) volontairement non fait. `Trade.step` `factoriesBuf` déjà recyclé (N45) ; early-out 0 usine / sort seulement si `n>=2` = reste de feel N66, cheap. `structureHash` O(B log B) seulement sur `RequestSnapshot` rate-limité (N4, client jamais `FireServer`). `Nukes.detonate` (N76) `table.clear` les hashes **module** — leftover ocean `next` nil. `splitMirv` alloue encore (N77). `TickMetrics.record` alloue encore (N78).
+P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `startMatch` suffit) ; disconnect mid-match **vivant** = `Persistence.record(..., false)` 0 XP (chemin distinct de N37 ; éliminé puis leave **grave** le snapshot) ; wrap `launchAttack` n’applique `AimFront.focus` que si le couple n’existait pas (renfort = pas de re-visée — feel N36). Spatial hash warships (contrat A de N39) volontairement non fait. `Trade.step` `factoriesBuf` déjà recyclé (N45) ; early-out 0 usine / sort seulement si `n>=2` = reste de feel N66, cheap. `structureHash` O(B log B) seulement sur `RequestSnapshot` rate-limité (N4, client jamais `FireServer`). `Nukes.detonate` (N76) `table.clear` les hashes **module** — leftover ocean `next` nil. `splitMirv` (N77) `table.clear` les arrays **module** — leftover ocean `# == 1`. `TickMetrics.record` (N78) ring — leftover `snapshot` (N79) / `reset` pool (N80). `Nukes.step` `table.remove` missiles encore O(n) par intercept/scission/détonation (pas ticket : ordre reverse-iter conservé).
 
 ---
 
@@ -326,8 +345,10 @@ P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `
 | `COLLAPSE_MIN_TILES` | 24 | 24 | oui (N69, inchangé) |
 | `BUILD_MIN_SPACING` | (Config) | (apply) | oui (`validTiles` via `blockBuf` — N71, loi inchangée) |
 | `BUILD_SNAP_RADIUS` | (Config) | (apply) | oui (`validTiles` — N71, loi inchangée) |
-| `MIRV_SEPARATION` | 0.55 | 0.55 | oui (`splitMirv` — N77 encore alloué) |
+| `MIRV_SEPARATION` | 0.55 | 0.55 | oui (`splitMirv` — N77, arrays recyclés) |
 | `NUKE_STATS[ATOM].radius` | 9 | 9 | oui (`detonate` — N76, hashes recyclés) |
+| `NUKE_STATS[MIRV].warheads` | 6 | 6 | oui (`splitMirv` — N77, `mirvTxBuf` cap) |
+| `NUKE_STATS[MIRV].spread` | 16 | 16 | oui (`splitMirv` — N77, `NextInteger` inchangé) |
 
 ---
 
@@ -337,7 +358,7 @@ P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `
 ./tests/run.sh  → exit 0
 bundle server : 37 modules
 Serveur : Tous les invariants tiennent.
-  … gardes #17–#102 inchangés …
+  … gardes #17–#104 inchangés …
   allyBuf : deux appels, rawequal, allie present (N72)
   allyBuf : breakAlliance → ex-allie absent (N72)
   allyBuf : slot isole next nil (N72)
@@ -346,13 +367,17 @@ Serveur : Tous les invariants tiennent.
   stripTerritory : table.clear in-place, voisin intact (N74)
   detonate hashes : boom A, snapshot avant crater (N76)
   detonate hashes : ocean leftover 0, rawequal (N76)
+  splitMirv hashes : porteur land, rawequal (N77)
+  splitMirv hashes : ocean leftover 1, rawequal (N77)
   combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 captures=80 pops=160
   factions : 18
-  metrics : ticks=6000 avgChanged=8.9 p95Changed=19 maxChanged=479 avgTickMs=0.37 p95TickMs=0.85
+  metrics : ticks=6000 avgChanged=8.9 p95Changed=19 maxChanged=479 avgTickMs=0.38 p95TickMs=0.87
+  metrics hashes : seenBuf rawequal, nil sans clear (N78)
+  metrics hashes : ring 601, Sample recycle, ticks= (N78)
 Client  : 34 OK — Tous les ecrans se construisent et s'executent sans erreur.
 ```
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe33.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe34.log`
 
 ---
 
@@ -368,7 +393,9 @@ Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe33.log`
 - Purge inbound d’un slot = **dans `removePlayer`**, pas seulement dans `Diplomacy.step` (ordre : Diplomacy puis `state:step`). Inclut cadran + colis + **transports** + **missiles** + **convois kind==2** (avant `setOwner`).
 - Transports : `kind == 1`. Convois : `kind == 2`. Missiles : `toIndex(floor(tx), floor(ty))` vs `owner` **avant** `setOwner`. Ne pas `require(Navy)` / `require(Nukes)` / `require(Trade)` / `require(Bots)` / `require(Buildings)` / `require(Research)` / `require(Diplomacy)` / `require(Placement)` depuis GameState (cycle).
 - Missile inbound = **annulé**, pas remboursé. Convoi inbound = **coulé**, pas d’or. Convoi vs PORT **détruit** (combat, pas recycle) = **coulé** dans `Navy.step` (contrat B). Capture de PORT = convoi continue. Frappe / convoi déjà visé sur un tiers = conservé. Splash tiers / fallout au spawn = N33.
-- Crater nuke : `tilesBeforeBuf` / `hitTilesBuf` (N76). `table.clear` **avant** fill. Formule `share = tilesHit / tilesBefore` inchangée. Wrap `installFallout` **après** orig. Ne pas `require(Nukes)` depuis GameState. Leftover `splitMirv` → N77.
+- Crater nuke : `tilesBeforeBuf` / `hitTilesBuf` (N76). `table.clear` **avant** fill. Formule `share = tilesHit / tilesBefore` inchangée. Wrap `installFallout` **après** orig. Ne pas `require(Nukes)` depuis GameState. Visée MIRV → N77 **fermé**.
+- Visée MIRV : `mirvTxBuf` / `mirvTyBuf` (N77). `table.clear` **avant** fill. Pas de `Vector2`. Ogives = records **neufs** dans `state.missiles` (possession). `spread` / `minGap=4` / fallback point visé inchangés. Non réentrant — `Nukes.step` série. Ne pas partager `tilesBeforeBuf` / `hitTilesBuf`. Leftover `snapshot` metrics → N79.
+- Metrics : `seenBuf` + ring Sample (N78). Early-out delta nil **sans** clear. `formatReport` parse `ticks=`. `snapshot` encore alloué → N79. `reset` `table.clear(history)` → N80. Ne pas `require(TickMetrics)` depuis GameState.
 - `findSeaPath` : pools module-level, `buffer.fill(buf, 0, 0)`, `table.clear` parent/queue. `pathWalkBuf` walk scratch (N64) ; copie inverse dans un tableau **neuf**. Navy n’est pas réentrant. Ne pas porter AimFront avec. Ne **pas** `return pathWalkBuf` : `boat.path` prend possession.
 - `tryAnnex` : appelé **après** `setOwner` ; BFS depuis les voisins défenseur du seed. Océan = abort (enclave terrestre), pas un bug. Pools `annexVisitBuf` / queue / pocket, `buffer.fill(buf, 0, 0)`.
 - `syncCarriers` : `_carriersDirty` NAVAL_BASE seulement (`placeBuilding` / `destroyBuilding` / `transferBuilding`). Spawn via `navalBasesBySlot` (N48). `carrierSeen` recyclé. Pas de scan 10 Hz. Pas de dirty CITY/PORT. Distinct de `portsByTile` (PORT) et de `buildingsBySlot` (tous kinds).
@@ -407,9 +434,11 @@ Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe33.log`
 - Pactes bots : `Bots.decideDiplomacy` (N72). `allyBuf` hash + `table.clear`. Fill `areAllied` sur `state.players` (**pas** copie des clés `alliances[slot]` — recette visual V42, pas feel 1e43 N91). Coalition / trahison / proposition lisent `allyBuf`. `Bots.allyBuf` exposé banc. Non réentrant — `Bots.step` séquentiel, `clear` au bot suivant **voulu**. Seuils 0.75/0.35/2.2/0.25/0.3 inchangés. Ne pas `require(Bots)` depuis GameState. Ne pas fusionner avec `contactBuf` (N61).
 - Rot cadran : `ChantierB.stepDoomsday` (N73). `stripBuf` array + truncate leftover **avant** arrachage, reset **après** chaque slot. Itérer `1..n`. Skip AFK / `awaitingSpawn` **conservé**. `rotQuota` inchangé. Scan `TILE_COUNT` **reste** (N9 / N75). `ChantierB.stripBuf` exposé banc. Non réentrant. Ne pas `require(ChantierB)` depuis GameState. Leftover hashes spawn → N74 **fermé**. Leftover scan → N75.
 - Strip spawn : `ChantierB.stripTerritory` (N74). `table.clear(ps.border)` / `table.clear(ps.coast)` in-place. Pas de buf module. `tiles = 0` / `awaitingSpawn` / destroy capital inchangés. Hashes **par joueur**. Banc rawequal + voisin intact. Ne pas `ps.border = nil`.
-- Crater nuke : `Nukes.detonate` (N76). `tilesBeforeBuf` / `hitTilesBuf` + `table.clear` **avant** fill. Snapshot `ps.tiles` **avant** crater. Formule `share` inchangée. `Nukes.tilesBeforeBuf` / `Nukes.hitTilesBuf` exposés banc. Non réentrant — `Nukes.step` détone en série, `clear` au boom suivant **voulu**. Wrap `installFallout` après orig. Ne pas partager `samBuf` / `blastX` / `destroyBuf`. Leftover `splitMirv` → N77.
+- Crater nuke : `Nukes.detonate` (N76). `tilesBeforeBuf` / `hitTilesBuf` + `table.clear` **avant** fill. Snapshot `ps.tiles` **avant** crater. Formule `share` inchangée. `Nukes.tilesBeforeBuf` / `Nukes.hitTilesBuf` exposés banc. Non réentrant — `Nukes.step` détone en série, `clear` au boom suivant **voulu**. Wrap `installFallout` après orig. Ne pas partager `samBuf` / `blastX` / `destroyBuf` / `mirvTxBuf`. Leftover `splitMirv` → N77 **fermé**.
+- Visée MIRV : `Nukes.splitMirv` (N77). `mirvTxBuf` / `mirvTyBuf` + `table.clear` **avant** fill. Pas de `Vector2`. Fallback `# == 0` → point visé. `Nukes.mirvTxBuf` / `Nukes.mirvTyBuf` exposés banc. Non réentrant — `clear` à la scission suivante **voulu**. Ogives unique. Leftover metrics → N78 **fermé**.
+- Metrics tick : `TickMetrics.record` (N78). `seenBuf` + `table.clear` avant fill (delta non-nil). Ring Sample, pas `remove(1)`. `TickMetrics.seenBuf` / `TickMetrics.history` exposés banc. Early-out nil sans clear. Leftover `snapshot` arrays → N79. Leftover `reset` pool → N80.
 - `init.server` / `Persistence` restent hors bundle : extraire un helper testable (`MatchLifecycle` / `snapshotBoats` / `snapshotMissiles` / `frontHudForReplicate` / `playerStatsForReplicate` déjà là) ou documenter un test Studio. TickMetrics est **dans** le bundle (N78).
 - Humain éliminé : `settledHumans[slot]` **avant** destruction du PlayerState. Bots ignorés. `endMatch` / disconnect après élimination passent par `MatchLifecycle` (init.server hors bundle). Disconnect **vivant** = 0 XP. `Persistence` reste hors du tick. Ne pas recâbler N6.
 - Grâce humaine = `Bots.humanTargetProtected` (bots **et** tribus). Ne pas dupliquer une 2e courbe.
 - Ne pas casser le client 34/34.
-- Ligne feel (#19/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48/#51/#53/#56/#59/#62 + 55ba + 4876 + cc42 + 2f5d + b62d + 69f4 + 07c6 + 2b37 + e277 + 1e43 + a963 + **d74d**) : rebase sur cette passe avant cherry-pick, sinon perte `tilesBeforeBuf`. Cherry-pick seq obligatoire (N41 feel) et `targetSlot` (N49 feel) seulement. Feel N91 (`allyBuf`) = N72 **fermé via visual V42**. Feel N93 (`stripBuf`) = N73 **fermé via visual V43**. Feel N94 (`stripTerritory`) = N74 **fermé**. Feel N95/N96 (`gainBuf` / `surveyTerritories`) = ligne visuelle (déjà sur bee8 / d74d). N50/N52 feel (`findSpawn` / `isSpawnSafe`) porte N33. **Ne pas** porter `retreating` Overlay (feel N56) avec N51. **Ne pas** porter `TRAIN_STOP_BONUS` HUD (feel N20) avec N65. **Ne pas** porter feel `guard < 80` (debit hardening = captures/pops). **Ne pas** porter `previewCtx` (feel N92). Client feel = 35/35 ; client hardening = **34/34**.
+- Ligne feel (#19/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48/#51/#53/#56/#59/#62 + 55ba + 4876 + cc42 + 2f5d + b62d + 69f4 + 07c6 + 2b37 + e277 + 1e43 + a963 + d74d + **c786**) : rebase sur cette passe avant cherry-pick, sinon perte `mirvTxBuf` / ring Sample. Cherry-pick seq obligatoire (N41 feel) et `targetSlot` (N49 feel) seulement. Feel N91 (`allyBuf`) = N72 **fermé via visual V42**. Feel N93 (`stripBuf`) = N73 **fermé via visual V43**. Feel N94 (`stripTerritory`) = N74 **fermé**. Feel N95/N96 (`gainBuf` / `surveyTerritories`) = ligne visuelle. N50/N52 feel (`findSpawn` / `isSpawnSafe`) porte N33. **Ne pas** porter `retreating` Overlay (feel N56) avec N51. **Ne pas** porter `TRAIN_STOP_BONUS` HUD (feel N20) avec N65. **Ne pas** porter feel `guard < 80` (debit hardening = captures/pops). **Ne pas** porter `previewCtx` (feel N92). Client feel = 35/35 ; client hardening = **34/34**.
