@@ -101,6 +101,14 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- reentrant.
 	self.shockFree = {} :: { Part }
 
+	-- V116 : free-list DeliveryPulse PAR overlay (pas blastFree /
+	-- smokeFree / shockFree). Recette feel N162 inline — ne PAS
+	-- merger 076b. Leftover Parent = nil, pas Destroy. Name
+	-- DeliveryPulse. Euler N132 deja (wakeRot V80). Distinct de
+	-- V113 (Blast). Distinct de V114 (BlastSmoke). Distinct de
+	-- V115 (Shockwave). Pas reentrant.
+	self.deliveryFree = {} :: { Part }
+
 	return self
 end
 
@@ -830,8 +838,9 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				splash.Transparency = 0.18
 				-- V79 : translation * rot cuit. Plus de CFrame.Angles despawn.
 				-- Recette feel N131. Y + 0.14 inchange. Distinct de V78 (spawn,
-				-- Y + 0.12). Distinct de DeliveryPulse (V80). Distinct de
-				-- Shockwave (V81).
+				-- Y + 0.12). Distinct de DeliveryPulse (V80 + V116
+				-- recycle). Distinct de Shockwave (V81). Recycle
+				-- LandingSplash leftover V117 (feel N161).
 				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * self.wakeRot
 				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 					Size = Vector3.new(0.18, 15, 15),
@@ -895,23 +904,53 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		if delivery.progress >= 1 then
 			route.delivery = nil
 			route.truckModel.Parent = nil
-			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
-			pulse.Shape = Enum.PartType.Cylinder
+			-- V116 : recycler DeliveryPulse. Size (0.22, 2.8, 2.8) +
+			-- Transparency 0.28 + Color colorFor(slot) + CFrame AVANT
+			-- Tween (un leftover Size = tween 11×11 / Transparency 1
+			-- de l'arrivee precedente). Recette feel N162 inline —
+			-- ne PAS merger 076b. Name DeliveryPulse conserve. Euler
+			-- N132 deja (wakeRot V80). Pas de pool partage avec
+			-- Blast / BlastSmoke / Shockwave. Ne pas nil les slots
+			-- du pool (pop O(1) : [n] = nil). Camion Parent = nil
+			-- conserve. Distinct de V115 (shockFree). Distinct de
+			-- V113 (blastFree). Distinct de V114 (smokeFree). Distinct
+			-- de V81 (Shockwave wakeRot). Flame Size (V111) inchangee.
+			local deliveryFree = self.deliveryFree
+			local pn = #deliveryFree
+			local pulse = if pn > 0 then deliveryFree[pn] else nil
+			if pulse then
+				deliveryFree[pn] = nil
+			else
+				pulse = Instance.new("Part")
+				pulse.Name = "DeliveryPulse"
+				pulse.Shape = Enum.PartType.Cylinder
+				pulse.Anchored = true
+				pulse.CanCollide = false
+				pulse.CanTouch = false
+				pulse.CanQuery = false
+				pulse.CastShadow = false
+				pulse.Material = Enum.Material.Neon
+				pulse.TopSurface = Enum.SurfaceType.Smooth
+				pulse.BottomSurface = Enum.SurfaceType.Smooth
+			end
+			pulse.Name = "DeliveryPulse"
+			pulse.Color = colorFor(route.slot)
 			pulse.Transparency = 0.28
+			pulse.Size = Vector3.new(0.22, 2.8, 2.8)
 			-- V80 : translation * rot cuit. Plus de CFrame.Angles arrivee.
 			-- Recette feel N132 — ne pas merger 5aa9. Distinct de V78
 			-- (spawn, Y + 0.12) / V79 (despawn, Y + 0.14). Distinct de
-			-- Shockwave (V81). Recycle DeliveryPulse leftover V116
-			-- (feel N162). route.to deja un Vector3.
+			-- Shockwave (V81). Pulse recycle (V116). route.to deja un
+			-- Vector3.
 			pulse.CFrame = CFrame.new(route.to) * self.wakeRot
+			pulse.Parent = self.root
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,
 			}):Play()
 			task.delay(0.85, function()
-				if pulse.Parent then
-					pulse:Destroy()
-				end
+				pulse.Parent = nil
+				deliveryFree[#deliveryFree + 1] = pulse
 			end)
 			continue
 		end
@@ -1028,8 +1067,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Name Blast conserve. Pas de pool partage avec Shockwave / fumee.
 	-- Ne pas nil les slots du pool (pop O(1) : [n] = nil). Distinct de
 	-- V112 (Ground/Border, WorldRenderer). Distinct de V81 (Shockwave
-	-- wakeRot). Distinct de V115 (shockFree). Flame Size (V111)
-	-- inchangee.
+	-- wakeRot). Distinct de V115 (shockFree). Distinct de V116
+	-- (DeliveryPulse deliveryFree). Flame Size (V111) inchangee.
 	local free = self.blastFree
 	local n = #free
 	local sphere = if n > 0 then free[n] else nil
@@ -1062,7 +1101,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- V81). Pas de pool partage avec Blast / BlastSmoke. Ne pas nil
 	-- les slots du pool (pop O(1) : [n] = nil). Distinct de V113
 	-- (Blast blastFree). Distinct de V114 (BlastSmoke smokeFree).
-	-- Distinct de V81 (wakeRot). Flame Size (V111) inchangee.
+	-- Distinct de V81 (wakeRot). Distinct de V116 (DeliveryPulse
+	-- deliveryFree). Flame Size (V111) inchangee.
 	local shockFree = self.shockFree
 	local kn = #shockFree
 	local shockwave = if kn > 0 then shockFree[kn] else nil
@@ -1106,8 +1146,9 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- f293. Name BlastSmoke conserve. Pas de pool partage avec Blast /
 	-- Shockwave. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
 	-- Distinct de V113 (Blast blastFree). Distinct de V115 (Shockwave
-	-- shockFree). Distinct de V81 (Shockwave wakeRot). Flame Size
-	-- (V111) inchangee.
+	-- shockFree). Distinct de V116 (DeliveryPulse deliveryFree).
+	-- Distinct de V81 (Shockwave wakeRot). Flame Size (V111)
+	-- inchangee.
 	local smokeFree = self.smokeFree
 	for i = 1, 5 do
 		local sn = #smokeFree
