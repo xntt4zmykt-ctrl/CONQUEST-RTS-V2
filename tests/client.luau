@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	os.exit(1)
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -227,6 +227,14 @@ check("identite, ere, diplomatie et classement", function()
 			"les factions ne sont plus triees par territoire decroissant"
 		)
 	end
+
+	-- N97 : leftover truncate. Premier update 12 slots, second un seul
+	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
+	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
+	assert(#hud.ranked == 1, "leftover ranked non truncate")
+	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	hud:update(stats, roster)
 
 	hud:setDiplomacy({
 		allies = { [2] = true },
@@ -427,7 +435,7 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 end)
 
 --[[
-	Disposition OpenFront.
+	Disposition CONQUEST.
 
 	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
 	choses, et c'est exactement ce qui casse quand on deplace une interface :
@@ -501,7 +509,7 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		"la bille du curseur n'est pas dans le panneau de controle"
 	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
-	-- jeu de reference — la puce dit combien part, le curseur decide.
+	-- CONQUEST — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
@@ -668,6 +676,76 @@ check("calques d'entites, effets et apercu", function()
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
+end)
+
+check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
+	local SpawnHint = __require("SpawnHint")
+	local Theme = __require("Theme")
+	local OCEAN = Config.TERRAIN.OCEAN
+	local owner = world.owner
+
+	local land: number? = nil
+	local ocean: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) == OCEAN then
+			if not ocean then
+				ocean = index
+			end
+		else
+			if not land then
+				land = index
+			end
+		end
+		if land and ocean then
+			break
+		end
+	end
+	assert(land ~= nil, "aucune terre")
+	assert(ocean ~= nil, "aucun ocean")
+	assert(SpawnHint.looksClaimable(terrain, owner, land), "disque isole encore rouge")
+	assert(not SpawnHint.looksClaimable(terrain, owner, ocean), "ocean colore comme spawn")
+
+	-- Peint tout le terre comme un empire sauf une lisiere (meme recette N55).
+	local occupier = 1
+	local pocket: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(owner, index, occupier)
+		end
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			local x, y = MapGen.fromIndex(index)
+			local adj = false
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					if dx ~= 0 or dy ~= 0 then
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local ni = MapGen.toIndex(nx, ny)
+							if buffer.readu8(terrain, ni) ~= OCEAN and buffer.readu8(owner, ni) == occupier then
+								adj = true
+							end
+						end
+					end
+				end
+			end
+			if adj then
+				buffer.writeu8(owner, index, 0)
+				pocket = index
+				break
+			end
+		end
+	end
+	assert(pocket ~= nil, "lisiere introuvable")
+	assert(not SpawnHint.looksClaimable(terrain, owner, pocket), "lisiere encore verte")
+	effects:previewTile(pocket, Theme.color.danger, false)
+	effects:clearActionPreview()
+
+	-- Restaure le buffer owner du monde (tout NEUTRAL) pour les checks suivants.
+	for index = 0, Config.TILE_COUNT - 1 do
+		buffer.writeu8(owner, index, 0)
+	end
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -1186,6 +1264,11 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
 	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
 
+	-- N96 : owner tout NEUTRAL → plus d'ancres (leftover hash interdit).
+	local barren = buffer.create(Config.TILE_COUNT)
+	labels:refresh(barren, stats, roster)
+	assert(labels.labels[1] == nil and labels.labels[2] == nil, "etiquette fantome apres carte neutre")
+
 	labels:clear()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
 end)
@@ -1250,7 +1333,7 @@ end)
 
 check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
-		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
 		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
 	}, {
@@ -1261,6 +1344,20 @@ check("navires, missiles et interpolation", function()
 	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
 	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
 	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
+	-- N98 : extra missile mute, pas remplace. Navire : extra reste nil
+	-- (retraite N56 via retreatTinted).
+	assert(overlay.units[1].extra == nil, "un navire ne doit pas porter extra")
+	local extra = overlay.units[3].extra
+	assert(extra ~= nil and extra.tx == 60 and extra.ty == 60, "extra missile initial absent")
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "extra missile non mute")
+	assert(rawequal(extra, overlay.units[3].extra), "record extra missile remplace")
 	overlay:stepInterpolation(1 / 60)
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
@@ -1285,6 +1382,27 @@ check("deltas de terrain et conquetes classees", function()
 	local changed, gains, losses, others = world:applyDelta(delta, 1)
 	assert(changed == 4, "le nombre de tuiles modifiees est faux")
 	assert(gains ~= nil and losses ~= nil and others ~= nil, "conquetes non classees")
+
+	-- N95 : prise sur une faction puis delta vide → leftover truncate.
+	-- Coloniser du neutre ne classe rien ; occuper en 2 puis capturer en 1
+	-- produit un gain. Le second applyDelta (payload vide) doit renvoyer
+	-- les memes pools a # == 0, sinon un splash fantome rejouerait la tuile.
+	local occupy = buffer.create(5)
+	buffer.writeu32(occupy, 0, 2100)
+	buffer.writeu8(occupy, 4, 2)
+	world:applyDelta(occupy, 1)
+	local capture = buffer.create(5)
+	buffer.writeu32(capture, 0, 2100)
+	buffer.writeu8(capture, 4, 1)
+	local _, g2, l2, o2 = world:applyDelta(capture, 1)
+	assert(#g2 == 1 and g2[1] == 2100, "prise locale non classee en gain")
+	assert(#l2 == 0 and #o2 == 0, "prise locale mal classee")
+	local empty = buffer.create(0)
+	local changed0, g3, l3, o3 = world:applyDelta(empty, 1)
+	assert(changed0 == 0, "delta vide count")
+	assert(#g3 == 0 and #l3 == 0 and #o3 == 0, "leftover applyDelta non truncate")
+	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
+
 	world:stepRebuilds()
 end)
 
@@ -1296,7 +1414,7 @@ check("camera strategique", function()
 	camera:step(1 / 60)
 
 	--[[
-		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Panoramique libre au clic du milieu, le geste CONQUEST.
 		Les faux InputObject sont de simples tables : le code ne lit que
 		UserInputType, Position et Delta.
 	]]
@@ -1413,7 +1531,7 @@ end)
 	Barre d'action tactile.
 
 	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
-	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	que personne ne la force — c'est le contrat de la disposition CONQUEST. On
 	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
 	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
 
@@ -1471,4 +1589,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	os.exit(1)
 end
