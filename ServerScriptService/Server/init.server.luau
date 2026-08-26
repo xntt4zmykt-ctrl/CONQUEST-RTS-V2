@@ -794,19 +794,8 @@ local function replicate()
 	-- snapshotBoats (N51) recycle boatSnapBuf ; jamais path / homeTile /
 	-- retreating (Overlay de cette ligne ne lit pas retreating).
 	local boats = state:snapshotBoats()
-
-	local missiles = {}
-	for _, missile in state.missiles do
-		table.insert(missiles, {
-			id = missile.id,
-			slot = missile.slot,
-			x = missile.x,
-			y = missile.y,
-			tx = missile.tx,
-			ty = missile.ty,
-			kind = missile.kind,
-		})
-	end
+	-- snapshotMissiles (N52) : Types.MissileSnapshot seulement, pas progress.
+	local missiles = state:snapshotMissiles()
 
 	fireDeployed(unitSnapshot, boats, missiles)
 
