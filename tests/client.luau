@@ -510,9 +510,60 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 	hud:openSheet("chat")
 	assert(hud.sheets.chat.Visible, "la feuille de messages ne s'ouvre pas")
 
+	-- V128 : capture layout + bouton AVANT le changement d'onglet
+	-- (feel N170 inline — ne PAS merger a4af / e839 / ee71).
+	-- Leftover V124 feedFree (check fil) doit rester vert.
+	-- Leftover V127 park ActionPreview (check calques) doit rester
+	-- vert. Leftover V103 FIFO (check fil) doit rester vert.
+	local firstChat
+	local chatGrid
+	for _, child in hud.chatBody:GetChildren() do
+		if child:IsA("UIGridLayout") then
+			chatGrid = child
+		elseif child:IsA("TextButton") and not firstChat then
+			firstChat = child
+		end
+	end
+	assert(chatGrid, "UIGridLayout absent au premier catalogue")
+	assert(firstChat, "aucun bouton au premier catalogue")
+
 	-- Un message sans cible part immediatement.
 	hud.chatCategory = "social"
 	hud:refreshChatSheet()
+	assert(rawequal(hud.chatGrid, chatGrid), "UIGridLayout recree au changement d'onglet")
+	assert(chatGrid.Parent == hud.chatBody, "UIGridLayout pas garde")
+	assert(type(hud.chatFree) == "table", "chatFree absent")
+	assert(hud.chatFree[#hud.chatFree + 1] == nil, "chatFree leftover slot")
+	local reusedChat = false
+	for _, child in hud.chatBody:GetChildren() do
+		if child:IsA("TextButton") and rawequal(child, firstChat) then
+			reusedChat = true
+			break
+		end
+	end
+	assert(reusedChat, "ChatButton recree au changement d'onglet")
+	assert(firstChat.Parent == hud.chatBody, "ChatButton pas reparente")
+	assert(firstChat.Name == "ChatButton", "Name ChatButton perdu")
+	-- social (4) apres aide (4) : pop+push net zero.
+	assert(#hud.chatFree == 0, "chatFree non vide apres pop+push 4=4")
+
+	-- defense (3) laisse un leftover ; retour social le reprend.
+	hud.chatCategory = "defense"
+	hud:refreshChatSheet()
+	assert(rawequal(hud.chatGrid, chatGrid), "UIGridLayout recree defense")
+	assert(#hud.chatFree >= 1, "chatFree defense non parque")
+	assert(hud.chatFree[#hud.chatFree + 1] == nil, "chatFree leftover slot defense")
+	local parkedChat = hud.chatFree[#hud.chatFree]
+	assert(parkedChat ~= nil, "chatFree slot defense vide")
+	assert(parkedChat.Parent == nil, "ChatButton defense pas parque")
+	local nChat = #hud.chatFree
+	hud.chatCategory = "social"
+	hud:refreshChatSheet()
+	assert(rawequal(hud.chatGrid, chatGrid), "UIGridLayout recree retour social")
+	assert(#hud.chatFree == nChat - 1, "chatFree non pop retour social")
+	assert(hud.chatFree[nChat] == nil, "chatFree leftover slot pop")
+	assert(parkedChat.Parent == hud.chatBody, "ChatButton pas repris")
+
 	local gg = buttonWithText("Bien joue !")
 	assert(gg, "le message social n'est pas dans le catalogue affiche")
 	gg.Activated:Fire()
@@ -1000,7 +1051,7 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse. V126 clearSelection Parent=nil. V127 clearActionPreview Parent=nil.
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse. V126 clearSelection Parent=nil. V127 clearActionPreview Parent=nil. V128 refreshChatSheet chatFree (check messages rapides).
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))

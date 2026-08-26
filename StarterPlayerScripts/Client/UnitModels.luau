@@ -449,6 +449,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- Distinct de V125 (recycle selectTile SelectedTerritory — autre fichier).
 			-- Distinct de V126 (clearSelection Parent=nil — autre fichier).
 			-- Distinct de V127 (clearActionPreview Parent=nil — autre fichier).
+			-- Distinct de V128 (refreshChatSheet chatFree — autre fichier).
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z

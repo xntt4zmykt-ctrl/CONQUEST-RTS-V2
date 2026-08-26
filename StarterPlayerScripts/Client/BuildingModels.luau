@@ -38,8 +38,10 @@ local BuildingModels = {}
 -- Distinct de V124 (HUD notify feedFree). Distinct de V125
 -- (selectTile SelectedTerritory, Effects). Distinct de V126
 -- (clearSelection Parent=nil, Effects). Distinct de V127
--- (clearActionPreview Parent=nil, Effects). Dust / scaffold Destroy
--- conserves. Pas reentrant. Evenement
+-- (clearActionPreview Parent=nil, Effects). Distinct de V128
+-- (refreshChatSheet chatFree, HUD). Dust / scaffold Destroy
+-- conserves. Leftover suivant = Overlay applyBuildingDelta
+-- Destroy modeles (V129). Pas reentrant. Evenement
 -- chantier, pas 60 Hz.
 BuildingModels.ringFree = {} :: { Part }
 
