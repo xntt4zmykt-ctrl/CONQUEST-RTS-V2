@@ -913,6 +913,15 @@ function GameState.addPlayer(
 	self.requests[slot] = {}
 	self.embargoes[slot] = {}
 
+	-- Ceinture : un slot recycle n'herite pas du cadran du predecesseur
+	-- meme si removePlayer a ete contourne (spawn rate, tests). ISSUE-N47.
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
+
 	local center = self:findSpawn(rng)
 	if not center then
 		self.players[slot] = nil
@@ -974,7 +983,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	-- de targetSlot, on lit owner[targetTile]. Apres neutralisation,
 	-- destOwner==NEUTRAL et Navy.step ne retraite pas — resolveLanding pose
 	-- une tete de pont vs cote vide. Restitution 100 %, pas BOAT_RETREAT_LOSS.
-	-- kind 1 = transport. Pas de require Navy (cycle Navy -> GameState).
+	-- kind 1 = transport. kind 2 = convoi (ISSUE-N48, recette 69b4) : couler,
+	-- pas d'or (le navire n'est pas arrive), pas de malus vendeur. Pas de
+	-- require Navy (cycle Navy -> GameState).
 	for i = #self.boats, 1, -1 do
 		local boat = self.boats[i]
 		if boat.slot == slot then
@@ -988,6 +999,15 @@ function GameState.removePlayer(self: GameState, slot: number)
 						attacker.troops += math.max(0, boat.troops)
 					end
 					boat.troops = 0
+					table.remove(self.boats, i)
+				end
+			end
+		elseif boat.kind == 2 then
+			-- JoinRequest entre deux ticks recycle le slot, repose un PORT
+			-- sur la meme tuile, et resolveTrade verse l'or a l'heritier.
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
 					table.remove(self.boats, i)
 				end
 			end
@@ -1083,6 +1103,34 @@ function GameState.removePlayer(self: GameState, slot: number)
 		self.quickChatLast[slot] = nil
 	end
 	self.bunkersBySlot[slot] = nil
+
+	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
+	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.
+	-- ISSUE-N47, recette 1dbe. Apres destroy / inbound boats-missiles / setOwner.
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
+	-- Colis : indexes par tuile d'usine, mais delivery.slot est le payeur.
+	-- Trade.step tourne AVANT stepElimination : un JoinRequest entre deux
+	-- ticks peut reposer une usine sur la meme tuile avec le slot recycle
+	-- et encaisser le colis du disparu.
+	if self.tradeDeliveries then
+		for index, delivery in self.tradeDeliveries do
+			if delivery.slot == slot then
+				self.tradeDeliveries[index] = nil
+			end
+		end
+	end
+	if self.tradeCooldowns then
+		for index in self.tradeCooldowns do
+			if not self.buildings[index] then
+				self.tradeCooldowns[index] = nil
+			end
+		end
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)

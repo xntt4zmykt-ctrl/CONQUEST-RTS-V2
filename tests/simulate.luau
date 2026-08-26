@@ -4176,6 +4176,291 @@ do
 end
 
 do
+	-- N46 : une proposition inverse PERIMEE ne doit pas bloquer une nouvelle
+	-- request (Bots.step avant Diplomacy.step). Recette 915c.
+	local state = GameState.new(9698)
+	local a = state:addPlayer(nil, "A", Random.new(107), 0)
+	local b = state:addPlayer(nil, "B", Random.new(108), 0)
+	if not a or not b then
+		fail("request stale reverse — spawn impossible")
+	else
+		local okLive = Diplomacy.request(state, b.slot, a.slot)
+		if not okLive then
+			fail("request stale reverse — proposition initiale refusee")
+		else
+			state.requests[b.slot][a.slot] = 0
+			state.tick = 1
+			local ok, message = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail(`request stale reverse — nouvelle demande refusee ({tostring(message)})`)
+			end
+			if state:areAllied(a.slot, b.slot) then
+				fail("request stale reverse — pacte signe sur une proposition perimee")
+			end
+			local fromA = state.requests[a.slot]
+			if not fromA or fromA[b.slot] == nil then
+				fail("request stale reverse — nouvelle demande non enfilee")
+			end
+			local fromB = state.requests[b.slot]
+			if fromB and fromB[a.slot] ~= nil then
+				fail("request stale reverse — proposition perimee encore en table")
+			end
+			print("request stale reverse : proposition perimee ignoree, nouvelle demande enfilee")
+		end
+	end
+end
+
+do
+	-- N46 : demande croisee VIVANTE = toujours une acceptation.
+	local state = GameState.new(9699)
+	local a = state:addPlayer(nil, "A", Random.new(109), 0)
+	local b = state:addPlayer(nil, "B", Random.new(110), 0)
+	if not a or not b then
+		fail("request live reverse — spawn impossible")
+	else
+		if not Diplomacy.request(state, b.slot, a.slot) then
+			fail("request live reverse — proposition initiale refusee")
+		else
+			local ok = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail("request live reverse — croisement vivant refuse")
+			end
+			if not state:areAllied(a.slot, b.slot) then
+				fail("request live reverse — pacte non signe")
+			end
+			print("request live reverse : croisement vivant signe le pacte")
+		end
+	end
+end
+
+do
+	-- N47 : removePlayer purge doomWarnedAt / doomUnderSince (slot recycle).
+	local state = GameState.new(9090)
+	local leader = state:addPlayer(nil, "Chef", Random.new(90), 0)
+	local victim = state:addPlayer(nil, "Marque", Random.new(91), 0)
+	if not leader or not victim then
+		fail("doomsday recycle — spawn impossible")
+	else
+		state.doomWarnedAt = state.doomWarnedAt or {}
+		state.doomUnderSince = state.doomUnderSince or {}
+		state.doomWarnedAt[victim.slot] = 999
+		state.doomUnderSince[victim.slot] = 50
+		local gone = victim.slot
+		state:removePlayer(gone)
+		if state.doomWarnedAt[gone] ~= nil then
+			fail("doomsday recycle — doomWarnedAt survit a removePlayer")
+		end
+		if state.doomUnderSince[gone] ~= nil then
+			fail("doomsday recycle — doomUnderSince survit a removePlayer")
+		end
+		local heir = state:addPlayer(nil, "Heritier", Random.new(92), 0)
+		if not heir then
+			fail("doomsday recycle — reuse de slot impossible")
+		elseif heir.slot == gone and state.doomWarnedAt[heir.slot] ~= nil then
+			fail("doomsday recycle — le nouvel occupant herite du cadran")
+		end
+		print("doomsday recycle : timers cadran purges au recycle de slot")
+	end
+end
+
+do
+	-- N47 : colis d'un disparu purge avant qu'un slot recycle encaisse.
+	local state = GameState.new(9192)
+	local a = state:addPlayer(nil, "Reste", Random.new(95), 0)
+	local b = state:addPlayer(nil, "Livreur", Random.new(96), 0)
+	if not a or not b then
+		fail("colis recycle — spawn impossible")
+	else
+		local factoryTile = b.capitalTile or 0
+		state.tradeDeliveries[factoryTile] = {
+			to = factoryTile,
+			slot = b.slot,
+			level = 1,
+			links = 1,
+			distance = 4,
+			arrivalTick = state.tick + 10,
+		}
+		state.tradeCooldowns[factoryTile] = state.tick + 20
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.tradeDeliveries[factoryTile] ~= nil then
+			fail("colis recycle — colis du slot recycle encore en route")
+		end
+		if state.tradeCooldowns[factoryTile] ~= nil then
+			fail("colis recycle — cooldown usine detruite encore pose")
+		end
+		print("colis recycle : colis / cooldown purges au recycle de slot")
+	end
+end
+
+do
+	-- N48 : convoi inbound vers le port d'un disparu. removePlayer coule
+	-- le navire AVANT setOwner. Recycle + PORT sur la meme tuile ne verse
+	-- plus l'or a l'heritier. Pas de malus vendeur. Recette 69b4.
+	local state = GameState.new(9900)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(121), 0)
+	local dest = state:addPlayer(nil, "Quai", Random.new(122), 0)
+	if not seller or not dest then
+		fail("trade inbound — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade inbound — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portB, dest.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, dest.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portB :: number)
+			if not path then
+				fail("trade inbound — route maritime introuvable")
+			else
+				local goldSeller = seller.gold
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				local gone = dest.slot
+				state:removePlayer(gone)
+				local leftover = 0
+				for _, boat in state.boats do
+					if boat.kind == Navy.KIND_TRADE then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`trade inbound — {leftover} convoi(s) encore en mer`)
+				elseif math.abs(seller.gold - goldSeller) > 0.01 then
+					fail(`trade inbound — or vendeur {seller.gold} (paiement / malus ?)`)
+				else
+					local heir = state:addPlayer(nil, "Heritier", Random.new(123), 0)
+					if not heir then
+						fail("trade inbound — recycle impossible")
+					else
+						state:setOwner(portB :: number, heir.slot)
+						state:placeBuilding(portB :: number, Config.BUILDING.PORT, heir.slot)
+						local goldHeir = heir.gold
+						goldSeller = seller.gold
+						-- Evite spawnTradeShips (tick % 45 == 0) qui recrerait
+						-- un convoi A→heritier le meme pas.
+						state.tick = 1
+						Navy.step(state, Random.new(11))
+						if math.abs(seller.gold - goldSeller) > 0.01 then
+							fail(`trade inbound — or vendeur apres recycle {seller.gold}`)
+						elseif math.abs(heir.gold - goldHeir) > 0.01 then
+							fail(`trade inbound — or heritier {heir.gold} (paiement fantome)`)
+						else
+							print("trade inbound : convoi coule, pas d'or a l'heritier")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N48 : un convoi A→C survit au recycle d'un autre slot (B).
+	local state = GameState.new(9901)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(124), 0)
+	local bystander = state:addPlayer(nil, "Temoin", Random.new(125), 0)
+	local buyer = state:addPlayer(nil, "Acheteur", Random.new(126), 0)
+	if not seller or not bystander or not buyer then
+		fail("trade third-party — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portC: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portC = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portC then
+			fail("trade third-party — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portC, buyer.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portC, Config.BUILDING.PORT, buyer.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portC :: number)
+			if not path then
+				fail("trade third-party — route maritime introuvable")
+			else
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portC,
+					homeTile = portA,
+				})
+				state:removePlayer(bystander.slot)
+				if #state.boats ~= 1 or state.boats[1].kind ~= Navy.KIND_TRADE then
+					fail(`trade third-party — convoi tiers retire ({#state.boats} restant)`)
+				else
+					local goldA, goldC = seller.gold, buyer.gold
+					state.tick = 1
+					Navy.step(state, Random.new(12))
+					if seller.gold <= goldA or buyer.gold <= goldC then
+						fail("trade third-party — or non verse apres recycle d'un temoin")
+					else
+						print("trade third-party : convoi A→C conserve, or verse")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(

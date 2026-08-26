@@ -28,6 +28,13 @@ local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	end
 end
 
+-- Presence d'une date ne suffit pas : Bots.step tourne AVANT Diplomacy.step,
+-- donc une inverse perimee reste dans requests[] ce tick. `true` n'est pas
+-- une expiry de proposition (les pactes, eux, ont pactStillLive).
+local function requestIsLive(state: GameState, expiry: any): boolean
+	return typeof(expiry) == "number" and state.tick < expiry
+end
+
 --=============================================================================
 -- Alliances
 --=============================================================================
@@ -55,9 +62,17 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
+	-- Bots.step tourne AVANT Diplomacy.step : une proposition inverse perimee
+	-- reste dans requests[] ce tick. Sans le garde, accept refuse "expiree"
+	-- et on n'envoie jamais la nouvelle demande — 1 tick (ou 12 pour une
+	-- tribu) de diplomatie bloquee, meme classe que areAllied / viewFor.
+	-- ISSUE-N46, recette 915c. Ne pas signer un pacte sur une expiry.
 	local theirs = state.requests[to]
 	if theirs and theirs[from] then
-		return Diplomacy.accept(state, to, from)
+		if requestIsLive(state, theirs[from]) then
+			return Diplomacy.accept(state, to, from)
+		end
+		theirs[from] = nil
 	end
 
 	state.requests[from][to] = state.tick + Config.ALLIANCE_REQUEST_TIMEOUT
