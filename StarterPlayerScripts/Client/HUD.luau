@@ -1235,6 +1235,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- init feedFree ici (pas HUD.new). Distinct de V123 (BuildRing
 	-- ringFree, BuildingModels). Distinct de V120 (floatingText
 	-- textFree, Effects). Distinct de V122 (conquestPulse pulseFree).
+	-- Distinct de V125 (selectTile SelectedTerritory, Effects).
 	-- Pas reentrant. Evenement fil, pas 60 Hz. Ne pas nil les slots
 	-- du pool. Ne pas geler Size flame (V74).
 	local feedFree = self.feedFree
