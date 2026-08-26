@@ -877,8 +877,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- V57 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
 		-- V64 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
-		-- 60 Hz. Roues : Angles conserve. Unites inchangees (V56). Chantier
-		-- segment.rot inchange (V63).
+		-- 60 Hz. Roues : Angles conserve. Unites : V65 (yaw, pas segRot).
+		-- Chantier segment.rot inchange (V63).
 		local path = route.path
 		local nSeg = #path - 1
 		local scaled = delivery.progress * nSeg
@@ -914,8 +914,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 
 		local x, y = unit.currentX, unit.currentY
 		-- V56 : X/Z monde en nombres. Plus de tileToWorld / Vector3.Unit /
-		-- CFrame.new(position) par unite. Un seul lookAt. Immobile = regard -Z
+		-- CFrame.new(position) par unite.
+		-- V65 : pose = translation * yaw. Plus de lookAt(deux Vector3) 60 Hz.
+		-- Immobile = lookX=0, lookZ=-1 → atan2(0, 1) = 0 → identite
 		-- (meme pose que CFrame.new(x,y,z)). Extra missile inchange (V52).
+		-- Camion segRot inchange (V64). Chantier segment.rot inchange (V63).
 		local worldX = x * TILE - HALF_W + TILE_HALF
 		local worldZ = y * TILE - HALF_D + TILE_HALF
 
@@ -942,7 +945,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local mag = math.sqrt(dx * dx + dy * dy)
 		local lookX = if mag > 0.01 then dx else 0
 		local lookZ = if mag > 0.01 then dy else -1
-		local frame = CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX + lookX, py, worldZ + lookZ))
+		local frame = CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, math.atan2(lookX, -lookZ), 0)
 		if mag > 0.01 and not unit.isMissile then
 			frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
 		end
