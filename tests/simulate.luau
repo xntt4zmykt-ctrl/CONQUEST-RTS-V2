@@ -4585,6 +4585,201 @@ end
 
 print("passe 23 : snapshotBoats, snapshotMissiles OK")
 
+--[[
+	Nightly passe 24 — revue PR #69 : flushBuildingDelta / frontHud (V28–V29).
+]]
+do
+	-- V28 : flushBuildingDelta recycle. Flush spawn (capitale) d'abord.
+	-- CITY → length 1, kind/slot/index. Second flush → nil. destroy →
+	-- length 1, kind==0, links==nil. Relance pose → length 1, pas de fuite
+	-- du destroy. Recette feel N73 / hardening N54.
+	local state = GameState.new(2401)
+	local owner = state:addPlayer(nil, "BuildSnap", Random.new(95), 0)
+	if not owner then
+		fail("buildingSnapBuf — spawn impossible")
+	else
+		state:flushBuildingDelta()
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if
+				buffer.readu8(state.owner, index) == owner.slot
+				and not state.buildings[index]
+				and state:isLand(index)
+			then
+				site = index
+				break
+			end
+		end
+		if not site then
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) and buffer.readu8(state.owner, index) == Config.NEUTRAL_SLOT then
+					state:setOwner(index, owner.slot)
+					site = index
+					break
+				end
+			end
+		end
+		if not site then
+			fail("buildingSnapBuf — tuile libre introuvable")
+		else
+			state:placeBuilding(site, Config.BUILDING.CITY, owner.slot)
+			local first = state:flushBuildingDelta()
+			local firstN = if first then #first else 0
+			local firstOk = false
+			if first then
+				for _, rec in first do
+					if rec.index == site and rec.kind == Config.BUILDING.CITY and rec.slot == owner.slot then
+						firstOk = true
+						break
+					end
+				end
+			end
+			if firstN ~= 1 or not firstOk then
+				fail(`buildingSnapBuf — pose CITY length {firstN}, attendu 1`)
+			else
+				local second = state:flushBuildingDelta()
+				if second ~= nil then
+					fail("buildingSnapBuf — second flush non nil")
+				else
+					state:destroyBuilding(site)
+					local gone = state:flushBuildingDelta()
+					local goneN = if gone then #gone else 0
+					local goneOk = false
+					if gone then
+						for _, rec in gone do
+							if rec.index == site and rec.kind == 0 and rec.links == nil then
+								goneOk = true
+								break
+							end
+						end
+					end
+					if goneN ~= 1 or not goneOk then
+						fail(`buildingSnapBuf — destroy length {goneN} kind/links`)
+					else
+						state:placeBuilding(site, Config.BUILDING.CITY, owner.slot)
+						local again = state:flushBuildingDelta()
+						local againN = if again then #again else 0
+						local againOk = false
+						local leakedDestroy = false
+						if again then
+							for _, rec in again do
+								if rec.index == site and rec.kind == Config.BUILDING.CITY then
+									againOk = true
+								end
+								if rec.kind == 0 then
+									leakedDestroy = true
+								end
+							end
+						end
+						if againN ~= 1 or not againOk or leakedDestroy then
+							fail(`buildingSnapBuf — relance length {againN} fuite destroy`)
+						else
+							print("buildingSnapBuf : CITY, second nil, destroy kind=0, relance 1 (V28)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V29 : frontHudForReplicate recycle. 0 front → maps vides. 1 terre +
+	-- 1 beachhead meme couple → 2 tas. Retraite jusqu'a dissolution → maps
+	-- vides (pas de fuite de slot). Recette feel N74 / hardening N55.
+	local state = GameState.new(2402)
+	local a = state:addPlayer(nil, "HudAtk", Random.new(11), 0)
+	local b = state:addPlayer(nil, "HudDef", Random.new(12), 0)
+	if not a or not b then
+		fail("frontHud — spawn impossible")
+	else
+		local emptyA, emptyC, emptyT = state:frontHudForReplicate()
+		if next(emptyA) ~= nil or next(emptyC) ~= nil or next(emptyT) ~= nil then
+			fail("frontHud — 0 front mais maps non vides")
+		else
+			local contact = nil
+			local beach: number? = nil
+			local scratch = table.create(4, 0)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+					local n = MapGen.neighbors(index, scratch)
+					for i = 1, n do
+						local nb = scratch[i]
+						if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+							state:setOwner(nb, b.slot)
+							contact = index
+							beach = nb
+							break
+						end
+					end
+				end
+				if contact then
+					break
+				end
+			end
+			if not contact or not beach then
+				fail("frontHud — pas de contact terrestre")
+			else
+				state.combatUnlocked = true
+				a.attackRatio = 0.5
+				a.troops = 20000
+				state:seedBeachhead(a.slot, b.slot, 400, beach)
+				local launched = state:launchAttack(a.slot, b.slot)
+				local landTroops = 0
+				local beachTroops = 0
+				local heapCount = 0
+				for _, atk in state.attacks do
+					if atk.attacker == a.slot and atk.target == b.slot then
+						heapCount += 1
+						if atk.isBeachhead then
+							beachTroops = math.floor(atk.troops)
+						else
+							landTroops = math.floor(atk.troops)
+						end
+					end
+				end
+				if not launched or heapCount ~= 2 then
+					fail(`frontHud — launchAttack/heaps {tostring(launched)} n={heapCount}`)
+				else
+					local act, comm, targs = state:frontHudForReplicate()
+					local tlist = targs[a.slot]
+					if
+						act[a.slot] ~= 2
+						or comm[a.slot] ~= landTroops + beachTroops
+						or not tlist
+						or #tlist ~= 2
+						or tlist[1] ~= b.slot
+						or tlist[2] ~= b.slot
+						or act[b.slot] ~= nil
+						or targs[b.slot] ~= nil
+					then
+						fail("frontHud — 2 tas compteurs/cibles incorrects")
+					else
+						print("frontHud : 0 vide, 1 terre + 1 beachhead = 2 tas (V29)")
+						if not state:retreatAttack(a.slot, b.slot) then
+							fail("frontHud — retreatAttack refuse")
+						else
+							local marked = state.attacks[1]
+							if marked and marked.retreatAt then
+								state.tick = marked.retreatAt
+							end
+							state:stepAttacks()
+							local goneA, goneC, goneT = state:frontHudForReplicate()
+							if #state.attacks ~= 0 or next(goneA) ~= nil or next(goneC) ~= nil or next(goneT) ~= nil then
+								fail("frontHud — fuite de slot apres retraite")
+							else
+								print("frontHud : retraite → maps vides (V29)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 24 : buildingSnapBuf, frontHudForReplicate OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)

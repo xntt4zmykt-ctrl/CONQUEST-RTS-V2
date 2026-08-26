@@ -1,11 +1,11 @@
-# Nightly report — passe 23 (revue PR #67)
+# Nightly report — passe 24 (revue PR #69)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-b841` (PR #67, `8d92d7f`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-b1c7`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-b1c7` (PR #69, `192d2dd`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-b826`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #67 (`carrierBuf`/`targetBuf`, `fillBlastBuf` — HEAD visuel). Correctifs sûrs, sans merger feel `55ba`/`741d` ni hardening `1e60`.
+Revue de PR #69 (`snapshotBoats`/`snapshotMissiles` — HEAD visuel). Correctifs sûrs, sans merger feel `4876`/`55ba` ni hardening `3ef4`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,15 +15,15 @@ Revue de PR #67 (`carrierBuf`/`targetBuf`, `fillBlastBuf` — HEAD visuel). Corr
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `snapshotBoats` + `boatSnapBuf` recycle inner records, truncate | `GameState.luau` | V26 N51/N70 **sans** `retreating` |
-| `snapshotMissiles` + `missileSnapBuf` (Types.MissileSnapshot seulement) | `GameState.luau` | V26 N52/N71 |
-| `init.server` appelle les helpers (plus d’alloc `{boats}`/`{missiles}` 10 Hz) | `init.server.luau` | V26 |
+| `flushBuildingDelta` + `buildingSnapBuf` recycle inner records, truncate, early-out vide → `nil` | `GameState.luau` | V28 N73/N54 |
+| `frontHudForReplicate` (trois maps + `attackTargetPool`) | `GameState.luau` | V29 N74/N55 |
+| `init.server` `replicate()` appelle le helper HUD (plus d’alloc maps 10 Hz) | `init.server.luau` | V29 |
 
-`carrierBuf` / `targetBuf` / `fillBlastBuf` / `navalBasesBySlot` / `_carriersDirty` **non retouchés**. Schéma filaire client **inchangé** (`FireAllClients`, pas `fireDeployed`). Overlay ne reçoit toujours pas `retreating`.
+`boatSnapBuf` / `missileSnapBuf` / `carrierBuf` / `fillBlastBuf` **non retouchés**. Schéma filaire client **inchangé** (`FireAllClients`, pas `fireDeployed`). `stats` / `buildPrices` restent dans `init.server` (cycle Buildings si on les met dans GameState).
 
 ---
 
-## Constatations PR #67 (à ne pas casser)
+## Constatations PR #69 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -37,10 +37,12 @@ Revue de PR #67 (`carrierBuf`/`targetBuf`, `fillBlastBuf` — HEAD visuel). Corr
 - **Posted PORT :** `portsByTile` `{slot, level}`. Distinct de `_carriersDirty` (NAVAL_BASE). Vague = `TRADE_SHIP_INTERVAL` 45, pas 10 Hz. **Loi manhattan visuelle inchangée.**
 - **Posted NAVAL_BASE :** `navalBasesBySlot`. Spawn seulement si `_carriersDirty`. Un PORT n’est jamais un carrier.
 - **Warships targeting :** `carrierBuf`/`targetBuf` (V24). Early-out 0 carrier / 0 bateau d’un autre slot. Pas de spatial hash.
-- **Score nuke bots :** `fillBlastBuf` une fois par visée (V27). Index présent + set nil = 0, pas de fallback hash. `blastValue` API banc conservée.
+- **Score nuke bots :** `fillBlastBuf` une fois par visée (V27). Index présent + set nil = 0, pas de fallback hash.
 - **UnitSnapshot 10 Hz :** `snapshotBoats` / `snapshotMissiles` (V26). Table vide recyclee (pas `nil`) pour retirer le dernier fantôme client. Pas de `path` / `homeTile` / `retreating` / `progress` / `sx`.
+- **BuildingDelta 10 Hz :** `buildingSnapBuf` (V28). Early-out dirty vide → `nil`. Destruction `kind=0`. `links` = table live (Overlay lit tout de suite).
+- **HUD fronts 10 Hz :** `frontHudForReplicate` (V29). Terre et `isBeachhead` = tas séparés. Slot sans front absent (nil, pas `{}`).
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
-- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). Aucun require ajouté (`GameState` ne require pas `Types`).
+- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). Aucun require ajouté (`GameState` ne require pas `Buildings` / `Research` / `Types`).
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
 
@@ -48,7 +50,7 @@ Revue de PR #67 (`carrierBuf`/`targetBuf`, `fillBlastBuf` — HEAD visuel). Corr
 
 ## Specs worker (reste)
 
-Ne pas merger feel `55ba`/`741d` ni hardening `1e60`/`08a1` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `4876`/`55ba` ni hardening `3ef4` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -104,35 +106,35 @@ Ne pas merger feel `55ba`/`741d` ni hardening `1e60`/`08a1` sur cette branche sa
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V28 — `flushBuildingDelta` recycle (`buildingSnapBuf`)
+### ISSUE-V30 — `pricesFor` / `priceBuf` (Buildings)
 
-**Problème.** `GameState.flushBuildingDelta` alloue `{out}` + un record par tuile dirty **chaque flush**. Feel N73 a `buildingSnapBuf`.
+**Problème.** `init.server` `replicate()` alloue `buildPrices = {}` **par slot** chaque tick playing, puis appelle `Buildings.priceFor` pour chaque `BUILDABLE`. Feel N75 a `Buildings.pricesFor` + `priceBuf`.
 
-**20K CCU.** 10 Hz playing × poses/captures/destroys = alloc tables sur le hot path replication.
+**20K CCU.** 10 Hz × 18 factions × kinds = alloc tables HUD même sans pose.
 
-**Faire.** Recette feel N73 (`55ba`) : `buildingSnapBuf` + inner records, truncate, early-out dirty vide → `nil`. Destruction : `kind`/`slot`/`level` = 0, `links` = nil. `links` reste la **table live** de l’usine (Overlay lit les champs tout de suite, pas l’identité de `out`). Helper déjà dans `GameState` (testable). Ne pas re-toucher V26 (`boatSnapBuf` / `missileSnapBuf`).
+**Faire.** Recette feel N75 (`4876`) : extraire `Buildings.pricesFor` / `priceBuf` (slot inconnu = `emptyPriceBuf`, **pas** `math.huge`). Appeler depuis `init.server`. **Pas** dans GameState — cycle `require` Buildings.
 
-**Contraintes.** Server-only. Schéma filaire client inchangé (`BuildingSnapshot`). `FireAllClients` visuel (pas `fireDeployed`).
+**Contraintes.** Server-only. Ne pas changer le schéma `PlayerStats.buildPrices`. Ne pas porter `playerStatsForReplicate` en même temps (V31). `FireAllClients` visuel.
 
-**Tester.** Pose 1 CITY → 1 record. Destroy → `kind=0`. Second flush → `nil`. Relance pose → length 1, pas de fuite. `./tests/run.sh`. Client 34/34.
+**Tester.** Slot vivant → un record par `BUILDABLE`, prix = `priceFor`. Slot inconnu → `emptyPriceBuf` (pas `math.huge`). `./tests/run.sh`. Client 34/34.
 
-### ISSUE-V29 — `frontHudForReplicate` (HUD fronts)
+### ISSUE-V31 — `playerStatsForReplicate` (GameState)
 
-**Problème.** `init.server` `replicate()` alloue `activeAttacks` / `committedTroops` / `attackTargets` + listes inner **chaque tick** playing. Feel N74 a le helper `GameState.frontHudForReplicate`.
+**Problème.** `init.server` `replicate()` alloue `stats[slot] = {…}` chaque tick playing. Feel N76 a `GameState.playerStatsForReplicate` / `statsBuf`.
 
-**20K CCU.** 10 Hz × 18 factions × fronts = alloc maps même sans combat.
+**20K CCU.** 10 Hz × 18 factions = alloc records HUD même sans combat.
 
-**Faire.** Recette feel N74 (`55ba`) : extraire `GameState.frontHudForReplicate` (trois maps + `attackTargetPool`). Chaque tas compte (terre et `isBeachhead` séparés). Slots sans front **absents** (nil, pas `{}`) — `replicate()` garde `or 0` et `attackTargets` nil. **Pas** `stats` / `buildPrices` (feel N75/N76, ticket suivant). `init.server` hors bundle : helper testable.
+**Faire.** Recette feel N76 (`4876`) : extraire `GameState.playerStatsForReplicate` / `statsBuf`. `eraProgress` / `buildPrices` restent posés dans `init.server` (GameState ne require pas Research/Buildings). Helper testable — `init.server` hors bundle.
 
-**Contraintes.** Server-only. Ne pas changer le schéma `PlayerStats`. Ne pas porter `buildPrices` dans GameState (cycle Buildings).
+**Contraintes.** Server-only. Ne pas changer le schéma `PlayerStats`. Ne pas porter `Research.progress` ratios (feel N77). Après V30.
 
-**Tester.** 0 front → trois maps vides. 1 terre + 1 beachhead même couple → 2 tas. `./tests/run.sh`. Client 34/34.
+**Tester.** 1 joueur → 1 record recyclé, champs troupes/or/tuiles. Second appel même slot = même table, champs à jour. Slot parti → truncate. `./tests/run.sh`. Client 34/34.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `55ba`/`741d` / hardening `1e60`/`08a1` sur #39/#67.
+- Merger feel `4876`/`55ba` / hardening `3ef4` sur #39/#69.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -140,10 +142,10 @@ Ne pas merger feel `55ba`/`741d` ni hardening `1e60`/`08a1` sur cette branche sa
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
-- `samsOf` / `fillBlastBuf` / `snapshotBoats` réentrants : un seul appelant chacun. Dupliquer le buffer si un second appelant apparaît.
+- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` réentrants : un seul appelant chacun. Dupliquer le buffer si un second appelant apparaît.
 - Feel N70 `retreating` sur le snapshot — Overlay visuel ne teinte pas la retraite.
 - `delivery.level` snapshot à l’arrivée (feel) : le header Trade dit « niveau à l’arrivée » ; dispatch stocke déjà `level` mais `resolve` lit `factory.level`. Produit, pas un bug d’index.
-- Feel N75 (`buildPrices` dans Buildings) / N76 (`stats` records) — après V29.
+- Feel N77 (`Research.progress` sans table `ratios`) / N78 (`viewFor` recycle par slot) — après V31.
 - `dirtyIndexBuf` (feel N72 / hardening N53) — ne ferme pas l’alloc `buffer.create` (voir V14b).
 
 ---
@@ -155,6 +157,6 @@ Ne pas merger feel `55ba`/`741d` ni hardening `1e60`/`08a1` sur cette branche sa
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–22 + **passe 23** (0 unité → table vide pas nil, 1 carrier + 1 transport sans path/retreating, truncate 2→1→0, 1 ogive tx/ty sans progress, truncate 1→0→1).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–23 + **passe 24** (CITY → 1 record, second flush `nil`, destroy `kind=0`, relance length 1 ; 0 front → maps vides ; 1 terre + 1 beachhead → 2 tas ; retraite → maps vides).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
