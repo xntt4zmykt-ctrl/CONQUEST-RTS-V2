@@ -275,6 +275,10 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
+		if payload.targetSlot == slot then
+			bumpRefuse("InvalidTarget")
+			return false, "InvalidTarget"
+		end
 	elseif actionType == "QuickChat" then
 		local entry = if typeof(payload.messageId) == "string" then QuickChat.get(payload.messageId) else nil
 		if not entry then
