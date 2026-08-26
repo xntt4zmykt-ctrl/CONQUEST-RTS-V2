@@ -40,7 +40,8 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 
 -- V48 : applyDelta recycle gains / losses / others (recette V47 candBuf).
 -- Distinct de V14b (filaire buffer.create) et de V26 (boatSnapBuf).
--- Distinct de V101 (dirtyHead file, pas applyDelta).
+-- Distinct de V101 (dirtyHead file, pas applyDelta). Distinct de V102
+-- (compact prefix dirtyQueue, pas applyDelta).
 -- Non reentrant — applyDelta synchrone unique par frame. Truncate leftover
 -- AVANT return (vague A rejouerait un splash sur une tuile de vague B).
 -- Early-out count == 0 : truncate a 0, retourner les pools (JAMAIS {}).
@@ -49,6 +50,13 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local gainBuf: { number } = table.create(16)
 local lossBuf: { number } = table.create(16)
 local otherBuf: { number } = table.create(16)
+
+-- V102 : compact du prefixe consomme. Seuil 32 = ~10 frames de budget 3.
+-- Pas de table.remove(1). Drain complet (V101) inchange. Recycle
+-- Ground/Border (feel N106) non porte. Recette feel N114 inline —
+-- ne PAS merger 846c. Distinct de V101 (curseur + truncate). Distinct
+-- de V100 (trail offset.Z, UnitModels.place). HUD feed leftover V103.
+local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}
 WorldRenderer.__index = WorldRenderer
@@ -71,9 +79,10 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	-- V101 : curseur de consommation. table.remove(1) decalait tout le
 	-- tableau a chaque rebuild (budget 3 / frame). Recette feel N112
 	-- inline — ne PAS merger 04e7. Truncate seulement quand la file
-	-- est consommee. Compact prefix (feel N114, seuil 32) leftover.
-	-- Recycle Ground/Border (feel N106) non porte. Trail offset.Z
-	-- (V100) inchange. FactoryOutput / SiloWarning leftover separe.
+	-- est consommee. V102 : compact prefix (feel N114, seuil 32)
+	-- apres la boucle. Recycle Ground/Border (feel N106) non porte.
+	-- Trail offset.Z (V100) inchange. FactoryOutput / SiloWarning
+	-- leftover separe. HUD feed leftover V103.
 	self.dirtyHead = 1
 	self.partCount = 0
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une
@@ -647,9 +656,9 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 	-- table.insert inchanges. Stale (dirty deja nil) saute sans compter
 	-- le budget, comme avant. Recette feel N112 inline — ne PAS merger
 	-- 04e7. Distinct de V100 (trail offset.Z, UnitModels.place).
-	-- Distinct de V48 (applyDelta pools). Compact prefix leftover
-	-- (feel N114). Recycle Ground/Border (feel N106) non porte.
-	-- Houle / feuillage inchanges (V58/V59). Pas de RemoteFunction.
+	-- Distinct de V48 (applyDelta pools). V102 compact prefix apres
+	-- la boucle (feel N114). Recycle Ground/Border (feel N106) non
+	-- porte. Houle / feuillage inchanges (V58/V59). Pas de RemoteFunction.
 	while done < budget and head <= #queue do
 		local chunk = queue[head]
 		head += 1
@@ -662,6 +671,22 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 
 	if head > #queue then
 		table.clear(queue)
+		head = 1
+	elseif head > DIRTY_COMPACT_HEAD then
+		-- V102 : prefixe 1..head-1 mort tant que la vague n'est pas
+		-- rattrapee. Copie in-place des restants, nil du surplus,
+		-- tete a 1. Pas a chaque frame (seuil 32). Pas de table.remove.
+		-- Drain V101 inchange. Recette feel N114 inline — ne PAS
+		-- merger 846c. Distinct de V101 (curseur). Distinct de V48
+		-- (applyDelta). Recycle Ground/Border (feel N106) non porte.
+		local n = #queue
+		local remaining = n - head + 1
+		for i = 1, remaining do
+			queue[i] = queue[head + i - 1]
+		end
+		for i = remaining + 1, n do
+			queue[i] = nil
+		end
 		head = 1
 	end
 	self.dirtyHead = head
