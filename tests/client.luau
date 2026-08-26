@@ -1206,7 +1206,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- PLAINS + 0.5 (check navires) doit rester vert. Leftover V115
 	-- Shockwave (check navires) doit rester vert. Leftover V117
 	-- LandingSplash (check navires) doit rester vert. Leftover V118
-	-- LaunchWake (check navires) doit rester vert.
+	-- LaunchWake (check navires) doit rester vert. Leftover V119
+	-- goldPopup (check livraison) doit rester vert.
 	assert(type(overlay.deliveryFree) == "table", "deliveryFree absent")
 	assert(#overlay.deliveryFree == 0, "deliveryFree pre-park non vide")
 	testFlushDelays()
@@ -2028,6 +2029,71 @@ check("livraison : le gain s'affiche sur la gare", function()
 		otherBoard.Size.Y.Offset < mineSize,
 		"la livraison d'un rival s'affiche aussi fort que la notre"
 	)
+	-- V119 : GoldPopup free-list goldFree. Recette feel N159 inline —
+	-- ne PAS merger b63e. Name GoldPopup / Board. Arbre Billboard
+	-- conserve (pas recreer Board ni TextLabel). CFrame + Board Size
+	-- + Text / TextSize / TextTransparency / TextStrokeTransparency
+	-- avant Tween. Pas Destroy. testFlushDelays parque (Parent = nil) ;
+	-- 3e arrival recycle. Distinct de V118 (wakeFree, check navires).
+	-- Distinct de V117 (splashFree, check navires). Distinct de V116
+	-- (deliveryFree, check pose/capture). Distinct de Effects
+	-- floatingText (feel N158, leftover V120). Leftover V118 LaunchWake
+	-- (check navires) doit rester vert. Leftover V117 LandingSplash
+	-- (check navires) doit rester vert. Leftover V116 DeliveryPulse
+	-- (check pose/capture) doit rester vert.
+	assert(type(overlay.goldFree) == "table", "goldFree absent")
+	assert(#overlay.goldFree == 0, "goldFree pre-park non vide")
+	local oursBoard = board
+	local rivalBoard = otherBoard
+	testFlushDelays()
+	assert(latest.Parent == nil, "GoldPopup ours encore parent apres delay")
+	assert(other.Parent == nil, "GoldPopup rival encore parent apres delay")
+	assert(#overlay.goldFree == 2, "goldFree non parque")
+	assert(overlay.goldFree[3] == nil, "goldFree leftover slot")
+	local goldSeen = {
+		[latest] = true,
+		[other] = true,
+	}
+	assert(goldSeen[overlay.goldFree[1]], "goldFree autre Part 1")
+	assert(goldSeen[overlay.goldFree[2]], "goldFree autre Part 2")
+	assert(rawequal(latest:FindFirstChild("Board"), oursBoard), "Board ours recree")
+	assert(rawequal(other:FindFirstChild("Board"), rivalBoard), "Board rival recree")
+	overlay:onTradeEvent("arrival", 3200, 0, 1, 1240)
+	local live
+	local liveN = 0
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "GoldPopup" then
+			liveN += 1
+			live = node
+		end
+	end
+	assert(liveN == 1, "GoldPopup count 3e arrivee")
+	assert(live ~= nil, "GoldPopup absent 3e arrivee")
+	assert(goldSeen[live], "GoldPopup non recycle")
+	assert(live.Parent == overlay.root, "GoldPopup recycle hors root")
+	assert(#overlay.goldFree == 1, "goldFree non pop")
+	assert(overlay.goldFree[2] == nil, "goldFree leftover slot pop")
+	local leftover = overlay.goldFree[1]
+	assert(leftover ~= nil and leftover ~= live, "leftover goldFree incoherent")
+	assert(goldSeen[leftover], "goldFree leftover autre Part")
+	assert(leftover.Parent == nil, "leftover GoldPopup encore parent")
+	local liveBoard = live:FindFirstChild("Board")
+	local leftoverBoard = leftover:FindFirstChild("Board")
+	assert(liveBoard ~= nil, "Board absent au recycle")
+	assert(
+		rawequal(liveBoard, if live == latest then oursBoard else rivalBoard),
+		"Board non recycle"
+	)
+	assert(
+		rawequal(leftoverBoard, if leftover == latest then oursBoard else rivalBoard),
+		"Board leftover recree"
+	)
+	local liveLabel = liveBoard:FindFirstChildWhichIsA("TextLabel")
+	assert(liveLabel ~= nil, "le popup recycle n'a pas de texte")
+	assert(liveLabel.Text == "+1.24K or", `le popup recycle affiche "{liveLabel.Text}"`)
+	assert(liveBoard.Size.Y.Offset == 32, "Board Size ours perdu au recycle")
+	assert(liveBoard.Size.X.Offset == 120, "Board Size X ours perdu au recycle")
+	assert(liveBoard.Size.Y.Offset > 22, "Board Size ours pas plus fort que rival")
 end)
 
 check("navires, missiles et interpolation", function()
@@ -2050,7 +2116,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). V117 recycle LandingSplash (ci-dessous). V118 recycle LaunchWake (ci-dessous). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). V117 recycle LandingSplash (ci-dessous). V118 recycle LaunchWake (ci-dessous). V119 recycle goldPopup (check livraison). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")

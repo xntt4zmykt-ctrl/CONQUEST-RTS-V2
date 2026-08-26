@@ -107,7 +107,8 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- DeliveryPulse. Euler N132 deja (wakeRot V80). Distinct de
 	-- V113 (Blast). Distinct de V114 (BlastSmoke). Distinct de
 	-- V115 (Shockwave). Distinct de V117 (LandingSplash). Distinct
-	-- de V118 (LaunchWake). Pas reentrant.
+	-- de V118 (LaunchWake). Distinct de V119 (goldPopup goldFree).
+	-- Pas reentrant.
 	self.deliveryFree = {} :: { Part }
 
 	-- V117 : free-list LandingSplash PAR overlay (pas blastFree /
@@ -116,19 +117,31 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Destroy. Name LandingSplash. Euler N131 deja (wakeRot V79).
 	-- Distinct de V113 (Blast). Distinct de V114 (BlastSmoke).
 	-- Distinct de V115 (Shockwave). Distinct de V116
-	-- (DeliveryPulse). Distinct de V118 (LaunchWake). Pas
-	-- reentrant.
+	-- (DeliveryPulse). Distinct de V118 (LaunchWake). Distinct
+	-- de V119 (goldPopup goldFree). Pas reentrant.
 	self.splashFree = {} :: { Part }
 
 	-- V118 : free-list LaunchWake PAR overlay (pas blastFree /
-	-- smokeFree / shockFree / deliveryFree / splashFree). Recette
-	-- feel N160 inline — ne PAS merger d29b. Leftover Parent =
-	-- nil, pas Destroy. Name LaunchWake. Euler N130 deja (wakeRot
-	-- V78). Distinct de V113 (Blast). Distinct de V114
+	-- smokeFree / shockFree / deliveryFree / splashFree / goldFree).
+	-- Recette feel N160 inline — ne PAS merger d29b. Leftover
+	-- Parent = nil, pas Destroy. Name LaunchWake. Euler N130 deja
+	-- (wakeRot V78). Distinct de V113 (Blast). Distinct de V114
 	-- (BlastSmoke). Distinct de V115 (Shockwave). Distinct de
-	-- V116 (DeliveryPulse). Distinct de V117 (LandingSplash). Pas
-	-- reentrant.
+	-- V116 (DeliveryPulse). Distinct de V117 (LandingSplash).
+	-- Distinct de V119 (goldPopup goldFree). Pas reentrant.
 	self.wakeFree = {} :: { Part }
+
+	-- V119 : free-list GoldPopup PAR overlay (pas blastFree /
+	-- smokeFree / shockFree / deliveryFree / splashFree / wakeFree).
+	-- Recette feel N159 inline — ne PAS merger b63e. Leftover
+	-- Parent = nil, pas Destroy. Name GoldPopup / Board. Arbre
+	-- Billboard conserve (anchor + Board + TextLabel, pas recreer
+	-- les enfants). Distinct de V118 (LaunchWake). Distinct de
+	-- V117 (LandingSplash). Distinct de V116 (DeliveryPulse).
+	-- Distinct de V115 (Shockwave). Distinct de V113 (Blast).
+	-- Distinct de V114 (BlastSmoke). Pas reentrant. Evenement
+	-- arrivee colis, pas 60 Hz.
+	self.goldFree = {} :: { Part }
 
 	return self
 end
@@ -573,17 +586,6 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	local base = WorldSpace.indexToWorld(tileIndex)
 	local y = WorldSpace.surfaceHeight(self.terrain, tileIndex)
 
-	local anchor = Instance.new("Part")
-	anchor.Name = "GoldPopup"
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.one
-	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
-	anchor.Parent = self.root
-
 	--[[
 		Notre livraison se lit, celle du voisin se devine.
 
@@ -595,39 +597,80 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 		l'attention.
 	]]
 	local ours = mine ~= false
-	local board = Instance.new("BillboardGui")
-	board.Name = "Board"
-	board.Size = UDim2.fromOffset(if ours then 120 else 80, if ours then 32 else 22)
-	board.StudsOffset = Vector3.new(0, 1.5, 0)
-	board.AlwaysOnTop = true
-	board.Parent = anchor
-
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.FontFace = Theme.font.display
-	text.TextSize = if ours then 22 else 15
-	text.TextColor3 = Theme.color.gold
-	text.TextStrokeTransparency = if ours then 0.35 else 0.7
-	text.TextTransparency = if ours then 0 else 0.35
-	-- "+1.24K or" plutot que "+1240" : meme format que le reste du jeu, et
-	-- l'unite dit de quelle ressource il s'agit.
-	text.Text = `+{Format.compact(gold)} or`
-	text.Parent = board
+	-- V119 : recycler GoldPopup. CFrame (tuile + y + 7 * WORLD_SCALE)
+	-- + Board Size (ours 120×32 vs rival 80×22) + Text / TextSize /
+	-- TextTransparency / TextStrokeTransparency AVANT Tween (un
+	-- leftover CFrame = lift +5, Transparency 1 du popup precedent).
+	-- Recette feel N159 inline — ne PAS merger b63e. Name GoldPopup /
+	-- Board conserves. Arbre Billboard conserve (pas recreer Board
+	-- ni TextLabel). Pas de pool partage avec Blast / BlastSmoke /
+	-- Shockwave / DeliveryPulse / LandingSplash / LaunchWake. Ne pas
+	-- nil les slots du pool (pop O(1) : [n] = nil). Distinct de V118
+	-- (wakeFree). Distinct de V117 (splashFree). Distinct de V116
+	-- (deliveryFree). Distinct de V115 (shockFree). Distinct de V113
+	-- (blastFree). Distinct de V114 (smokeFree). Distinct de Effects
+	-- floatingText (feel N158, autre fichier — leftover V120). Delay
+	-- 1.5 inchange. Tween lift + fade inchanges. ours = mine ~= false
+	-- inchange. Ne pas modifier routePart. Ne pas changer Overlay.clear.
+	local goldFree = self.goldFree
+	local pn = #goldFree
+	local anchor = if pn > 0 then goldFree[pn] else nil
+	local board
+	local text
+	if anchor then
+		goldFree[pn] = nil
+		board = anchor:FindFirstChild("Board")
+		text = if board then board:FindFirstChildWhichIsA("TextLabel") else nil
+	else
+		anchor = Instance.new("Part")
+		anchor.Name = "GoldPopup"
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanQuery = false
+		anchor.CanTouch = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.one
+		board = Instance.new("BillboardGui")
+		board.Name = "Board"
+		board.StudsOffset = Vector3.new(0, 1.5, 0)
+		board.AlwaysOnTop = true
+		board.Parent = anchor
+		text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.FontFace = Theme.font.display
+		text.TextColor3 = Theme.color.gold
+		text.Parent = board
+	end
+	anchor.Name = "GoldPopup"
+	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
+	anchor.Parent = self.root
+	if board then
+		board.Name = "Board"
+		board.Size = UDim2.fromOffset(if ours then 120 else 80, if ours then 32 else 22)
+	end
+	if text then
+		text.TextSize = if ours then 22 else 15
+		text.TextStrokeTransparency = if ours then 0.35 else 0.7
+		text.TextTransparency = if ours then 0 else 0.35
+		-- "+1.24K or" plutot que "+1240" : meme format que le reste du jeu, et
+		-- l'unite dit de quelle ressource il s'agit.
+		text.Text = `+{Format.compact(gold)} or`
+	end
 
 	local lift = TweenService:Create(anchor, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = anchor.CFrame + Vector3.new(0, 5 * Config.WORLD_SCALE, 0),
 	})
 	lift:Play()
-	TweenService:Create(text, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		TextTransparency = 1,
-		TextStrokeTransparency = 1,
-	}):Play()
+	if text then
+		TweenService:Create(text, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1,
+		}):Play()
+	end
 	task.delay(1.5, function()
-		-- Recycle goldPopup leftover V119 (feel N159).
-		if anchor.Parent then
-			anchor:Destroy()
-		end
+		anchor.Parent = nil
+		goldFree[#goldFree + 1] = anchor
 	end)
 end
 
@@ -807,11 +850,12 @@ local function trackUnit(
 			-- ne PAS merger d29b. Name LaunchWake conserve. Euler
 			-- N130 deja (wakeRot V78). Pas de pool partage avec
 			-- Blast / BlastSmoke / Shockwave / DeliveryPulse /
-			-- LandingSplash. Ne pas nil les slots du pool (pop
+			-- LandingSplash / GoldPopup. Ne pas nil les slots du pool (pop
 			-- O(1) : [n] = nil). Skip missiles conserve. Distinct
 			-- de V117 (splashFree). Distinct de V116 (deliveryFree).
 			-- Distinct de V115 (shockFree). Distinct de V113
 			-- (blastFree). Distinct de V114 (smokeFree). Distinct
+			-- de V119 (goldFree). Distinct
 			-- de V81 (Shockwave wakeRot). Flame Size (V111)
 			-- inchangee. Ne pas modifier routePart.
 			local wakeFree = self.wakeFree
