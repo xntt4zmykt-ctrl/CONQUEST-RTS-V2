@@ -36,6 +36,37 @@ local B = Config.BUILDING
 local priceBuf: { [number]: { [number]: number } } = {}
 local emptyPriceBuf: { [number]: number } = {}
 
+-- V40 : ctx de placement recycle (recette feel N85). Record unique +
+-- closures module qui lisent ctxState. Pas reentrant — resolve est
+-- synchrone et unique. Slot inconnu → nil SANS muter ctxBuf. Ne pas
+-- table.clone. Ne pas stocker au-dela de Placement.resolve. Le client
+-- (PlacementPreview / init.client) construit SES closures — ce buffer
+-- n'existe pas cote Overlay.
+local ctxState: GameState? = nil
+
+local function ownerAt(index: number): number
+	local state = ctxState :: GameState
+	return buffer.readu8(state.owner, index)
+end
+
+local function buildingAt(index: number): (number?, number?, number?)
+	local state = ctxState :: GameState
+	local building = state.buildings[index]
+	if not building then
+		return nil, nil, nil
+	end
+	return building.kind, building.slot, building.level
+end
+
+local ctxBuf: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = ownerAt,
+	buildingAt = buildingAt,
+}
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -46,22 +77,14 @@ function Buildings.contextFor(state: GameState, slot: number): Placement.Context
 		return nil
 	end
 
-	return {
-		slot = slot,
-		era = ps.era,
-		gold = ps.gold,
-		terrain = state.terrain,
-		ownerAt = function(index: number): number
-			return buffer.readu8(state.owner, index)
-		end,
-		buildingAt = function(index: number): (number?, number?, number?)
-			local building = state.buildings[index]
-			if not building then
-				return nil, nil, nil
-			end
-			return building.kind, building.slot, building.level
-		end,
-	}
+	ctxState = state
+	ctxBuf.slot = slot
+	ctxBuf.era = ps.era
+	ctxBuf.gold = ps.gold
+	ctxBuf.terrain = state.terrain
+	ctxBuf.ownerAt = ownerAt
+	ctxBuf.buildingAt = buildingAt
+	return ctxBuf
 end
 
 --[[
