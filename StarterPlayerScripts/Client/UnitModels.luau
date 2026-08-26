@@ -138,7 +138,16 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- Coque longue et pont d'envol : deux volumes portent l'essentiel de la
 	-- lecture, le reste n'est que detail.
 	addPart(visual, "Part", "Hull", Vector3.new(5.6, 1.6, 18), NAVY_DARK, CFrame.new(0, -0.2, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- N144 : proue Bow. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.pi, 0) ≡ Angles(0, π, 0).
+	-- Yaw Y=π fixe. Offset (0, -0.2, -10.8) carrier /
+	-- (0, 0.05, -5.9) transport, tailles Vector3.new(5.6, 1.6, 3.6) /
+	-- Vector3.new(4.8, 1.65, 3.3), NAVY, Name = "Bow" inchanges.
+	-- Deux sites ensemble (ici + createBoat). Distinct houle N143
+	-- (±11°). Distinct rampe leftover (pitch -8°). Distinct missile
+	-- leftover (Y=90). addWake N143 / Overlay / BuildingModels /
+	-- place / createMissile inchanges.
+	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "FlightDeck", Vector3.new(8.4, 0.35, 19.5), DECK, CFrame.new(0, 0.78, 0), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "DeckLine", Vector3.new(0.35, 0.06, 15), WHITE, CFrame.new(-1.1, 0.98, 0), Enum.Material.SmoothPlastic)
 
@@ -173,7 +182,11 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- Coque basse, proue inclinee et pont superieur : trois volumes suffisent a
 	-- casser instantanement la silhouette de cube du placeholder historique.
 	addPart(visual, "Part", "Keel", Vector3.new(4.8, 1.15, 9.2), NAVY_DARK, CFrame.new(0, -0.15, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- N144 : proue Bow transport/cargo. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.pi, 0) ≡ Angles(0, π, 0). Couple
+	-- avec buildCarrier (yaw π fixe, ne pas splitter). Offset
+	-- (0, 0.05, -5.9) inchange. Distinct rampe leftover (pitch -8°).
+	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
 

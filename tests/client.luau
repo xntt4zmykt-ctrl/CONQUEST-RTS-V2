@@ -1666,6 +1666,15 @@ check("navires, missiles et interpolation", function()
 	-- rester verts. Recette leftover N142, pas merger visual.
 	-- Proue leftover N144 non touchee. BuildingModels / Overlay
 	-- inchanges.
+	-- N144 : UnitModels Bow fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Yaw Y=π fixe, deux sites (carrier + transport/cargo). Leftover
+	-- N143 houle addWake, leftover N133 Shockwave, leftover N131
+	-- splash, leftover N130 LaunchWake Overlay, leftover N128 flag,
+	-- leftover N127 radar, leftover N125 roulis, leftover N116
+	-- immobile, leftover N142 Interceptor (check modeles) doivent
+	-- rester verts. Recette leftover N143, pas merger visual.
+	-- Rampe / missile leftover non touches. addWake N143 inchange.
+	-- BuildingModels / Overlay inchanges.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
