@@ -1,11 +1,11 @@
-# Nightly report — passe 59 (revue PR #157)
+# Nightly report — passe 60 (revue PR #159)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-70a5` (PR #157, `66465f3`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-185a`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-185a` (PR #159, `a26ca10`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-6183`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #157 (`PlacementPreview` Size rayon = kind — HEAD visuel, V76). Correctifs sûrs, sans merger feel `5655`/`396d` ni hardening `e291`/`0744`.
+Revue de PR #159 (`PlacementPreview.update` early-out tuile+statut — HEAD visuel, V77). Correctifs sûrs, sans merger feel `5655`/`5aa9` ni hardening `e291`/`0744`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,14 +15,13 @@ Revue de PR #157 (`PlacementPreview` Size rayon = kind — HEAD visuel, V76). Co
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `PlacementPreview.update` early-out si tuile + statut inchangés et déjà visible | `PlacementPreview.luau`, `tests/client.luau` | V77 |
-| `update(nil)` nil `self.tile` / `self.status` / `self.shown` pour forcer le restore au retour souris | `PlacementPreview.luau` | piège hide |
+| Overlay LaunchWake `wakeRot` cuit à `new` ; spawn = translation × rot, plus de `CFrame.Angles` | `Overlay.luau`, `tests/client.luau` | V78 |
 
-`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` (V68) / champ `focusX/Y/Z` (V69) / Radar / Flag / Boom (V70) / roulis navire (V71) / roues camion (V72) / radar/flag unités (V73) / flame Size API (V74) / `footprintRot` / `pulseRot` (V75) / Size rayon kind (V76) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `FactionLabels.luau` / `Overlay.luau` / `WorldSpace.luau` / `WorldRenderer.luau` / `WorldCamera.luau` / `Minimap.luau` / `BuildingModels.luau` / `UnitModels.luau` / `init.client.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60). Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68). Champ `focusX/Y/Z` **inchangé** (V69). Radar / Flag / Boom **inchangés** (V70). Roulis navire **inchangé** (V71). Roues camion **inchangées** (V72). Radar/flag unités **inchangés** (V73). Flame `Size = Vector3.new` **inchangé** (V74 API, pulse Z). `footprintRot` / `pulseRot` **inchangés** (V75). Size rayon **inchangé** (V76). Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. Explosion / wake / splash **inchangés** (événement). `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement. `resolve` / `previewCtxBuf` **inchangés** (V51). Hover closures **inchangées** (V53). Pulse livraison `CFrame.Angles` **inchangé** (événement, leftover V80). LaunchWake `CFrame.Angles` **inchangé** (leftover V78).
+`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` (V68) / champ `focusX/Y/Z` (V69) / Radar / Flag / Boom (V70) / roulis navire (V71) / roues camion (V72) / radar/flag unités (V73) / flame Size API (V74) / `footprintRot` / `pulseRot` (V75) / Size rayon kind (V76) / early-out hover (V77) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `FactionLabels.luau` / `WorldSpace.luau` / `WorldRenderer.luau` / `WorldCamera.luau` / `Minimap.luau` / `BuildingModels.luau` / `UnitModels.luau` / `PlacementPreview.luau` / `init.client.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60). Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68). Champ `focusX/Y/Z` **inchangé** (V69). Radar / Flag / Boom **inchangés** (V70). Roulis navire **inchangé** (V71). Roues camion **inchangées** (V72). Radar/flag unités **inchangés** (V73). Flame `Size = Vector3.new` **inchangé** (V74 API, pulse Z). `footprintRot` / `pulseRot` **inchangés** (V75). Size rayon **inchangé** (V76). Early-out hover **inchangé** (V77). Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. Explosion / splash / pulse livraison **inchangés** (événement, leftover V79–V80). `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement. `resolve` / `previewCtxBuf` **inchangés** (V51). Hover closures **inchangées** (V53). Pulse livraison `CFrame.Angles` **inchangé** (événement, leftover V80). LandingSplash `CFrame.Angles` **inchangé** (leftover V79).
 
 ---
 
-## Constatations PR #157 (à ne pas casser)
+## Constatations PR #159 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence. `Placement` est partagé : Preview et serveur exécutent le même `resolve` ; la vérité reste `Buildings.build` côté serveur.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -55,6 +54,7 @@ Revue de PR #157 (`PlacementPreview` Size rayon = kind — HEAD visuel, V76). Co
 - **Empreinte placement rot :** `PlacementPreview.update` (V75). `footprintRot` / `pulseRot` cuits à `new` : `fromEulerAnglesYXZ(0, 0, rad(90))`. Hot path : `CFrame.new(base.X, ground + 0.42, base.Z) * self.footprintRot` et `CFrame.new(..., ground + 0.38, ...) * self.pulseRot` **seulement si la tuile a changé** (V77). Hauteurs `+0.42` / `+0.38` **inchangées**. Rotation constante — recette V63, **pas** V70 (`time` variable). **Pas réentrant**. Mode build seulement.
 - **Empreinte placement Size :** `PlacementPreview.setKind` (V76). Rayon = kind seulement : `DEFENSE` → `DEFENSE_RADIUS * TILE_SIZE * 2` (144), sinon `TILE_SIZE * 3` (36). `pulseSize = radius * 1.08`. Size posé **une fois** au changement de kind. Hover ne réécrit plus Size. Placeholder `10×10` / `8×8` du `new` n’est pas le rayon réel. `setKind` same-kind early-out **conservé**. `hide()` cache aussi le pulse. Distinct de V74 (flame Z pulse `sin(time*18)`). Distinct de V75 (CFrame translation). Distinct de `part.Size` chantier (API largeur voie). **Pas réentrant**. Mode build seulement.
 - **Empreinte placement hover :** `PlacementPreview.update` (V77). Early-out si `shown` et tuile **et** statut inchangés : zéro `WorldSpace` / Color / `CFrame.new`. Color seulement si statut a changé (ou restore). CFrame seulement si tuile a changé (V75). `update(nil)` pose `tile = nil`, `status = nil`, `shown = false` — sans ça le restore au retour souris serait avalé. `setKind` reset `shown`. Distinct de V76 (Size). Distinct de V75 (rot cuit, translation quand la tuile bouge). Distinct de V74 (flame Z **doit** changer). Distinct de CityWindows / beacons `sin(time)` (**ne pas** geler). **Pas réentrant**. Mode build seulement.
+- **Overlay LaunchWake :** `trackUnit` insert navire (V78). `wakeRot` cuit à `Overlay.new` : `fromEulerAnglesYXZ(0, 0, rad(90))`. Hot path : `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * self.wakeRot`. Y + 0.12 **inchangé**. Tween Size/Transparency **inchangé**. `task.delay` destroy **inchangé**. Skip missiles **inchangé**. Recette V75 / feel N130 — **pas** merger `5655` (feel a `retreatTinted`). Distinct de V77 (Preview hover). Distinct de V75 (Preview). Distinct de LandingSplash despawn (leftover V79). Distinct de DeliveryPulse (leftover V80). **Pas réentrant**. Événement spawn, pas 60 Hz.
 - **Chantier de voie :** `applyRouteProgress` lift + nombres + `segment.rot` (V61 + V62 + V63). `part.Size = Vector3.new` **inchangé** (API).
 - **Caméra stratégique :** `WorldCamera.step` overview (V66 + V67 + V68 + V69). Champ `focusX/Y/Z`. Plus de `Vector3.new` idle 60 Hz.
 - **Hover 60 Hz :** `previewOwnerAt` / `previewBuildingAt` module (V53).
@@ -62,13 +62,13 @@ Revue de PR #157 (`PlacementPreview` Size rayon = kind — HEAD visuel, V76). Co
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
-- **PR #157 :** Size rayon V76 intact. Banc apercu leftover V76 `rawequal(Size)` ville/bunker + leftover V75 hauteurs `+0.42/+0.38`. Rien à revert.
+- **PR #159 :** early-out hover V77 intact (`update(nil)` nil tile/status/shown, CFrame `rawequal` à tuile+statut inchangés). Size V76 / rot V75 **non retouchés**. Rien à revert.
 
 ---
 
 ## Specs worker (reste)
 
-Ne pas merger feel `5655`/`396d` ni hardening `e291`/`0744` sur cette branche sans rebase. Porter **une** recette à la fois. Feel N129 (footprint hauteur **0.4**, **pas** de pulse) ≠ visual V75/V76/V77 — ne pas merger.
+Ne pas merger feel `5655`/`5aa9` ni hardening `e291`/`0744` sur cette branche sans rebase. Porter **une** recette à la fois. Feel N129 (footprint hauteur **0.4**, **pas** de pulse) ≠ visual V75/V76/V77 — ne pas merger.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -124,31 +124,31 @@ Ne pas merger feel `5655`/`396d` ni hardening `e291`/`0744` sur cette branche sa
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V78 — Overlay LaunchWake `CFrame.Angles` à l’apparition d’un navire
+### ISSUE-V79 — Overlay LandingSplash `CFrame.Angles` au despawn d’un navire
 
-**Problème.** V77 ferme le hover 60 Hz si tuile+statut inchangés. Reste, à **chaque spawn navire** (`trackUnit`, pas missile) :
+**Problème.** V78 ferme `CFrame.Angles` au **spawn** navire (`LaunchWake`). Reste, à **chaque despawn** navire (`applyUnits` id absent, pas missile) :
 
 ```
-wake.CFrame = CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+splash.CFrame = CFrame.new(last.X, OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
 ```
 
-Rotation constante (cylindre plat) — même constante que V75 `footprintRot`. Feel N130 a déjà cuit `fromEulerAnglesYXZ` sur feel `5655` : **porter la recette, ne pas merger** (feel a `retreatTinted` / N56, Overlay visuel ne teinte pas la retraite). Distinct de V77 (Preview hover). Distinct de V75 (Preview, pas Overlay). Distinct de LandingSplash despawn (leftover V79 / feel N131, Y + 0.14). Distinct de DeliveryPulse (leftover V80 / feel N132, `route.to`). Distinct de `part.Size` tween (API, **ne pas** geler). Événement, pas 60 Hz interpolation — mais `CFrame.Angles` + `CFrame.new` à chaque apparition.
+Rotation constante (cylindre plat) — même constante que V75 `footprintRot` / V78 `wakeRot`. Feel N131 a déjà cuit `fromEulerAnglesYXZ` sur feel `5aa9` : **porter la recette, ne pas merger** (feel skip retraite N56 / `retreatTinted`, Overlay visuel ne teinte pas la retraite). Distinct de V78 (spawn, Y + 0.12). Distinct de V75 (Preview). Distinct de DeliveryPulse (leftover V80 / feel N132, `route.to`). Distinct de Shockwave (leftover V81 / feel N133, `explosion`, `PLAINS + 0.5`). Distinct de `part.Size` tween (API, **ne pas** geler). Événement despawn, pas 60 Hz interpolation.
 
-**20K CCU.** 8 clients × spawn bateau (vague + carriers). Pas d’autorité. Moins chaud que V77, prochaine constante cylindre à cuire.
+**20K CCU.** 8 clients × despawn bateau (débarquement / coulé). Pas d’autorité. Même classe que V78, prochaine constante cylindre à cuire.
 
-**Faire.** Cuire `wakeRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))` à `Overlay.new` (ou constante module). Hot path : `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * self.wakeRot`. Y + 0.12 **inchangé**. Tween Size/Transparency **inchangé**. `task.delay` destroy **inchangé**. Skip missiles **inchangé**. Ne **pas** porter LandingSplash ni DeliveryPulse dans le même commit.
+**Faire.** Réutiliser `self.wakeRot` **ou** cuire `splashRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))` à `Overlay.new` (constante identique — un seul champ suffit). Hot path : `CFrame.new(last.X, OCEAN_LEVEL + 0.14, last.Z) * self.wakeRot`. Y + 0.14 **inchangé**. Tween Size/Transparency **inchangé**. `task.delay` destroy **inchangé**. Skip missiles **inchangé**. Skip retraite N56 **n’existe pas** sur visual — ne pas l’inventer. Ne **pas** porter DeliveryPulse ni Shockwave dans le même commit.
 
-**Contraintes.** Client-only. **V78 visual ≠ V77 (Preview hover) ≠ V75 (Preview rot).** Recette feel N130 — **ne pas merger** `5655`. Client 34/34 (check navires leftover V73 **doit rester vert**. Check apercu V77 CFrame `rawequal` + restore **doit rester vert**. Check pose/capture V72 **doit rester vert**). **Ne pas** éditer le serveur. **Ne pas** éditer `PlacementPreview.luau`. **Ne pas** éditer `UnitModels.luau`.
+**Contraintes.** Client-only. **V79 visual ≠ V78 (LaunchWake spawn) ≠ V75 (Preview rot).** Recette feel N131 — **ne pas merger** `5aa9`. Client 34/34 (check navires leftover V78 **doit rester vert**. Check apercu V77 CFrame `rawequal` + restore **doit rester vert**. Check pose/capture V72 **doit rester vert**). **Ne pas** éditer le serveur. **Ne pas** éditer `PlacementPreview.luau`. **Ne pas** éditer `UnitModels.luau`.
 
-**Tester.** Check navires : wake spawn, `rawequal(wakeRot)` si cuit à `new`, Y = `OCEAN_LEVEL + 0.12`. Check apercu V77 **doit rester vert**. `./tests/run.sh`. Client 34/34.
+**Tester.** Check navires : `applyUnits({}, {})` après des bateaux → LandingSplash, `rawequal(wakeRot)`, Y = `OCEAN_LEVEL + 0.14`. Check apercu V77 **doit rester vert**. `./tests/run.sh`. Client 34/34.
 
-**Fichiers.** `Overlay.luau` (`trackUnit` LaunchWake **seulement**). `tests/client.luau` commentaire leftover. `PlacementPreview.luau` **non**. `UnitModels.luau` **non**. `init.client.luau` **non**.
+**Fichiers.** `Overlay.luau` (`applyUnits` LandingSplash **seulement**). `tests/client.luau` commentaire leftover. `PlacementPreview.luau` **non**. `UnitModels.luau` **non**. `init.client.luau` **non**.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `5655`/`396d` / hardening `e291`/`0744` sur #157.
+- Merger feel `5655`/`5aa9` / hardening `e291`/`0744` sur #159.
 - Feel N129 footprint hauteur 0.4 sans pulse — **ne pas** porter le Size visual V76 (pas de pulse feel).
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
@@ -180,11 +180,12 @@ Rotation constante (cylindre plat) — même constante que V75 `footprintRot`. F
 - `PlacementPreview.update` footprint / pulse `CFrame.Angles` 60 Hz — **fermé** (V75). Rot cuit à `new`. Ne pas cuire la translation (le curseur bouge).
 - `PlacementPreview.setKind` footprint / pulse `Size = Vector3.new` — **fermé** (V76). Rayon = kind. Ne pas geler Size au `new` initial (`10×10` placeholder).
 - `PlacementPreview.update` Color / Transparency / `CFrame.new` si tuile+statut inchangés — **fermé** (V77). `update(nil)` nil le tile.
-- Overlay LaunchWake `CFrame.Angles` spawn navire — leftover V78 (recette feel N130, ne pas merger).
+- Overlay LaunchWake `CFrame.Angles` spawn navire — **fermé** (V78). `wakeRot` cuit à `new`.
 - Overlay LandingSplash `CFrame.Angles` despawn — leftover V79 (feel N131, Y + 0.14).
 - Overlay DeliveryPulse `CFrame.Angles` — leftover V80 (feel N132, `route.to`).
+- Overlay Shockwave `CFrame.Angles` — leftover V81 (feel N133, `explosion`).
 - `CFrame.Angles` de construction (`addWake`, `Bow`, ailettes, `WorldRenderer` glint/tronc) — une fois, pas 60 Hz interpolation.
-- Pulse livraison / wake / splash / explosion `CFrame.Angles` — événement (V78–V80).
+- Pulse livraison / splash / explosion `CFrame.Angles` — événement (V79–V81).
 - Transparency CityWindows / beacons / FactoryOutput / SiloWarning — leftover séparé (pas CFrame, animation `sin(time)`).
 - Overlay `buildFactoryRoute` `CFrame.lookAt` (construction de voie / `segRot` / pose initiale camion) — une fois par route, pas 60 Hz.
 
@@ -197,11 +198,12 @@ Rotation constante (cylindre plat) — même constante que V75 `footprintRot`. F
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–58 inchangées (passe 59 = client-only).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–59 inchangées (passe 60 = client-only).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Client V75 : check « apercu de placement » — `footprintRot` / `pulseRot` cuits à `new`, `rawequal` après hover, hauteurs `+0.42/+0.38`. Leftover V51/V53 accrochage **doit rester vert**.  
 Client V76 : même check apercu — `setKind(CITY)` Size `Y == TILE*3` (36), pulse `* 1.08` ; deux `update` → `rawequal(Size)` ; `setKind(DEFENSE)` Size `Y == DEFENSE_RADIUS*TILE*2` (144) ; hover ne perd pas le rayon bunker. Leftover V75 rot **doit rester vert**.  
 Client V77 : même check apercu — deux `update(1000, "exact")` → `rawequal(CFrame)` ; `update(1000, "snap")` change Color, CFrame `rawequal` ; `update(nil)` Transparency == 1 puis restore < 1. Leftover V76 Size **doit rester vert**.  
+Client V78 : check « navires, missiles et interpolation » — `wakeRot` cuit à `new`, 3 navires + 1 missile → 3 `LaunchWake`, Y = `OCEAN_LEVEL + 0.12`, relot `rawequal`. Leftover V73 radar/flag **doit rester vert**.  
 Client V73 : check navires leftover **doit rester vert**.  
 Client V72 : check pose/capture leftover **doit rester vert**.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
