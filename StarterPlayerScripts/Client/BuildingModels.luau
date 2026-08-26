@@ -492,7 +492,15 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.Color = Color3.fromRGB(255, 214, 130)
 	ring.Transparency = 0.4
 	ring.Size = Vector3.new(0.4, 3, 3)
-	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	-- N136 : playConstruction BuildRing. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- ground Vector3 inchange. Tween Size/Transparency + task.delay
+	-- Destroy inchanges. Drop / sort Y des parts inchanges.
+	-- Distinct OceanGlint N135 (yaw `angle`, OCEAN_LEVEL + 0.08).
+	-- Distinct Effects ring N134 (Y = 3). Distinct Overlay Shockwave
+	-- N133 (PLAINS + 0.5). Distinct trunks leftover (buildDecorations).
+	-- animate / Overlay / WorldRenderer / Effects inchanges.
+	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
 	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -525,13 +533,40 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 		end
 
 		if child.Name == "Radar" then
-			child.CFrame = rest * CFrame.Angles(0, time * 1.45, 0)
+			-- N124 : translation * yaw. RestCFrame de ces trois pieces
+			-- est une translation pure (block() pose CFrame.new(offset),
+			-- create ajoute position — rotation identite). Donc
+			-- rest * Angles(rx,ry,rz) ≡ CFrame.new(rest.X,Y,Z) *
+			-- fromEulerAnglesYXZ(rx,ry,rz). fromEulerAnglesYXZ ≡ Angles
+			-- ici : Radar/Boom n'ont que Y ; Flag a ry=0 donc X puis Z.
+			-- Plus de CFrame.Angles 60 Hz. Amplitude / frequences
+			-- inchangees. Cable Y inchange (N109). Camera focusX inchangee
+			-- (N122). Minimap nombres inchanges (N123). Roues camion /
+			-- roulis navire inchanges.
+			-- Recette visual V70, portee pas mergee.
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, time * 1.45, 0)
 		elseif child.Name == "CapitalFlag" then
-			child.CFrame = rest * CFrame.Angles(math.sin(time * 2.4) * 0.045, 0, math.sin(time * 1.7) * 0.035)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(
+					math.sin(time * 2.4) * 0.045,
+					0,
+					math.sin(time * 1.7) * 0.035
+				)
 		elseif child.Name == "PortCraneBoom" then
-			child.CFrame = rest * CFrame.Angles(0, math.sin(time * 0.35) * 0.12, 0)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, math.sin(time * 0.35) * 0.12, 0)
 		elseif child.Name == "PortCraneCable" then
-			child.CFrame = rest + Vector3.new(0, math.sin(time * 0.8) * 0.35, 0)
+			-- N109 : Y en nombres depuis rest. Plus de Vector3.new 60 Hz
+			-- (rest + offset). Un CFrame.new. Amplitude 0.35 conservee.
+			-- Radar / flag / boom : N124 (rotation, pas translation).
+			-- Feuillage / houle / camion / unites inchanges (N108/N107/N105/N103).
+			-- Recette visual V60, portee pas mergee.
+			child.CFrame = CFrame.new(
+				rest.X,
+				rest.Y + math.sin(time * 0.8) * 0.35,
+				rest.Z
+			)
 		elseif child.Name == "CityWindows" then
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
