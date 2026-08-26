@@ -1,54 +1,54 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 46)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 47)
 
-Déclencheur : ouverture de la **PR #140** (`cursor/analyse-nocturne-du-codebase-b19e`) — WorldCamera shake/offset nombres, specs N121–N122.
+Déclencheur : ouverture de la **PR #144** (`cursor/analyse-nocturne-du-codebase-4d8e`) — WorldCamera lerp/champ focus, specs N123–N124.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-4d8e`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#142.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-71f0`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#144.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. Camera overview : lerp mire `fx/fy/fz` (N121) ; champs `focusX/Y/Z` (N122) ; shake `sx/sy/sz` (N119) ; offset YXZ `ox/oy/oz` (N120) ; pose `CFrame.new * rotation` (N118). `init.client` reconstruit encore un Vector3 pour `Minimap.setFocus` (leftover N123).
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. Camera overview : lerp mire `fx/fy/fz` (N121) ; champs `focusX/Y/Z` (N122) ; shake `sx/sy/sz` (N119) ; offset YXZ `ox/oy/oz` (N120) ; pose `CFrame.new * rotation` (N118). Minimap : `setFocus(x,y,z)` nombres (N123). Radar / Flag / Boom : `fromEulerAnglesYXZ` (N124). Overlay navire : `CFrame.Angles` roulis encore 60 Hz (leftover N125).
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #140 (passe 45) : claims vérifiés.** Shake `sx/sy/sz` (N119) ; offset trig `ox/oy/oz` (N120). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #144 (passe 46) : claims vérifiés.** Lerp `fx/fy/fz` (N121) ; champs `focusX/Y/Z` (N122). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #140 a documenté (N121, N122)**.
+Cette passe a **livré ce que #144 a documenté (N123, N124)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #140
+## 2. Revue PR #144
 
-| Claim #140 | Réalité à l’ouverture |
+| Claim #144 | Réalité à l’ouverture |
 |---|---|
-| WorldCamera shake nombres (N119) | Oui. `sx/sy/sz`, coeffs 0.65 / 0.42 / 0.5, fréq. 31 / 37 / 23. Recette visual V66 leftover shake, pas merger `926d`. |
-| WorldCamera offset trig (N120) | Oui. `ox/oy/oz` YXZ. Plus de `VectorToWorldSpace`. Recette visual V67, pas merger `b2f1`. Lerp `focus` Vector3 leftover N121. |
-| Specs N121–N122 | **Corrigés ici.** N121 = lerp `fx/fy/fz` (recette visual V68 déjà fermée sur `0231` / PR #139 — **porté, pas mergé**). N122 = champ `focusX/Y/Z` (recette visual V69 champs déjà fermée sur `c5c9` / PR #142 — **porté, pas mergé** ; `Minimap.setFocus(x,y,z)` **non** porté — leftover N123). |
+| WorldCamera lerp focus nombres (N121) | Oui. `fx/fy/fz`, un `Vector3.new` d’écriture fermé ensuite en N122. Recette visual V68, pas merger `0231`. |
+| WorldCamera champ `focusX/Y/Z` (N122) | Oui. Plus de Vector3 idle dans `step`. `focusTile(instant)` synchronise nombres **et** `self.focus`. Recette visual V69 champs, pas merger `c5c9`. `Minimap.setFocus` restait Vector3 (leftover N123). |
+| Specs N123–N124 | **Corrigés ici.** N123 = `Minimap.setFocus(x,y,z)` (recette visual V69 leftover minimap déjà fermée sur `c5c9` / PR #142 — **porté, pas mergé**). N124 = Radar/Flag/Boom `fromEulerAnglesYXZ` (recette visual V70 déjà fermée sur `06ee` / PR #143 — **porté, pas mergé**). |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #141 (`4c70` N97–N98), feel jusqu’à #140, visuelles #39/…/`c5c9` V69 **fermé** ; `06ee` V70 Radar **fermé** + leftover V71 roulis navire. **#140 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#141) reste distincte. Ne pas merger visual `c5c9` / `0231` ni hardening `4c70` / `2c0f` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #141/`24a7` (N97–N98), feel jusqu’à #144, visuelles #39/…/`c5c9` V69 **fermé** ; `06ee` V70 Radar **fermé** ; `9ab9` V71 roulis Overlay **fermé** + leftover V72 roues camion. **#144 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `9ab9` / `06ee` / `c5c9` ni hardening `4c70` / `24a7` sans rebase.
 
-**Revue autorité (sous-agent isolé) :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. Risques documentés, non corrigés ici (hors N121/N122) : `JoinRequest` hors IntentValidator ; Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
+**Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. N123/N124 sont cosmétique client. Risques documentés, non corrigés ici (hors N123/N124) : `JoinRequest` hors IntentValidator ; Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
 
-**Revue combat/éco (sous-agent isolé) :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. `Trade.dispatch` `{}` encore (hardening N92, pas sur feel). Aucun bug clair sûr hors N121/N122.
+**Revue combat/éco :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. `Trade.dispatch` `{}` encore (hardening N92, pas sur feel). Aucun bug clair sûr hors N123/N124.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N121–N122 du rapport #140. Commits séparés (N121 puis N122).
+Feel #19 inchangé. Pas de réinvention : N123–N124 du rapport #144. Commits séparés (N123 puis N124).
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| WorldCamera.step lerp `focus` Vector3 60 Hz (N121) | `WorldCamera.luau` (`step` overview, bloc lerp), `tests/client.luau` (asserts dans le check camera existant) | Leftover N120. `fx/fy/fz` nombres + un `Vector3.new` d’écriture. Œil `ex = fx + ox + sx`. Recette visual V68 déjà sur `0231`, **pas** merger. Cosmétique. Offset / shake / pose **inchangés**. |
-| WorldCamera.step `self.focus = Vector3.new` idle (N122) | `WorldCamera.luau` (`new` + `focusTile` instant + `step`), `init.client.luau` (`setFocus` RenderStepped), `tests/client.luau` (asserts `focusX`) | Leftover N121. Champs `focusX/Y/Z`. Plus de Vector3 idle dans `step`. `focusTile(instant)` synchronise nombres **et** `self.focus` (geste). Recette visual V69 champs déjà sur `c5c9`, **pas** merger. `Minimap.setFocus` reste Vector3 (reconstruction au lecteur — leftover N123). Cosmétique. |
+| Minimap.setFocus Vector3 60 Hz (N123) | `Minimap.luau` (`setFocus`), `init.client.luau` (RenderStepped), `tests/client.luau` (check minimap) | Leftover N122. `(x,y,z)` nombres, y ignoré. Origine monde → u=0.5, v=0.5. Recette visual V69 leftover minimap déjà sur `c5c9`, **pas** merger. Cosmétique. Camera `focusX/Y/Z` **inchangés**. |
+| BuildingModels Radar/Flag/Boom `CFrame.Angles` 60 Hz (N124) | `BuildingModels.luau` (`animate` trois branches), `tests/client.luau` (check modeles procéduraux) | Leftover N109. `CFrame.new(rest.X,Y,Z) * fromEulerAnglesYXZ`. Amplitude/fréquences inchangées. Recette visual V70 déjà sur `06ee`, **pas** merger. Cosmétique. Câble N109 **conservé**. Overlay **non**. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), `Minimap.setFocus` nombres (**N123**), Radar/Flag/Boom `CFrame.Angles` (**N124**), tribus `humanTargetProtected`. Overlay / WorldRenderer / BuildingModels / HUD / UnitModels / serveur **non édités** (hors `init.client` lecteur minimap N122).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), Overlay navire roulis (**N125**), Overlay camion roues (**N126**), tribus `humanTargetProtected`. Overlay / WorldRenderer / WorldCamera / HUD / UnitModels / serveur **non édités**.
 
 ---
 
@@ -80,67 +80,73 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert). Wrap `launchAttack` gare via `parkedBuf` (**N87**).
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx / Diplomacy.viewFor 1 Hz. Playing 10 Hz ; lobby vide et ended → 1 Hz.
-- Overlay interpolation X/Z + yaw euler (**N117**) **et** camion `segRot` (**N115**). Camera : lerp nombres (**N121**) + champ `focusX/Y/Z` (**N122**) + shake (**N119**) + offset (**N120**) + pose (**N118**). `Minimap.setFocus` Vector3 encore 60 Hz (**N123**). Radar/Flag/Boom `CFrame.Angles` encore 60 Hz (**N124**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- Overlay interpolation X/Z + yaw euler (**N117**) **et** camion `segRot` (**N115**). Camera : lerp nombres (**N121**) + champ `focusX/Y/Z` (**N122**) + shake (**N119**) + offset (**N120**) + pose (**N118**). Minimap `setFocus(x,y,z)` (**N123**). Radar/Flag/Boom euler (**N124**). Overlay navire `CFrame.Angles` roulis encore 60 Hz (**N125**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N123–N124)
+## 5. Issues worker-ready (nouveaux, N125–N126)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N122 = faits. N22 = **N67 fait**. N27 = doc only. **V68 / N121** fermés ici (portés, pas mergés ; V68 déjà livré visuel `0231`). **V69 champs / N122** fermés ici (portés, pas mergés ; V69 déjà livré visuel `c5c9` **y compris** `Minimap.setFocus(x,y,z)` — feel a porté les champs seulement). **V70** déjà fermé visuel `06ee` — leftover feel = **N124** (porter, ne pas merger). Leftover feel Minimap = **N123** (leftover visual V69 minimap déjà sur `c5c9`).
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N124 = faits. N22 = **N67 fait**. N27 = doc only. **V69 leftover minimap / N123** fermés ici (portés, pas mergés ; V69 déjà livré visuel `c5c9` y compris minimap). **V70 / N124** fermés ici (portés, pas mergés ; V70 déjà livré visuel `06ee`). Leftover feel Overlay roulis = **N125** (recette visual V71 **déjà fermée** sur `9ab9` / passe 54 visual — porter, ne pas merger). Leftover feel camion roues = **N126** (leftover visual V72 déjà sur `9ab9`, ne pas merger).
 
 ---
 
-### ISSUE-N123 — Minimap.setFocus nombres 60 Hz (feel)
+### ISSUE-N125 — Overlay navire `CFrame.Angles` roulis 60 Hz (feel)
 
-**Priorité :** P3 alloc client camera. Leftover explicite de N122 (champs `focusX/Y/Z` déjà). Distinct de N122 (stockage camera), de N121 (lerp). Recette visual V69 leftover minimap **déjà fermée** sur `c5c9` (passe 52 visual) — **porter `setFocus(x,y,z)`, ne pas merger** `c5c9`. Ne pas toucher Overlay ni WorldRenderer.
+**Priorité :** P3 alloc client Overlay. Leftover explicite de N124 (Radar/Flag/Boom déjà). Distinct de N124 (BuildingModels, rest identité), de N117 (yaw pose), de N126 (roues camion). Recette visual V71 **déjà fermée** sur `9ab9` (passe 54 visual) — **porter euler nombres, ne pas merger** `9ab9`. `Overlay.stepInterpolation` seulement. Ne pas toucher BuildingModels ni WorldCamera.
 
-**Problème :** N122 ferme le Vector3 idle dans `WorldCamera.step`. Reste, **chaque RenderStepped** : `init.client` fait `m:setFocus(Vector3.new(camera.focusX, camera.focusY, camera.focusZ))`. `Minimap.setFocus` lit encore `worldPosition.X/.Z`. Un Vector3 par frame idle au lecteur. Distinct de N122 (camera step déjà sans Vector3). Distinct de N124 (Radar/Flag/Boom).
+**Problème :** N124 ferme Radar / Flag / Boom. Reste, **une fois par frame par navire en mouvement** dans `Overlay.stepInterpolation` :
 
-**Pourquoi 20K CCU :** leftover N122. 8 clients × 60 Hz × 1 Vector3. Pas d’autorité (marqueur minimap cosmétique). Un `setFocus` nombres faux casserait le point de mire (u/v hors [0,1] ou axes X/Z inversés).
+```
+frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+```
+
+Branche `mag > 0.01 and not unit.isMissile` seulement. `frame` a **déjà** translation × yaw (N117) : ce n’est **pas** un `RestCFrame` identité. Donc on ne peut **pas** réduire à `CFrame.new(x,y,z) * euler` (recette N124). `fromEulerAnglesYXZ(rx, 0, rz)` ≡ `Angles(rx, 0, rz)` ici (`ry=0` → X puis Z). Distinct de N124 (BuildingModels, rest identité). Distinct de N117 (yaw `atan2`, immobile). Distinct des roues camion `CFrame.Angles` (spin `progress * π * 20`, leftover N126). Distinct de `UnitModels.place` radar/flag (offset pièce, leftover séparé). Wake / splash / pulse `CFrame.Angles` = événement, pas 60 Hz interpolation.
+
+**Pourquoi 20K CCU :** leftover N117. 8 clients × 60 Hz × N navires en mer × `CFrame.Angles` + compose. Pas d’autorité (silhouette cosmétique). Un euler faux casserait le clapotis des transports / porte-avions en route. Missiles (`isMissile`) n’ont pas ce roulis — ne pas l’ajouter.
 
 **Worker :**
 
-1. Dans `Minimap.setFocus` seulement : signature `(x: number, y: number, z: number)` (y ignoré pour u/v, comme `.Y` aujourd’hui). `u = clamp((x + WORLD_WIDTH/2) / WORLD_WIDTH, 0, 1)`, `v = clamp((z + WORLD_DEPTH/2) / WORLD_DEPTH, 0, 1)`. Plus de `worldPosition.X/.Z`. Dans `init.client` RenderStepped : `m:setFocus(camera.focusX, camera.focusY, camera.focusZ)` — **plus de** `Vector3.new`. `WorldCamera.step` / `focusX/Y/Z` **inchangés** (N122). Lerp / offset / shake / pose **inchangés**. Overlay unités / camion **inchangés**.
+1. Dans `Overlay.stepInterpolation` seulement, branche navire en mouvement : lire les deux `sin` dans des locaux `rx` / `rz`, poser `frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)`. Plus de `CFrame.Angles` 60 Hz sur le hot path unités. Amplitude 0.018 / 0.035 et fréquences 1.7 / 2.1 **inchangées**. Garde `mag > 0.01 and not unit.isMissile` **inchangée**.
 
-2. Ne **pas** éditer `Overlay.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `BuildingModels.luau` / `WorldCamera.luau`. Ne pas « fermer » Radar/Flag/Boom (leftover N124). Ne pas splitter `targetFocus`. Après N122. Recette visual V69 minimap déjà sur `c5c9` — porter `setFocus(x,y,z)`, pas merger visual `c5c9` / `0231`.
+2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire un `segRot` d’unité (le look change chaque frame — N117). Ne pas « fermer » le yaw `fromEulerAnglesYXZ(0, atan2, 0)` (N117 déjà). Ne pas « fermer » roues camion (leftover N126). Ne pas « fermer » `UnitModels.place` radar/flag/flamme. Ne pas porter BuildingModels. Après N124. Recette visual V71 déjà sur `9ab9` — porter euler nombres, pas merger visual.
 
-3. Le check « minimap » appelle aujourd’hui `setFocus(Vector3.new(0, 0, 0))` : le passer en `setFocus(0, 0, 0)`. Marqueur à `(0,0,0)` monde → u=0.5, v=0.5. Tests « camera strategique » leftover N122 (`focusX` avance, `rawequal` pas requis — feel n’assert **pas** `rawequal(camera.focus)` après `step`, c’est un assert visual) **et** « camera tactile » **doivent rester verts**.
+3. Ne pas changer MIN/MAX_DISTANCE. Tests « navires, missiles et interpolation » **et** leftover N124 modeles radar/flag/boom **et** leftover N123 minimap **et** leftover N122 camera `focusX` **doivent rester verts**. Après N124. Recette visual V71 déjà sur `9ab9` — porter, pas merger visual `9ab9` / `06ee` / `c5c9`.
 
-4. Test : banc client « minimap » **et** « camera strategique » **et** « camera tactile » **doivent rester verts**. Leftover N122 / N121 / N120 / N119 / N117 **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+4. Test : banc client « navires, missiles et interpolation » **doit rester vert** : second `applyUnits` extra mute N98 ; `targetX` N101 ; `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY` ; premier `stepInterpolation` unités immobiles ne casse pas (`currentX == targetX`, leftover N116). Leftover N124 modeles procéduraux (radar/flag/boom + câble N109) **doit rester vert**. Leftover N115 `segRot` pose/capture **doit rester vert**. Leftover N123 minimap **doit rester vert**. Leftover N122 camera `focusX` **doit rester vert**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-5. Fichiers : `Minimap.luau` (`setFocus`). `init.client.luau` (RenderStepped). `tests/client.luau` **seulement si** le check minimap / camera (ne **pas** ajouter un 36e). `WorldCamera.luau` **non**. **Ne pas** éditer le serveur.
+5. Fichiers : `Overlay.luau` (`stepInterpolation` branche `mag > 0.01 and not unit.isMissile` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore N125 (commentaire leftover, **garder** N117/N116/N101/N98). `BuildingModels.luau` **non**. `UnitModels.luau` **non**. `WorldCamera.luau` **non**. `Minimap.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N123 feel ≠ N122 (champs déjà) ≠ N124 (Radar Angles) ≠ visual V69 (déjà livré visuel `c5c9` y compris minimap, ne pas merger).** Non réentrant. Ne pas fusionner avec N124 dans le même worker. Axes : X→u, Z→v (pas Y).
+**Contraintes :** pas de RemoteFunction. **N125 feel ≠ N124 (Radar/Flag/Boom rest identité) ≠ N117 (yaw pose) ≠ N126 (roues camion) ≠ visual V71 (déjà livré visuel `9ab9`, ne pas merger).** Non réentrant. Ne pas fusionner avec N126 dans le même worker. Immobile (`mag <= 0.01`) : **zéro** compose roulis — leftover N116 **doit rester vert**. Missile : pas de roulis.
 
 ---
 
-### ISSUE-N124 — BuildingModels Radar / Flag / Boom `CFrame.Angles` 60 Hz (feel)
+### ISSUE-N126 — Overlay camion `CFrame.Angles` roues 60 Hz (feel)
 
-**Priorité :** P3 alloc client bâtiments. Leftover explicite après N122 (camera chain). Distinct de N123 (Minimap). Recette visual V70 **fermée** sur `06ee` (passe 53 visual) — **porter euler nombres, ne pas merger** `06ee`. `BuildingModels.animate` seulement. Ne pas toucher Overlay ni WorldCamera.
+**Priorité :** P3 alloc client Overlay. Leftover explicite après N125 (roulis navire). Distinct de N125 (navire), de N115 (`segRot` déjà), de N124 (bâtiments). Recette visual V72 leftover **déjà documentée** sur `9ab9` (passe 54 visual) — **porter euler nombres, ne pas merger** `9ab9`. `Overlay.stepInterpolation` boucle camion **seulement**. Ne pas toucher BuildingModels ni UnitModels.
 
-**Problème :** N122/N123 ferment la caméra Vector3 idle. Reste, **une fois par frame par pièce animée** dans `BuildingModels.animate` : `rest * CFrame.Angles(...)`. Trois branches :
+**Problème :** N125 ferme le roulis navire. Reste, **une fois par frame par roue de camion** dans `Overlay.stepInterpolation` :
 
-- `Radar` : `rest * CFrame.Angles(0, time * 1.45, 0)`
-- `CapitalFlag` : `rest * CFrame.Angles(sin(time*2.4)*0.045, 0, sin(time*1.7)*0.035)`
-- `PortCraneBoom` : `rest * CFrame.Angles(0, sin(time*0.35)*0.12, 0)`
+```
+piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
+```
 
-`RestCFrame` de ces trois pièces est une **translation pure** (`block()` pose `CFrame.new(offset)`). Donc `rest * Angles(rx,ry,rz)` ≡ `CFrame.new(rest.X, rest.Y, rest.Z) * Angles(rx,ry,rz)`. Distinct de N109 (câble = translation Y, **pas** une rotation). Distinct des roues camion `CFrame.Angles` (spin réel, leftover séparé).
+Branche `piece.part.Name == "Wheel"` seulement. `frame` a **déjà** translation × `segRot` (N115) : ce n’est **pas** un `RestCFrame` identité. Donc on ne peut **pas** réduire à `CFrame.new(x,y,z) * euler` (recette N124). `fromEulerAnglesYXZ(rx, 0, 0)` ≡ `Angles(rx, 0, 0)` ici (seulement X). Distinct de N125 (navire `ry=0` X+Z). Distinct de N115 (`segRot` cuit à la pose). Distinct de `UnitModels.place` radar/flag (offset pièce, leftover séparé). Spin **réel** : `progress * π * 20` — ne **pas** convertir en translation.
 
-**Pourquoi 20K CCU :** leftover N109. 8 clients × 60 Hz × (1 radar SAM + 1 drapeau capitale + 1 grue PORT) × `CFrame.Angles` + compose. Pas d’autorité (silhouette cosmétique). Un euler faux casserait la rotation du radar / le clapotis du drapeau / le lacet de la grue.
+**Pourquoi 20K CCU :** leftover N115. 8 clients × 60 Hz × N camions × 4 roues × `CFrame.Angles` + compose. Pas d’autorité (silhouette cosmétique). Un euler faux casserait le roulement des camions usine→gare. Pièces non-roue (`frame * offset` sans Angles) **inchangées**.
 
 **Worker :**
 
-1. Dans `BuildingModels.animate` seulement : Radar / CapitalFlag / PortCraneBoom lisent `rest.X/.Y/.Z` en nombres, posent `CFrame.new(rx, ry, rz) * CFrame.fromEulerAnglesYXZ(ax, ay, az)` avec **les mêmes trois nombres** actuellement passés à `CFrame.Angles` (Radar : `(0, time*1.45, 0)` ; Flag : `(sin*0.045, 0, sin*0.035)` ; Boom : `(0, sin*0.12, 0)`). `fromEulerAnglesYXZ` ≡ `Angles` ici : Radar/Boom n’ont que Y ; Flag a `ry=0` donc X puis Z. Plus de `CFrame.Angles` 60 Hz sur ces trois noms.
+1. Dans `Overlay.stepInterpolation` seulement, branche camion `Wheel` : lire `delivery.progress * math.pi * 20` dans un local `spin`, poser `piece.part.CFrame = frame * piece.offset * CFrame.fromEulerAnglesYXZ(spin, 0, 0)`. Plus de `CFrame.Angles` 60 Hz sur le hot path camion. Facteur `π * 20` **inchangé**. Garde `Name == "Wheel"` **inchangée**. Pièces non-Wheel : `frame * offset` **inchangé**. `segRot` / interpolation nombres / lift **inchangés** (N115/N111/N110).
 
-2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage / N109 câble). Amplitude et fréquences **inchangées**. Ne **pas** splitter `RestCFrame`. Ne pas « fermer » Transparency CityWindows / beacons / FactoryOutput / SiloWarning. Ne pas « fermer » `PortCraneCable` (N109 déjà). Ne pas porter Overlay. Ne pas « fermer » `Size` chantier (API). Ne pas « fermer » `CFrame.Angles` roues camion (spin réel). Après N123. Recette visual V70 déjà sur `06ee` — porter euler nombres, pas merger visual.
+2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire le spin dans `piece.offset` (le progress change chaque frame — N115 a cuit le **look**, pas le spin). Ne pas « fermer » `segRot` (N115 déjà). Ne pas « fermer » N125 dans le même commit. Ne pas « fermer » `UnitModels.place` radar/flag/flamme. Ne pas porter BuildingModels. Après N125. Recette visual V72 leftover déjà sur `9ab9` — porter, pas merger visual.
 
-3. Ne pas changer MIN/MAX_DISTANCE. Tests « modeles procéduraux » **et** leftover N109 câble Y **doivent rester verts**. Leftover N122 camera `focusX` **doit rester vert**. Après N123. Recette visual V70 déjà sur `06ee` — porter euler nombres, pas merger visual `06ee` / `c5c9`.
+3. Tests « pose et capture de chaque type de batiment » leftover N115 `segRot` **et** leftover N125 navires **et** leftover N124 modeles **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-4. Test : banc client « modeles procéduraux : le palier change la silhouette » **doit rester vert** : deux `animate` successifs, Parts stables, rotation visible (CFrame ≠ RestCFrame pour Radar/Flag/Boom). Check câble leftover N109. Check camera leftover N122 / N121. Check navires leftover N117. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+4. Test : banc client pose/capture **doit rester vert** : `segRot` taille, origine, `rawequal`. Check navires leftover N125/N117. Check modeles leftover N124. Check camera leftover N122. Check minimap leftover N123. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-5. Fichiers : `BuildingModels.luau` (`animate` branches Radar / CapitalFlag / PortCraneBoom **seulement**). `tests/client.luau` **seulement si** le check « modeles procéduraux » ne distingue pas encore boom/radar/drapeau (ajouter des asserts rotation, **garder** le câble N109, ne **pas** ajouter un 36e). `WorldCamera.luau` **non**. `Minimap.luau` **non**. `init.client.luau` **non**. Overlay **non**. **Ne pas** éditer le serveur.
+5. Fichiers : `Overlay.luau` (`stepInterpolation` branche `Wheel` **seulement**). `tests/client.luau` **seulement si** le check pose/capture ne mentionne pas encore N126 (commentaire leftover, **garder** N115 `segRot`). `BuildingModels.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N124 feel ≠ N123 (Minimap) ≠ N122 (focusX) ≠ visual V70 (déjà livré visuel `06ee`, ne pas merger).** Non réentrant. Ne pas fusionner avec N123 dans le même worker. `RestCFrame` identité rotation **doit rester vrai** pour ces trois pièces — si un futur `block()` pose une rotation, cuire `RestRot` à `create` **dans le même commit**.
+**Contraintes :** pas de RemoteFunction. **N126 feel ≠ N125 (roulis navire) ≠ N115 (segRot déjà) ≠ N124 (Radar rest identité) ≠ visual V72 (leftover `9ab9`, ne pas merger).** Non réentrant. Ne pas fusionner avec N125 dans le même worker. Pièces non-roue : zéro compose Angles. Sans `delivery` : la branche camion n’est pas atteinte.
 
 ---
 
@@ -149,7 +155,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; lerp camera → **N121 fait** ; champ focus → **N122 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; Minimap nombres → **N123 fait** ; Radar euler → **N124 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -157,7 +163,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; champ focus → **N122 fait**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; Radar euler → **N124 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -173,13 +179,13 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert (serveur rate-limite ; client n’envoie jamais) |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34–N120 | (voir rapport #140) | — | **faits** |
-| N121 | WorldCamera.step lerp `focus` Vector3 60 Hz | P3 | **fait** cette passe (`fx/fy/fz`, recette visual V68) |
-| N122 | WorldCamera.step champ `focusX/Y/Z` | P3 | **fait** cette passe (champs, recette visual V69 ; Minimap nombres **non**) |
-| N123 | Minimap.setFocus nombres 60 Hz | P3 | **nouveau** (recette visual V69 leftover minimap déjà sur `c5c9`, ne pas merger) |
-| N124 | BuildingModels Radar/Flag/Boom `CFrame.Angles` 60 Hz | P3 | **nouveau** (recette visual V70 déjà sur `06ee`, ne pas merger) |
+| N34–N122 | (voir rapport #144) | — | **faits** |
+| N123 | Minimap.setFocus nombres 60 Hz | P3 | **fait** cette passe (recette visual V69 leftover minimap) |
+| N124 | BuildingModels Radar/Flag/Boom `CFrame.Angles` 60 Hz | P3 | **fait** cette passe (recette visual V70) |
+| N125 | Overlay navire `CFrame.Angles` roulis 60 Hz | P3 | **nouveau** (recette visual V71 déjà sur `9ab9`, ne pas merger) |
+| N126 | Overlay camion roues `CFrame.Angles` 60 Hz | P3 | **nouveau** (leftover visual V72 déjà sur `9ab9`, ne pas merger) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 / #136 / #140 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 / #136 / #140 / #144 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -236,27 +242,27 @@ MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N115 `segRot` leftover, N113 `rot` chantier) ; `navires, missiles et interpolation` (N117 second frame lerp sous yaw euler ; leftover N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` (N122 `focusX` lerp avance sans sauter ; N121 œil `fx + ox` ; N120 formule `ox/oy/oz` à pitch défaut 58° ; N119 punch + décroissance ; leftover N118 `CFrame.X` nombre, leftover tactile pincement/torsion) ; `minimap` (`setFocus` Vector3 encore — leftover N123). `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `Overlay.luau` **non** touché. `Minimap.luau` **non** touché (API Vector3 conservée). `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
+Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N115 `segRot` leftover, N113 `rot` chantier) ; `modeles procéduraux` (N124 radar/flag/boom `fromEulerAnglesYXZ`, leftover N109 câble Y, Parts stables, rotation visible CFrame ≠ RestCFrame, Y inchangé = pas une translation) ; `navires, missiles et interpolation` (N117 second frame lerp sous yaw euler ; leftover N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` (N122 `focusX` lerp avance sans sauter ; N121 œil `fx + ox` ; N120 formule `ox/oy/oz` à pitch défaut 58° ; N119 punch + décroissance ; leftover N118 `CFrame.X` nombre, leftover tactile pincement/torsion) ; `minimap` (N123 `setFocus(0,0,0)` → u=0.5, v=0.5 ; marqueur suit `focusX`/`focusZ`). `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `WorldCamera.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `Overlay.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass46.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass47.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N121/N122 sont un hoist lerp / champ camera vérifiés par le banc headless.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N123/N124 sont un hoist signature minimap / euler bâtiments vérifiés par le banc headless.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N121 n’ajoute **pas** de require (nombres locaux WorldCamera). N122 n’ajoute **pas** de require (champs `focusX/Y/Z`). N123 restera dans `Minimap.setFocus`. N124 restera dans `BuildingModels.animate`.
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N123 n’ajoute **pas** de require (signature Minimap). N124 n’ajoute **pas** de require (nombres locaux BuildingModels). N125 restera dans `Overlay.stepInterpolation`. N126 restera dans la boucle camion Overlay.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
 
 Piège N64 (toujours vrai) : ne **pas** référencer `IS_STATION` depuis `refreshRailNetwork` — le `local` est déclaré plus bas, la closure verrait `nil` au runtime.
 
-Piège N121 : un seul `Vector3.new` d’écriture pour `self.focus` (API pan/minimap) — **fermé ensuite** en N122. Utiliser `fx/fy/fz` pour l’œil (`ex = fx + ox + sx`), pas `self.focus.X` après le write. Recette visual V68 déjà sur `0231` — porter, ne pas merger.
+Piège N123 : X→u, Z→v (pas Y). Le check minimap `setFocus(Vector3.new(0,0,0))` est passé en nombres. Recette visual V69 leftover minimap déjà sur `c5c9` — porter, ne pas merger.
 
-Piège N122 : splitter `focusX/Y/Z` sans casser `camera.focus` Vector3 au geste `focusTile(instant)`. Ne pas splitter `targetFocus`. Ne pas réécrire `self.focus` 60 Hz (stale après lerp — les asserts live lisent `focusX`). Recette visual V69 champs déjà sur `c5c9` — porter les champs, **pas** `Minimap.setFocus(x,y,z)` (leftover N123). Ne pas merger visual.
+Piège N124 : **garder la rotation** (pas une translation façon N109 câble). `fromEulerAnglesYXZ` ≡ `Angles` si ry=0 (Flag) ou seulement Y (Radar/Boom). Recette visual V70 déjà sur `06ee` — porter, ne pas merger. `RestCFrame` identité rotation **doit rester vrai** pour ces trois pièces.
 
-Piège N123 (à venir) : X→u, Z→v. Le check minimap `setFocus(Vector3.new(0,0,0))` doit passer en nombres. Recette visual V69 leftover minimap déjà sur `c5c9` — porter, ne pas merger.
+Piège N125 (à venir) : `frame` a déjà translation × yaw — **ne pas** réduire à `CFrame.new * euler`. Immobile = zéro compose. Missile = pas de roulis. Recette visual V71 déjà sur `9ab9` — porter, ne pas merger.
 
-Piège N124 (à venir) : **garder la rotation** (pas une translation façon N109 câble). `fromEulerAnglesYXZ` ≡ `Angles` si ry=0 (Flag) ou seulement Y (Radar/Boom). Recette visual V70 déjà sur `06ee` — porter, ne pas merger.
+Piège N126 (à venir) : spin réel `progress * π * 20` dans un local `spin`. `frame` a déjà `segRot`. Ne pas cuire le spin dans `piece.offset`. Recette visual V72 leftover déjà sur `9ab9` — porter, ne pas merger.
