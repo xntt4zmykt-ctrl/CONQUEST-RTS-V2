@@ -772,8 +772,8 @@ check("calques d'entites, effets et apercu", function()
 	-- notifications) et leftover N152 flame (check navires) doivent
 	-- rester verts. Recette leftover N154, pas merger visual V83
 	-- SelectionRing pulseRot. HUD / UnitModels / Overlay /
-	-- PlacementPreview non touches. tileFlash leftover N156 non
-	-- touche (Instance.new+Destroy chaque capture).
+	-- PlacementPreview non touches. tileFlash leftover N156 (check
+	-- vagues, free-list) doit rester vert.
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
@@ -1776,19 +1776,35 @@ check("navires, missiles et interpolation", function()
 end)
 
 check("vagues de conquete", function()
-	-- N134 : conquestPulse ring fromEulerAnglesYXZ (pas CFrame.Angles).
-	-- Hauteur Y = 3. Caps flash inchanges. Leftover N95 applyDelta pools
-	-- (check deltas), leftover N133 overlay:explosion, leftover N132 pulse
-	-- doivent rester verts. Recette visual V75 leftover evenements, pas
-	-- merger. Overlay / WorldRenderer inchanges. Leftover N156 tileFlash
-	-- Instance.new+Destroy chaque capture (non touche).
+	-- N156 : tileFlash free-list. conquestWave(200) pose jusqu'a 28+
+	-- plaques (step = count // 28). Flush → Parent nil + push flashFree,
+	-- live == 0. Deuxieme vague (1 tuile) reutilise la derniere plaque
+	-- (rawequal Parent root). Caps 90/28 inchanges. Tween Create conserve.
+	-- Leftover N134 conquestPulse euler (Y = 3, pas de pool) doit rester
+	-- vert. Leftover N155 selectTile reuse (check calques) doit rester
+	-- vert. Recette leftover N155, pas merger visual V83 SelectionRing
+	-- pulseRot. HUD / UnitModels / Overlay / PlacementPreview /
+	-- selectTile / previewTile / conquestPulse non touches. Flame leftover
+	-- N152 (check navires) et leftover N157 conquestPulse Destroy (non
+	-- touche).
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
 	end
 	effects:conquestWave(wave, Color3.fromRGB(255, 0, 0), true)
+	local liveBefore = effects.live
+	assert(liveBefore > 0, "aucune plaque live")
+	assert(effects.flashFree == nil or #effects.flashFree == 0, "free-list trop tot")
+	testFlushDelays()
+	assert(effects.live == 0, "live pas decremente")
+	local free = effects.flashFree
+	assert(free ~= nil and #free == liveBefore, "plaques non poolees")
+	local pooled = free[#free]
+	assert(pooled.Parent == nil, "plaque encore parentee")
 	effects:lossWave(wave, #wave)
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
+	assert(#free == liveBefore - 1, "plaque non reutilisee")
+	assert(rawequal(pooled.Parent, effects.root), "plaque non reparentee")
 end)
 
 check("deltas de terrain et conquetes classees", function()

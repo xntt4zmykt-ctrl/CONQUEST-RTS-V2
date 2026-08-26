@@ -174,18 +174,36 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 
-	local plate = Instance.new("Part")
-	-- N156 leftover : Instance.new + Destroy chaque capture (cap
-	-- MAX_LIVE_FLASHES=90, MAX_FLASHES_PER_WAVE=28). Distinct
-	-- selectTile N155 (reuse deja). Distinct previewTile N154 skip.
-	-- Distinct conquestPulse N134 (euler, pas pool). Distinct flame
-	-- leftover N152. Recette leftover N155.
-	plate.Anchored = true
-	plate.CanCollide = false
-	plate.CanTouch = false
-	plate.CanQuery = false
-	plate.CastShadow = false
-	plate.Material = Enum.Material.Neon
+	-- N156 : free-list flashFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 0.7 s : Parent = nil + push. selectTile reutilise
+	-- deja (N155). previewTile reutilise deja (N96 + N154 skip).
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
+	-- V74 freeze). Distinct HUD N153. Distinct previewTile N154.
+	-- Distinct selectTile N155. Distinct conquestPulse leftover
+	-- N157 (euler N134, pas pool). Distinct visual V83 SelectionRing
+	-- pulseRot (ne pas merger 0b3d). Caps 90/28 inchanges. Tween
+	-- Create conserve (pulse CFrame/Transparency/Size restart).
+	-- Recette leftover N155, pas merger visual. HUD / UnitModels /
+	-- Overlay / PlacementPreview / conquestPulse inchanges.
+	local free = self.flashFree
+	if not free then
+		free = {}
+		self.flashFree = free
+	end
+	local n = #free
+	local plate
+	if n > 0 then
+		plate = free[n]
+		free[n] = nil
+	else
+		plate = Instance.new("Part")
+		plate.Anchored = true
+		plate.CanCollide = false
+		plate.CanTouch = false
+		plate.CanQuery = false
+		plate.CastShadow = false
+		plate.Material = Enum.Material.Neon
+	end
 	plate.Color = color
 	plate.Transparency = 0.15
 	plate.Size = Vector3.new(Config.TILE_SIZE, 0.4, Config.TILE_SIZE)
@@ -201,7 +219,9 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	}):Play()
 
 	task.delay(0.7, function()
-		plate:Destroy()
+		plate.Parent = nil
+		local pool = self.flashFree
+		pool[#pool + 1] = plate
 		self.live -= 1
 	end)
 end
