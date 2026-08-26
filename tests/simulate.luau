@@ -3117,6 +3117,194 @@ do
 end
 
 do
+	-- Cadran : removePlayer purge doomWarnedAt / doomUnderSince (slot recycle).
+	local state = GameState.new(9090)
+	local leader = state:addPlayer(nil, "Chef", Random.new(90), 0)
+	local victim = state:addPlayer(nil, "Marque", Random.new(91), 0)
+	if not leader or not victim then
+		fail("doomsday recycle — spawn impossible")
+	else
+		state.doomWarnedAt = state.doomWarnedAt or {}
+		state.doomUnderSince = state.doomUnderSince or {}
+		state.doomWarnedAt[victim.slot] = 999
+		state.doomUnderSince[victim.slot] = 50
+		local gone = victim.slot
+		state:removePlayer(gone)
+		if state.doomWarnedAt[gone] ~= nil then
+			fail("doomsday recycle — doomWarnedAt survit a removePlayer")
+		end
+		if state.doomUnderSince[gone] ~= nil then
+			fail("doomsday recycle — doomUnderSince survit a removePlayer")
+		end
+		local heir = state:addPlayer(nil, "Heritier", Random.new(92), 0)
+		if not heir then
+			fail("doomsday recycle — reuse de slot impossible")
+		elseif heir.slot == gone and state.doomWarnedAt[heir.slot] ~= nil then
+			fail("doomsday recycle — le nouvel occupant herite du cadran")
+		end
+		print("doomsday recycle : timers cadran purges au recycle de slot")
+	end
+end
+
+do
+	-- AFK strip / tiles=0 : stepDoomsday doit EFFACER les timers, pas seulement skip.
+	local Doomsday = __require("Doomsday")
+	local state = GameState.new(9091)
+	state.mode = GameModes.get("blitz")
+	local leader = state:addPlayer(nil, "Chef", Random.new(93), 0)
+	local afk = state:addPlayer(nil, "Afk", Random.new(94), 0)
+	if not leader or not afk then
+		fail("doomsday AFK clear — spawn impossible")
+	else
+		local ChantierB = __require("ChantierB")
+		state.doomWarnedAt = state.doomWarnedAt or {}
+		state.doomUnderSince = state.doomUnderSince or {}
+		state.doomWarnedAt[afk.slot] = 1
+		state.doomUnderSince[afk.slot] = 40
+		ChantierB.stripTerritory(state, afk)
+		state.tick = math.floor((state.mode.duration * 0.55) / Config.TICK_DT)
+		if not Doomsday.waveState(state.mode.duration, state.tick * Config.TICK_DT).armed then
+			fail("doomsday AFK clear — vague non armee")
+		elseif GameState.stepDoomsday then
+			GameState.stepDoomsday(state)
+			if state.doomWarnedAt[afk.slot] ~= nil or state.doomUnderSince[afk.slot] ~= nil then
+				fail("doomsday AFK clear — timers conserves pendant awaitingSpawn")
+			end
+			print("doomsday AFK clear : timers effaces pendant strip / spawn")
+		else
+			fail("doomsday AFK clear — stepDoomsday absent")
+		end
+	end
+end
+
+do
+	-- Colis d'un disparu : removePlayer purge avant qu'un slot recycle encaisse.
+	local state = GameState.new(9192)
+	local a = state:addPlayer(nil, "Reste", Random.new(95), 0)
+	local b = state:addPlayer(nil, "Livreur", Random.new(96), 0)
+	if not a or not b then
+		fail("trade inbound — spawn impossible")
+	else
+		local factoryTile = b.capitalTile or 0
+		state.tradeDeliveries[factoryTile] = {
+			to = factoryTile,
+			slot = b.slot,
+			level = 1,
+			links = 1,
+			distance = 4,
+			arrivalTick = state.tick + 10,
+		}
+		state.tradeCooldowns[factoryTile] = state.tick + 20
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.tradeDeliveries[factoryTile] ~= nil then
+			fail("trade inbound — colis du slot recycle encore en route")
+		end
+		if state.tradeCooldowns[factoryTile] ~= nil then
+			fail("trade inbound — cooldown usine detruite encore pose")
+		end
+		print("trade inbound : colis purges au recycle de slot")
+	end
+end
+
+do
+	-- Grace humaine : Bots.humanTargetProtected, et les tribus l'honorent.
+	local bot = nil
+	local human = nil
+	local state = GameState.new(9293)
+	bot = state:addPlayer(nil, "Bot", Random.new(97), 0)
+	human = state:addPlayer(nil, "Humain", Random.new(98), 0)
+	if not bot or not human then
+		fail("human grace — spawn impossible")
+	else
+		human.isBot = false
+		bot.isBot = true
+		state.tick = 0
+		if not Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — humain non protege pendant BOT_HUMAN_GRACE_DURATION")
+		end
+		state.tick = math.floor(Config.BOT_HUMAN_GRACE_DURATION * Config.TICK_RATE) + 10
+		human.tiles = 200
+		bot.tiles = 50
+		if Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — protection encore active au-dela des tuiles")
+		end
+		human.tiles = 50
+		bot.tiles = 200
+		if not Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — petit humain non protege apres la grace")
+		end
+		print("human grace : BOT_HUMAN_GRACE_DURATION et protection tuiles")
+	end
+end
+
+do
+	-- Tribu pendant la grace : ne lance pas sur un humain, meme encercle.
+	local Tribes = __require("Tribes")
+	local state = GameState.new(9394)
+	state.combatUnlocked = true
+	Tribes.spawnAll(state, Random.new(99), 1)
+	local tribe: any = nil
+	for _, ps in state.players do
+		if ps.isTribe then
+			tribe = ps
+			break
+		end
+	end
+	local human = state:addPlayer(nil, "Cible", Random.new(100), 0)
+	if not tribe or not human then
+		fail("tribe grace — spawn impossible")
+	else
+		human.isBot = false
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local owner = buffer.readu8(state.owner, index)
+				if owner ~= tribe.slot then
+					state:setOwner(index, human.slot)
+				end
+			end
+		end
+		local tick = 0
+		while (tick + tribe.slot * 5) % 12 ~= 0 do
+			tick += 1
+		end
+		state.tick = tick
+		Tribes.step(state, Random.new(1))
+		for _, atk in state.attacks do
+			if atk.attacker == tribe.slot and atk.target == human.slot then
+				fail("tribe grace — tribu attaque un humain pendant la grace")
+				break
+			end
+		end
+		print("tribe grace : tribu n'attaque pas l'humain pendant la grace")
+	end
+end
+
+do
+	-- Proposition bot : un pacte perime dans la table n'est plus "deja allie".
+	local state = GameState.new(9495)
+	local a = state:addPlayer(nil, "BotA", Random.new(101), 0)
+	local b = state:addPlayer(nil, "BotB", Random.new(102), 0)
+	if not a or not b then
+		fail("bot expiry ally — spawn impossible")
+	else
+		state.alliances[a.slot][b.slot] = 0
+		state.alliances[b.slot][a.slot] = 0
+		state.tick = 1
+		if state:areAllied(a.slot, b.slot) then
+			fail("bot expiry ally — areAllied honore encore expiry=0")
+		end
+		-- La table brute reste peuplee (Diplomacy.step n'a pas tourne) :
+		-- Bots.decideDiplomacy re-propose via areAllied, pas alliances[slot][other].
+		local ok = Diplomacy.request(state, a.slot, b.slot)
+		if not ok then
+			fail("bot expiry ally — request refuse malgre pacte perime en table")
+		end
+		print("bot expiry ally : areAllied + request ignorent un pacte perime en table")
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
