@@ -677,6 +677,10 @@ check("construction du monde 3D", function()
 		end
 	end
 	assert(world.partCount == visible, "partCount incoherent avec les Parts visibles")
+	-- N112 : curseur dirtyHead, file drainee. Plus de table.remove(1).
+	-- Leftover N106 (partCount) reste au-dessus. Truncate a la consommation.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
+	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 
 	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
 	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
@@ -920,6 +924,15 @@ check("pose et capture de chaque type de batiment", function()
 	assert(rawequal(namedPart(sample.model, "Shoulder"), shoulder), "Shoulder recree")
 	assert(rawequal(namedPart(sample.model, "CenterMark"), mark), "CenterMark recree")
 	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres interpolation")
+
+	-- N111 : ox/oy/oz + dx/dy/dz cuits. Deux frames pendant le chantier :
+	-- nombres, oy asphalt ≠ shoulder. Leftover N110 (Parts, Y) reste au-dessus.
+	-- Recette visual V62, portee pas mergee.
+	local firstSeg = sample.construction.segments[1]
+	assert(type(firstSeg.dx) == "number" and type(firstSeg.dy) == "number" and type(firstSeg.dz) == "number", "dx/dy/dz absents")
+	assert(type(firstSeg.layers[1].ox) == "number" and type(firstSeg.layers[1].oy) == "number", "ox/oy shoulder absents")
+	assert(firstSeg.layers[2].oy ~= firstSeg.layers[1].oy, "oy asphalt = shoulder")
+	assert(firstSeg.layers[3].oy ~= firstSeg.layers[2].oy, "oy bande = asphalt")
 
 	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
 	-- libere — sinon il resterait a tourner pour rien a chaque image.
@@ -1534,6 +1547,12 @@ check("deltas de terrain et conquetes classees", function()
 
 	world:stepRebuilds()
 	world:stepRebuilds()
+	-- N112 : curseur, pas table.remove. Tete avancee ou file truncatee.
+	-- Leftover N106 (partCount / Ground recycle) reste plus bas.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead >= 1, "dirtyHead absent apres deltas")
+	if world.dirtyHead > #world.dirtyQueue then
+		assert(#world.dirtyQueue == 0 and world.dirtyHead == 1, "file non truncatee une fois consommee")
+	end
 
 	-- N106 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
 	-- Parent = nil ; partCount = visibles. Recette N85, pas de pool global.
