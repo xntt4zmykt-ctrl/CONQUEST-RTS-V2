@@ -44,6 +44,97 @@ local targetBuf = table.create(48)
 -- ports/candidats par vague. Index GameState.portsByTile, pas buildings.
 local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
 local candidateBuf: { number } = table.create(32)
+-- N96 : bateau live recycle (leftover N40/N51). Contrat A free-list.
+-- spawn pop/cree, table.remove push. path unique (N64) a chaque spawn
+-- — ne pas reutiliser l'ancien tableau. Couvre transport / trade /
+-- carrier. Pool module survit a GameState.new. Ne pas require depuis
+-- GameState (cycle). Ne pas porter retreating Overlay (feel N56).
+-- table.clear du record interdit. Un leftover _sink = coule immediat.
+type BoatRec = {
+	id: number,
+	slot: number,
+	kind: number,
+	troops: number,
+	x: number,
+	y: number,
+	path: { number },
+	step: number,
+	targetTile: number,
+	homeTile: number?,
+	angle: number?,
+	retreating: boolean?,
+	health: number?,
+	maxHealth: number?,
+	lastShellTick: number?,
+	_sink: boolean?,
+	_sunkUntil: number?,
+}
+local boatFree: { BoatRec } = table.create(8)
+Navy.boatFree = boatFree
+
+local function acquireBoat(
+	id: number,
+	slot: number,
+	kind: number,
+	troops: number,
+	x: number,
+	y: number,
+	path: { number },
+	step: number,
+	targetTile: number,
+	homeTile: number,
+	retreating: boolean?,
+	angle: number?,
+	health: number?,
+	maxHealth: number?,
+	lastShellTick: number?
+): BoatRec
+	local rec = table.remove(boatFree)
+	if rec == nil then
+		rec = {
+			id = id,
+			slot = slot,
+			kind = kind,
+			troops = troops,
+			x = x,
+			y = y,
+			path = path,
+			step = step,
+			targetTile = targetTile,
+			homeTile = homeTile,
+			retreating = retreating,
+			angle = angle,
+			health = health,
+			maxHealth = maxHealth,
+			lastShellTick = lastShellTick,
+		}
+	else
+		rec.id = id
+		rec.slot = slot
+		rec.kind = kind
+		rec.troops = troops
+		rec.x = x
+		rec.y = y
+		rec.path = path
+		rec.step = step
+		rec.targetTile = targetTile
+		rec.homeTile = homeTile
+		rec.retreating = retreating
+		rec.angle = angle
+		rec.health = health
+		rec.maxHealth = maxHealth
+		rec.lastShellTick = lastShellTick
+		rec._sink = nil
+		rec._sunkUntil = nil
+	end
+	return rec
+end
+
+local function despawnBoat(state: GameState, i: number)
+	local boat = state.boats[i]
+	table.remove(state.boats, i)
+	table.insert(boatFree, boat :: BoatRec)
+end
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -254,19 +345,10 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	ps.attacksLaunched += 1
 
 	local ox, oy = MapGen.fromIndex(origin)
-	table.insert(state.boats, {
-		id = state:nextId(),
-		slot = slot,
-		kind = KIND_TRANSPORT,
-		troops = troops,
-		x = ox,
-		y = oy,
-		path = path,
-		step = 1,
-		targetTile = targetTile,
-		homeTile = origin,
-		retreating = false,
-	})
+	table.insert(
+		state.boats,
+		acquireBoat(state:nextId(), slot, KIND_TRANSPORT, troops, ox, oy, path, 1, targetTile, origin, false)
+	)
 
 	state:sound("boatLaunch", slot)
 	return true, `Debarquement en route — {troops} troupes.`
@@ -414,18 +496,10 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			continue
 		end
 		local ox, oy = MapGen.fromIndex(source.index)
-		table.insert(state.boats, {
-			id = state:nextId(),
-			slot = source.slot,
-			kind = KIND_TRADE,
-			troops = 0,
-			x = ox,
-			y = oy,
-			path = path,
-			step = 1,
-			targetTile = target.index,
-			homeTile = source.index,
-		})
+		table.insert(
+			state.boats,
+			acquireBoat(state:nextId(), source.slot, KIND_TRADE, 0, ox, oy, path, 1, target.index, source.index)
+		)
 		afloat += 1
 	end
 end
@@ -476,7 +550,7 @@ local function syncCarriers(state: GameState)
 		end
 		local base = state.buildings[boat.homeTile]
 		if not base or base.kind ~= Config.BUILDING.NAVAL_BASE then
-			table.remove(state.boats, i)
+			despawnBoat(state, i)
 			continue
 		end
 		boat.slot = base.slot
@@ -499,22 +573,26 @@ local function syncCarriers(state: GameState)
 					local building = state.buildings[index]
 					if building and building.kind == Config.BUILDING.NAVAL_BASE then
 						local x, y = MapGen.fromIndex(index)
-						table.insert(state.boats, {
-							id = state:nextId(),
-							slot = building.slot,
-							kind = KIND_CARRIER,
-							troops = 0,
-							x = x,
-							y = y,
-							path = {},
-							step = 1,
-							targetTile = index,
-							homeTile = index,
-							angle = (index % 360) * math.pi / 180,
-							health = maxHp,
-							maxHealth = maxHp,
-							lastShellTick = 0,
-						})
+						table.insert(
+							state.boats,
+							acquireBoat(
+								state:nextId(),
+								building.slot,
+								KIND_CARRIER,
+								0,
+								x,
+								y,
+								{},
+								1,
+								index,
+								index,
+								nil,
+								(index % 360) * math.pi / 180,
+								maxHp,
+								maxHp,
+								0
+							)
+						)
 					end
 				end
 			end
@@ -523,22 +601,26 @@ local function syncCarriers(state: GameState)
 		for index, building in state.buildings do
 			if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
 				local x, y = MapGen.fromIndex(index)
-				table.insert(state.boats, {
-					id = state:nextId(),
-					slot = building.slot,
-					kind = KIND_CARRIER,
-					troops = 0,
-					x = x,
-					y = y,
-					path = {},
-					step = 1,
-					targetTile = index,
-					homeTile = index,
-					angle = (index % 360) * math.pi / 180,
-					health = maxHp,
-					maxHealth = maxHp,
-					lastShellTick = 0,
-				})
+				table.insert(
+					state.boats,
+					acquireBoat(
+						state:nextId(),
+						building.slot,
+						KIND_CARRIER,
+						0,
+						x,
+						y,
+						{},
+						1,
+						index,
+						index,
+						nil,
+						(index % 360) * math.pi / 180,
+						maxHp,
+						maxHp,
+						0
+					)
+				)
 			end
 		end
 	end
@@ -722,7 +804,7 @@ local function stepCarriers(state: GameState)
 				local hx, hy = MapGen.fromIndex(boat.homeTile)
 				boat.x, boat.y = hx, hy
 			else
-				table.remove(state.boats, i)
+				despawnBoat(state, i)
 			end
 		elseif boat.kind == KIND_CARRIER and boat.health == 0 then
 			local untilTick = boat._sunkUntil or 0
@@ -757,7 +839,7 @@ function Navy.step(state: GameState, rng: Random)
 		if boat.kind == KIND_TRADE then
 			local dest = state.buildings[boat.targetTile]
 			if not dest or dest.kind ~= Config.BUILDING.PORT then
-				table.remove(state.boats, i)
+				despawnBoat(state, i)
 				continue
 			end
 		end
@@ -773,13 +855,13 @@ function Navy.step(state: GameState, rng: Random)
 					owner.troops += math.max(0, boat.troops)
 				end
 				boat.troops = 0
-				table.remove(state.boats, i)
+				despawnBoat(state, i)
 				continue
 			end
 			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
-					table.remove(state.boats, i)
+					despawnBoat(state, i)
 					continue
 				end
 			end
@@ -809,7 +891,7 @@ function Navy.step(state: GameState, rng: Random)
 			elseif boat.kind == KIND_TRADE then
 				resolveTrade(state, boat)
 			end
-			table.remove(state.boats, i)
+			despawnBoat(state, i)
 		end
 	end
 end

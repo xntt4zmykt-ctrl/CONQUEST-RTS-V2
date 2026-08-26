@@ -384,6 +384,14 @@ GameState.portRecPool = portRecPool
 type FactoryRec = { slot: number, level: number }
 local factoryRecPool: { [number]: FactoryRec } = {}
 GameState.factoryRecPool = factoryRecPool
+-- N95 : record Building recycle (leftover N93/N94). placeBuilding
+-- reecrit kind / slot / level=1 / cooldown=0 et assigne links = {}
+-- neuf (N65 unique — ne pas table.clear un ancien links : N54 alias
+-- live). destroyBuilding → buildings[index] = nil ; le pool survit.
+-- Pool module survit a GameState.new. Ne pas partager avec
+-- portRecPool / factoryRecPool (sidecars) ni Trade.deliveryPool.
+local buildingRecPool: { [number]: Building } = {}
+GameState.buildingRecPool = buildingRecPool
 -- N83 : pool parallele. drainEvents / drainSounds nil les files
 -- (# == 0) sans detruire les records. notify / sound reecrivent
 -- eventPool[n] / soundPool[n]. Overlay HUD lit le payload tout de
@@ -1139,7 +1147,20 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if self.buildings[index] then
 		return
 	end
-	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
+	-- N95 : recycle buildingRecPool[index] (recette portRecPool N93).
+	-- links neuf a chaque pose (N65 unique — N54 alias live).
+	local rec = buildingRecPool[index]
+	if rec == nil then
+		rec = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
+		buildingRecPool[index] = rec
+	else
+		rec.kind = kind
+		rec.slot = slot
+		rec.level = 1
+		rec.links = {}
+		rec.cooldown = 0
+	end
+	self.buildings[index] = rec
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
 	indexBuilding(self, slot, index, true)
