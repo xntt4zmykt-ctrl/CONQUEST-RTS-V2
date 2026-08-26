@@ -35,6 +35,10 @@ local carrierSeen: { [number]: boolean } = {}
 -- tick, early-out si 0 carrier ou 0 candidat hostile.
 local carrierBuf = table.create(18)
 local targetBuf = table.create(48)
+-- spawnTradeShips : listes recyclees (ISSUE-N40 contrat A). Pas d'alloc
+-- ports/candidats par vague. Index GameState.portsByTile, pas buildings.
+local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
+local candidateBuf: { number } = table.create(32)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -320,11 +324,45 @@ local function countTradeShips(state: GameState): number
 end
 
 local function spawnTradeShips(state: GameState, rng: Random)
-	local ports: { { index: number, slot: number, level: number } } = {}
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.PORT then
-			table.insert(ports, { index = index, slot = building.slot, level = building.level })
+	-- N40 contrat A : early-out cap AVANT flatten ; index portsByTile
+	-- (PORT only, pas _carriersDirty). portsBuf / candidateBuf recycles.
+	-- Loi de tirage inchangee (sort index, poids = level, canTrade embargo).
+	local afloat = countTradeShips(state)
+	if afloat >= Config.MAX_TRADE_SHIPS then
+		return
+	end
+	local ports = portsBuf
+	local indexed = state.portsByTile
+	local n = 0
+	if indexed then
+		for index, info in indexed do
+			n += 1
+			local rec = ports[n]
+			if rec then
+				rec.index = index
+				rec.slot = info.slot
+				rec.level = info.level
+			else
+				ports[n] = { index = index, slot = info.slot, level = info.level }
+			end
 		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.PORT then
+				n += 1
+				local rec = ports[n]
+				if rec then
+					rec.index = index
+					rec.slot = building.slot
+					rec.level = building.level
+				else
+					ports[n] = { index = index, slot = building.slot, level = building.level }
+				end
+			end
+		end
+	end
+	for i = #ports, n + 1, -1 do
+		ports[i] = nil
 	end
 	if #ports < 2 then
 		return
@@ -332,7 +370,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 	table.sort(ports, function(a, b)
 		return a.index < b.index
 	end)
-	local afloat = countTradeShips(state)
 	for _, source in ports do
 		if afloat >= Config.MAX_TRADE_SHIPS then
 			return
@@ -347,18 +384,18 @@ local function spawnTradeShips(state: GameState, rng: Random)
 		if not armed then
 			continue
 		end
-		local candidates: { number } = {}
+		table.clear(candidateBuf)
 		for i, other in ports do
 			if canTrade(state, source.slot, other.slot) then
 				for _ = 1, other.level do
-					table.insert(candidates, i)
+					table.insert(candidateBuf, i)
 				end
 			end
 		end
-		if #candidates == 0 then
+		if #candidateBuf == 0 then
 			continue
 		end
-		local target = ports[candidates[rng:NextInteger(1, #candidates)]]
+		local target = ports[candidateBuf[rng:NextInteger(1, #candidateBuf)]]
 		local path = Navy.findSeaPath(state, source.index, target.index)
 		if not path or #path > Config.BOAT_MAX_RANGE then
 			continue
@@ -495,7 +532,7 @@ local function stepCarriers(state: GameState)
 	-- possibles (pools module-level). Early-out si 0 carrier ou aucun
 	-- bateau d'un autre slot. Priorite / areAllied / degats inchanges.
 	-- Pas de spatial hash (contrat A) : ticket separe si le late-game
-	-- le justifie. spawnTradeShips O(ports) = N40, pas ici.
+	-- le justifie. spawnTradeShips = N40 (index PORT, pas nested buildings).
 	table.clear(carrierBuf)
 	table.clear(targetBuf)
 	for _, boat in state.boats do

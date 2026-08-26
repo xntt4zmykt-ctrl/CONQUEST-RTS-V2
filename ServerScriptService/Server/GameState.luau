@@ -161,6 +161,14 @@ export type GameState = typeof(setmetatable(
 		-- `defense` reste alloue (HUD / tileCost hors install) mais n'est
 		-- plus ecrit a la pose (Option A).
 		bunkersBySlot: { [number]: { [number]: true } },
+		-- Grille spatiale bunkers (ISSUE-N41) : slot -> cellKey -> tuiles.
+		-- cell = DEFENSE_RADIUS ; lookup 3x3 par capture, pas le scan lineaire
+		-- du camp. Source de verite pose/destroy = bunkersBySlot ; cette grille
+		-- est un index. Pas le buffer `defense` (plus ecrit).
+		bunkerCells: { [number]: { [number]: { [number]: true } } },
+		-- Index PORT (ISSUE-N40) : spawnTradeShips n'a plus a parcourir
+		-- buildings. Distinct de `_carriersDirty` (NAVAL_BASE seulement).
+		portsByTile: { [number]: { slot: number, level: number } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -235,6 +243,8 @@ function GameState.new(seed: number): GameState
 	self.missiles = {}
 	self.buildings = {}
 	self.bunkersBySlot = {}
+	self.bunkerCells = {}
+	self.portsByTile = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -712,6 +722,14 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+-- Cellule spatiale bunkers (ISSUE-N41). cell = DEFENSE_RADIUS ; une capture
+-- ne consulte que 9 seaux. Doit matcher ChantierB.attackLogic.
+local function defenseCellKey(index: number): number
+	local r = math.max(1, Config.DEFENSE_RADIUS or 30)
+	local x, y = MapGen.fromIndex(index)
+	return math.floor(y / r) * 1024 + math.floor(x / r)
+end
+
 -- Index bunker : pose / capture / destroy seulement, jamais dans le tick.
 local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
 	local set = self.bunkersBySlot[slot]
@@ -721,8 +739,38 @@ local function indexBunker(self: GameState, slot: number, index: number, present
 			self.bunkersBySlot[slot] = set
 		end
 		set[index] = true
-	elseif set then
-		set[index] = nil
+		local cells = self.bunkerCells[slot]
+		if not cells then
+			cells = {}
+			self.bunkerCells[slot] = cells
+		end
+		local key = defenseCellKey(index)
+		local bucket = cells[key]
+		if not bucket then
+			bucket = {}
+			cells[key] = bucket
+		end
+		bucket[index] = true
+	else
+		if set then
+			set[index] = nil
+		end
+		local cells = self.bunkerCells[slot]
+		if cells then
+			local bucket = cells[defenseCellKey(index)]
+			if bucket then
+				bucket[index] = nil
+			end
+		end
+	end
+end
+
+-- Index PORT : spawnTradeShips (ISSUE-N40). Pas _carriersDirty.
+local function indexPort(self: GameState, index: number, slot: number, level: number, present: boolean)
+	if present then
+		self.portsByTile[index] = { slot = slot, level = level }
+	else
+		self.portsByTile[index] = nil
 	end
 end
 
@@ -736,6 +784,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 
 	if kind == B.DEFENSE then
 		indexBunker(self, slot, index, true)
+	end
+	if kind == B.PORT then
+		indexPort(self, index, slot, 1, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -766,6 +817,9 @@ function GameState.upgradeBuilding(self: GameState, index: number): number?
 	building.level += 1
 	self:countBuilding(building.slot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, true)
+	end
 
 	-- Le niveau d'une usine pese sur le rendement de sa grappe.
 	if building.kind == B.FACTORY then
@@ -794,6 +848,9 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexBunker(self, previousSlot, index, false)
 		indexBunker(self, newSlot, index, true)
 	end
+	if building.kind == B.PORT then
+		indexPort(self, index, newSlot, building.level, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -809,6 +866,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
 		indexBunker(self, building.slot, index, false)
+	end
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1144,6 +1204,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 
 	self.bunkersBySlot[slot] = nil
+	if self.bunkerCells then
+		self.bunkerCells[slot] = nil
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)

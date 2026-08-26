@@ -44,19 +44,48 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local mag, speed = terrainMagSpeed(terrain)
 	local posted = false
 	if defender then
-		-- Index par camp (ISSUE-N36) : O(bunkers_defenseur), pas O(buildings).
+		-- Index par camp (ISSUE-N36) + grille spatiale (ISSUE-N41) : 9 cellules
+		-- de cote DEFENSE_RADIUS, pas le scan lineaire de bunkersBySlot.
 		-- Le buffer `defense` n'est plus ecrit (Option A) ni lu ici.
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
-		if bunkers then
-			for index in bunkers do
-				local bx, by = MapGen.fromIndex(index)
-				local dx, dy = bx - cx, by - cy
-				if dx * dx + dy * dy <= r2 then
-					posted = true
+		local cellR = math.max(1, r)
+		local cells = state.bunkerCells and state.bunkerCells[defender.slot]
+		if cells then
+			local gx = math.floor(cx / cellR)
+			local gy = math.floor(cy / cellR)
+			for dx = -1, 1 do
+				if posted then
 					break
+				end
+				for dy = -1, 1 do
+					local bucket = cells[(gy + dy) * 1024 + (gx + dx)]
+					if bucket then
+						for index in bucket do
+							local bx, by = MapGen.fromIndex(index)
+							local ddx, ddy = bx - cx, by - cy
+							if ddx * ddx + ddy * ddy <= r2 then
+								posted = true
+								break
+							end
+						end
+					end
+					if posted then
+						break
+					end
+				end
+			end
+		else
+			local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+			if bunkers then
+				for index in bunkers do
+					local bx, by = MapGen.fromIndex(index)
+					local dx, dy = bx - cx, by - cy
+					if dx * dx + dy * dy <= r2 then
+						posted = true
+						break
+					end
 				end
 			end
 		end
