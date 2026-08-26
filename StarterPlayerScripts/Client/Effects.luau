@@ -61,6 +61,9 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- MAX_LIVE_PULSES=8 inchange. Distinct de Overlay Shockwave (V81,
 	-- PLAINS + 0.5). V83 : SelectionRing reutilise le meme pulseRot
 	-- (geste selectTile, height = surface + 0.48, pas +0.8).
+	-- V125 : SelectedTerritory reuse self.selection (feel N155
+	-- inline, pas merger a72c / 0b3d / ba8a). clearSelection
+	-- Destroy conserve (feel N168 = leftover suivant).
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	-- V120 : free-list floatingText PAR Effects (pas goldFree Overlay /
@@ -109,58 +112,75 @@ end
 --=============================================================================
 
 function Effects.selectTile(self: Effects, index: number, color: Color3)
-	if self.selection then
-		self.selection:Destroy()
-	end
-
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
-	local marker = Instance.new("Part")
-	marker.Name = "SelectedTerritory"
-	marker.Anchored = true
-	marker.CanCollide = false
-	marker.CanTouch = false
-	marker.CanQuery = false
-	marker.CastShadow = false
-	marker.Material = Enum.Material.Neon
+
+	-- V125 : reuse SelectedTerritory. Recette analogique V124 /
+	-- feel N155 inline — ne PAS merger a72c / 0b3d / ba8a. Size
+	-- visuel TILE*1.22 × 0.32 — pas feel TILE*1.15 × 0.28.
+	-- Transparency 0.32 — pas feel 0.38. Y = surfaceHeight + 0.58
+	-- — pas feel +0.55. Tween Transparency 0.62 inchange (pas de
+	-- tween Size feel). Color / CFrame reecrits au reuse. Tween
+	-- pulse conserve (pas recree). SelectionRing V83 reutilise
+	-- aussi (evite la fuite d'anneaux si on clique deux fois
+	-- sans clearSelection). clearSelection Destroy conserve
+	-- (feel N168 = leftover suivant). Distinct de V124 (feedFree
+	-- HUD). Distinct de V123 (ringFree BuildingModels). Distinct
+	-- de V122 (pulseFree). Distinct de V83 (pulseRot deja).
+	-- Distinct de previewTile (ActionPreview, Y +0.42). Pas
+	-- reentrant. Geste joueur, pas 60 Hz. Ne pas porter Size /
+	-- Transparency / Y feel. Ne pas geler Size flame (V74).
+	local marker = self.selection
+	if not marker then
+		marker = Instance.new("Part")
+		marker.Name = "SelectedTerritory"
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.CastShadow = false
+		marker.Material = Enum.Material.Neon
+		marker.Transparency = 0.32
+		marker.Size = Vector3.new(Config.TILE_SIZE * 1.22, 0.32, Config.TILE_SIZE * 1.22)
+		marker.Parent = self.root
+		self.selection = marker
+		TweenService:Create(marker, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+			Transparency = 0.62,
+		}):Play()
+	end
 	marker.Color = color
-	marker.Transparency = 0.32
-	marker.Size = Vector3.new(Config.TILE_SIZE * 1.22, 0.32, Config.TILE_SIZE * 1.22)
 	marker.CFrame = CFrame.new(base.X, height + 0.58, base.Z)
-	marker.Parent = self.root
-	self.selection = marker
 
-	local ring = Instance.new("Part")
-	ring.Name = "SelectionRing"
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
+	local ring = self.selectionRing
+	if not ring then
+		ring = Instance.new("Part")
+		ring.Name = "SelectionRing"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0.55
+		ring.Size = Vector3.new(0.2, Config.TILE_SIZE * 1.5, Config.TILE_SIZE * 1.5)
+		-- V83 : translation * pulseRot (V82). Plus de CFrame.Angles a la
+		-- selection. Height = surfaceHeight sans +0.8, puis + 0.48 inchange.
+		-- Name SelectionRing inchange. Tweens Transparency/Size inchanges.
+		-- Marker SelectedTerritory inchange (translation seule). Distinct de
+		-- V82 (onde, surface+0.8, Name=ConquestPulse). Distinct de V81
+		-- (explosion Overlay, PLAINS + 0.5). Distinct de ActionPreview
+		-- (pas de cylindre). Geste joueur, pas 60 Hz. Recette V82 pulseRot
+		-- — ne pas merger feel bfcc, ne pas inventer selectionRot.
+		ring.Parent = self.root
+		self.selectionRing = ring
+		TweenService:Create(ring, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+			Transparency = 0.78,
+			Size = Vector3.new(0.2, Config.TILE_SIZE * 1.75, Config.TILE_SIZE * 1.75),
+		}):Play()
+	end
 	ring.Color = color
-	ring.Transparency = 0.55
-	ring.Size = Vector3.new(0.2, Config.TILE_SIZE * 1.5, Config.TILE_SIZE * 1.5)
-	-- V83 : translation * pulseRot (V82). Plus de CFrame.Angles a la
-	-- selection. Height = surfaceHeight sans +0.8, puis + 0.48 inchange.
-	-- Name SelectionRing inchange. Tweens Transparency/Size inchanges.
-	-- Marker SelectedTerritory inchange (translation seule). Distinct de
-	-- V82 (onde, surface+0.8, Name=ConquestPulse). Distinct de V81
-	-- (explosion Overlay, PLAINS + 0.5). Distinct de ActionPreview
-	-- (pas de cylindre). Geste joueur, pas 60 Hz. Recette V82 pulseRot
-	-- — ne pas merger feel bfcc, ne pas inventer selectionRot.
 	ring.CFrame = CFrame.new(base.X, height + 0.48, base.Z) * self.pulseRot
-	ring.Parent = self.root
-	self.selectionRing = ring
-
-	TweenService:Create(marker, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-		Transparency = 0.62,
-	}):Play()
-	TweenService:Create(ring, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-		Transparency = 0.78,
-		Size = Vector3.new(0.2, Config.TILE_SIZE * 1.75, Config.TILE_SIZE * 1.75),
-	}):Play()
 end
 
 function Effects.clearSelection(self: Effects)
@@ -174,9 +194,10 @@ function Effects.clearSelection(self: Effects)
 	end
 end
 
--- Apercu leger de l'action sous le curseur. Contrairement a `selectTile`, ce
--- marqueur est reutilise et simplement deplace : le raycast tourne chaque
--- frame, il ne doit donc jamais creer une Part par mouvement de souris.
+-- Apercu leger de l'action sous le curseur. V125 recycle deja
+-- SelectedTerritory entre deux clics (geste, pas 60 Hz) ;
+-- `previewTile` reste le chemin 60 Hz (raycast). `clearSelection`
+-- Destroy conserve (feel N168 = leftover).
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
 	local marker = self.actionPreview
 	if not marker then

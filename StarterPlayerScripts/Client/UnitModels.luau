@@ -446,6 +446,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- Distinct de V122 (recycle conquestPulse, Effects — autre fichier).
 			-- Distinct de V123 (recycle BuildRing, BuildingModels — autre fichier).
 			-- Distinct de V124 (recycle HUD notify feedFree — autre fichier).
+			-- Distinct de V125 (recycle selectTile SelectedTerritory — autre fichier).
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z

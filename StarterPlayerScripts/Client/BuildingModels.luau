@@ -35,7 +35,8 @@ local BuildingModels = {}
 -- overlay.root). PointLight enfant FindFirstChildWhichIsA. Distinct
 -- de V122 (conquestPulse pulseFree, Effects). Distinct de V121
 -- (tileFlash flashFree). Distinct de V113 (Blast blastFree, Overlay).
--- Distinct de V124 (HUD notify feedFree). Dust / scaffold Destroy
+-- Distinct de V124 (HUD notify feedFree). Distinct de V125
+-- (selectTile SelectedTerritory, Effects). Dust / scaffold Destroy
 -- conserves. Pas reentrant. Evenement
 -- chantier, pas 60 Hz.
 BuildingModels.ringFree = {} :: { Part }

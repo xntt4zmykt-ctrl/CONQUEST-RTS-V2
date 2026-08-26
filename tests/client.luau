@@ -1000,36 +1000,77 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil).
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse.
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
 	local ringFound = false
 	local aRing
+	local aMarker
 	for _, node in effects.root:GetChildren() do
 		if node.Name == "SelectionRing" then
 			ringFound = true
 			aRing = node
+		elseif node.Name == "SelectedTerritory" then
+			aMarker = node
 		end
 	end
 	assert(ringFound, "pas de SelectionRing a la selection")
 	assert(aRing ~= nil and aRing.CFrame, "ring sans CFrame")
+	assert(aMarker ~= nil and aMarker.CFrame, "SelectedTerritory absent")
 	assert(
 		math.abs(aRing.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2000) + 0.48)) < 1e-6,
 		"ring Y"
 	)
+	assert(math.abs(aMarker.Size.Y - 0.32) < 1e-6, "marker Size Y visuel")
+	assert(
+		math.abs(aMarker.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2000) + 0.58)) < 1e-6,
+		"marker Y visuel"
+	)
 	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree a la selection")
+	-- V125 : deuxieme clic recycle le marqueur (feel N155 inline —
+	-- ne PAS merger a72c / 0b3d / ba8a). Size Y == 0.32 / Y =
+	-- surface+0.58 visuels — pas feel 0.28 / +0.55. SelectionRing
+	-- V83 conserve (pulseRot, Y = surface+0.48). Un seul ring (plus
+	-- de fuite si on clique sans clear). Leftover V83 Y +0.48 doit
+	-- rester vert. Leftover V124 feedFree (check fil) doit rester vert.
+	effects:selectTile(2001, Color3.fromRGB(231, 76, 60))
+	assert(rawequal(effects.selection, aMarker), "SelectedTerritory recree au 2e clic")
+	assert(aMarker.Name == "SelectedTerritory", "Name SelectedTerritory perdu")
+	assert(math.abs(aMarker.Size.Y - 0.32) < 1e-6, "reuse Size Y visuel")
+	assert(
+		math.abs(aMarker.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2001) + 0.58)) < 1e-6,
+		"reuse marker Y visuel"
+	)
+	assert(rawequal(effects.selectionRing, aRing), "SelectionRing recree au 2e clic")
+	assert(
+		math.abs(aRing.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2001) + 0.48)) < 1e-6,
+		"reuse ring Y"
+	)
+	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree au 2e clic")
+	local ringCount = 0
+	for _, node in effects.root:GetChildren() do
+		if node.Name == "SelectionRing" then
+			ringCount += 1
+		end
+	end
+	assert(ringCount == 1, "SelectionRing fuite au 2e clic")
 	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
 	local ringLeft = false
+	local markerLeft = false
 	for _, node in effects.root:GetChildren() do
 		if node.Name == "SelectionRing" then
 			ringLeft = true
+		elseif node.Name == "SelectedTerritory" then
+			markerLeft = true
 		end
 	end
 	assert(not ringLeft, "SelectionRing survit clearSelection")
+	assert(not markerLeft, "SelectedTerritory survit clearSelection")
+	assert(effects.selection == nil, "clearSelection ne Destroy pas le marqueur")
 end)
 
 check("pose et capture de chaque type de batiment", function()
