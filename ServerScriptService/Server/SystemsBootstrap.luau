@@ -72,15 +72,15 @@ function SystemsBootstrap.install()
 
 		local origLaunch = GameState.launchAttack
 		function GameState.launchAttack(self, attackerSlot, targetSlot)
+			-- Le clic de spawn est deja distingue dans IntentValidator
+			-- (awaitingSpawn -> claimSpawn). Ne pas avaler l'offensive suivante.
 			local ps = self.players[attackerSlot]
-			if ps and ps.justClaimed then
-				ps.justClaimed = false
-				return true, nil
-			end
 
+			-- Un front terre existe deja (vise ou non) : on renforce, on ne
+			-- recree pas le tas. Les tetes de pont restent a part.
 			local already = false
 			for _, atk in self.attacks do
-				if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
+				if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 					already = true
 					break
 				end
@@ -94,7 +94,7 @@ function SystemsBootstrap.install()
 			local ok, message = origLaunch(self, attackerSlot, targetSlot)
 			if ok and typeof(aim) == "number" and not already then
 				for _, atk in self.attacks do
-					if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
+					if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 						AimFront.focus(self, atk, math.floor(aim))
 						break
 					end

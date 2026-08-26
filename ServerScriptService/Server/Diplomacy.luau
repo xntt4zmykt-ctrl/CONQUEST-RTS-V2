@@ -8,8 +8,8 @@
 	publiquement — ce qui laisse a la victime le temps de reagir et inscrit la
 	trahison au compteur permanent du traitre.
 
-	L'embargo, lui, donne a la diplomatie un poids economique : couper les
-	routes commerciales d'un rival lui coute de l'or a chaque tick.
+	L'embargo, lui, donne a la diplomatie un poids economique : il bloque les
+	navires de commerce (`canTrade`). Il ne modifie pas l'or territorial par tick.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,10 +22,63 @@ type GameState = GameState.GameState
 
 local Diplomacy = {}
 
+-- N59 : vue diplomatique recyclee par slot (recette feel cc42 N78).
+-- Un buffer global unique casserait le FireClient precedent (boucle
+-- humains sequentielle : clear trop tot). HUD / tests lisent les
+-- champs tout de suite. Pas reentrant entre slots.
+type ViewRec = {
+	allies: { [number]: boolean },
+	incoming: { [number]: boolean },
+	outgoing: { [number]: boolean },
+	embargoes: { [number]: boolean },
+	traitors: { [number]: boolean },
+	marks: { [number]: number },
+}
+
+local viewBuf: { [number]: ViewRec } = {}
+
+-- N60 : paires expirees recyclees (recette feel 2f5d N79).
+-- Collecter avant de muter alliances[] (parcours + ecriture = comportement
+-- indefini). Un record par paire (a < b), pas { a, b } anonyme.
+-- Non reentrant — step unique par tick.
+type ExpiredRec = { a: number, b: number }
+local expiredBuf: { ExpiredRec } = table.create(8)
+local expiredRecPool: { ExpiredRec } = table.create(8)
+
+local function viewRecFor(slot: number): ViewRec
+	local rec = viewBuf[slot]
+	if rec == nil then
+		rec = {
+			allies = {},
+			incoming = {},
+			outgoing = {},
+			embargoes = {},
+			traitors = {},
+			marks = {},
+		}
+		viewBuf[slot] = rec
+	else
+		table.clear(rec.allies)
+		table.clear(rec.incoming)
+		table.clear(rec.outgoing)
+		table.clear(rec.embargoes)
+		table.clear(rec.traitors)
+		table.clear(rec.marks)
+	end
+	return rec
+end
+
 local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	if not map[slot] then
 		map[slot] = {}
 	end
+end
+
+-- Une proposition est encore honorable tant que le tick courant n'a pas
+-- atteint l'expiry. flush() tourne avant Diplomacy.step : viewFor et accept
+-- doivent appliquer le meme garde, sinon le HUD affiche 1 tick de trop.
+local function requestIsLive(state: GameState, expiry: any): boolean
+	return typeof(expiry) == "number" and state.tick < expiry
 end
 
 --=============================================================================
@@ -55,9 +108,16 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
+	-- Bots.step tourne AVANT Diplomacy.step : une proposition inverse perimee
+	-- reste dans requests[] ce tick. Sans le garde, accept refuse "expiree"
+	-- et on n'envoie jamais la nouvelle demande — 1 tick (ou 12 pour une
+	-- tribu) de diplomatie bloquee, meme classe que areAllied / viewFor.
 	local theirs = state.requests[to]
 	if theirs and theirs[from] then
-		return Diplomacy.accept(state, to, from)
+		if requestIsLive(state, theirs[from]) then
+			return Diplomacy.accept(state, to, from)
+		end
+		theirs[from] = nil
 	end
 
 	state.requests[from][to] = state.tick + Config.ALLIANCE_REQUEST_TIMEOUT
@@ -70,6 +130,15 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	if not requestIsLive(state, requestExpiry) then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
 	end
 	requests[to] = nil
 
@@ -91,10 +160,7 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	for i = #state.attacks, 1, -1 do
 		local atk = state.attacks[i]
 		if (atk.attacker == from and atk.target == to) or (atk.attacker == to and atk.target == from) then
-			local attacker = state.players[atk.attacker]
-			if attacker then
-				attacker.troops += math.max(0, atk.troops)
-			end
+			state:returnCommittedTroops(atk)
 			table.remove(state.attacks, i)
 		end
 	end
@@ -319,7 +385,9 @@ function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: stri
 		local allySet = state.alliances[slot]
 		if allySet then
 			for other in allySet do
-				state:notify(message, "info", other)
+				if state:areAllied(slot, other) then
+					state:notify(message, "info", other)
+				end
 			end
 		end
 	else
@@ -384,17 +452,30 @@ function Diplomacy.step(state: GameState)
 		On collecte avant de retirer : muter les deux tables pendant qu'on les
 		parcourt est un comportement indefini.
 	]]
-	local expired: { { a: number, b: number } } = {}
+	local n = 0
 	for a, set in state.alliances do
 		for b, expiry in set do
-			-- Une seule fois par paire.
-			if a < b and state.tick >= expiry then
-				table.insert(expired, { a = a, b = b })
+			-- Une seule fois par paire. `true` legacy (tests unidirectionnels) :
+			-- pas une date, le pacte ne tombe pas (meme classe que pactStillLive).
+			if a < b and typeof(expiry) == "number" and state.tick >= expiry then
+				n += 1
+				local rec = expiredRecPool[n]
+				if rec == nil then
+					rec = { a = 0, b = 0 }
+					expiredRecPool[n] = rec
+				end
+				rec.a = a
+				rec.b = b
+				expiredBuf[n] = rec
 			end
 		end
 	end
 
-	for _, pair in expired do
+	for i = 1, n do
+		local pair = expiredBuf[i]
+		if pair == nil then
+			continue
+		end
 		local setA, setB = state.alliances[pair.a], state.alliances[pair.b]
 		if setA then
 			setA[pair.b] = nil
@@ -420,6 +501,9 @@ function Diplomacy.step(state: GameState)
 				pair.b
 			)
 		end
+	end
+	for i = #expiredBuf, 1, -1 do
+		expiredBuf[i] = nil
 	end
 
 	-- Une marque qui vise un disparu, ou posee par un disparu, ne doit pas
@@ -462,7 +546,9 @@ function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: num
 	local allySet = state.alliances[from]
 	if allySet then
 		for other in allySet do
-			state:notify(message, "info", other)
+			if state:areAllied(from, other) then
+				state:notify(message, "info", other)
+			end
 		end
 	end
 	return true, `{t.name} designee comme cible pour ton alliance.`
@@ -473,28 +559,42 @@ end
 	structure interne des relations, le reseau n'en voit qu'une projection.
 ]]
 function Diplomacy.viewFor(state: GameState, slot: number)
-	local allies: { [number]: boolean } = {}
-	local incoming: { [number]: boolean } = {}
-	local outgoing: { [number]: boolean } = {}
-	local embargoes: { [number]: boolean } = {}
-	local traitors: { [number]: boolean } = {}
+	local rec = viewRecFor(slot)
+	-- Slot sans joueur : maps vides, pas d'erreur. Ne pas scanner
+	-- requests/traitors d'un disparu — le HUD n'appelle viewFor que
+	-- pour un humain encore dans slotByPlayer.
+	if not state.players[slot] then
+		return rec
+	end
+
+	local allies = rec.allies
+	local incoming = rec.incoming
+	local outgoing = rec.outgoing
+	local embargoes = rec.embargoes
+	local traitors = rec.traitors
+	local marks = rec.marks
 
 	local allySet = state.alliances[slot]
 	if allySet then
 		for other in allySet do
-			allies[other] = true
+			if state:areAllied(slot, other) then
+				allies[other] = true
+			end
 		end
 	end
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if requestIsLive(state, expiry) and state.players[other] then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if expiry and requestIsLive(state, expiry) and state.players[other] then
 			incoming[other] = true
 		end
 	end
@@ -514,7 +614,6 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	-- Marquages de cible : les miens et ceux de mes allies. La marque d'un
 	-- ennemi est un renseignement qu'on ne livre pas gratuitement.
-	local marks: { [number]: number } = {}
 	local mine = state.targetMarks[slot]
 	if mine and state.players[mine] then
 		marks[slot] = mine
@@ -526,14 +625,7 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 		end
 	end
 
-	return {
-		allies = allies,
-		incoming = incoming,
-		outgoing = outgoing,
-		embargoes = embargoes,
-		traitors = traitors,
-		marks = marks,
-	}
+	return rec
 end
 
 return Diplomacy
