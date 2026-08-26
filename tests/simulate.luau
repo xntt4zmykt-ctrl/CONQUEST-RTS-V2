@@ -5836,6 +5836,100 @@ do
 end
 
 do
+	-- N49 : samsOf recycle samBuf (recette feel N68). Truncate entre
+	-- appels. Index present + set nil = zero SAM, meme si le hash
+	-- buildings contient un SAM orphelin (pas de fallback).
+	local state = GameState.new(1074)
+	local owner = state:addPlayer(nil, "Batterie", Random.new(88), 0)
+	local vacant = state:addPlayer(nil, "Vide", Random.new(89), 0)
+	if not owner or not vacant then
+		fail("samsOf recycle — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 4 then
+					break
+				end
+			end
+		end
+		if #sites < 4 then
+			fail("samsOf recycle — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[4], Config.BUILDING.SILO, owner.slot)
+
+			local first = Buildings.samsOf(state, owner.slot)
+			local firstN = 0
+			local firstSilo = false
+			for _, tile in first do
+				firstN += 1
+				if tile == sites[4] then
+					firstSilo = true
+				end
+			end
+			if firstN ~= 3 then
+				fail(`samsOf recycle — {firstN} tuiles, attendu 3`)
+			elseif firstSilo then
+				fail("samsOf recycle — silo dans samsOf")
+			else
+				local empty = Buildings.samsOf(state, vacant.slot)
+				local emptyN = 0
+				for _ in empty do
+					emptyN += 1
+				end
+				if emptyN ~= 0 or #empty ~= 0 then
+					fail(`samsOf recycle — fuite premier remplissage (#{empty} iter={emptyN})`)
+				else
+					local again = Buildings.samsOf(state, owner.slot)
+					local againN = 0
+					local againSilo = false
+					for _, tile in again do
+						againN += 1
+						if tile == sites[4] then
+							againSilo = true
+						end
+					end
+					if againN ~= 3 then
+						fail(`samsOf recycle — {againN} tuiles au 3e appel, attendu 3`)
+					elseif againSilo then
+						fail("samsOf recycle — silo au 3e appel")
+					else
+						local orphanTile: number? = nil
+						for index = 0, Config.TILE_COUNT - 1 do
+							if buffer.readu8(state.owner, index) == vacant.slot and not state.buildings[index] then
+								orphanTile = index
+								break
+							end
+						end
+						if not orphanTile then
+							fail("samsOf recycle — tuile orpheline introuvable")
+						else
+							state.buildings[orphanTile] = {
+								kind = Config.BUILDING.SAM,
+								slot = vacant.slot,
+								level = 1,
+								links = {},
+								cooldown = 0,
+							}
+							local leaked = Buildings.samsOf(state, vacant.slot)
+							if #leaked ~= 0 then
+								fail("samsOf recycle — fallback hash sur SAM orphelin")
+							else
+								print("samsOf recycle : truncate, pas de fuite (N49)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
