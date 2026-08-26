@@ -127,8 +127,8 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	-- de modele, pas 60 Hz. block() pose d'abord CFrame.new(x, roofY, 0)
 	-- ; la ligne ecrase ensuite. teeth / x / roofY / Size / Color /
 	-- Material inchanges. Ne pas editer les cheminees / reservoir.
-	-- Portes silo V90 (check modeles). Ne pas toucher les rampes
-	-- SAM (leftover V91). Ne pas merger feel a8e1.
+	-- Portes silo V90 / rampes SAM V91 (check modeles). Ne pas toucher
+	-- UnitModels addWake (leftover V92). Ne pas merger feel a8e1.
 	local teeth = 1 + tier
 	for i = 1, teeth do
 		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
@@ -182,8 +182,8 @@ function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color
 	-- Shape = Cylinder pose AVANT le CFrame. block() pose d'abord
 	-- CFrame.new(offset) ; cylinder() ecrase ensuite. Call sites
 	-- buildFactory / buildSilo non edites. Toits usine V89 / portes
-	-- silo V90 (check modeles). Ne pas toucher les rampes SAM
-	-- (leftover V91). Ne pas merger feel a8e1.
+	-- silo V90 / rampes SAM V91 (check modeles). Ne pas toucher
+	-- UnitModels addWake (leftover V92). Ne pas merger feel a8e1.
 	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
@@ -353,8 +353,10 @@ local function buildSilo(model: Model, color: Color3, _level: number?)
 	-- buildFactory — ne PAS retoucher les toits). Distinct de V88
 	-- (cylinder helper, Z=90°, même buildSilo pour le tube/missile —
 	-- ne PAS retoucher le helper). Distinct de V87 (Rock yaw `phase`
-	-- variable, WorldRenderer). Distinct de leftover V91 (rampes SAM,
-	-- pitch X=-31°, buildSam). Construction de modele, pas 60 Hz.
+	-- variable, WorldRenderer). Distinct de V91 (rampes SAM, pitch
+	-- X=-31°, buildSam — ne PAS retoucher les rampes). Distinct de
+	-- leftover V92 (UnitModels addWake yaw Y=±11°). Construction de
+	-- modele, pas 60 Hz.
 	-- block() pose d'abord CFrame.new(±3.6, 1.3, 0) ; la ligne ecrase
 	-- ensuite. STEEL / Size 4.4, 0.45, 6.5 / Material Metal / Name
 	-- SiloDoor inchanges. Ne pas editer le tube / missile / ogive.
@@ -380,11 +382,25 @@ local function buildSam(model: Model, color: Color3, _level: number?)
 	block(model, Vector3.new(3.8, 2.2, 3.8), Vector3.new(0, 2.15, 0), color, Enum.Material.Metal)
 
 	-- Quatre missiles sur deux rampes inclinees.
+	-- V91 : translation * fromEulerAnglesYXZ (pitch X=-31° fixe). Plus
+	-- de CFrame.Angles a buildSam Interceptor. Recette feel N142 inline
+	-- — ne PAS cuire un rampRot (translations side/lane distinctes,
+	-- comme V90 doorRot / V89 roofRot / V88 cylinderRot / V86 trunkRot
+	-- interdits). Distinct de V90 (portes silo, Z=±18°, même fichier,
+	-- buildSilo — ne PAS retoucher les portes). Distinct de V89 (toits
+	-- usine, Z=-12°, buildFactory — ne PAS retoucher les toits).
+	-- Distinct de V88 (cylinder helper, Z=90° — ne PAS retoucher le
+	-- helper). Distinct de leftover V92 (UnitModels addWake, yaw
+	-- Y=±11°). Construction de modele, pas 60 Hz. block() pose d'abord
+	-- CFrame.new(side * 1.45, 5.1, lane * 0.72) ; la ligne ecrase
+	-- ensuite. MISSILE / Size 0.72, 5.8, 0.72 / Material Metal / Name
+	-- Interceptor inchanges. Nez Neon inchange. Ne pas editer le radar
+	-- / socle / nez. Ne pas merger feel 4885.
 	for side = -1, 1, 2 do
 		for lane = -1, 1, 2 do
 			local launcher = block(model, Vector3.new(0.72, 5.8, 0.72), Vector3.new(side * 1.45, 5.1, lane * 0.72), MISSILE, Enum.Material.Metal)
 			launcher.Name = "Interceptor"
-			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.Angles(math.rad(-31), 0, 0)
+			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.fromEulerAnglesYXZ(math.rad(-31), 0, 0)
 			local nose = block(model, Vector3.new(0.82, 0.9, 0.82), Vector3.new(side * 1.45, 7.85, lane * 0.72 - 1.65), color)
 			nose.Material = Enum.Material.Neon
 		end
