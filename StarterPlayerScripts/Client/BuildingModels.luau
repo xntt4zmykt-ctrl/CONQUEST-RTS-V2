@@ -679,7 +679,8 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- V107 — ne PAS merger c450 / ee71. Distinct de V107
 			-- (UnitModels Flag, offset local). Distinct de V70
 			-- (fromEulerAnglesYXZ deja, pas CFrame.Angles). Distinct
-			-- de leftover V109 (PortCraneBoom, elseif suivant). Un
+			-- de V109 (PortCraneBoom, elseif suivant, fermee ici).
+			-- Distinct de leftover V110 (PortCraneCable). Un
 			-- elseif, Name CapitalFlag inchange. Construction
 			-- buildCapital inchangee. Pas de flagPhase.
 			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
@@ -689,19 +690,32 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 					math.sin(time * 1.7 + rest.Z * 0.05) * 0.035
 				)
 		elseif child.Name == "PortCraneBoom" then
-			-- Leftover V109 : yaw synchrone sin(time * 0.35), sans
-			-- rest.X. Amplitude 0.12 / frequence 0.35 inchangees.
-			-- Distinct de V108 (CapitalFlag pitch/roll, elseif
-			-- precedent). Distinct de V70 (fromEulerAnglesYXZ deja).
-			-- Distinct de Radar (time * 1.45, rotation continue).
-			-- rest est deja un CFrame monde pose a create.
+			-- V109 : phase depuis rest.X. Plus de lockstep
+			-- sin(time * 0.35) sans phase. rest est deja un
+			-- CFrame monde pose a create (RestCFrame). Offset
+			-- local Vector3.new(4.2, boomY, 0) — rest.X /
+			-- rest.Z varient par tuile. Amplitude 0.12,
+			-- frequence 0.35, * 0.1 inchanges (famille V98).
+			-- Pas de Position. Recette analogique V108 — ne
+			-- PAS merger c450 / ee71. Distinct de V108
+			-- (CapitalFlag pitch/roll, elseif precedent).
+			-- Distinct de V70 (fromEulerAnglesYXZ deja, pas
+			-- CFrame.Angles). Distinct de Radar (time * 1.45,
+			-- rotation continue, pas un sin). Distinct de
+			-- leftover V110 (PortCraneCable, elseif suivant).
+			-- Un elseif, Name PortCraneBoom inchange.
+			-- Construction buildPort inchangee. Pas de boomPhase.
 			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
-				* CFrame.fromEulerAnglesYXZ(0, math.sin(time * 0.35) * 0.12, 0)
+				* CFrame.fromEulerAnglesYXZ(0, math.sin(time * 0.35 + rest.X * 0.1) * 0.12, 0)
 		elseif child.Name == "PortCraneCable" then
 			-- V60 : Y en nombres depuis rest. Plus de Vector3.new 60 Hz
 			-- (rest + offset). Un CFrame.new. Amplitude 0.35 conservee.
 			-- Radar / flag / boom : V70 (rotation, pas translation).
 			-- Feuillage / houle / camion / unites inchanges (V59/V58/V57/V56).
+			-- Leftover V110 : Y synchrone sin(time * 0.8), sans
+			-- rest.X. Amplitude 0.35 / frequence 0.8 inchangees.
+			-- Distinct de V109 (PortCraneBoom yaw, elseif
+			-- precedent). rest est deja un CFrame monde pose a create.
 			child.CFrame = CFrame.new(
 				rest.X,
 				rest.Y + math.sin(time * 0.8) * 0.35,
@@ -749,7 +763,8 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- (wake Transparency, fermee ici). Distinct de V107
 			-- (flag pitch, UnitModels, fermee ici). Distinct de
 			-- V108 (CapitalFlag, elseif plus haut, fermee ici).
-			-- Distinct de leftover V109 (PortCraneBoom). Un
+			-- Distinct de V109 (PortCraneBoom, fermee ici).
+			-- Distinct de leftover V110 (PortCraneCable). Un
 			-- elseif, Name inchange.
 			-- Radar / Flag / Boom (V70) et cable (V60) inchanges.
 			-- RestCFrame a la construction inchange.
@@ -762,8 +777,9 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- de V105 (feux navire, fermee ici). Distinct de V106
 			-- (wake Transparency, fermee ici). Distinct de V107
 			-- (flag pitch, fermee ici). Distinct de V108
-			-- (CapitalFlag, fermee ici). Distinct de leftover
-			-- V109 (PortCraneBoom). Un elseif, Name inchange.
+			-- (CapitalFlag, fermee ici). Distinct de V109
+			-- (PortCraneBoom, fermee ici). Distinct de leftover
+			-- V110 (PortCraneCable). Un elseif, Name inchange.
 			child.Transparency = if math.sin(time * 4.5 + rest.Z * 0.05) > -0.25 then 0.05 else 0.6
 		end
 	end
