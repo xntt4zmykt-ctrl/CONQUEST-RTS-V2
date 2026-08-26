@@ -72,11 +72,9 @@ function SystemsBootstrap.install()
 
 		local origLaunch = GameState.launchAttack
 		function GameState.launchAttack(self, attackerSlot, targetSlot)
+			-- Le clic de spawn est deja distingue dans IntentValidator
+			-- (awaitingSpawn -> claimSpawn). Ne pas avaler l'offensive suivante.
 			local ps = self.players[attackerSlot]
-			if ps and ps.justClaimed then
-				ps.justClaimed = false
-				return true, nil
-			end
 
 			local already = false
 			for _, atk in self.attacks do

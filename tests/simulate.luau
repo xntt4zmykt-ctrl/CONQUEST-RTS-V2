@@ -126,6 +126,7 @@ local function checkInvariants(state, tick)
 
 	-- 5. Comptage des batiments coherent avec la table reelle.
 	local realPorts, realSilos, realCapitals = {}, {}, {}
+	local realPortLevels = {}
 	local realBuildingCounts = {}
 	local realCityPop, realCityGold = {}, {}
 	for index, building in state.buildings do
@@ -138,6 +139,7 @@ local function checkInvariants(state, tick)
 			realCityGold[building.slot] = (realCityGold[building.slot] or 0) + city.goldBonus
 		elseif building.kind == Config.BUILDING.PORT then
 			realPorts[building.slot] = (realPorts[building.slot] or 0) + 1
+			realPortLevels[building.slot] = (realPortLevels[building.slot] or 0) + (building.level or 1)
 		elseif building.kind == Config.BUILDING.SILO then
 			realSilos[building.slot] = (realSilos[building.slot] or 0) + 1
 		elseif building.kind == Config.BUILDING.CAPITAL then
@@ -186,6 +188,9 @@ local function checkInvariants(state, tick)
 		end
 		if (realPorts[slot] or 0) ~= ps.portCount then
 			fail(`tick {tick} — slot {slot} : portCount={ps.portCount} mais {realPorts[slot] or 0} reels`)
+		end
+		if (realPortLevels[slot] or 0) ~= ps.portLevels then
+			fail(`tick {tick} — slot {slot} : portLevels={ps.portLevels} mais {realPortLevels[slot] or 0} reels`)
 		end
 		if (realSilos[slot] or 0) ~= ps.siloCount then
 			fail(`tick {tick} — slot {slot} : siloCount={ps.siloCount} mais {realSilos[slot] or 0} reels`)
@@ -2103,7 +2108,7 @@ print("")
 print(`--- apres {TICKS} ticks ({string.format("%.1f", TICKS / Config.TICK_RATE)} s de jeu simule) ---`)
 print(`temps de calcul   : {string.format("%.2f", elapsed)} s`)
 print(`colonisation      : {string.format("%.1f", state:colonizedRatio() * 100)} % des terres`)
-print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} navale={buildingCounts[8] or 0} capitale={buildingCounts[6] or 0} labo={buildingCounts[7] or 0} usine={buildingCounts[8] or 0}`)
+print(`batiments         : ville={buildingCounts[1] or 0} port={buildingCounts[2] or 0} bunker={buildingCounts[3] or 0} silo={buildingCounts[4] or 0} sam={buildingCounts[5] or 0} navale={buildingCounts[9] or 0} capitale={buildingCounts[6] or 0} labo={buildingCounts[7] or 0} usine={buildingCounts[8] or 0}`)
 local carriers = 0
 for _, boat in state.boats do
 	if boat.kind == 3 then
@@ -2350,7 +2355,267 @@ do
 			fail("intentions — rate limit non declenche")
 		end
 		print("intentions : sequence, idempotence, apply immediat, rate limit OK")
+
+		-- Doctrine inconnue : plus de repli silencieux vers Industrielle.
+		IntentValidator.reset()
+		local okBadDoc, reasonBadDoc =
+			IntentValidator.enqueue(ctx, fakePlayer, "ChooseDoctrine", 1, { doctrineId = 999 })
+		if okBadDoc or reasonBadDoc ~= "InvalidSchema" then
+			fail(`intentions — doctrine 999 acceptee ({tostring(reasonBadDoc)})`)
+		end
+
+		-- Action diplomatique hors catalogue.
+		local okBadDip, reasonBadDip = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"Diplomacy",
+			2,
+			{ action = "hackGold", targetSlot = 1 }
+		)
+		if okBadDip or reasonBadDip ~= "UnknownAction" then
+			fail(`intentions — diplomatie pirate acceptee ({tostring(reasonBadDip)})`)
+		end
+
+		-- Nuke kind hors NUKE_STATS.
+		local okBadNuke, reasonBadNuke =
+			IntentValidator.enqueue(ctx, fakePlayer, "Nuke", 3, { index = 0, kind = 99 })
+		if okBadNuke or reasonBadNuke ~= "InvalidSchema" then
+			fail(`intentions — nuke kind 99 accepte ({tostring(reasonBadNuke)})`)
+		end
+
+		-- Phase ended : plus aucun ordre, y compris doctrine / ratio.
+		ctx.matchPhase = "ended"
+		local okEnded, reasonEnded =
+			IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 4, { ratio = 0.5 })
+		if okEnded or reasonEnded ~= "NotPlaying" then
+			fail(`intentions — ordre accepte en phase ended ({tostring(reasonEnded)})`)
+		end
+		ctx.matchPhase = "playing"
+		print("intentions : schema doctrine/nuke/diplomatie, ended OK")
+
+		-- Feel OF : apply immediat → la file reste vide ; MAX_PENDING_INTENTS est
+		-- dormant. On verifie juste que le rate limit ne laisse rien en file.
+		if IntentValidator.pendingCount() ~= 0 then
+			fail(`intentions — file non vide apres apply immediat ({IntentValidator.pendingCount()})`)
+		end
+
+		-- QuickChat : le cooldown serveur doit faire echouer l'intent, pas un succes fantome.
+		IntentValidator.reset()
+		table.clear(replies)
+		state.tick = 10
+		local okChat = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 1, { messageId = "social_luck" })
+		if not okChat then
+			fail("intentions — QuickChat refuse a l'enqueue")
+		end
+		local firstChat = replies[#replies]
+		if not firstChat or not firstChat.ok then
+			fail("intentions — premier QuickChat non applique")
+		end
+		table.clear(replies)
+		local okChat2 = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 2, { messageId = "social_luck" })
+		if not okChat2 then
+			fail("intentions — second QuickChat refuse a l'enqueue (schema OK, apply doit refuser)")
+		end
+		local secondChat = replies[#replies]
+		if not secondChat or secondChat.ok then
+			fail("intentions — QuickChat en cooldown rapporte un succes")
+		end
+		print("intentions : QuickChat cooldown honore")
 	end
+end
+
+do
+	-- Alliance : areAllied exige les deux directions.
+	local state = GameState.new(101)
+	local a = state:addPlayer(nil, "A", Random.new(1), 0)
+	local b = state:addPlayer(nil, "B", Random.new(2), 0)
+	if not a or not b then
+		fail("alliances — spawn impossible")
+	else
+		state.alliances[a.slot][b.slot] = true
+		if state:areAllied(a.slot, b.slot) then
+			fail("areAllied vrai sur un pacte a une direction")
+		end
+		state.alliances[b.slot][a.slot] = true
+		if not state:areAllied(a.slot, b.slot) then
+			fail("areAllied faux sur un pacte symetrique")
+		end
+		state.alliances[b.slot][a.slot] = nil
+		local oneWay = Diplomacy.viewFor(state, a.slot)
+		if oneWay.allies[b.slot] then
+			fail("viewFor — alliance unidirectionnelle exposee au HUD")
+		end
+	end
+end
+
+do
+	-- removePlayer doit laisser les frontieres voisines coherentes.
+	local state = GameState.new(202)
+	local a = state:addPlayer(nil, "Stay", Random.new(1), 0)
+	local b = state:addPlayer(nil, "Leave", Random.new(2), 0)
+	if not a or not b then
+		fail("removePlayer — spawn impossible")
+	else
+		local contact = nil
+		local scratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+						state:setOwner(nb, b.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("removePlayer — impossible de creer un contact")
+		elseif not a.border[contact] then
+			fail("removePlayer — contact non marque frontiere avant depart")
+		else
+			state:removePlayer(b.slot)
+			if buffer.readu8(state.owner, contact) ~= a.slot then
+				fail("removePlayer — tuile du survivant perdue")
+			end
+			if not a.border[contact] then
+				fail("removePlayer — frontiere du survivant non rafraichie (contact vs neutre)")
+			end
+		end
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(303)
+	local bot = state:addPlayer(nil, "Stripped", Random.new(3), 0)
+	if not bot then
+		fail("stripTerritory — spawn impossible")
+	else
+		ChantierB.stripTerritory(state, bot)
+		if bot.tiles ~= 0 then
+			fail(`stripTerritory — tiles={bot.tiles} attendu 0`)
+		end
+		local owned = 0
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == bot.slot then
+				owned += 1
+			end
+		end
+		if owned ~= 0 then
+			fail(`stripTerritory — {owned} tuiles encore possedees`)
+		end
+	end
+end
+
+do
+	-- justClaimed ne doit plus avaler une vraie offensive.
+	local state = GameState.new(404)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Claimant", Random.new(4), 0)
+	if not a then
+		fail("justClaimed — spawn impossible")
+	else
+		a.justClaimed = true
+		a.troops = 500
+		a.attackRatio = 1
+		local target = Config.NEUTRAL_SLOT
+		local ok, message = state:launchAttack(a.slot, target)
+		if ok and message == nil and #state.attacks == 0 then
+			fail("justClaimed — launchAttack a renvoye un succes silencieux")
+		end
+	end
+end
+
+do
+	-- Nukes : meme garde combatUnlocked que terre / mer.
+	local state = GameState.new(505)
+	state.combatUnlocked = false
+	local a = state:addPlayer(nil, "Bomber", Random.new(5), 0)
+	local b = state:addPlayer(nil, "Target", Random.new(6), 0)
+	if not a or not b then
+		fail("nukes prep — spawn impossible")
+	else
+		a.era = 5
+		a.gold = 99999
+		a.spawnTick = -10000 -- hors SPAWN_NUKE_IMMUNITY pour isoler combatUnlocked
+		local siloTile = nil
+		local scratch = table.create(4, 0)
+		if a.capitalTile then
+			local n = MapGen.neighbors(a.capitalTile, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if buffer.readu8(state.owner, nb) == a.slot then
+					siloTile = nb
+					break
+				end
+			end
+		end
+		if not siloTile then
+			fail("nukes prep — pas de tuile pour le silo")
+		else
+			state:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
+			local ok, message = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if ok then
+				fail("nukes prep — frappe acceptee pendant la preparation")
+			elseif not message or not string.find(message, "preparation", 1, true) then
+				fail(`nukes prep — mauvais refus ({tostring(message)})`)
+			end
+			state.combatUnlocked = true
+			local ok2, message2 = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if not ok2 then
+				fail(`nukes prep — frappe refusee une fois le combat ouvert ({tostring(message2)})`)
+			end
+		end
+	end
+end
+
+do
+	if math.abs((Config.BOAT_TROOP_RATIO or 0) - 0.2) > 1e-9 then
+		fail(`BOAT_TROOP_RATIO={Config.BOAT_TROOP_RATIO} attendu 0.2 (charge 1/5)`)
+	end
+end
+
+do
+	-- Cadran : un humain pas encore spawn (tiles=0) ne doit pas saigner.
+	local Doomsday = __require("Doomsday")
+	local state = GameState.new(707)
+	state.mode = GameModes.get("blitz")
+	local leader = state:addPlayer(nil, "Leader", Random.new(7), 0)
+	local afk = state:addPlayer(nil, "Afk", Random.new(8), 0)
+	if not leader or not afk then
+		fail("doomsday spawn — spawn impossible")
+	else
+		local ChantierB = __require("ChantierB")
+		ChantierB.stripTerritory(state, afk)
+		afk.awaitingSpawn = true
+		afk.troops = 12000
+		local before = afk.troops
+		state.tick = math.floor((state.mode.duration * 0.55) / Config.TICK_DT)
+		if not Doomsday.waveState(state.mode.duration, state.tick * Config.TICK_DT).armed then
+			fail("doomsday spawn — vague non armee dans le scenario de test")
+		elseif GameState.stepDoomsday then
+			GameState.stepDoomsday(state)
+			if afk.troops ~= before then
+				fail(`doomsday spawn — troupes AFK {before} -> {afk.troops}`)
+			end
+		else
+			fail("doomsday spawn — stepDoomsday absent")
+		end
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
+	print(
+		`combat vivant : MAX_TILES_PER_TICK={Config.MAX_TILES_PER_TICK} (inutilise) attackTilesPerTick(10k,nil,1)={perTick} guard=80`
+	)
 end
 
 do

@@ -451,7 +451,8 @@ Config.CARRIER_INTERCEPT_DAMAGE = 0.075 -- part des troupes du transport, par ti
 -- imprenable. C'est la mecanique qui ouvre la carte.
 
 Config.BOAT_SPEED = 0.85 -- tuiles par tick
-Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
+-- Charge 1/5 (port OF). La valeur 0.4 n'etait jamais lue : Navy embarquait `troops / 5`.
+Config.BOAT_TROOP_RATIO = 0.2 -- part max de la reserve embarquee
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
@@ -860,6 +861,8 @@ Config.RENDER_MODE = "Blocks" -- "Blocks" | "CanvasExperimental" | "LowDetail"
 
 -- Intentions reseau
 Config.INTENT_RATE_LIMIT_PER_SEC = 20
+Config.MAX_PENDING_INTENTS = 32 -- par joueur, file avant flush (dormant si apply immediat)
+Config.JOIN_COOLDOWN_SEC = 2 -- anti-spam JoinRequest
 Config.SNAPSHOT_COOLDOWN_SEC = 5
 Config.MAX_SNAPSHOTS_PER_MATCH = 12
 
