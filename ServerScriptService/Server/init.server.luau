@@ -704,30 +704,11 @@ local function replicate()
 	-- Unites : peu nombreuses, donc envoyees en clair. L'instantane vide est
 	-- important lui aussi : c'est lui qui retire le dernier navire du client et
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
-	local boats = {}
-	for _, boat in state.boats do
-		table.insert(boats, {
-			id = boat.id,
-			slot = boat.slot,
-			x = boat.x,
-			y = boat.y,
-			troops = math.floor(boat.troops),
-			kind = boat.kind,
-		})
-	end
-
-	local missiles = {}
-	for _, missile in state.missiles do
-		table.insert(missiles, {
-			id = missile.id,
-			slot = missile.slot,
-			x = missile.x,
-			y = missile.y,
-			tx = missile.tx,
-			ty = missile.ty,
-			kind = missile.kind,
-		})
-	end
+	-- snapshotBoats (V26) recycle boatSnapBuf ; jamais path / homeTile /
+	-- retreating (Overlay visuel ne lit pas retreating).
+	local boats = state:snapshotBoats()
+	-- snapshotMissiles (V26) : Types.MissileSnapshot seulement, pas progress.
+	local missiles = state:snapshotMissiles()
 
 	unitSnapshot:FireAllClients(boats, missiles)
 
