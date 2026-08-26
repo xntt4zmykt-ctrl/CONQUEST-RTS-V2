@@ -152,34 +152,53 @@ local function deployedCount(): number
 	return n
 end
 
+-- N86 : args locaux mutes (pas un {} par appel). Le packet vit dans
+-- MatchLifecycle.matchUpdateBuf. FireAllClients reste ici.
+local matchUpdateArgs = {
+	phase = nil,
+	stage = nil,
+	combatIn = 0,
+	timeLeft = 0,
+	mode = nil,
+	players = 0,
+	maxPlayers = 0,
+	maxHumans = 0,
+	maxBots = 0,
+	maxFactions = 0,
+	renderMode = nil,
+	winner = nil,
+	winnerName = nil,
+	restartIn = 0,
+	summary = nil,
+}
+
 local function broadcastMatchUpdate(stats)
-	matchUpdate:FireAllClients({
-		phase = matchPhase,
-		stage = if matchPhase == "waiting"
-			then "waiting"
-			elseif matchPhase == "ended"
-			then "ended"
-			elseif state.combatUnlocked
-			then "combat"
-			else "preparation",
-		combatIn = if matchPhase == "waiting"
-			then Config.PREPARATION_DURATION
-			else math.max(0, combatStartsAt - os.clock()),
-		timeLeft = if matchPhase == "waiting"
-			then activeMode.duration
-			else math.max(0, matchEndsAt - os.clock()),
-		mode = activeMode.id,
-		players = deployedCount(),
-		maxPlayers = Config.PUBLIC_MATCH_CAPACITY,
-		maxHumans = Config.MAX_HUMAN_PLAYERS,
-		maxBots = Config.MAX_BOTS,
-		maxFactions = Config.MAX_TOTAL_FACTIONS,
-		renderMode = Config.RENDER_MODE,
-		winner = winnerSlot,
-		winnerName = winnerName,
-		restartIn = math.max(0, restartAt - os.clock()),
-		summary = if matchPhase == "ended" then stats else nil,
-	})
+	matchUpdateArgs.phase = matchPhase
+	matchUpdateArgs.stage = if matchPhase == "waiting"
+		then "waiting"
+		elseif matchPhase == "ended"
+		then "ended"
+		elseif state.combatUnlocked
+		then "combat"
+		else "preparation"
+	matchUpdateArgs.combatIn = if matchPhase == "waiting"
+		then Config.PREPARATION_DURATION
+		else math.max(0, combatStartsAt - os.clock())
+	matchUpdateArgs.timeLeft = if matchPhase == "waiting"
+		then activeMode.duration
+		else math.max(0, matchEndsAt - os.clock())
+	matchUpdateArgs.mode = activeMode.id
+	matchUpdateArgs.players = deployedCount()
+	matchUpdateArgs.maxPlayers = Config.PUBLIC_MATCH_CAPACITY
+	matchUpdateArgs.maxHumans = Config.MAX_HUMAN_PLAYERS
+	matchUpdateArgs.maxBots = Config.MAX_BOTS
+	matchUpdateArgs.maxFactions = Config.MAX_TOTAL_FACTIONS
+	matchUpdateArgs.renderMode = Config.RENDER_MODE
+	matchUpdateArgs.winner = winnerSlot
+	matchUpdateArgs.winnerName = winnerName
+	matchUpdateArgs.restartIn = math.max(0, restartAt - os.clock())
+	matchUpdateArgs.summary = if matchPhase == "ended" then stats else nil
+	matchUpdate:FireAllClients(MatchLifecycle.buildMatchUpdate(matchUpdateArgs))
 end
 
 --[[
@@ -261,7 +280,8 @@ local function flushEvents()
 	for _, loot in state.plunders do
 		fireDeployed(plunderEvent, loot.tile, loot.slot, loot.gold)
 	end
-	table.clear(state.plunders)
+	-- N85 : truncate sans detruire le pool (pas table.clear).
+	state:drainPlunders()
 end
 
 --=============================================================================

@@ -128,4 +128,90 @@ end
 MatchLifecycle.rosterBuf = rosterBuf
 MatchLifecycle.rosterRecPool = rosterRecPool
 
+export type MatchUpdateRec = {
+	phase: string?,
+	stage: string?,
+	combatIn: number,
+	timeLeft: number,
+	mode: any,
+	players: number,
+	maxPlayers: number,
+	maxHumans: number,
+	maxBots: number,
+	maxFactions: number,
+	renderMode: any,
+	winner: number?,
+	winnerName: string?,
+	restartIn: number,
+	summary: any,
+}
+
+-- N86 : packet salon/chrono 1 Hz recycle (leftover N84). Un record,
+-- pas une map par slot. args en argument — ne pas require GameState
+-- (cycle). summary = reference live ou nil (pas un clone de statsBuf).
+-- Args nil / vides = scalaires a 0 / nil. Distinct de rosterBuf (N84)
+-- et de playerStatsForReplicate (N57).
+local matchUpdateBuf: MatchUpdateRec = {
+	phase = nil,
+	stage = nil,
+	combatIn = 0,
+	timeLeft = 0,
+	mode = nil,
+	players = 0,
+	maxPlayers = 0,
+	maxHumans = 0,
+	maxBots = 0,
+	maxFactions = 0,
+	renderMode = nil,
+	winner = nil,
+	winnerName = nil,
+	restartIn = 0,
+	summary = nil,
+}
+
+local function resetMatchUpdate(rec: MatchUpdateRec)
+	rec.phase = nil
+	rec.stage = nil
+	rec.combatIn = 0
+	rec.timeLeft = 0
+	rec.mode = nil
+	rec.players = 0
+	rec.maxPlayers = 0
+	rec.maxHumans = 0
+	rec.maxBots = 0
+	rec.maxFactions = 0
+	rec.renderMode = nil
+	rec.winner = nil
+	rec.winnerName = nil
+	rec.restartIn = 0
+	rec.summary = nil
+end
+
+function MatchLifecycle.buildMatchUpdate(args: any, buf: MatchUpdateRec?): MatchUpdateRec
+	local rec = buf or matchUpdateBuf
+	if args == nil or next(args) == nil then
+		resetMatchUpdate(rec)
+		return rec
+	end
+	rec.phase = args.phase
+	rec.stage = args.stage
+	rec.combatIn = args.combatIn or 0
+	rec.timeLeft = args.timeLeft or 0
+	rec.mode = args.mode
+	rec.players = args.players or 0
+	rec.maxPlayers = args.maxPlayers or 0
+	rec.maxHumans = args.maxHumans or 0
+	rec.maxBots = args.maxBots or 0
+	rec.maxFactions = args.maxFactions or 0
+	rec.renderMode = args.renderMode
+	rec.winner = args.winner
+	rec.winnerName = args.winnerName
+	rec.restartIn = args.restartIn or 0
+	rec.summary = args.summary
+	return rec
+end
+
+-- Banc N86 : rawequal packet. Pas replique.
+MatchLifecycle.matchUpdateBuf = matchUpdateBuf
+
 return MatchLifecycle

@@ -368,6 +368,15 @@ local eventPool: { EventRec } = table.create(8)
 local soundPool: { SoundRec } = table.create(8)
 GameState.eventPool = eventPool
 GameState.soundPool = soundPool
+-- N85 : pool parallele des butins (recette eventPool N83).
+-- collapseFaction reecrit plunderPool[n]. drainPlunders nil la file
+-- (# == 0) sans detruire les records. Overlay "+X or" lit tile /
+-- slot / gold tout de suite via FireClient (pas le record). Distinct
+-- de eventPool / soundPool (N83), collapseRemainBuf (N69) et
+-- collapsingBuf (N67). Non reentrant — flushEvents unique / tick.
+type PlunderRec = { tile: number, slot: number, gold: number }
+local plunderPool: { PlunderRec } = table.create(4)
+GameState.plunderPool = plunderPool
 
 --=============================================================================
 -- Construction
@@ -505,6 +514,18 @@ function GameState.drainSounds(self: GameState)
 	local n = #self.sounds
 	for i = 1, n do
 		self.sounds[i] = nil
+	end
+end
+
+--[[
+	N85 : #plunders == 0, records conserves dans plunderPool. init.server
+	itere puis appelle ceci a la place de table.clear (hors bundle).
+	Un plunder fantome apres drain = double "+X or".
+]]
+function GameState.drainPlunders(self: GameState)
+	local n = #self.plunders
+	for i = 1, n do
+		self.plunders[i] = nil
 	end
 end
 
@@ -1997,7 +2018,20 @@ function GameState.collapseFaction(self: GameState, victimSlot: number, captorSl
 			if not where or buffer.readu8(self.owner, where) ~= victimSlot then
 				where = collapseRemainBuf[1]
 			end
-			table.insert(self.plunders, { tile = where, slot = captorSlot, gold = loot })
+			-- N85 contrat B : reecrit un record recycle. Truncate leftover
+			-- = drainPlunders, pas ici. where = collapseRemainBuf[1]
+			-- AVANT le premier swap (N69) — ne pas y toucher.
+			local pn = #self.plunders + 1
+			local rec = plunderPool[pn]
+			if rec == nil then
+				rec = { tile = where, slot = captorSlot, gold = loot }
+				plunderPool[pn] = rec
+			else
+				rec.tile = where
+				rec.slot = captorSlot
+				rec.gold = loot
+			end
+			self.plunders[pn] = rec
 		end
 	end
 
