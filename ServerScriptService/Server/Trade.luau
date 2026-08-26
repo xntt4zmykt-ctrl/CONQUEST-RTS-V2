@@ -40,6 +40,9 @@ local IS_DESTINATION = {
 	[B.FACTORY] = true,
 }
 
+-- Recycle le flatten FACTORY (ISSUE-N45). Trade.step tourne a 10 Hz.
+local factoriesBuf: { number } = {}
+
 local function tileDistance(a: number, b: number): number
 	local ax, ay = MapGen.fromIndex(a)
 	local bx, by = MapGen.fromIndex(b)
@@ -126,16 +129,32 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
 	-- depend de l'ordre interne de la table, et deux serveurs partis de la
 	-- meme graine divergeraient des le premier colis.
-	local factories: { number } = {}
-	for index, building in state.buildings do
-		if building.kind == B.FACTORY then
+	-- N45 : flatten depuis factoriesByTile, pas le hash buildings (recette
+	-- portsByTile). Sort par index inchange (RNG). Buffer recycle.
+	local factories = factoriesBuf
+	table.clear(factories)
+	local indexed = state.factoriesByTile
+	if indexed then
+		for index in indexed do
 			table.insert(factories, index)
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == B.FACTORY then
+				table.insert(factories, index)
+			end
 		end
 	end
 	table.sort(factories)
 
 	for _, index in factories do
 		local factory = state.buildings[index]
+		if not factory or factory.kind ~= B.FACTORY then
+			if indexed then
+				indexed[index] = nil
+			end
+			continue
+		end
 		local delivery = state.tradeDeliveries[index]
 		if delivery then
 			if state.tick >= delivery.arrivalTick then

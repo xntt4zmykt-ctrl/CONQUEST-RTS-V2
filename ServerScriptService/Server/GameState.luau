@@ -174,6 +174,13 @@ export type GameState = typeof(setmetatable(
 		-- Index SAM par camp (ISSUE-N42 / feel N57). tryIntercept et samsOf
 		-- n'iterent plus le hash buildings. Pose/destroy/transfer seulement.
 		samsBySlot: { [number]: { [number]: true } },
+		-- Index SILO par camp (ISSUE-N44 / feel N60). Nukes.launch n'itere plus
+		-- le hash buildings. Pose/destroy/transfer seulement. Distinct de
+		-- coolingBuildings (N43) : ici c'est le choix du lanceur, pas le tick.
+		silosBySlot: { [number]: { [number]: true } },
+		-- Index FACTORY (ISSUE-N45). Trade.step n'itere plus buildings a 10 Hz.
+		-- Recette portsByTile : pose/destroy/transfer/upgrade FACTORY seulement.
+		factoriesByTile: { [number]: { slot: number, level: number } },
 		-- Batiments dont cooldown > 0 (ISSUE-N43). stepCooldowns n'itere plus
 		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
 		coolingBuildings: { [number]: true },
@@ -254,6 +261,8 @@ function GameState.new(seed: number): GameState
 	self.bunkerCells = {}
 	self.portsByTile = {}
 	self.samsBySlot = {}
+	self.silosBySlot = {}
+	self.factoriesByTile = {}
 	self.coolingBuildings = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
@@ -798,6 +807,29 @@ local function indexSam(self: GameState, slot: number, index: number, present: b
 	end
 end
 
+-- Index SILO : Nukes.launch (ISSUE-N44). Recette samsBySlot, sans grille.
+local function indexSilo(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.silosBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.silosBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
+-- Index FACTORY : Trade.step (ISSUE-N45). Recette portsByTile, pas _carriersDirty.
+local function indexFactory(self: GameState, index: number, slot: number, level: number, present: boolean)
+	if present then
+		self.factoriesByTile[index] = { slot = slot, level = level }
+	else
+		self.factoriesByTile[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -812,8 +844,14 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.SAM then
 		indexSam(self, slot, index, true)
 	end
+	if kind == B.SILO then
+		indexSilo(self, slot, index, true)
+	end
 	if kind == B.PORT then
 		indexPort(self, index, slot, 1, true)
+	end
+	if kind == B.FACTORY then
+		indexFactory(self, index, slot, 1, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -847,6 +885,9 @@ function GameState.upgradeBuilding(self: GameState, index: number): number?
 	if building.kind == B.PORT then
 		indexPort(self, index, building.slot, building.level, true)
 	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, index, building.slot, building.level, true)
+	end
 
 	-- Le niveau d'une usine pese sur le rendement de sa grappe.
 	if building.kind == B.FACTORY then
@@ -879,8 +920,15 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexSam(self, previousSlot, index, false)
 		indexSam(self, newSlot, index, true)
 	end
+	if building.kind == B.SILO then
+		indexSilo(self, previousSlot, index, false)
+		indexSilo(self, newSlot, index, true)
+	end
 	if building.kind == B.PORT then
 		indexPort(self, index, newSlot, building.level, true)
+	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, index, newSlot, building.level, true)
 	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
@@ -901,8 +949,14 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	if building.kind == B.SAM then
 		indexSam(self, building.slot, index, false)
 	end
+	if building.kind == B.SILO then
+		indexSilo(self, building.slot, index, false)
+	end
 	if building.kind == B.PORT then
 		indexPort(self, index, building.slot, building.level, false)
+	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, index, building.slot, building.level, false)
 	end
 	if self.coolingBuildings then
 		self.coolingBuildings[index] = nil
@@ -1246,6 +1300,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.samsBySlot then
 		self.samsBySlot[slot] = nil
+	end
+	if self.silosBySlot then
+		self.silosBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil
