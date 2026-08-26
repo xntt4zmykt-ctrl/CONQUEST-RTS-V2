@@ -8,8 +8,8 @@
 	publiquement — ce qui laisse a la victime le temps de reagir et inscrit la
 	trahison au compteur permanent du traitre.
 
-	L'embargo, lui, donne a la diplomatie un poids economique : couper les
-	routes commerciales d'un rival lui coute de l'or a chaque tick.
+	L'embargo, lui, donne a la diplomatie un poids economique : il bloque les
+	navires de commerce (`canTrade`). Il ne modifie pas l'or territorial par tick.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,6 +26,13 @@ local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	if not map[slot] then
 		map[slot] = {}
 	end
+end
+
+-- Presence d'une date ne suffit pas : Bots.step tourne AVANT Diplomacy.step,
+-- donc une inverse perimee reste dans requests[] ce tick. `true` n'est pas
+-- une expiry de proposition (les pactes, eux, ont pactStillLive).
+local function requestIsLive(state: GameState, expiry: any): boolean
+	return typeof(expiry) == "number" and state.tick < expiry
 end
 
 --=============================================================================
@@ -55,9 +62,17 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
+	-- Bots.step tourne AVANT Diplomacy.step : une proposition inverse perimee
+	-- reste dans requests[] ce tick. Sans le garde, accept refuse "expiree"
+	-- et on n'envoie jamais la nouvelle demande — 1 tick (ou 12 pour une
+	-- tribu) de diplomatie bloquee, meme classe que areAllied / viewFor.
+	-- ISSUE-N46, recette 915c. Ne pas signer un pacte sur une expiry.
 	local theirs = state.requests[to]
 	if theirs and theirs[from] then
-		return Diplomacy.accept(state, to, from)
+		if requestIsLive(state, theirs[from]) then
+			return Diplomacy.accept(state, to, from)
+		end
+		theirs[from] = nil
 	end
 
 	state.requests[from][to] = state.tick + Config.ALLIANCE_REQUEST_TIMEOUT
@@ -70,6 +85,17 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	-- apply immediat (feel) tourne avant Diplomacy.step : sans ce garde, une
+	-- proposition expiree reste acceptable pendant le tick qui la nettoie.
+	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
 	end
 	requests[to] = nil
 
@@ -157,7 +183,7 @@ function Diplomacy.startCooldown(state: GameState, a: number, b: number)
 end
 
 --[[
-	Prolonge un pacte avant son terme, modele OpenFront : la prolongation est
+	Prolonge un pacte avant son terme, regle CONQUEST : la prolongation est
 	MUTUELLE. Le premier camp marque son intention ; le pacte n'est repousse
 	que quand le second marque la sienne. Une prolongation unilaterale
 	permettrait a un camp d'enfermer l'autre dans une alliance dont il ne
@@ -319,7 +345,9 @@ function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: stri
 		local allySet = state.alliances[slot]
 		if allySet then
 			for other in allySet do
-				state:notify(message, "info", other)
+				if state:areAllied(slot, other) then
+					state:notify(message, "info", other)
+				end
 			end
 		end
 	else
@@ -437,7 +465,7 @@ end
 
 --[[
 	Designe une faction comme cible de l'alliance, modele des coordonnees
-	partagees du jeu de reference : une offensive a trois n'a de poids que si
+	partagees CONQUEST : une offensive a trois n'a de poids que si
 	tout le monde frappe au meme endroit. La marque est propre a chaque joueur,
 	visible de ses allies, et remplace la precedente — une seule priorite a la
 	fois, sinon elle ne priorise plus rien.
@@ -462,7 +490,9 @@ function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: num
 	local allySet = state.alliances[from]
 	if allySet then
 		for other in allySet do
-			state:notify(message, "info", other)
+			if state:areAllied(from, other) then
+				state:notify(message, "info", other)
+			end
 		end
 	end
 	return true, `{t.name} designee comme cible pour ton alliance.`
@@ -482,19 +512,24 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 	local allySet = state.alliances[slot]
 	if allySet then
 		for other in allySet do
-			allies[other] = true
+			if state:areAllied(slot, other) then
+				allies[other] = true
+			end
 		end
 	end
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if typeof(expiry) == "number" and state.tick < expiry and state.players[other] then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if typeof(expiry) == "number" and state.tick < expiry and state.players[other] then
 			incoming[other] = true
 		end
 	end
