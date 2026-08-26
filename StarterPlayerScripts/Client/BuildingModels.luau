@@ -531,7 +531,16 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 		elseif child.Name == "PortCraneBoom" then
 			child.CFrame = rest * CFrame.Angles(0, math.sin(time * 0.35) * 0.12, 0)
 		elseif child.Name == "PortCraneCable" then
-			child.CFrame = rest + Vector3.new(0, math.sin(time * 0.8) * 0.35, 0)
+			-- N109 : Y en nombres depuis rest. Plus de Vector3.new 60 Hz
+			-- (rest + offset). Un CFrame.new. Amplitude 0.35 conservee.
+			-- Radar / flag / boom Angles inchanges (rotation reelle).
+			-- Feuillage / houle / camion / unites inchanges (N108/N107/N105/N103).
+			-- Recette visual V60, portee pas mergee.
+			child.CFrame = CFrame.new(
+				rest.X,
+				rest.Y + math.sin(time * 0.8) * 0.35,
+				rest.Z
+			)
 		elseif child.Name == "CityWindows" then
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
