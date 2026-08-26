@@ -7533,6 +7533,112 @@ do
 end
 
 do
+	-- N91 : decideDiplomacy recycle allyBuf. Bot sans pacte → map vide.
+	-- A allie a B puis C sans pacte → leftover A absent. Trahison
+	-- (force × 2.2, frontiere > 4, rng < 0.25) rompt toujours.
+	-- Recette visual V42 (hash table.clear). Pas de contactBuf / siteBuf.
+	local emptyState = GameState.new(1091)
+	local loner = emptyState:addPlayer(nil, "AllyLoner", Random.new(91), 0)
+	if not loner then
+		fail("allyBuf — spawn loner impossible")
+	else
+		local quiet = { NextNumber = function()
+			return 0.99
+		end }
+		Bots.decideDiplomacy(emptyState, loner, quiet)
+		if next(Bots.allyBuf) ~= nil then
+			fail("allyBuf — bot sans pacte non vide")
+		else
+			print("allyBuf : bot sans pacte, next nil (N91)")
+		end
+	end
+
+	local state = GameState.new(1092)
+	local a = state:addPlayer(nil, "AllyA", Random.new(92), 0)
+	local b = state:addPlayer(nil, "AllyB", Random.new(93), 0)
+	local c = state:addPlayer(nil, "AllyC", Random.new(94), 0)
+	if not a or not b or not c then
+		fail("allyBuf — spawn trio impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		if not Diplomacy.accept(state, a.slot, b.slot) then
+			fail("allyBuf — pacte A–B")
+		else
+			local quiet = { NextNumber = function()
+				return 0.99
+			end }
+			Bots.decideDiplomacy(state, a, quiet)
+			local first = Bots.allyBuf
+			if first[b.slot] ~= true then
+				fail("allyBuf — allie B absent")
+			elseif first[c.slot] ~= nil then
+				fail("allyBuf — C non allie present")
+			else
+				Bots.decideDiplomacy(state, c, quiet)
+				if first[b.slot] ~= nil then
+					fail("allyBuf — leftover A apres C")
+				elseif next(Bots.allyBuf) ~= nil then
+					fail("allyBuf — C sans pacte non vide")
+				elseif not rawequal(first, Bots.allyBuf) then
+					fail("allyBuf — rawequal")
+				else
+					print("allyBuf : leftover A→C absent, rawequal (N91)")
+				end
+			end
+		end
+	end
+
+	local war = GameState.new(1093)
+	local strong = war:addPlayer(nil, "AllyStrong", Random.new(95), 0)
+	local weak = war:addPlayer(nil, "AllyWeak", Random.new(96), 0)
+	if not strong or not weak then
+		fail("allyBuf — spawn trahison impossible")
+	else
+		Diplomacy.request(war, strong.slot, weak.slot)
+		if not Diplomacy.accept(war, strong.slot, weak.slot) then
+			fail("allyBuf — pacte trahison")
+		else
+			local planted = 0
+			local scratch = table.create(4, 0)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(war.owner, index) == strong.slot and war:isLand(index) then
+					local n = MapGen.neighbors(index, scratch)
+					for i = 1, n do
+						local nb = scratch[i]
+						if war:isLand(nb) and buffer.readu8(war.owner, nb) == 0 then
+							war:setOwner(nb, weak.slot)
+							planted += 1
+							if planted >= 6 then
+								break
+							end
+						end
+					end
+				end
+				if planted >= 6 then
+					break
+				end
+			end
+			local contacts = Bots.neighborFactions(war, strong.slot)
+			if (contacts[weak.slot] or 0) <= 4 then
+				fail(`allyBuf — frontiere trop courte ({contacts[weak.slot] or 0}, planted={planted})`)
+			else
+				strong.troops = 10000
+				weak.troops = 10
+				local eager = { NextNumber = function()
+					return 0.1
+				end }
+				Bots.decideDiplomacy(war, strong, eager)
+				if war:areAllied(strong.slot, weak.slot) then
+					fail("allyBuf — trahison n'a pas rompu")
+				else
+					print("allyBuf : force × 2.2 + frontiere > 4 → breakAlliance (N91)")
+				end
+			end
+		end
+	end
+end
+
+do
 	-- N81 : gatherSites recycle siteBuf. Spawn (frontiere non vide) →
 	-- DEFENSE #>=1, chaque index dans ps.border, #<=60. Second appel
 	-- → rawequal. table.clear(border) → #==0 (truncate, pas de fuite).

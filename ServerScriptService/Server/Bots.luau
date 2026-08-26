@@ -58,6 +58,14 @@ local scratch = table.create(4, 0)
 -- x2, decideNavy, decideAttack) — jamais imbriques. Map, pas array :
 -- table.clear, pas de truncate. Slot sans joueur / sans frontiere → vide.
 local contactBuf: { [number]: number } = {}
+-- N91 : pactes recycles pour decideDiplomacy. Hash, table.clear, pas
+-- de truncate. Distinct de contactBuf (voisins de tuiles, N80) et de
+-- siteBuf (pose, N81). Copie les cles de state.alliances[slot] — ne
+-- pas iterer state.alliances global ni state.players. Appels
+-- sequentiels par bot (Bots.step) : un second clear au bot suivant
+-- est voulu. Pas reentrant. Pas de filaire.
+-- Recette visual V42 (hash table.clear) — ne pas merger d3e2.
+local allyBuf: { [number]: true } = {}
 -- N81 : emplacements de pose recycles. Unique appelant synchrone
 -- (decideBuild). Array + truncate (recette N68), pas table.clear.
 -- Cap DEFENSE = 60. Non reentrant — decideBuild lit puis abandonne.
@@ -462,7 +470,13 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 		end
 	end
 
-	local allies = state.alliances[slot] or {}
+	table.clear(allyBuf)
+	local mine = state.alliances[slot]
+	if mine then
+		for other in mine do
+			allyBuf[other] = true
+		end
+	end
 	local leader, coalitionActive = dominantLeader(state)
 	local threatened = coalitionActive and leader ~= slot
 
@@ -501,7 +515,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	--
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
-	for ally in allies do
+	for ally in allyBuf do
 		if not state:areAllied(slot, ally) then
 			continue
 		end
@@ -969,5 +983,8 @@ end
 -- Banc N62 : selection / score sans passer par le rng de decide*.
 Bots.lowestUpgradable = lowestUpgradable
 Bots.blastValue = blastValue
+-- Banc N91 : leftover apres un bot sans pacte. Pas replique.
+Bots.decideDiplomacy = decideDiplomacy
+Bots.allyBuf = allyBuf
 
 return Bots
