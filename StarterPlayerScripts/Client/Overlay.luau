@@ -239,16 +239,15 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			-- V62 : interpolation en nombres depuis ox/oy/oz + dx/dy/dz
-			-- (cuits a la construction). Plus de layer.origin + direction * t
-			-- 60 Hz. LookAt conserve (deux Vector3 = API). Size inchange (API).
-			-- Lift cuit inchange (V61). Cable / feuillage / houle / camion /
+			-- V63 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+			-- 60 Hz. Lerp nombres inchange (V62). Size inchange (API). Lift
+			-- cuit inchange (V61). Cable / feuillage / houle / camion /
 			-- unites inchanges (V60/V59/V58/V57/V56).
 			local t = visible - shown / 2
 			local cx = layer.ox + dx * t
 			local cy = layer.oy + dy * t
 			local cz = layer.oz + dz * t
-			part.CFrame = CFrame.lookAt(Vector3.new(cx, cy, cz), Vector3.new(cx + dx, cy + dy, cz + dz))
+			part.CFrame = CFrame.new(cx, cy, cz) * segment.rot
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -324,6 +323,9 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local origin = a - direction * (tileSize / 2)
 		local dx, dy, dz = direction.X, direction.Y, direction.Z
 		local ox, oy, oz = origin.X, origin.Y, origin.Z
+		-- V63 : orientation cuit une fois (grille HV, un axe ≈ 0).
+		-- applyRouteProgress compose translation * rot, plus de lookAt 60 Hz.
+		local rot = CFrame.lookAt(Vector3.zero, direction)
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
@@ -345,6 +347,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 			-- V61 : lift cuit dans origin par calque (une fois).
 			-- V62 : ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
 			-- plus origin + direction * t a 60 Hz.
+			-- V63 : rot cuit ici. applyRouteProgress n'appelle plus lookAt 60 Hz.
 			layers = {
 				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin, ox = ox, oy = oy, oz = oz, ratio = 1 },
 				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, liftAsphalt, 0), ox = ox, oy = oy + liftAsphalt, oz = oz, ratio = 1 },
@@ -352,6 +355,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 			},
 			origin = origin,
 			direction = direction,
+			rot = rot,
 			dx = dx,
 			dy = dy,
 			dz = dz,
