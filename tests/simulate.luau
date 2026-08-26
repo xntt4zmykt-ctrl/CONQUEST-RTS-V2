@@ -10139,6 +10139,228 @@ do
 	end
 end
 
+do
+	-- N103 : RailPath.runs recycle tableau + records (leftover N101).
+	-- Contrat A : retour module, second rawequal, leftover #.
+	-- Overlay sync — ne stocke pas le tableau. Path find unique (N101).
+	-- Banc voies / N65 / N101 verts. Overlay.luau inchange.
+	local function idx(x: number, y: number): number
+		return MapGen.toIndex(x, y)
+	end
+	local pathL: { number } = {}
+	for x = 5, 12 do
+		table.insert(pathL, idx(x, 5))
+	end
+	for y = 6, 11 do
+		table.insert(pathL, idx(12, y))
+	end
+	local runsL = RailPath.runs(pathL)
+	local buf = RailPath.runBuf
+	if buf == nil then
+		fail("rail runs — runBuf absent")
+	elseif not rawequal(runsL, buf) then
+		fail("rail runs — pas le tableau module (contrat A)")
+	elseif #runsL ~= 2 then
+		fail(`rail runs — L attendu 2 troncons (#{#runsL})`)
+	elseif not runsL[1].horizontal or runsL[2].horizontal then
+		fail("rail runs — L orientation")
+	elseif runsL[1].fromIndex ~= pathL[1] or runsL[2].toIndex ~= pathL[#pathL] then
+		fail("rail runs — L extremites")
+	else
+		local recA = runsL[1]
+		local recB = runsL[2]
+		local pathH = { idx(0, 0), idx(3, 0) }
+		local runsH = RailPath.runs(pathH)
+		if not rawequal(runsH, runsL) then
+			fail("rail runs — 2e appel pas rawequal")
+		elseif #runsH ~= 1 then
+			fail(`rail runs — leftover # ({#runsH} attendu 1)`)
+		elseif runsH[2] ~= nil then
+			fail("rail runs — leftover [2] fantome")
+		elseif runsH[1].fromIndex ~= pathH[1] or runsH[1].toIndex ~= pathH[2] or not runsH[1].horizontal then
+			fail("rail runs — H champs")
+		else
+			local runs0 = RailPath.runs({ idx(0, 0) })
+			if not rawequal(runs0, runsH) then
+				fail("rail runs — vide pas rawequal")
+			elseif #runs0 ~= 0 or runs0[1] ~= nil then
+				fail(`rail runs — leftover vide (#{#runs0})`)
+			else
+				local runsL2 = RailPath.runs(pathL)
+				local recycled = rawequal(runsL2[1], recA)
+					or rawequal(runsL2[1], recB)
+					or rawequal(runsL2[2], recA)
+					or rawequal(runsL2[2], recB)
+				if not rawequal(runsL2, buf) then
+					fail("rail runs — 4e appel pas module")
+				elseif #runsL2 ~= 2 then
+					fail(`rail runs — L recycle # ({#runsL2})`)
+				elseif not recycled then
+					fail("rail runs — records non recycles")
+				else
+					print("rail runs : rawequal module, leftover #, pool (N103)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N104 : BoatFront park swap-pop (leftover N102). 2 ponts + terre
+	-- (recette N68) → launchAttack renfort → #attacks == 3, nBeach == 2,
+	-- pas de trou, rawequal les 2 ponts parked. Sans releaseAttack.
+	-- Banc N67 / N68 / N69 / N98 / N99 / N102 verts. Ne pas fermer N29.
+	local BoatFront = __require("BoatFront")
+	local sea = GameState.new(1108)
+	sea.combatUnlocked = true
+	local sa = sea:addPlayer(nil, "ParkSwapA", Random.new(120), 0)
+	local sb = sea:addPlayer(nil, "ParkSwapB", Random.new(121), 0)
+	if not sa or not sb then
+		fail("park order — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local pairsFound: { { number } } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if sea:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if sea:isLand(nb) and nb ~= index then
+						local used = false
+						for _, pair in pairsFound do
+							if pair[1] == index or pair[2] == index or pair[1] == nb or pair[2] == nb then
+								used = true
+								break
+							end
+						end
+						if not used then
+							table.insert(pairsFound, { index, nb })
+							if #pairsFound >= 2 then
+								break
+							end
+						end
+					end
+				end
+			end
+			if #pairsFound >= 2 then
+				break
+			end
+		end
+		if #pairsFound < 2 then
+			fail("park order — deux paires terrestres introuvables")
+		else
+			local landContact: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(sea.owner, index) == sa.slot and sea:isLand(index) then
+					local nn = MapGen.neighbors(index, scratch)
+					for i = 1, nn do
+						local nb = scratch[i]
+						if sea:isLand(nb) and buffer.readu8(sea.owner, nb) == 0 then
+							local clash = false
+							for _, pair in pairsFound do
+								if nb == pair[1] or nb == pair[2] or index == pair[1] or index == pair[2] then
+									clash = true
+									break
+								end
+							end
+							if not clash then
+								sea:setOwner(nb, sb.slot)
+								landContact = index
+								break
+							end
+						end
+					end
+				end
+				if landContact then
+					break
+				end
+			end
+			if not landContact then
+				fail("park order — pas de contact terre distinct des ponts")
+			else
+				sa.attackRatio = 1
+				sa.troops = 5000
+				sea:setOwner(pairsFound[1][1], sa.slot)
+				sea:setOwner(pairsFound[1][2], sb.slot)
+				sea:setOwner(pairsFound[2][1], sa.slot)
+				sea:setOwner(pairsFound[2][2], sb.slot)
+				sea:seedBeachhead(sa.slot, sb.slot, 700, pairsFound[1][1])
+				sea:seedBeachhead(sa.slot, sb.slot, 900, pairsFound[2][1])
+				if #sea.attacks ~= 2 then
+					fail(`park order — {#sea.attacks} ponts apres 2 seed (attendu 2)`)
+				else
+					local pontA = sea.attacks[1]
+					local pontB = sea.attacks[2]
+					sa.troops = 5000
+					local launched = sea:launchAttack(sa.slot, sb.slot)
+					local nBeach, nLand = 0, 0
+					local seenA, seenB = false, false
+					local hole = false
+					for i = 1, #sea.attacks do
+						local atk = sea.attacks[i]
+						if atk == nil then
+							hole = true
+							break
+						end
+						if atk.isBeachhead then
+							nBeach += 1
+							if rawequal(atk, pontA) then
+								seenA = true
+							elseif rawequal(atk, pontB) then
+								seenB = true
+							end
+						else
+							nLand += 1
+						end
+					end
+					if not launched or #sea.attacks ~= 3 or nBeach ~= 2 or nLand ~= 1 or hole then
+						fail(
+							`park order — leftover 3 ({launched} #={#sea.attacks} beach={nBeach} land={nLand} hole={hole})`
+						)
+					elseif not seenA or not seenB then
+						fail("park order — ponts non rawequal apres park")
+					else
+						sa.troops = 5000
+						sea:launchAttack(sa.slot, sb.slot)
+						nBeach, nLand, seenA, seenB, hole = 0, 0, false, false, false
+						for i = 1, #sea.attacks do
+							local atk = sea.attacks[i]
+							if atk == nil then
+								hole = true
+								break
+							end
+							if atk.isBeachhead then
+								nBeach += 1
+								if rawequal(atk, pontA) then
+									seenA = true
+								elseif rawequal(atk, pontB) then
+									seenB = true
+								end
+							else
+								nLand += 1
+							end
+						end
+						if #sea.attacks ~= 3 or nBeach ~= 2 or nLand ~= 1 or hole then
+							fail(
+								`park order — renfort ({#sea.attacks} beach={nBeach} land={nLand} hole={hole})`
+							)
+						elseif not seenA or not seenB then
+							fail("park order — ponts perdus au renfort")
+						elseif #BoatFront.parkedBuf ~= 2 then
+							-- parkedBuf leftover 2 (truncate n+1), pas 0 : N68
+							-- truncate apres wrap laisse n ponts. N68 0 pont
+							-- land laisse #==0. Ici 2 ponts parked.
+							fail(`park order — parkedBuf leftover (#{#BoatFront.parkedBuf})`)
+						else
+							print("park order : swap-pop 2 ponts rawequal, leftover 3 (N104)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
