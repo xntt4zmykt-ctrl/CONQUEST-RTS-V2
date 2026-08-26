@@ -234,6 +234,45 @@ check("identite, ere, diplomatie et classement", function()
 	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
 	assert(#hud.ranked == 1, "leftover ranked non truncate")
 	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	-- V54 : meme tuiles, troupes differentes → tie-break troupes desc.
+	-- stats[7]/[8] ont des tuiles distinctes (500 - slot*10) : on pose 100/100.
+	local tieLow = {
+		troops = 10,
+		tiles = 100,
+		gold = 0,
+		maxTroops = 1,
+		era = 1,
+		eraProgress = 0,
+		activeAttacks = 0,
+		committedTroops = 0,
+		logisticsRoutes = 0,
+		logisticsIncome = 0,
+		buildPrices = {},
+	}
+	local tieHigh = {
+		troops = 40,
+		tiles = 100,
+		gold = 0,
+		maxTroops = 1,
+		era = 1,
+		eraProgress = 0,
+		activeAttacks = 0,
+		committedTroops = 0,
+		logisticsRoutes = 0,
+		logisticsIncome = 0,
+		buildPrices = {},
+	}
+	hud:update({
+		[7] = tieLow,
+		[8] = tieHigh,
+	}, {
+		[7] = roster[7],
+		[8] = roster[8],
+	})
+	assert(#hud.ranked == 2, "tie-break ranked taille")
+	assert(hud.ranked[1].tiles == 100 and hud.ranked[2].tiles == 100, "tie-break tuiles")
+	assert(hud.ranked[1].slot == 8 and hud.ranked[1].troops == 40, "tie-break troupes non descendant")
+	assert(hud.ranked[2].slot == 7, "tie-break ordre")
 	hud:update(stats, roster)
 
 	hud:setDiplomacy({
