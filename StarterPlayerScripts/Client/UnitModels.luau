@@ -345,7 +345,18 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 		elseif piece.role == "flame" then
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
 		elseif piece.role == "trail" then
-			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Position.Z) * 0.035, 0.25, 0.9)
+			-- N151 : phase depuis offset.Z. Plus de offset.Position.Z 60 Hz
+			-- (CFrame.Position alloue un Vector3). piece.offset est deja
+			-- le CFrame local (construction CFrame.new(0, 0, 4.6 + i * 1.4)
+			-- — translation pure). offset.Z ≡ Position.Z. Amplitude 0.035
+			-- / frequence time * 9 / clamp 0.25..0.9 / += Transparency
+			-- inchanges. Role "trail" inchange. Distinct flame leftover
+			-- N152 (Size = Vector3.new, pulse Z conserve, ≠ visual V74
+			-- freeze). Distinct beacons N150 (rest.Z). Distinct fenetres
+			-- N149 (rest.X). Recette leftover N150, pas merger visual.
+			-- Flame / radar / flag / wake / light / BuildingModels /
+			-- Overlay / createMissile inchanges.
+			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Z) * 0.035, 0.25, 0.9)
 		elseif piece.role == "light" then
 			piece.part.Transparency = if math.sin(time * 3) > -0.2 then 0 else 0.45
 		end

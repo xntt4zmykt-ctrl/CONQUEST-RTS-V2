@@ -1730,6 +1730,13 @@ check("navires, missiles et interpolation", function()
 	-- Recette leftover N147, pas merger visual. Fin N147 / MissileBody
 	-- N146 / rampe N145 / Bow N144 / addWake N143 inchanges. Coque
 	-- procedurale inchangee. BuildingModels / Overlay inchanges.
+	-- N151 : UnitModels.place trail offset.Z (pas offset.Position.Z).
+	-- Amplitude / frequence / clamp / += Transparency inchanges.
+	-- Leftover N148 mesh visual.pieces, leftover N147 Fin, leftover
+	-- N146 MissileBody doivent rester verts. Recette leftover N150,
+	-- pas merger visual. Flame leftover N152 non touchee (pulse Z
+	-- conserve, ≠ visual V74 freeze). Beacons N150 / fenetres N149
+	-- (check modeles) inchanges. BuildingModels / Overlay inchanges.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
