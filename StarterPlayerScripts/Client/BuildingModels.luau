@@ -689,7 +689,18 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 				rest.Z
 			)
 		elseif child.Name == "CityWindows" then
-			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
+			-- V98 : phase depuis rest.X. Plus de child.Position.X 60 Hz
+			-- (Position reconstruit un Vector3 monde apres create).
+			-- rest est deja lu deux lignes plus haut. Amplitude 0.06 /
+			-- 0.08, frequence 0.7, * 0.1 inchanges. Recette feel N149
+			-- — ne PAS merger c450. Distinct de V70 (Radar CFrame yaw).
+			-- Distinct de V60 (cable Y nombres). Distinct de V97
+			-- (mesh carrier, UnitModels — autre fichier). Distinct de
+			-- leftover V99 (beacons child.Position.Z, elseif suivant).
+			-- FactoryOutput / SiloWarning n'ont PAS de Position — ne
+			-- pas les toucher. Radar / Flag / Boom (V70) et cable (V60)
+			-- inchanges. RestCFrame a la construction inchange.
+			child.Transparency = 0.06 + (math.sin(time * 0.7 + rest.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
 			child.Transparency = 0.05 + (math.sin(time * 2.8 + child.Position.Z * 0.05) + 1) * 0.18
 		elseif child.Name == "FactoryOutput" then
