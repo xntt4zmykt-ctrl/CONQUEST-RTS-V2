@@ -22,12 +22,22 @@ local KIND_CARRIER = 3
 local MAX_BFS_NODES = 24000
 
 local scratch = table.create(4, 0)
+-- Pools : findSeaPath est appele a chaque invasion, retraite, et vague
+-- commerciale. Allouer 40 960 octets + tables par appel saturait le GC
+-- sur un shard 8 humains / 10 bots (ISSUE-N31). Recette feel N37, sans
+-- le wrap AimFront.
+local visitBuf = buffer.create(Config.TILE_COUNT)
+local parentScratch: { [number]: number } = {}
+local queueScratch: { number } = table.create(512)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
-	local visited = buffer.create(Config.TILE_COUNT)
-	local parent: { [number]: number } = {}
-	local queue = table.create(512)
+	buffer.fill(visitBuf, 0, 0)
+	table.clear(parentScratch)
+	table.clear(queueScratch)
+	local visited = visitBuf
+	local parent = parentScratch
+	local queue = queueScratch
 	local head = 1
 	local explored = 0
 
