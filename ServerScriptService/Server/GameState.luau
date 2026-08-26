@@ -309,6 +309,13 @@ local statsRecPool: { [number]: StatsRec } = {}
 -- Ne pas nommer `doomed` : removePlayer a deja un snapshot batiments.
 -- Non reentrant — step() unique / tick. Ne pas truncate a 0 apres return.
 local elimBuf: { number } = table.create(8)
+-- N89 : snapshot batiments de removePlayer (recette elimBuf / N82).
+-- Distinct de elimBuf (slots) et de doomedBuf (hash d'Attack N86).
+-- Ne pas nommer `doomed` : collision N82/N86. Non reentrant — removePlayer
+-- est synchrone ; stepElimination peut enchainer plusieurs slots, donc
+-- truncate A CHAQUE appel. Un leftover d'etat A ferait destroyBuilding
+-- fantome sur une autre instance. Overlay n'itere pas cette liste.
+local destroyBuf: { number } = table.create(16)
 -- N88 : collapseFaction porteuses tuiles (recette elimBuf / N82). Distinct
 -- de collapsingBuf (victim/captor N86) et de elimBuf (slots). Non reentrant
 -- — un collapse par tick (collecte N86 close avant). Truncate leftover
@@ -1392,21 +1399,28 @@ function GameState.removePlayer(self: GameState, slot: number)
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
 	-- N62 : snapshot buildingsBySlot[slot] (destroy mute l'index). Fallback
-	-- hash si l'index est nil (tests partiels).
-	local doomed: { number } = {}
+	-- hash si l'index est nil (tests partiels). N89 : destroyBuf recycle ;
+	-- truncate leftover AVANT la boucle (un leftover d'etat A detruirait
+	-- un batiment fantome d'etat B au meme index de tuile). Iterer 1..n.
+	local nDestroy = 0
 	if self.buildingsBySlot and self.buildingsBySlot[slot] then
 		for index in self.buildingsBySlot[slot] do
-			table.insert(doomed, index)
+			nDestroy += 1
+			destroyBuf[nDestroy] = index
 		end
 	else
 		for index, building in self.buildings do
 			if building.slot == slot then
-				table.insert(doomed, index)
+				nDestroy += 1
+				destroyBuf[nDestroy] = index
 			end
 		end
 	end
-	for _, index in doomed do
-		self:destroyBuilding(index)
+	for i = #destroyBuf, nDestroy + 1, -1 do
+		destroyBuf[i] = nil
+	end
+	for i = 1, nDestroy do
+		self:destroyBuilding(destroyBuf[i])
 	end
 
 	-- Transports AVANT setOwner (ISSUE-N43, recette 915c). N49 pose

@@ -7022,6 +7022,78 @@ do
 end
 
 do
+	-- N90 : Placement.validTiles recycle. Tuile etrangere → length 0,
+	-- second early-out rawequal (emptyTileBuf). Deux resolve CITY successifs
+	-- → meme tile (pas de leftover). Hors carte → length 0, pas d'erreur.
+	local state = GameState.new(1095)
+	local a = state:addPlayer(nil, "TilesA", Random.new(31), 0)
+	local b = state:addPlayer(nil, "TilesB", Random.new(32), 0)
+	if not a or not b then
+		fail("validTiles — spawn impossible")
+	else
+		local ctxA = Buildings.contextFor(state, a.slot)
+		local foreign: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == b.slot then
+				foreign = index
+				break
+			end
+		end
+		if not ctxA or not foreign then
+			fail("validTiles — ctx / tuile etrangere absents")
+		else
+			local firstEmpty = Placement.validTiles(ctxA, foreign, Config.BUILDING.CITY)
+			local secondEmpty = Placement.validTiles(ctxA, -1, Config.BUILDING.CITY)
+			if #firstEmpty ~= 0 then
+				fail(`validTiles — etrangere length {#firstEmpty}`)
+			elseif not rawequal(firstEmpty, secondEmpty) then
+				fail("validTiles — early-out rawequal")
+			else
+				print("validTiles : etrangere #0, rawequal emptyTileBuf (N90)")
+				local site: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						buffer.readu8(state.owner, index) == a.slot
+						and not state.buildings[index]
+						and state:isLand(index)
+					then
+						site = index
+						break
+					end
+				end
+				if not site then
+					fail("validTiles — tuile libre introuvable")
+				else
+					a.gold = 100000
+					local first, reason1 = Buildings.resolve(state, a.slot, site, Config.BUILDING.CITY)
+					local second, reason2 = Buildings.resolve(state, a.slot, site, Config.BUILDING.CITY)
+					if not first or not second then
+						fail(`validTiles — resolve CITY refuse ({reason1}/{reason2})`)
+					elseif buffer.readu8(state.owner, first.tile) ~= a.slot then
+						fail("validTiles — leftover tiles[1] hors territoire")
+					elseif first.tile ~= second.tile then
+						fail("validTiles — leftover tiles[1] distinct")
+					else
+						print("validTiles : deux resolve CITY, tile identique (N90)")
+						local ctxB = Buildings.contextFor(state, b.slot)
+						if not ctxB then
+							fail("validTiles — ctx B absent")
+						else
+							local oob = Placement.validTiles(ctxB, Config.TILE_COUNT, Config.BUILDING.CITY)
+							if #oob ~= 0 then
+								fail(`validTiles — hors carte length {#oob}`)
+							else
+								print("validTiles : hors carte #0, pas d'erreur (N90)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- N76 : playerStatsForReplicate recycle. 1 joueur 0 front → champs
 	-- honores, attackTargets nil, next(stats) = ce slot. launchAttack →
 	-- activeAttacks==1. removePlayer → slot absent. Second appel →
@@ -7150,6 +7222,90 @@ do
 					fail(`removePlayer index — {leftover} batiment(s) du disparu`)
 				else
 					print("removePlayer index : snapshot buildingsBySlot, rien ne reste")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N89 : destroyBuf. Slot sans batiment → pas d'erreur, index vide.
+	-- Slot deja absent → return. Deux instances : leftover A ne detruit
+	-- pas la CITY de B (autre index). Truncate avant destroyBuilding.
+	local empty = GameState.new(1094)
+	local nobody = empty:addPlayer(nil, "DestEmpty", Random.new(91), 0)
+	if not nobody then
+		fail("destroyBuf — spawn empty impossible")
+	else
+		empty:removePlayer(99)
+		if nobody.capitalTile then
+			empty:destroyBuilding(nobody.capitalTile)
+		end
+		local goneEmpty = nobody.slot
+		empty:removePlayer(goneEmpty)
+		empty:removePlayer(goneEmpty)
+		if empty.buildingsBySlot[goneEmpty] and next(empty.buildingsBySlot[goneEmpty]) ~= nil then
+			fail("destroyBuf — slot sans batiment laisse un index")
+		else
+			print("destroyBuf : slot vide / absent, pas d'erreur (N89)")
+			local s1 = GameState.new(1093)
+			local ownerA = s1:addPlayer(nil, "DestA", Random.new(71), 0)
+			if not ownerA then
+				fail("destroyBuf — spawn A impossible")
+			else
+				local cityA: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						buffer.readu8(s1.owner, index) == ownerA.slot
+						and not s1.buildings[index]
+						and s1:isLand(index)
+					then
+						cityA = index
+						break
+					end
+				end
+				if not cityA then
+					fail("destroyBuf — tuile CITY A introuvable")
+				else
+					s1:placeBuilding(cityA, Config.BUILDING.CITY, ownerA.slot)
+					s1:removePlayer(ownerA.slot)
+					local s2 = GameState.new(1093)
+					local ownerB = s2:addPlayer(nil, "DestB", Random.new(71), 0)
+					local extra = s2:addPlayer(nil, "DestC", Random.new(72), 0)
+					if not ownerB or not extra then
+						fail("destroyBuf — spawn B/C impossible")
+					else
+						local cityB: number? = nil
+						for index = 0, Config.TILE_COUNT - 1 do
+							if
+								buffer.readu8(s2.owner, index) == ownerB.slot
+								and not s2.buildings[index]
+								and s2:isLand(index)
+								and index ~= cityA
+							then
+								cityB = index
+								break
+							end
+						end
+						if not cityB then
+							fail("destroyBuf — tuile CITY B introuvable")
+						else
+							s2:placeBuilding(cityB, Config.BUILDING.CITY, ownerB.slot)
+							if extra.capitalTile then
+								s2:destroyBuilding(extra.capitalTile)
+							end
+							s2:removePlayer(extra.slot)
+							local cityLive = s2.buildings[cityB]
+							local capLive = if ownerB.capitalTile then s2.buildings[ownerB.capitalTile] else nil
+							if not cityLive or cityLive.kind ~= Config.BUILDING.CITY then
+								fail("destroyBuf — leftover A a detruit la CITY de B")
+							elseif not capLive then
+								fail("destroyBuf — leftover A a detruit la capitale de B")
+							else
+								print("destroyBuf : leftover A→B, CITY B survit (N89)")
+							end
+						end
+					end
 				end
 			end
 		end
