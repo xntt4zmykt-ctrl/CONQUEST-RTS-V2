@@ -8705,6 +8705,150 @@ do
 	end
 end
 
+do
+	-- N93 : GameState.indexPort recycle portRecPool[index]. Pose /
+	-- upgrade / transfer → rawequal record + GameState.portRecPool[index].
+	-- Champs a jour. Destroy → portsByTile[index] == nil, pool survit.
+	-- 2e pose meme tuile → rawequal. Banc N40 pose / upgrade / destroy
+	-- / vague inchanges. Pas N40 flatten / N48 / N92. Pools separes
+	-- de factoryRecPool (N94).
+	if rawequal(GameState.portRecPool, GameState.factoryRecPool) then
+		fail("port pool — portRecPool alias factoryRecPool")
+	else
+		local state = GameState.new(1093)
+		local owner = state:addPlayer(nil, "QuaiPool", Random.new(40), 0)
+		local heir = state:addPlayer(nil, "QuaiHeritier", Random.new(41), 0)
+		if not owner or not heir then
+			fail("port pool — spawn impossible")
+		else
+			local site: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) and MapGen.isCoastal(state.terrain, index) and not state.buildings[index] then
+					site = index
+					break
+				end
+			end
+			if not site then
+				fail("port pool — tuile cotiere introuvable")
+			else
+				state:placeBuilding(site, Config.BUILDING.PORT, owner.slot)
+				local rec = state.portsByTile[site]
+				if not rec or rec.slot ~= owner.slot or rec.level ~= 1 then
+					fail("port pool — pose n'a pas indexe")
+				elseif not rawequal(rec, GameState.portRecPool[site]) then
+					fail("port pool — recPool[index] distinct")
+				elseif rawequal(rec, GameState.factoryRecPool[site]) then
+					fail("port pool — rec partage factoryRecPool")
+				else
+					state:upgradeBuilding(site)
+					local after = state.portsByTile[site]
+					if not after or not rawequal(rec, after) then
+						fail("port pool — upgrade non recycle")
+					elseif after.level ~= state.buildings[site].level then
+						fail("port pool — level stale")
+					else
+						state:transferBuilding(site, heir.slot)
+						local moved = state.portsByTile[site]
+						if not moved or not rawequal(rec, moved) then
+							fail("port pool — transfer non recycle")
+						elseif moved.slot ~= heir.slot then
+							fail("port pool — slot stale")
+						else
+							state:destroyBuilding(site)
+							if state.portsByTile[site] ~= nil then
+								fail("port pool — destroy laisse l'index")
+							elseif GameState.portRecPool[site] == nil then
+								fail("port pool — pool perdu au destroy")
+							else
+								state:placeBuilding(site, Config.BUILDING.PORT, owner.slot)
+								local again = state.portsByTile[site]
+								if not again or not rawequal(rec, again) then
+									fail("port pool — 2e pose non recycle")
+								elseif again.slot ~= owner.slot or again.level ~= 1 then
+									fail("port pool — 2e pose champs stale")
+								else
+									print("port pool : rawequal index, destroy nil (N93)")
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N94 : GameState.indexFactory recycle factoryRecPool[index]. Pose /
+	-- upgrade / transfer → rawequal record + GameState.factoryRecPool[index].
+	-- Champs a jour. Destroy → factoriesByTile[index] == nil, pool survit.
+	-- 2e pose meme tuile → rawequal. Banc N45 pose / upgrade / transfer /
+	-- destroy / flatten inchanges. Banc N92 delivery pool vert. Pas N45
+	-- flatten / N92 colis / N93 PORT. Pools separes. Ne pas pooler
+	-- factory.links.
+	local state = GameState.new(1094)
+	local owner = state:addPlayer(nil, "UsinePool", Random.new(73), 0)
+	local heir = state:addPlayer(nil, "UsineHeritier", Random.new(74), 0)
+	if not owner or not heir then
+		fail("factory pool — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and not state.buildings[index] then
+				factoryTile = index
+				break
+			end
+		end
+		if not factoryTile then
+			fail("factory pool — tuile terrestre introuvable")
+		else
+			state:setOwner(factoryTile, owner.slot)
+			state:placeBuilding(factoryTile, Config.BUILDING.FACTORY, owner.slot)
+			local rec = state.factoriesByTile[factoryTile]
+			if not rec or rec.slot ~= owner.slot or rec.level ~= 1 then
+				fail("factory pool — pose n'a pas indexe")
+			elseif not rawequal(rec, GameState.factoryRecPool[factoryTile]) then
+				fail("factory pool — recPool[index] distinct")
+			elseif rawequal(rec, GameState.portRecPool[factoryTile]) then
+				fail("factory pool — rec partage portRecPool")
+			else
+				state:upgradeBuilding(factoryTile)
+				local after = state.factoriesByTile[factoryTile]
+				if not after or not rawequal(rec, after) then
+					fail("factory pool — upgrade non recycle")
+				elseif after.level ~= state.buildings[factoryTile].level then
+					fail("factory pool — level stale")
+				else
+					state:transferBuilding(factoryTile, heir.slot)
+					local moved = state.factoriesByTile[factoryTile]
+					if not moved or not rawequal(rec, moved) then
+						fail("factory pool — transfer non recycle")
+					elseif moved.slot ~= heir.slot then
+						fail("factory pool — slot stale")
+					else
+						state:destroyBuilding(factoryTile)
+						if state.factoriesByTile[factoryTile] ~= nil then
+							fail("factory pool — destroy laisse l'index")
+						elseif GameState.factoryRecPool[factoryTile] == nil then
+							fail("factory pool — pool perdu au destroy")
+						else
+							state:placeBuilding(factoryTile, Config.BUILDING.FACTORY, owner.slot)
+							local again = state.factoriesByTile[factoryTile]
+							if not again or not rawequal(rec, again) then
+								fail("factory pool — 2e pose non recycle")
+							elseif again.slot ~= owner.slot or again.level ~= 1 then
+								fail("factory pool — 2e pose champs stale")
+							else
+								print("factory pool : rawequal index, destroy nil (N94)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
