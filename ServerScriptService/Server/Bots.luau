@@ -54,6 +54,13 @@ local BOT_NAMES = {
 
 local botSlots: { number } = {}
 local scratch = table.create(4, 0)
+-- N69 : flatten buildingsBySlot une fois par visée (pas × 90 tuiles).
+-- Arrays parallèles, pas un spatial hash. Non réentrant — decideNuke
+-- est unique par bot par tick. blastValue (banc N62) réutilise le même pool.
+local blastX: { number } = table.create(48)
+local blastY: { number } = table.create(48)
+local blastLevel: { number } = table.create(48)
+local blastN = 0
 
 --=============================================================================
 -- Mise en place
@@ -642,36 +649,60 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 	end
 end
 
--- N62 : score d'emprise dans le rayon, via buildingsBySlot (plus le hash).
-local function blastValue(state: GameState, slot: number, tile: number, blast2: number): number
-	local x, y = MapGen.fromIndex(tile)
-	local value = 0
+-- N69 : flatten buildingsBySlot dans blastBuf. Index present + set nil
+-- = buffer vide, score 0 (contrat N62 : pas de fallback hash).
+local function fillBlastBuf(state: GameState, slot: number)
+	local n = 0
 	if state.buildingsBySlot then
 		local set = state.buildingsBySlot[slot]
 		if set then
 			for other in set do
 				local building = state.buildings[other]
 				if building then
+					n += 1
 					local bx, by = MapGen.fromIndex(other)
-					local dx, dy = bx - x, by - y
-					if dx * dx + dy * dy <= blast2 then
-						value += building.level
-					end
+					blastX[n] = bx
+					blastY[n] = by
+					blastLevel[n] = building.level
 				end
 			end
 		end
-		return value
-	end
-	for other, building in state.buildings do
-		if building.slot == slot then
-			local bx, by = MapGen.fromIndex(other)
-			local dx, dy = bx - x, by - y
-			if dx * dx + dy * dy <= blast2 then
-				value += building.level
+	else
+		for other, building in state.buildings do
+			if building.slot == slot then
+				n += 1
+				local bx, by = MapGen.fromIndex(other)
+				blastX[n] = bx
+				blastY[n] = by
+				blastLevel[n] = building.level
 			end
 		end
 	end
+	for i = #blastX, n + 1, -1 do
+		blastX[i] = nil
+		blastY[i] = nil
+		blastLevel[i] = nil
+	end
+	blastN = n
+end
+
+local function scoreBlast(tile: number, blast2: number): number
+	local x, y = MapGen.fromIndex(tile)
+	local value = 0
+	for i = 1, blastN do
+		local dx, dy = blastX[i] - x, blastY[i] - y
+		if dx * dx + dy * dy <= blast2 then
+			value += blastLevel[i]
+		end
+	end
 	return value
+end
+
+-- N62 : score d'emprise dans le rayon, via buildingsBySlot (plus le hash).
+-- N69 : fill unique ; le banc unitaire passe encore par cette API.
+local function blastValue(state: GameState, slot: number, tile: number, blast2: number): number
+	fillBlastBuf(state, slot)
+	return scoreBlast(tile, blast2)
 end
 
 local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Random)
@@ -768,6 +799,9 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 	end
 	local blast2 = blastRadius * blastRadius
 
+	-- N69 : un flatten, 90 scores. Pas blastValue × 90 (re-scan index).
+	fillBlastBuf(state, bestSlot)
+
 	local bestTile: number? = nil
 	local bestValue = -1
 	local shielded: number? = nil
@@ -787,7 +821,7 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 			continue
 		end
 
-		local value = blastValue(state, bestSlot, index, blast2)
+		local value = scoreBlast(index, blast2)
 
 		if value > bestValue then
 			bestValue = value

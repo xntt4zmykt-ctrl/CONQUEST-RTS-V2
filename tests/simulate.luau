@@ -5641,6 +5641,22 @@ do
 				fail(`blastValue — cluster {rich} <= vide {poor}`)
 			else
 				print("blastValue : 2 villes battent une frontiere vide (N62)")
+				-- N69 : set nil → score 0 (pas de fallback hash), puis restore
+				-- + truncate. Deux visees successives ne fuient pas.
+				local saved = state.buildingsBySlot[owner.slot]
+				state.buildingsBySlot[owner.slot] = nil
+				local afterNil = Bots.blastValue(state, owner.slot, sites[1], blast2)
+				if afterNil ~= 0 then
+					fail(`blastBuf — set nil score {afterNil}, attendu 0 (N69)`)
+				else
+					state.buildingsBySlot[owner.slot] = saved
+					local restored = Bots.blastValue(state, owner.slot, sites[1], blast2)
+					if restored ~= rich then
+						fail(`blastBuf — restore {restored} != {rich} (truncate/fuite N69)`)
+					else
+						print("blastBuf : set nil = 0, restore identique (N69)")
+					end
+				end
 			end
 		end
 	end
@@ -6228,6 +6244,105 @@ do
 						fail("warships own — lastShellTick avance sans autre slot")
 					else
 						print("warships own : 0 autre slot, early-out (N67)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N70 : snapshotBoats recycle. 1 carrier + 1 transport retreating,
+	-- pas de path/homeTile. Retirer le transport → length 1. Destroy base
+	-- → length 0 (pas de fuite du premier remplissage).
+	local state = GameState.new(1070)
+	local owner = state:addPlayer(nil, "FlotteSnap", Random.new(90), 0)
+	if not owner then
+		fail("boatSnapBuf — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("boatSnapBuf — tuile libre introuvable")
+		else
+			state:placeBuilding(site, Config.BUILDING.NAVAL_BASE, owner.slot)
+			Navy.step(state, Random.new(91))
+			table.insert(state.boats, {
+				id = state:nextId(),
+				slot = owner.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 400,
+				x = 3,
+				y = 4,
+				path = { site },
+				step = 1,
+				targetTile = site,
+				homeTile = site,
+				retreating = true,
+			})
+			local snaps = state:snapshotBoats()
+			local n = 0
+			local sawCarrier = false
+			local sawTransport = false
+			local leaked = false
+			local retreatOk = false
+			for _, snap in snaps do
+				n += 1
+				if (snap :: any).path ~= nil or (snap :: any).homeTile ~= nil then
+					leaked = true
+				end
+				if snap.kind == Navy.KIND_CARRIER then
+					sawCarrier = true
+				elseif snap.kind == Navy.KIND_TRANSPORT then
+					sawTransport = true
+					if snap.retreating == true and snap.troops == 400 then
+						retreatOk = true
+					end
+				end
+			end
+			if leaked then
+				fail("boatSnapBuf — path/homeTile fuite")
+			elseif n ~= 2 or #snaps ~= 2 then
+				fail(`boatSnapBuf — length {n}/#{#snaps}, attendu 2`)
+			elseif not sawCarrier or not sawTransport then
+				fail("boatSnapBuf — carrier ou transport manquant")
+			elseif not retreatOk then
+				fail("boatSnapBuf — retreating/troops transport incorrect")
+			else
+				print("boatSnapBuf : 1 carrier + 1 transport, retreating, pas de path (N70)")
+				for i = #state.boats, 1, -1 do
+					if state.boats[i].kind == Navy.KIND_TRANSPORT then
+						table.remove(state.boats, i)
+					end
+				end
+				local after = state:snapshotBoats()
+				local afterN = 0
+				local leftoverTransport = false
+				for _, snap in after do
+					afterN += 1
+					if snap.kind == Navy.KIND_TRANSPORT then
+						leftoverTransport = true
+					end
+				end
+				if leftoverTransport or afterN ~= 1 or #after ~= 1 then
+					fail(`boatSnapBuf — truncate transport fuite (n={afterN} #{#after})`)
+				else
+					state:destroyBuilding(site)
+					Navy.step(state, Random.new(92))
+					local gone = state:snapshotBoats()
+					local goneN = 0
+					for _ in gone do
+						goneN += 1
+					end
+					if goneN ~= 0 or #gone ~= 0 then
+						fail(`boatSnapBuf — destroy base fuite (n={goneN} #{#gone})`)
+					else
+						print("boatSnapBuf : truncate 2→1→0 (N70)")
 					end
 				end
 			end

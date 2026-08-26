@@ -229,6 +229,20 @@ local borderScratch = table.create(4, 0)
 -- Troisieme tampon : frontPriority est appele depuis la boucle de stepAttacks,
 -- qui itere deja sur `scratch`. Le partager ecraserait la liste en cours.
 local priorityScratch = table.create(4, 0)
+-- N70 : UnitSnapshot bateaux recycle (recette factoryBuf / N66). Inner
+-- payloads reecrits, pas recrees. Non reentrant — replicate() unique / tick.
+local boatSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+		retreating: boolean,
+	}
+} =
+	table.create(48)
 
 --=============================================================================
 -- Construction
@@ -1082,6 +1096,7 @@ end
 	Payload UnitSnapshot bateaux (10 Hz). Pas de path / homeTile (intention +
 	bandwidth). retreating = N56 : le HUD distingue retraite vs invasion.
 	init.server est hors bundle : ce helper est le contrat testable.
+	N70 : recycle boatSnapBuf + inner records. Truncate apres remplissage.
 ]]
 function GameState.snapshotBoats(self: GameState): {
 	{
@@ -1094,19 +1109,34 @@ function GameState.snapshotBoats(self: GameState): {
 		retreating: boolean,
 	}
 }
-	local boats = {}
+	local n = 0
 	for _, boat in self.boats do
-		table.insert(boats, {
-			id = boat.id,
-			slot = boat.slot,
-			x = boat.x,
-			y = boat.y,
-			troops = math.floor(boat.troops),
-			kind = boat.kind,
-			retreating = boat.retreating == true,
-		})
+		n += 1
+		local rec = boatSnapBuf[n]
+		if rec == nil then
+			boatSnapBuf[n] = {
+				id = boat.id,
+				slot = boat.slot,
+				x = boat.x,
+				y = boat.y,
+				troops = math.floor(boat.troops),
+				kind = boat.kind,
+				retreating = boat.retreating == true,
+			}
+		else
+			rec.id = boat.id
+			rec.slot = boat.slot
+			rec.x = boat.x
+			rec.y = boat.y
+			rec.troops = math.floor(boat.troops)
+			rec.kind = boat.kind
+			rec.retreating = boat.retreating == true
+		end
 	end
-	return boats
+	for i = #boatSnapBuf, n + 1, -1 do
+		boatSnapBuf[i] = nil
+	end
+	return boatSnapBuf
 end
 
 function GameState.addPlayer(
