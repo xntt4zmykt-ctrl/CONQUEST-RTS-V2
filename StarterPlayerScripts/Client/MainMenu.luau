@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Menu principal, cale sur l'ecran d'accueil du jeu de reference (OpenFront).
+	Menu principal, cale sur l'ecran d'accueil du direction visuelle CONQUEST.
 
 	Disposition 1:1, adaptee a notre contexte (un serveur, des bots, pas de
 	salons inter-serveurs) :
@@ -14,7 +14,7 @@
 
 	Leurs cartes de maps deviennent nos cartes de modes : chacune montre un
 	apercu reel du terrain genere (graine fixe par mode), son rythme et son
-	remplissage. La ou OpenFront promet une partie qui commence, nous montrons
+	remplissage. La ou d'autres titres du genre promet une partie qui commence, nous montrons
 	exactement ce que le joueur va affronter.
 
 	Le drapeau est dessine a la volee a partir d'un motif et de deux ou trois
@@ -265,7 +265,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	gradient.Color = ColorSequence.new(Color3.fromRGB(14, 19, 30), Color3.fromRGB(5, 7, 12))
 	gradient.Parent = backdrop
 
-	-- La trame hexagonale du jeu de reference, traduite en diagonales legeres :
+	-- La trame hexagonale CONQUEST, traduite en diagonales legeres :
 	-- une profondeur de carte sans fausse image de fond.
 	local tacticalGrid = Instance.new("Frame")
 	tacticalGrid.Name = "TacticalGrid"
@@ -585,7 +585,7 @@ end
 --=============================================================================
 
 --[[
-	La grande carte centrale, calque de leur carte de map : apercu reel du
+	La grande carte centrale, apercu de carte CONQUEST : apercu reel du
 	terrain en plein cadre, degrade en bas, pastille de compte a rebours en
 	haut a droite, nom et rythme en bas a gauche, remplissage en bas a droite.
 ]]
@@ -682,7 +682,7 @@ function MainMenu.buildRightColumn(self: MainMenu)
 	right.ZIndex = 51
 	right.Parent = self.stage
 
-	-- La ou OpenFront montre un stream, nous montrons la partie qui tourne
+	-- La ou d'autres titres du genre montre un stream, nous montrons la partie qui tourne
 	-- reellement sur ce serveur : meme case, meme promesse, donnees vraies.
 	local liveChip = Theme.label(right, "EN DIRECT MAINTENANT", T.tiny, C.danger)
 	liveChip.Position = UDim2.fromOffset(0, 0)
