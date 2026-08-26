@@ -349,8 +349,11 @@ function ChantierB.stripTerritory(state, ps)
 	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
-	ps.border = {}
-	ps.coast = {}
+	-- N74 : table.clear in-place. Un `= {}` neuf abandonnait les hashes
+	-- deja vides par setOwner. Un buf module partage serait mute par
+	-- setOwner du premier claimSpawn voisin.
+	table.clear(ps.border)
+	table.clear(ps.coast)
 end
 
 function ChantierB.placeDisk(state, slot, center)
