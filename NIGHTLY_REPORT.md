@@ -1,11 +1,11 @@
-# Nightly report — passe 22 (revue PR #64)
+# Nightly report — passe 23 (revue PR #67)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-230f` (PR #64, `1d38731`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-b841`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-b841` (PR #67, `8d92d7f`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-b1c7`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #64 (`factoriesBySlot`, `portsByTile`, `navalBasesBySlot` — HEAD visuel). Correctifs sûrs, sans merger feel `1fb3`/`5bf6` ni hardening `9f25`.
+Revue de PR #67 (`carrierBuf`/`targetBuf`, `fillBlastBuf` — HEAD visuel). Correctifs sûrs, sans merger feel `55ba`/`741d` ni hardening `1e60`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,16 +15,15 @@ Revue de PR #64 (`factoriesBySlot`, `portsByTile`, `navalBasesBySlot` — HEAD v
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `carrierBuf` / `targetBuf` recycle, early-out 0 carrier / 0 autre slot | `Navy.luau` | V24 N67/N39 |
-| Priorité transport > carrier > trade, `areAllied`, dégâts inchangés | `Navy.luau` | V24 |
-| `fillBlastBuf` / `scoreBlast` (arrays `blastX/Y/Level`) | `Bots.luau` | V27 N69 |
-| `decideNuke` : un flatten, 90 scores (plus `blastValue` × 90) | `Bots.luau` | V27 |
+| `snapshotBoats` + `boatSnapBuf` recycle inner records, truncate | `GameState.luau` | V26 N51/N70 **sans** `retreating` |
+| `snapshotMissiles` + `missileSnapBuf` (Types.MissileSnapshot seulement) | `GameState.luau` | V26 N52/N71 |
+| `init.server` appelle les helpers (plus d’alloc `{boats}`/`{missiles}` 10 Hz) | `init.server.luau` | V26 |
 
-`navalBasesBySlot` / `_carriersDirty` / `portsByTile` / `factoriesBySlot` **non retouchés**. `Nukes.samRange(level)` **conservé** (pas `Config.SAM_RANGE` de feel 5bf6).
+`carrierBuf` / `targetBuf` / `fillBlastBuf` / `navalBasesBySlot` / `_carriersDirty` **non retouchés**. Schéma filaire client **inchangé** (`FireAllClients`, pas `fireDeployed`). Overlay ne reçoit toujours pas `retreating`.
 
 ---
 
-## Constatations PR #64 (à ne pas casser)
+## Constatations PR #67 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -39,8 +38,9 @@ Revue de PR #64 (`factoriesBySlot`, `portsByTile`, `navalBasesBySlot` — HEAD v
 - **Posted NAVAL_BASE :** `navalBasesBySlot`. Spawn seulement si `_carriersDirty`. Un PORT n’est jamais un carrier.
 - **Warships targeting :** `carrierBuf`/`targetBuf` (V24). Early-out 0 carrier / 0 bateau d’un autre slot. Pas de spatial hash.
 - **Score nuke bots :** `fillBlastBuf` une fois par visée (V27). Index présent + set nil = 0, pas de fallback hash. `blastValue` API banc conservée.
+- **UnitSnapshot 10 Hz :** `snapshotBoats` / `snapshotMissiles` (V26). Table vide recyclee (pas `nil`) pour retirer le dernier fantôme client. Pas de `path` / `homeTile` / `retreating` / `progress` / `sx`.
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
-- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). Aucun require ajouté.
+- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). Aucun require ajouté (`GameState` ne require pas `Types`).
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
 
@@ -48,7 +48,7 @@ Revue de PR #64 (`factoriesBySlot`, `portsByTile`, `navalBasesBySlot` — HEAD v
 
 ## Specs worker (reste)
 
-Ne pas merger feel `1fb3`/`5bf6`/`741d` ni hardening `9f25`/`08a1` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `55ba`/`741d` ni hardening `1e60`/`08a1` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -104,23 +104,35 @@ Ne pas merger feel `1fb3`/`5bf6`/`741d` ni hardening `9f25`/`08a1` sur cette bra
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V26 — Snapshot navires / missiles 10 Hz
+### ISSUE-V28 — `flushBuildingDelta` recycle (`buildingSnapBuf`)
 
-**Problème.** `init.server` alloue `{boats}` + `{missiles}` + records internes **chaque tick** playing (`unitSnapshot:FireAllClients`). Feel N70/N71 a `snapshotBoats` / `snapshotMissiles` + `boatSnapBuf` / `missileSnapBuf`. Hardening N51 a `snapshotBoats` **sans** `retreating`.
+**Problème.** `GameState.flushBuildingDelta` alloue `{out}` + un record par tuile dirty **chaque flush**. Feel N73 a `buildingSnapBuf`.
 
-**20K CCU.** 10 Hz × (B+M) alloc tables = GC. Peu d’unités (~24 navires) mais le tick les paie quand même.
+**20K CCU.** 10 Hz playing × poses/captures/destroys = alloc tables sur le hot path replication.
 
-**Faire.** Extraire `GameState.snapshotBoats` + `snapshotMissiles` (Types seulement). Recycle inner records, truncate. **Ne pas** porter `retreating` : Overlay visuel ne le lit pas (recette hardening N51, pas feel N70 brut). `init.server` hors bundle : helper testable.
+**Faire.** Recette feel N73 (`55ba`) : `buildingSnapBuf` + inner records, truncate, early-out dirty vide → `nil`. Destruction : `kind`/`slot`/`level` = 0, `links` = nil. `links` reste la **table live** de l’usine (Overlay lit les champs tout de suite, pas l’identité de `out`). Helper déjà dans `GameState` (testable). Ne pas re-toucher V26 (`boatSnapBuf` / `missileSnapBuf`).
 
-**Contraintes.** Server-only. Ne pas changer le schéma filaire client. Ne pas re-toucher `carrierBuf` / `fillBlastBuf`.
+**Contraintes.** Server-only. Schéma filaire client inchangé (`BuildingSnapshot`). `FireAllClients` visuel (pas `fireDeployed`).
 
-**Tester.** 0 navire → table vide recyclée, pas `nil`. Pose 2 carriers → 2 records, destroy → truncate. `./tests/run.sh`. Client 34/34.
+**Tester.** Pose 1 CITY → 1 record. Destroy → `kind=0`. Second flush → `nil`. Relance pose → length 1, pas de fuite. `./tests/run.sh`. Client 34/34.
+
+### ISSUE-V29 — `frontHudForReplicate` (HUD fronts)
+
+**Problème.** `init.server` `replicate()` alloue `activeAttacks` / `committedTroops` / `attackTargets` + listes inner **chaque tick** playing. Feel N74 a le helper `GameState.frontHudForReplicate`.
+
+**20K CCU.** 10 Hz × 18 factions × fronts = alloc maps même sans combat.
+
+**Faire.** Recette feel N74 (`55ba`) : extraire `GameState.frontHudForReplicate` (trois maps + `attackTargetPool`). Chaque tas compte (terre et `isBeachhead` séparés). Slots sans front **absents** (nil, pas `{}`) — `replicate()` garde `or 0` et `attackTargets` nil. **Pas** `stats` / `buildPrices` (feel N75/N76, ticket suivant). `init.server` hors bundle : helper testable.
+
+**Contraintes.** Server-only. Ne pas changer le schéma `PlayerStats`. Ne pas porter `buildPrices` dans GameState (cycle Buildings).
+
+**Tester.** 0 front → trois maps vides. 1 terre + 1 beachhead même couple → 2 tas. `./tests/run.sh`. Client 34/34.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `1fb3`/`5bf6`/`741d` / hardening `9f25`/`08a1` sur #39/#64.
+- Merger feel `55ba`/`741d` / hardening `1e60`/`08a1` sur #39/#67.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -128,10 +140,11 @@ Ne pas merger feel `1fb3`/`5bf6`/`741d` ni hardening `9f25`/`08a1` sur cette bra
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
-- `samsOf` / `fillBlastBuf` réentrants : un seul appelant chacun (`decideNuke`). Dupliquer le buffer si un second appelant apparaît.
+- `samsOf` / `fillBlastBuf` / `snapshotBoats` réentrants : un seul appelant chacun. Dupliquer le buffer si un second appelant apparaît.
 - Feel N70 `retreating` sur le snapshot — Overlay visuel ne teinte pas la retraite.
 - `delivery.level` snapshot à l’arrivée (feel) : le header Trade dit « niveau à l’arrivée » ; dispatch stocke déjà `level` mais `resolve` lit `factory.level`. Produit, pas un bug d’index.
-- `flushBuildingDelta` recycle (feel N73) / `frontHudForReplicate` (feel N74) — ticket suivant après V26.
+- Feel N75 (`buildPrices` dans Buildings) / N76 (`stats` records) — après V29.
+- `dirtyIndexBuf` (feel N72 / hardening N53) — ne ferme pas l’alloc `buffer.create` (voir V14b).
 
 ---
 
@@ -142,6 +155,6 @@ Ne pas merger feel `1fb3`/`5bf6`/`741d` ni hardening `9f25`/`08a1` sur cette bra
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–21 + **passe 22** (0 carrier no-op, 1 obus + `lastShellTick`, `areAllied` saute, own-slot early-out, `blastBuf` set nil = 0 / restore).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–22 + **passe 23** (0 unité → table vide pas nil, 1 carrier + 1 transport sans path/retreating, truncate 2→1→0, 1 ogive tx/ty sans progress, truncate 1→0→1).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
