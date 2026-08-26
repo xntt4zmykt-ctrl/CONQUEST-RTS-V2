@@ -105,7 +105,7 @@ function WorldCamera.bindActions(self: WorldCamera)
 		local newDistance = math.clamp(oldDistance * (1 - input.Position.Z * 0.12), MIN_DISTANCE, MAX_DISTANCE)
 		if newDistance ~= oldDistance then
 			--[[
-				Zoom vers le curseur, la signature du jeu de reference : le
+				Zoom vers le curseur, la signature CONQUEST : le
 				point sous la souris reste sous la souris. Sans ca, zoomer sur
 				une cible exige de reframer a chaque coup de molette — la mire
 				ne bougeant jamais, c'est toujours le centre de l'ecran qui

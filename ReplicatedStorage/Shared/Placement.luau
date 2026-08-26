@@ -2,7 +2,7 @@
 --[[
 	Resolution d'un emplacement de construction.
 
-	Le principe, repris d'OpenFront : **un clic est une intention, pas une
+	Le principe, repris d'CONQUEST : **un clic est une intention, pas une
 	coordonnee**. Le joueur designe une direction, le moteur trouve la meilleure
 	tuile valide autour et construit la. On ne refuse jamais un clic pour une
 	raison de position.
