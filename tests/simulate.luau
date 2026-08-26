@@ -1841,10 +1841,12 @@ do
 			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
 			a.gold = 5000
 			b.troops = 10000
+			-- Hors de l'immunite de deploiement OF (5 s).
+			mirvState.tick = (Config.SPAWN_NUKE_IMMUNITY or 5) * Config.TICK_RATE + 1
 
-			local ok = Nukes.launch(mirvState, a.slot, targetTile, Config.NUKE.MIRV)
+			local ok, reason = Nukes.launch(mirvState, a.slot, targetTile, Config.NUKE.MIRV)
 			if not ok then
-				fail("mirv — le tir est refuse")
+				fail("mirv — le tir est refuse: " .. tostring(reason))
 			elseif a.gold ~= 5000 - Config.NUKE_STATS[Config.NUKE.MIRV].cost then
 				fail("mirv — le cout du tir n'est pas preleve")
 			else
@@ -2326,13 +2328,12 @@ do
 		if okDup or reasonDup ~= "DuplicateSequence" then
 			fail(`intentions — doublon non detecte ({tostring(reasonDup)})`)
 		end
-
-		local applied = IntentValidator.flush(ctx)
-		if applied ~= 1 then
-			fail(`intentions — flush attendu 1, obtenu {applied}`)
-		end
+		-- Feel OF : application immediate a l'enqueue, pas au flush.
 		if ps.attackRatio < 0.39 or ps.attackRatio > 0.41 then
-			fail(`intentions — ratio non applique ({ps.attackRatio})`)
+			fail(`intentions — ratio non applique immediatement ({ps.attackRatio})`)
+		end
+		if IntentValidator.flush(ctx) ~= 0 then
+			fail("intentions — la file aurait du rester vide apres apply immediat")
 		end
 
 		-- Rate limit
@@ -2348,7 +2349,7 @@ do
 		if not limited then
 			fail("intentions — rate limit non declenche")
 		end
-		print("intentions : sequence, idempotence, rate limit OK")
+		print("intentions : sequence, idempotence, apply immediat, rate limit OK")
 	end
 end
 

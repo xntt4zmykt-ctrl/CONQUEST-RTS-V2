@@ -105,6 +105,8 @@ local function isInteger(value: any): boolean
 	return typeof(value) == "number" and value == value and value == math.floor(value)
 end
 
+local applyOne: (Context, Intent) -> ()
+
 local function checkRate(userId: number, now: number): boolean
 	local limit = Config.INTENT_RATE_LIMIT_PER_SEC or 20
 	local start = windowStart[userId]
@@ -247,18 +249,22 @@ function IntentValidator.enqueue(
 		lastSequence[userId] = sequence
 	end
 
-	table.insert(queue, {
+	local intent: Intent = {
 		player = player,
 		userId = userId,
 		slot = slot,
 		sequence = sequence or 0,
 		actionType = actionType,
 		payload = payload,
-	})
+	}
+
+	-- Feel OpenFront : l'intention est resolue tout de suite apres validation.
+	-- La file ne sert que si un appelant demande un flush differe.
+	applyOne(ctx, intent)
 	return true, nil
 end
 
-local function applyOne(ctx: Context, intent: Intent)
+local function applyOneImpl(ctx: Context, intent: Intent)
 	local state = ctx.state
 	local slot = intent.slot
 	local player = intent.player
@@ -389,9 +395,10 @@ local function applyOne(ctx: Context, intent: Intent)
 	end
 end
 
+applyOne = applyOneImpl
+
 --[[
-	Applique la file dans l'ordre stable : userId, sequence, type.
-	A appeler en tete de tick, avant bots et systemes.
+	File differee (tests / batch). En production les intentions sont immediates.
 ]]
 function IntentValidator.flush(ctx: Context): number
 	if #queue == 0 then
@@ -413,7 +420,6 @@ function IntentValidator.flush(ctx: Context): number
 
 	local applied = 0
 	for _, intent in batch do
-		-- Revalider presence : elimination entre enqueue et flush.
 		if not ctx.state.players[intent.slot] then
 			bumpRefuse("Eliminated")
 			ctx.refuse(intent.player, "Eliminated", "Faction eliminee.")

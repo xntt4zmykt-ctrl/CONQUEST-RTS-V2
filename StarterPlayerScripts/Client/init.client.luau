@@ -340,27 +340,15 @@ local function inspectTerritory(index: number)
 end
 
 local function onTileClicked(index: number)
-	-- La fiche de territoire ne s'ouvre qu'en mode Attaquer, le seul ou le clic
-	-- sert aussi a inspecter. Dans les autres modes le clic EST un ordre :
-	-- ouvrir la fiche fermerait la palette et empecherait de poser plusieurs
-	-- batiments a la suite.
-	if hud.mode == "attack" then
-		inspectTerritory(index)
-	end
-	executeTerritoryAction(hud.mode, index)
+	-- Feel OpenFront : clic gauche = toujours attaquer / spawn.
+	-- Build, boat, nuke, retraite passent uniquement par le menu radial (clic droit).
+	inspectTerritory(index)
+	executeTerritoryAction("attack", index)
 end
 
 --[[
-	Menu radial : clic droit sur une case, regle CONQUEST.
-
-	Il double les modes plutot que de les remplacer. Le clic gauche continue
-	d'appliquer le mode arme — c'est le geste rapide, celui qu'on repete pour
-	poser cinq batiments d'affilee — et le clic droit ouvre le menu sur la case
-	visee pour choisir explicitement, sans avoir a se souvenir du mode courant.
-
-	Un menu contextuel connait sa cible : il grise ce qui n'a pas de sens ici,
-	la ou une barre permanente reste generique et laisse decouvrir l'erreur
-	apres coup.
+	Menu radial : clic droit / appui long — construction, debarquement, nucleaire,
+	retraite. Le clic gauche reste reserve a l'attaque (pipeline OpenFront).
 ]]
 local radial = RadialMenu.new(screenGui)
 
@@ -373,14 +361,12 @@ radial.onAction = function(action: string, tile: number)
 		fireOrder("RetreatOrder", tile)
 		return
 	end
-	hud:setMode(action :: any)
-	inspectTerritory(tile)
+	-- Une action radiale s'execute sur la case visee, sans armer un mode permanent.
 	executeTerritoryAction(action, tile)
 end
 
 radial.onBuild = function(kind: number, tile: number)
 	hud:setBuildKind(kind)
-	hud:setMode("build")
 	executeTerritoryAction("build", tile)
 end
 

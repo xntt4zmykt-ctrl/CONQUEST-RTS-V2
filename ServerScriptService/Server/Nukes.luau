@@ -36,6 +36,14 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 		return false, "Faction inconnue."
 	end
 
+	-- OF : immunite nucleaire ~5 s apres le spawn.
+	local immunity = Config.SPAWN_NUKE_IMMUNITY or 5
+	local spawnedAt = ps.spawnTick or 0
+	if state.tick < spawnedAt + immunity * Config.TICK_RATE then
+		local left = math.ceil((spawnedAt + immunity * Config.TICK_RATE - state.tick) / Config.TICK_RATE)
+		return false, `Immunite de deploiement : encore {left}s.`
+	end
+
 	local stats = Config.NUKE_STATS[kind]
 	if not stats then
 		return false, "Type de missile inconnu."

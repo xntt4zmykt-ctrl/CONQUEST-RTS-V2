@@ -74,6 +74,8 @@ export type PlayerState = {
 	capitalsCaptured: number,
 	buildingsBuilt: number,
 	attacksLaunched: number,
+	-- Tick de pose de capitale (immunite nucleaire OF).
+	spawnTick: number?,
 }
 
 export type Attack = {
@@ -848,6 +850,7 @@ function GameState.addPlayer(
 		capitalsCaptured = 0,
 		buildingsBuilt = 0,
 		attacksLaunched = 0,
+		spawnTick = 0,
 	}
 	self.players[slot] = state
 	self.alliances[slot] = {}
@@ -881,6 +884,7 @@ function GameState.addPlayer(
 	-- La capitale est posee par le moteur, jamais achetee.
 	self:placeBuilding(center, B.CAPITAL, slot)
 	state.capitalTile = center
+	state.spawnTick = self.tick
 
 	return state
 end

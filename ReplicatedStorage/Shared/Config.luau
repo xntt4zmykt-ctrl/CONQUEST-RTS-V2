@@ -309,7 +309,9 @@ Config.MAX_TILES_PER_TICK = 400
 -- Ouverture lisible : on peut coloniser et construire immediatement, mais les
 -- guerres entre nations attendent quelques secondes. Deux fronts simultanes
 -- restent possibles ; au-dela le jeu devient une suite d'ordres illisibles.
-Config.PREPARATION_DURATION = 75
+Config.PREPARATION_DURATION = 0 -- OpenFront : pas de gel des guerres ; le combat ouvre tout de suite
+-- Immunite nucleaire post-spawn (OF : 5 s), distincte de la preparation.
+Config.SPAWN_NUKE_IMMUNITY = 5
 Config.DOCTRINE_CHOICE_DURATION = 120
 Config.MAX_ACTIVE_ATTACKS_PER_PLAYER = 2
 
@@ -395,8 +397,8 @@ Config.LARGE_ATTACKER_COST_EXPONENT = 0.35 -- compensation : il perd moins par t
 	autres a n'importe quel voisin hostile. La condition "pendant qu'on
 	l'attaque" est ce qui protege un joueur qui vient de spawner.
 ]]
-Config.COLLAPSE_TILE_RATIO = 0.0025 -- part des terres sous laquelle on s'effondre
-Config.COLLAPSE_MIN_TILES = 24 -- plancher absolu, pour les tres petites cartes
+Config.COLLAPSE_TILE_RATIO = 0 -- OF : seuil absolu, pas un ratio de carte
+Config.COLLAPSE_MIN_TILES = 100 -- handleDeadDefender : sous 100 tuiles, absorption
 
 --=============================================================================
 -- Cadran de la fin du monde (anti-impasse)

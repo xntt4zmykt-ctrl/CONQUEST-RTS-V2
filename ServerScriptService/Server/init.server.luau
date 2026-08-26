@@ -250,17 +250,16 @@ local function activateMatch()
 	state.tick = 0 -- le temps passe depuis le deploiement, jamais depuis le menu
 	matchEndsAt = now + activeMode.duration
 	doctrineLockAt = now + Config.DOCTRINE_CHOICE_DURATION
-	combatStartsAt = now + Config.PREPARATION_DURATION
+	-- OF : pas de gel des guerres. combatUnlocked des le deploiement.
+	state.combatUnlocked = true
+	combatStartsAt = now
 
 	-- `botCount` decrit le nombre total de nations du mode. Les humains sont
 	-- poses d'abord ; l'IA remplit le reste, plafonne par MAX_BOTS.
 	local desiredTotal = math.min(activeMode.botCount, Config.PUBLIC_MATCH_CAPACITY, Config.MAX_TOTAL_FACTIONS)
 	local botsToSpawn = math.max(0, math.min(desiredTotal - humanCount, Config.MAX_BOTS))
 	Bots.spawnAll(state, rng, botsToSpawn)
-	state:notify(
-		`Operation lancee : {Config.PREPARATION_DURATION} secondes pour coloniser et construire avant les guerres.`,
-		"good"
-	)
+	state:notify("Operation lancee. Clique une terre libre pour poser ta capitale.", "good")
 	print(`[{Config.GAME_NAME}] operation active — {humanCount} humain(s), {botsToSpawn} bot(s)`)
 end
 
@@ -275,7 +274,7 @@ local function startMatch()
 
 	state = GameState.new(seed)
 	state.mode = activeMode
-	state.combatUnlocked = false
+	state.combatUnlocked = true
 	rng = Random.new(seed)
 	resultRecorded = {}
 	currentMapMeta = MapGen.mapMeta(seed, state.terrain)
@@ -777,12 +776,11 @@ local function stepOnce()
 		TickMetrics.record(state.tick, changed, delta, (os.clock() - tickStarted) * 1000)
 		return
 	elseif matchPhase == "playing" then
-		-- 1. Intentions validees depuis le dernier tick (ordre stable).
+		-- 1. Intentions deja appliquees a la reception (feel OF). Flush no-op.
 		IntentValidator.flush(intentContext())
 
-		if not state.combatUnlocked and os.clock() >= combatStartsAt then
+		if not state.combatUnlocked then
 			state.combatUnlocked = true
-			state:notify("⚔ Les frontieres sont ouvertes. Les guerres peuvent commencer.", "alert")
 		end
 		-- 2-5. Systemes puis economie / fronts / victoire.
 		Bots.step(state, rng)
