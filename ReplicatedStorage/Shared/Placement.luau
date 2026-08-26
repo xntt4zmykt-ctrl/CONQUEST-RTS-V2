@@ -34,6 +34,21 @@ local Placement = {}
 
 local B = Config.BUILDING
 
+-- N71 : validTiles recycle blockers / candidates / queue / visited
+-- (recette ctxBuf N66 leftover, feel 2b37 N90). Truncate leftover
+-- AVANT le BFS (queue) et AVANT le sort candidats — un leftover
+-- melangerait tiles[1]. Iterer 1..n, pas # sans truncate. Early-out
+-- kind/index/owner → emptyTileBuf (jamais d'insert). Retourner candBuf
+-- (resolve lit tiles[1] tout de suite, pas de clone). visitMap, pas
+-- visitBuf (clash Navy.findSeaPath). placeScratch distinct de
+-- GameState.scratch. Non reentrant — resolve synchrone unique.
+local blockBuf: { number } = table.create(32)
+local candBuf: { number } = table.create(32)
+local queueBuf: { number } = table.create(64)
+local visitMap: { [number]: true } = {}
+local emptyTileBuf: { number } = table.create(0)
+local placeScratch = table.create(4, 0)
+
 --[[
 	Tout ce dont la resolution a besoin de la partie.
 
@@ -154,15 +169,15 @@ end
 function Placement.validTiles(ctx: Context, index: number, kind: number): { number }
 	local def = BuildingDefs.get(kind)
 	if not def or not def.buildable then
-		return {}
+		return emptyTileBuf
 	end
 	if index < 0 or index >= Config.TILE_COUNT then
-		return {}
+		return emptyTileBuf
 	end
 	-- Seul filtre dur restant : on part de son propre territoire. Cliquer chez
 	-- le voisin n'est pas une erreur de precision, c'est une autre intention.
 	if ctx.ownerAt(index) ~= ctx.slot then
-		return {}
+		return emptyTileBuf
 	end
 
 	local radius = radiusFor(def)
@@ -174,7 +189,7 @@ function Placement.validTiles(ctx: Context, index: number, kind: number): { numb
 	-- pour chaque candidate serait quadratique.
 	local spacing = Config.BUILD_MIN_SPACING
 	local spacing2 = spacing * spacing
-	local blockers: { number } = {}
+	local nB = 0
 	do
 		local reach = radius + spacing
 		for dy = -reach, reach do
@@ -183,21 +198,29 @@ function Placement.validTiles(ctx: Context, index: number, kind: number): { numb
 				if MapGen.inBounds(nx, ny) then
 					local i = MapGen.toIndex(nx, ny)
 					if ctx.buildingAt(i) ~= nil then
-						table.insert(blockers, i)
+						nB += 1
+						blockBuf[nB] = i
 					end
 				end
 			end
 		end
 	end
+	for i = nB + 1, #blockBuf do
+		blockBuf[i] = nil
+	end
 
-	local candidates: { number } = {}
-	local visited: { [number]: true } = { [index] = true }
-	local queue: { number } = { index }
+	table.clear(visitMap)
+	visitMap[index] = true
+	local nQ = 1
+	queueBuf[1] = index
+	for i = nQ + 1, #queueBuf do
+		queueBuf[i] = nil
+	end
+	local nC = 0
 	local head = 1
-	local neighbors = table.create(4, 0)
 
-	while head <= #queue do
-		local current = queue[head]
+	while head <= nQ do
+		local current = queueBuf[head]
 		head += 1
 
 		local cx, cy = MapGen.fromIndex(current)
@@ -214,7 +237,8 @@ function Placement.validTiles(ctx: Context, index: number, kind: number): { numb
 		elseif def.coastalOnly and not MapGen.isCoastal(ctx.terrain, current) then
 			usable = false
 		else
-			for _, other in blockers do
+			for i = 1, nB do
+				local other = blockBuf[i]
 				local bx, by = MapGen.fromIndex(other)
 				local ex, ey = bx - cx, by - cy
 				if ex * ex + ey * ey < spacing2 then
@@ -225,25 +249,30 @@ function Placement.validTiles(ctx: Context, index: number, kind: number): { numb
 		end
 
 		if usable then
-			table.insert(candidates, current)
+			nC += 1
+			candBuf[nC] = current
 		end
 
 		-- On continue a propager meme depuis une tuile inutilisable : c'est
 		-- souvent en traversant un batiment existant qu'on atteint l'espace
 		-- libre juste derriere.
 		if dist2 < radius2 then
-			local n = MapGen.neighbors(current, neighbors)
+			local n = MapGen.neighbors(current, placeScratch)
 			for i = 1, n do
-				local nb = neighbors[i]
-				if not visited[nb] and ctx.ownerAt(nb) == ctx.slot then
-					visited[nb] = true
-					table.insert(queue, nb)
+				local nb = placeScratch[i]
+				if not visitMap[nb] and ctx.ownerAt(nb) == ctx.slot then
+					visitMap[nb] = true
+					nQ += 1
+					queueBuf[nQ] = nb
 				end
 			end
 		end
 	end
 
-	table.sort(candidates, function(a, b)
+	for i = nC + 1, #candBuf do
+		candBuf[i] = nil
+	end
+	table.sort(candBuf, function(a, b)
 		local ax, ay = MapGen.fromIndex(a)
 		local bx, by = MapGen.fromIndex(b)
 		local da = (ax - ox) ^ 2 + (ay - oy) ^ 2
@@ -257,7 +286,7 @@ function Placement.validTiles(ctx: Context, index: number, kind: number): { numb
 		return da < db
 	end)
 
-	return candidates
+	return candBuf
 end
 
 --[[
