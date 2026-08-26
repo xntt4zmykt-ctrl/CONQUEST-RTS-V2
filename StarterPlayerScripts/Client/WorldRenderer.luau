@@ -371,6 +371,77 @@ end
 local BORDER_THICKNESS = 0.8 * Config.WORLD_SCALE
 local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 
+-- N102 : buildChunkBorders hisse ownerOf / emit (recette N85 ctxState).
+-- Non reentrant — rebuildChunk est synchrone, un chunk a la fois. Poser
+-- borderTerrain / borderOwner / borderFolder / borderSurface AU DEBUT
+-- de buildChunkBorders. Un leftover `self` d'un chunk precedent colorerait
+-- le voisin. Overlay n'appelle pas buildChunkBorders. Pas de RemoteFunction.
+-- Ne pas table.clone de BORDER_PASSES. Ne pas recycler les Parts (N104).
+local borderTerrain: buffer? = nil
+local borderOwner: buffer? = nil
+local borderFolder: Folder? = nil
+local borderSurface = 0
+local borderDrawn = 0
+
+local BORDER_PASSES = {
+	{ dx = 0, dy = -1 },
+	{ dx = 0, dy = 1 },
+	{ dx = -1, dy = 0 },
+	{ dx = 1, dy = 0 },
+}
+
+local function ownerOf(x: number, y: number): number?
+	local terrain = borderTerrain
+	local owner = borderOwner
+	if not terrain or not owner then
+		return nil
+	end
+	if x < 0 or x >= W or y < 0 or y >= H then
+		return nil
+	end
+	local index = MapGen.toIndex(x, y)
+	if buffer.readu8(terrain, index) == OCEAN then
+		return nil
+	end
+	local slot = buffer.readu8(owner, index)
+	return if slot == NEUTRAL then nil else slot
+end
+
+local function emit(slot: number, ax: number, ay: number, bx: number, by: number, dx: number, dy: number)
+	local folder = borderFolder
+	if not folder then
+		return
+	end
+	local a = WorldSpace.tileToWorld(ax, ay)
+	local b = WorldSpace.tileToWorld(bx, by)
+	local inset = TILE / 2 - BORDER_THICKNESS / 2
+
+	local horizontal = dy ~= 0
+	local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
+
+	local part = Instance.new("Part")
+	part.Name = "Border"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Color = borderColor(slot)
+	part.Size = if horizontal
+		then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
+		else Vector3.new(BORDER_THICKNESS, 0.12 * Config.WORLD_SCALE, length)
+	part.CFrame = CFrame.new(
+		(a.X + b.X) / 2 + dx * inset,
+		borderSurface,
+		(a.Z + b.Z) / 2 + dy * inset
+	)
+	part.Parent = folder
+	borderDrawn += 1
+end
+
 --[[
 	Trace le contour des territoires d'un chunk.
 
@@ -387,6 +458,9 @@ local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 	long. Une frontiere de cent tuiles coute alors une poignee de Parts au lieu
 	de cent : c'est la meme economie que la fusion gloutonne du sol, appliquee a
 	une dimension de moins.
+
+	N102 : ownerOf / emit / BORDER_PASSES hissees au module (recette N85).
+	Plus de closures ni de table `passes` par chunk sale.
 ]]
 function WorldRenderer.buildChunkBorders(
 	self: WorldRenderer,
@@ -396,53 +470,11 @@ function WorldRenderer.buildChunkBorders(
 	x1: number,
 	y1: number
 ): number
-	local drawn = 0
-	local surface = Config.LAND_HEIGHT + BORDER_LIFT
-
-	-- Proprietaire d'une tuile, ou nil si elle est en mer ou sans maitre : dans
-	-- les deux cas elle ne porte pas de frontiere.
-	local function ownerOf(x: number, y: number): number?
-		if x < 0 or x >= W or y < 0 or y >= H then
-			return nil
-		end
-		local index = MapGen.toIndex(x, y)
-		if buffer.readu8(self.terrain, index) == OCEAN then
-			return nil
-		end
-		local slot = buffer.readu8(self.owner, index)
-		return if slot == NEUTRAL then nil else slot
-	end
-
-	local function emit(slot: number, ax: number, ay: number, bx: number, by: number, dx: number, dy: number)
-		local a = WorldSpace.tileToWorld(ax, ay)
-		local b = WorldSpace.tileToWorld(bx, by)
-		local inset = TILE / 2 - BORDER_THICKNESS / 2
-
-		local horizontal = dy ~= 0
-		local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
-
-		local part = Instance.new("Part")
-		part.Name = "Border"
-		part.Anchored = true
-		part.CanCollide = false
-		part.CanTouch = false
-		part.CanQuery = false
-		part.CastShadow = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.Color = borderColor(slot)
-		part.Size = if horizontal
-			then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
-			else Vector3.new(BORDER_THICKNESS, 0.12 * Config.WORLD_SCALE, length)
-		part.CFrame = CFrame.new(
-			(a.X + b.X) / 2 + dx * inset,
-			surface,
-			(a.Z + b.Z) / 2 + dy * inset
-		)
-		part.Parent = folder
-		drawn += 1
-	end
+	borderTerrain = self.terrain
+	borderOwner = self.owner
+	borderFolder = folder
+	borderSurface = Config.LAND_HEIGHT + BORDER_LIFT
+	borderDrawn = 0
 
 	--[[
 		Deux balayages : les cotes nord/sud se fusionnent le long des lignes, les
@@ -450,14 +482,7 @@ function WorldRenderer.buildChunkBorders(
 		quatre fois la meme boucle a une permutation d'axe pres — et quatre
 		occasions de se tromper d'indice.
 	]]
-	local passes = {
-		{ dx = 0, dy = -1 },
-		{ dx = 0, dy = 1 },
-		{ dx = -1, dy = 0 },
-		{ dx = 1, dy = 0 },
-	}
-
-	for _, pass in passes do
+	for _, pass in BORDER_PASSES do
 		local alongRow = pass.dy ~= 0
 
 		local outerFrom = if alongRow then cy else cx
@@ -499,7 +524,7 @@ function WorldRenderer.buildChunkBorders(
 		end
 	end
 
-	return drawn
+	return borderDrawn
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
