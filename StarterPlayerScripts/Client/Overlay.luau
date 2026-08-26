@@ -720,9 +720,10 @@ end
 	N117 : mouvement = `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`
 	(recette visual V65). Plus de lookAt deux Vector3 60 Hz.
 	N125 : roulis navire `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71,
-	portee pas mergee). Plus de CFrame.Angles 60 Hz. Roues camion leftover
-	N126. Camera N118 deja. Pas de RemoteFunction. HUD / UnitModels /
-	serveur non touches.
+	portee pas mergee). Plus de CFrame.Angles 60 Hz.
+	N126 : roues camion `fromEulerAnglesYXZ(spin, 0, 0)` (leftover visual
+	V72, portee pas mergee). Camera N118 deja. Pas de RemoteFunction.
+	HUD / UnitModels / serveur non touches.
 ]]
 local function trackUnit(
 	self: Overlay,
@@ -989,7 +990,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
 		-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
 		-- Radar / flag / boom inchanges (N124). Yaw inchange (N117).
-		-- Roues camion leftover N126. Immobile : zero compose.
+		-- Roues camion N126. Immobile : zero compose.
 		-- Recette visual V71, portee pas mergee. Extra missile inchange
 		-- (N98). Camion / chantier inchanges (N115 / N113).
 		-- UnitModels.place inchange. Camera inchangee (N118).
