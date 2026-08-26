@@ -21,8 +21,11 @@ export type Sample = {
 	tickMs: number,
 }
 
-local history: { Sample } = {}
 local HISTORY_CAP = 600 -- 60 s a 10 Hz
+local history: { Sample } = table.create(HISTORY_CAP)
+local historyCount = 0
+local historyWrite = 0
+local seenBuf: { [number]: boolean } = {}
 local totals = {
 	ticks = 0,
 	changedTiles = 0,
@@ -49,37 +52,57 @@ end
 ]]
 function TickMetrics.dirtyChunksFromDelta(delta: buffer?): number
 	if not delta then
+		-- N78 : early-out nil conserve — pas de table.clear inutile.
 		return 0
 	end
+	-- N78 : hash module, table.clear avant fill. Un leftover gonflerait
+	-- dirtyChunks (instrumentation, pas d'autorite GameState).
+	table.clear(seenBuf)
 	local count = buffer.len(delta) // 5
-	local seen: { [number]: boolean } = {}
 	local n = 0
 	for i = 0, count - 1 do
 		local index = buffer.readu32(delta, i * 5)
 		local chunk = chunkOf(index)
-		if not seen[chunk] then
-			seen[chunk] = true
+		if not seenBuf[chunk] then
+			seenBuf[chunk] = true
 			n += 1
 		end
 	end
 	return n
 end
 
+local function acquireSample(): Sample
+	if historyCount < HISTORY_CAP then
+		historyCount += 1
+		historyWrite = historyCount
+	else
+		historyWrite = historyWrite % HISTORY_CAP + 1
+	end
+	local sample = history[historyWrite]
+	if not sample then
+		sample = {
+			tick = 0,
+			changedTiles = 0,
+			dirtyChunks = 0,
+			deltaBytes = 0,
+			tickMs = 0,
+		}
+		history[historyWrite] = sample
+	end
+	return sample
+end
+
 function TickMetrics.record(tick: number, changedTiles: number, delta: buffer?, tickMs: number)
 	local deltaBytes = if delta then buffer.len(delta) else 0
 	local dirtyChunks = TickMetrics.dirtyChunksFromDelta(delta)
-	local sample: Sample = {
-		tick = tick,
-		changedTiles = changedTiles,
-		dirtyChunks = dirtyChunks,
-		deltaBytes = deltaBytes,
-		tickMs = tickMs,
-	}
-
-	table.insert(history, sample)
-	if #history > HISTORY_CAP then
-		table.remove(history, 1)
-	end
+	-- N78 : ring 1..HISTORY_CAP, pas table.insert + table.remove(1) O(n).
+	-- Reecrit les champs du record recycle. Totaux inchanges.
+	local sample = acquireSample()
+	sample.tick = tick
+	sample.changedTiles = changedTiles
+	sample.dirtyChunks = dirtyChunks
+	sample.deltaBytes = deltaBytes
+	sample.tickMs = tickMs
 
 	totals.ticks += 1
 	totals.changedTiles += changedTiles
@@ -101,6 +124,8 @@ local function percentile(values: { number }, p: number): number
 end
 
 function TickMetrics.snapshot()
+	-- Leftover N79 : 4 arrays + table de retour. Ne pas mixer (lifetime
+	-- different, table.sort dans percentile mute).
 	local changed = table.create(#history, 0)
 	local bytes = table.create(#history, 0)
 	local ms = table.create(#history, 0)
@@ -132,6 +157,8 @@ end
 
 function TickMetrics.reset()
 	table.clear(history)
+	historyCount = 0
+	historyWrite = 0
 	totals.ticks = 0
 	totals.changedTiles = 0
 	totals.dirtyChunks = 0
@@ -161,5 +188,10 @@ function TickMetrics.formatReport(): string
 		snap.p95.dirtyChunks
 	)
 end
+
+-- Banc N78 : rawequal seenBuf / Sample recycle. Pas replique.
+TickMetrics.HISTORY_CAP = HISTORY_CAP
+TickMetrics.history = history
+TickMetrics.seenBuf = seenBuf
 
 return TickMetrics
