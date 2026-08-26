@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 19)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 20)
 
-Déclencheur : ouverture de la **PR #53** (`cursor/analyse-nocturne-du-codebase-7c38`) — navalBasesBySlot, factoryBuf, specs N67–N68.
+Déclencheur : ouverture de la **PR #56** (`cursor/analyse-nocturne-du-codebase-1fb3`) — carrierBuf/targetBuf, samBuf, specs N69–N70.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-1fb3`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#53.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-5bf6`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#56.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted (bunker / SAM / silo / usine / tous / PORT / NAVAL_BASE) ne sont pas répliqués. `carrierBuf` / `targetBuf` / `samBuf` sont des pools module-level, pas de l’état répliqué.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted (bunker / SAM / silo / usine / tous / PORT / NAVAL_BASE) ne sont pas répliqués. `blastX/Y/Level` et `boatSnapBuf` sont des pools module-level, pas de l’état répliqué.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #53 (passe 18) : claims vérifiés.** `navalBasesBySlot` + `syncCarriers` spawn via l’index (`_carriersDirty` conservé) ; `factoryBuf` recycle + early-out 0 usine. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #56 (passe 19) : claims vérifiés.** `carrierBuf`/`targetBuf` + early-out 0 carrier / 0 autre slot (N67) ; `samBuf` truncate (N68). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #53 a documenté (N67, N68)**.
+Cette passe a **livré ce que #56 a documenté (N69, N70)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #53
+## 2. Revue PR #56
 
-| Claim #53 | Réalité à l’ouverture |
+| Claim #56 | Réalité à l’ouverture |
 |---|---|
-| `navalBasesBySlot` (N65) | Oui. Spawn carriers via l’index. Dirty NAVAL_BASE seulement. PORT ignoré. |
-| `factoryBuf` (N66) | Oui. Early-out 0 usine. Sort si `n >= 2`. |
-| Specs N67–N68 | **Corrigés ici.** |
+| `carrierBuf`/`targetBuf` (N67) | Oui. Early-out 0 carrier / 0 autre slot. Priorité / `areAllied` / dégâts inchangés. |
+| `samBuf` (N68) | Oui. Truncate. Index + set nil = zéro SAM. |
+| Specs N69–N70 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #52, feel jusqu’à #53, plus #39/#44/#47/#50 visuelles. **#53 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#43←#46←#49←#52) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #52, feel jusqu’à #56, plus #39/#44/#47/#50 visuelles. **#56 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#43←#46←#49←#52) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N67–N68 du rapport #53.
+Feel #19 inchangé. Pas de réinvention : N69–N70 du rapport #56.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `stepCarriers` nested `boats × boats` 10 Hz (N67) | `Navy.luau` (`carrierBuf`/`targetBuf`), `tests/simulate.luau` | Recette hardening N39 / 9f25. Une passe liste carriers vivants + cibles (TRANSPORT / TRADE / CARRIER hp>0). Early-out si 0 carrier **ou** 0 bateau d’un autre slot. Priorité / `areAllied` / dégâts / `WARSHIP_SHELL_RATE` inchangés. N65 (`navalBasesBySlot`) et N63 (`portsByTile`) non touchés. Pas de spatial hash. |
-| `Buildings.samsOf` alloue `{number}` à chaque visée nuke bot (N68) | `Buildings.luau` (`samBuf`), `tests/simulate.luau` | Recette `factoryBuf` / N66. Truncate après remplissage. Index présent + set nil = zéro SAM (contrat N59, pas de fallback hash). `tryIntercept` / `Nukes.launch` inchangés. Buffer non réentrant (appelant unique : `Bots.decideNuke`). |
+| `Bots.decideNuke` `blastValue` × 90 tuiles (N69) | `Bots.luau` (`fillBlastBuf` / `scoreBlast` / arrays `blastX/Y/Level`), `tests/simulate.luau` | Un flatten de `buildingsBySlot[bestSlot]` avant la boucle 90. Index présent + set nil = buffer vide, score 0 (contrat N62, pas de fallback hash). `Bots.blastValue` (banc N62) réutilise le même helper. SAM shield / « tout couvert → frapper le SAM » inchangés. Pas de spatial hash. |
+| `snapshotBoats` alloue table + N payloads / tick (N70) | `GameState.luau` (`boatSnapBuf`), `tests/simulate.luau` | Recette `factoryBuf` / N66. Inner records réécrits, pas recréés. Truncate. Pas de `path` / `homeTile` / `_sink`. `retreating == true` inchangé (N56). Overlay lit les champs, pas l’identité de table. Missiles → **N71**. `buildPrices` → N2. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, blastValue × 90 (N69), snapshotBoats alloc (N70).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, snapshot missiles (N71), `flushOwnerDelta` indices (N72).
 
 ---
 
@@ -68,56 +68,57 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **AimFront wrap** = re-visée du front terre du couple ; jamais `isBeachhead`.
 - **`tryAnnex`** = BFS depuis les voisins défenseur du seed déjà capturé ; océan abort ; pool N37-like.
-- **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, spawn via `navalBasesBySlot` (N65). Ciblage obus = `carrierBuf`/`targetBuf` recyclés **(N67, recette hardening N39)**. Pas de spatial hash.
+- **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, spawn via `navalBasesBySlot` (N65). Ciblage obus = `carrierBuf`/`targetBuf` recyclés **(N67)**. Pas de spatial hash.
 - **Posted bunker** = index `bunkersBySlot`. **Posted SAM** = `samsBySlot`. **Posted SILO** = `silosBySlot`. **Posted FACTORY** = `factoriesBySlot`. **Tous** = `buildingsBySlot`. **PORT** = `portsByTile`. **Posted NAVAL_BASE** = `navalBasesBySlot`.
 - **`samsOf`** = lit `samsBySlot` dans `samBuf` recyclé (N68). `tryIntercept` lit l’index directement (N57).
+- **Score nuke bots** = flatten `buildingsBySlot` une fois (N69), puis 90 `scoreBlast`.
 - **Inbound `removePlayer`** = snapshot `buildingsBySlot` → destroy → diplo + transports `kind==1` (100 %, lit **`owner[targetTile]`**) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`.
 - **Hover spawn** = `SpawnHint` (Shared) si `tiles==0`. Serveur = `claimSpawn` (N52+N55).
-- **Réplication :** StateDelta / UnitSnapshot (`retreating`) / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. `path` / `homeTile` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `snapshotBoats` alloue encore chaque tick (N70).
+- **Réplication :** StateDelta / UnitSnapshot (`retreating`, `boatSnapBuf` N70) / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. `path` / `homeTile` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. Missiles encore alloués dans `init.server` `replicate()` (**N71**). `flushOwnerDelta` alloue encore `indices` (**N72**).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N69–N70)
+## 5. Issues worker-ready (nouveaux, N71–N72)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N68 = faits. N22 = **N67 fait**. N27 = doc only. N59 index = fait ; alloc = **N68 fait**.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N70 = faits. N22 = **N67 fait**. N27 = doc only. N59 index = fait ; alloc = **N68 fait**. N62 index = fait ; nested 90 = **N69 fait**. N56 champ = fait ; alloc = **N70 fait**.
 
 ---
 
-### ISSUE-N69 — `Bots.blastValue` O(bâtiments cible) × 90 tuiles frontière (feel)
+### ISSUE-N71 — `replicate()` alloue table missiles + N payloads chaque tick (feel)
 
-**Priorité :** P3 alloc bots. Suite de N62 (`buildingsBySlot` pour le score) et de N68 (`samsOf` recyclé — le score d’emprise reste nested). Distinct de N68 (liste SAM) et de N57 (`tryIntercept`).
+**Priorité :** P2 alloc réplication. Suite explicite de N70 (`init.server` missiles, hors bundle). Distinct de N70 (`snapshotBoats`, déjà fait), de N2 (`stats` / `buildPrices`) et de N44 (inbound cancel, déjà fait).
 
-**Problème :** `Bots.decideNuke` échantillonne jusqu’à 90 tuiles de `target.border`. Chaque tuile non couverte par un SAM appelle `blastValue(state, bestSlot, index, blast2)`, qui itère `buildingsBySlot[bestSlot]` (x, y, level). Un rival mid-game ~40 bâtiments × 90 = 3 600 lookups / visée, plus `coveredBy` (déjà cheap après N68). `blastValue` est aussi exporté pour les tests N62 — ne pas casser l’API, flatten **autour** de la boucle 90, pas dans chaque appel unitaire.
+**Problème :** `init.server` `replicate()` fait `local missiles = {}` puis `table.insert` d’un **nouvel** enregistrement `{id, slot, x, y, tx, ty, kind}` pour chaque ogive, **chaque tick** (10 Hz playing) — même à 0 missile (table vide jetée). Le banc 6000 ticks a vu 98 explosions : des vols concurrent ~quelques ogives, mais le pattern est identique à N70 avant recycle. `sx` / `sy` / `progress` / `speed` ne sont **pas** dans `Types.MissileSnapshot` ; Overlay n’en a pas besoin (`tx`/`ty` seulement pour interpoler). Pas de helper testable aujourd’hui : le contrat vit hors bundle.
 
-**Pourquoi 20K CCU :** 10 Hz × bots ère nuke × nested, empilé avec `samBuf` (N68) et `factoryBuf` (N66). Pas d’autorité (le lancement reste `Nukes.launch` serveur). Cheap isolé une fois aplati.
+**Pourquoi 20K CCU :** 10 Hz × 8 humains × alloc courte, empilé avec `boatSnapBuf` (N70, déjà recyclé) et `buildPrices` 10 Hz × slots (N2). Pas d’autorité (snapshot dérivé serveur). Extraire le helper dans `GameState` (comme `snapshotBoats`) rend le recycle testable sans bundler `init.server`.
 
 **Worker :**
 
-1. Dans `decideNuke`, **avant** la boucle 90 : flatten `buildingsBySlot[bestSlot]` dans un `blastBuf` module-level (`table.create(48)` d’enregistrements `{x, y, level}` ou trois arrays parallèles). Truncate. Early-out set nil → buffer vide, score 0 (contrat N62 : index présent ⇒ pas de fallback hash). La boucle 90 lit le buffer, plus `blastValue` par tuile.
-2. Garder `Bots.blastValue` pour le test N62 (2 villes > frontière vide). Il peut s’appuyer sur le même helper interne. Ne pas toucher `samsOf` / N68, ni `Nukes.launch`, ni la règle « tout couvert → frapper le SAM ».
-3. Test : N62 `blastValue` reste vert. 0 bâtiment cible → toutes les tuiles score 0, SAM shield inchangé. 2 villes dans le rayon battent une tuile vide. Deux visées successives : pas de fuite du premier flatten (truncate). 6000 ticks.
-4. Fichiers : `Bots.luau` (`decideNuke` / helper), `tests/simulate.luau` (N62 existant + truncate).
+1. Ajouter `GameState.snapshotMissiles` calqué sur N70 : `missileSnapBuf = table.create(16)` module-level. Recycle N inner payloads (créer seulement si `missileSnapBuf[i] == nil`, sinon réécrire les champs). Truncate `#missileSnapBuf`. Champs **uniquement** ceux de `Types.MissileSnapshot` : `id, slot, x, y, tx, ty, kind`. **Ne pas** répliquer `sx` / `sy` / `progress` / `speed`.
+2. `init.server` `replicate()` : `local missiles = state:snapshotMissiles()` à la place du `local missiles = {}` + boucle. Ne pas toucher N70 `boatSnapBuf`. Ne pas toucher N2 `buildPrices` / stats. Pas de RemoteFunction.
+3. Test : insérer 1 missile (recette `nuke inbound` / `table.insert(state.missiles, {…})`) → snapshot length 1, `tx`/`ty` honorés, pas de `progress`. Vider `state.missiles` → length 0 (pas de fuite). Relancer 1 ogive → length 1. 6000 ticks. Client 35/35 (Overlay lit `tx`/`ty`, pas l’identité de table).
+4. Fichiers : `GameState.luau` (`snapshotMissiles`), `init.server.luau` (`replicate`), `tests/simulate.luau` (nouveau bloc N71, recette N70).
 
-**Contraintes :** pas de RemoteFunction. Recette N66 buffers, pas un spatial hash d’emprise. **N69 feel ≠ N62 (index, déjà fait) ≠ N68 (`samsOf`).** `blastBuf` n’est pas réentrant — `decideNuke` est unique par bot par tick.
+**Contraintes :** pas de RemoteFunction. Recette N70, pas un dirty flag (les ogives bougent chaque tick). **N71 feel ≠ N70 (bateaux, déjà fait) ≠ N2 (stats) ≠ N44 (cancel inbound).** `missileSnapBuf` n’est pas réentrant — `replicate()` est unique par tick. `init.server` reste hors bundle : le helper **doit** vivre dans `GameState`.
 
 ---
 
-### ISSUE-N70 — `snapshotBoats` alloue table + N payloads chaque tick (feel)
+### ISSUE-N72 — `flushOwnerDelta` alloue `indices` chaque tick (feel)
 
-**Priorité :** P2 alloc réplication. Précision de N2 (UnitSnapshot) **sans** toucher `buildPrices` / stats (reste N2). Distinct de N56 (`retreating` déjà répliqué) et de N67 (ciblage serveur, pas le snapshot).
+**Priorité :** P3 alloc réplication. Précision de N2 (owner delta) **sans** toucher `stats` / `buildPrices` (reste N2) ni le buffer outbound. Distinct de N70/N71 (UnitSnapshot). Visual V14 a commencé un recycle sur l’autre ligne ; **feel ne l’a jamais porté**.
 
-**Problème :** `GameState.snapshotBoats` fait `local boats = {}` puis `table.insert` d’un **nouvel** enregistrement `{id, slot, x, y, troops, kind, retreating}` pour chaque navire, **chaque tick** (10 Hz playing). Les carriers orbitent : x/y changent toujours, un dirty-skip positionnel ne marcherait pas. Late-game banc 6000 ticks = ~40 navires dont ~23 carriers → 40 tables jetées / tick / shard, plus la table `missiles` reconstruite dans `init.server` `replicate()` (hors bundle, même pattern). Le client n’a pas besoin de `path` / `homeTile` (N56).
+**Problème :** `GameState.flushOwnerDelta` fait `local indices = {}` puis `table.insert` pour chaque tuile `dirty`, **chaque tick** (10 Hz, y compris le banc 6000 ticks qui flush pour TickMetrics). `avgChanged=7.6` : presque chaque tick a du dirty. Le `buffer.create(count * 5)` outbound **doit** rester neuf (RemoteEvent). Seul le tableau d’indices est jetable. `table.clear(self.dirty)` après copie est correct ; ne pas itérer `dirty` deux fois.
 
-**Pourquoi 20K CCU :** 10 Hz × 8 humains × alloc courte, empilé avec `buildPrices` 10 Hz × slots (N2) et `structureHash` à la demande (N4). Pas d’autorité (snapshot dérivé serveur). Un shard 18 factions / 24 carriers saturera le GC avant le scan buildings (déjà indexé).
+**Pourquoi 20K CCU :** 10 Hz × shards, empilé avec N70/N71. Pas d’autorité (delta dérivé de `owner`). Un `table.create(64)` recyclé + truncate élimine l’alloc courte du hot path sans changer le wire format `[u32 index][u8 slot]`.
 
 **Worker :**
 
-1. `boatSnapBuf = table.create(48)` module-level dans `GameState.luau`. Recycle N inner payloads (créer seulement si `boatSnapBuf[i] == nil`, sinon réécrire les champs). Truncate `#boatSnapBuf` après remplissage. **Ne pas** répliquer `path` / `homeTile` / `_sink`. `retreating == true` inchangé (N56).
-2. Ne pas toucher N2 `buildPrices` / stats. Ne pas toucher N67 shells. `init.server` missiles : hors bundle — ticket séparé ou même recette dans `replicate()` **si** un hook testable existe déjà ; sinon documenter en N70b et s’arrêter à `snapshotBoats`. Pas de RemoteFunction.
-3. Test : 1 carrier + 1 transport → snapshot length 2, `retreating` du transport honoré, pas de `path`. Retirer le transport → snapshot length 1 (pas de fuite). Carrier seul après destroy base (N65) : length suit. 6000 ticks. Client 35/35 (Overlay lit `retreating`, pas l’identité de table).
-4. Fichiers : `GameState.luau` (`snapshotBoats`), `tests/simulate.luau` (étendre le test N56 existant).
+1. `dirtyIndexBuf = table.create(64)` module-level dans `GameState.luau` (à côté de `boatSnapBuf`). Remplir par index (`n += 1 ; buf[n] = index`), truncate `#dirtyIndexBuf`. Early-out `next(self.dirty) == nil` → `table.clear(self.dirty)` + return nil **sans** allouer. `buffer.create` outbound **neuf** à chaque flush non vide (ne pas recycler le buffer envoyé).
+2. Ne pas toucher N2 `buildPrices`. Ne pas toucher N70/N71. Ne pas changer le format 5 octets / tuile. Pas de RemoteFunction.
+3. Test : `addPlayer` (capitale dirty) → `flushOwnerDelta` `buffer.len // 5 > 0`. Second flush immédiat → `nil`. `setOwner` 1 tuile neutre → flush length 1 (pas la taille du premier). 6000 ticks (TickMetrics lit déjà ce helper). Client 35/35.
+4. Fichiers : `GameState.luau` (`flushOwnerDelta`), `tests/simulate.luau` (bloc court ; le run principal flush déjà chaque tick).
 
-**Contraintes :** pas de RemoteFunction. Recette `factoryBuf` / N66, pas un dirty flag (l’orbite invalide tout). **N70 feel ≠ N2 (stats/buildPrices, ouvert) ≠ N56 (champ retreating, déjà fait) ≠ N67 (ciblage).** `boatSnapBuf` n’est pas réentrant — `replicate()` est unique par tick.
+**Contraintes :** pas de RemoteFunction. Recette `factoryBuf` / N66, **pas** un reuse du `buffer` outbound. **N72 feel ≠ N2 (stats/buildPrices, ouvert) ≠ N70/N71 (unités) ≠ visual V14 (autre ligne).** `dirtyIndexBuf` n’est pas réentrant — un seul `flushOwnerDelta` par tick (`replicate` + banc).
 
 ---
 
@@ -126,7 +127,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` reconstruit 10 Hz × slots ; snapshot bateaux → **N70**) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` reconstruit 10 Hz × slots ; bateaux → **N70 fait** ; missiles → **N71**) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas) |
@@ -146,7 +147,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N19 | Embargo allié + tribus auto-accept | P2 | ouvert |
 | N20 | `railIncome` vs `deliveryValue` | P2 | **fait** `stopBonus` ; reste niveau live vs snapshot colis |
 | N21 | QuickChat 2-args | P3 | **fait** passe 5 |
-| N22 | Warships O(carriers × boats) | P2 | **fait** cette passe (**N67**, recette hardening N39) |
+| N22 | Warships O(carriers × boats) | P2 | **fait** passe 19 (**N67**) |
 | N23 | `retreatAttack` premier front | P2 | **fait** passe 5 |
 | N24 | notify/sfx `FireAllClients` | P2 | **fait** passe 5 |
 | N25 | `MAX_BOATS_PER_PLAYER` 6 vs 3 | P3 | ouvert |
@@ -180,23 +181,25 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N53 | Débarquement auto vs côte flippée | P3 | **fait** passe 14 (option A) |
 | N54 | MIRV bus vs `findSpawn` | P3 | **fait** passe 14 (`spread + warheadRadius`) |
 | N55 | `claimSpawn` isolation disque | P3 | **fait** passe 15 |
-| N56 | Snapshot bateau `retreating` | P3 | **fait** passe 15 (option A) ; alloc → **N70** |
+| N56 | Snapshot bateau `retreating` | P3 | **fait** passe 15 (option A) ; alloc → **N70 fait** |
 | N57 | SAM scan O(B) / missile | P2 | **fait** passe 15 (`samsBySlot`) |
 | N58 | Hover client spawn isolation | P3 | **fait** passe 16 (`SpawnHint`) |
 | N59 | `samsOf` / bots scan O(B) | P2 | **fait** passe 16 (alloc → **N68 fait**) |
 | N60 | `stepCooldowns` O(B) / tick nuke | P2 | **fait** passe 16 (`samsBySlot` + `silosBySlot`) |
 | N61 | `Trade.step` scan FACTORY O(B) | P2 | **fait** passe 17 (`factoriesBySlot`) |
-| N62 | Bots upgrade + score nuke O(B) | P2 | **fait** passe 17 (`buildingsBySlot`) ; nested 90 → **N69** |
+| N62 | Bots upgrade + score nuke O(B) | P2 | **fait** passe 17 (`buildingsBySlot`) ; nested 90 → **N69 fait** |
 | N63 | `spawnTradeShips` O(ports²) feel | P2 | **fait** passe 17 (`portsByTile`) |
 | N64 | `refreshRailNetwork` scan gares O(B) | P3 | **fait** passe 17 (`buildingsBySlot[slot]`) |
 | N65 | `syncCarriers` spawn NAVAL_BASE O(B) dirty | P3 | **fait** passe 18 (`navalBasesBySlot`) |
 | N66 | `Trade.step` alloc+sort liste usines 10 Hz | P3 | **fait** passe 18 (`factoryBuf`) |
-| N67 | `stepCarriers` nested O(C × B) 10 Hz | P2 | **fait** cette passe (`carrierBuf`/`targetBuf`) |
-| N68 | `samsOf` alloc table 10 Hz bots | P3 | **fait** cette passe (`samBuf`) |
-| N69 | `blastValue` × 90 tuiles frontière | P3 | **nouveau** |
-| N70 | `snapshotBoats` alloc 10 Hz | P2 | **nouveau** (précision N2, pas `buildPrices`) |
+| N67 | `stepCarriers` nested O(C × B) 10 Hz | P2 | **fait** passe 19 (`carrierBuf`/`targetBuf`) |
+| N68 | `samsOf` alloc table 10 Hz bots | P3 | **fait** passe 19 (`samBuf`) |
+| N69 | `blastValue` × 90 tuiles frontière | P3 | **fait** cette passe (`fillBlastBuf`) |
+| N70 | `snapshotBoats` alloc 10 Hz | P2 | **fait** cette passe (`boatSnapBuf`) |
+| N71 | `snapshotMissiles` alloc 10 Hz | P2 | **nouveau** (N70b, helper `GameState`) |
+| N72 | `flushOwnerDelta` indices alloc | P3 | **nouveau** (précision N2, pas `buildPrices`) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -237,15 +240,12 @@ Serveur :
 seed 7 / 99991 / 31337 / 1234567 : 18 factions, invariants OK
 factions : 18
 intentions : sequence, idempotence, apply immediat, rate limit OK
-samsOf : 3 tuiles, pas le silo (N59)
 samsOf recycle : truncate, pas de fuite (N68)
-navalBasesBySlot : 2 bases, pas le port, transfer/destroy OK (N65)
-Trade.step : 0 usine, lastFactoryVisits=0 (N66)
-Trade.step : 2 usines, sort stable (N66)
-warships empty : 0 carrier, pas de tir (N67)
-warships fire : 1 obus, lastShellTick pose (N67)
-warships ally : areAllied saute le transport (N67)
-warships own : 0 autre slot, early-out (N67)
+blastValue : 2 villes battent une frontiere vide (N62)
+blastBuf : set nil = 0, restore identique (N69)
+warships empty / fire / ally / own (N67)
+boatSnapBuf : 1 carrier + 1 transport, retreating, pas de path (N70)
+boatSnapBuf : truncate 2→1→0 (N70)
 removePlayer index : snapshot buildingsBySlot, rien ne reste
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
 metrics : ticks=6000 avgChanged=7.6 p95Changed=8 maxChanged=479 avgTickMs=0.38 p95TickMs=0.90
@@ -255,15 +255,15 @@ Tous les invariants tiennent.
 
 Client : **35/35 OK** — dont `hover spawn isolation : lisiere rouge, disque isole vert (N58)`. Overlay `previewTile(valid=false)` ne lève pas.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass19.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass20.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N67–N68 sont serveur / pools, pas un Play Solo.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N69–N70 sont serveur / pools, pas un Play Solo.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N67–N68 n’ajoutent **pas** de remote ni de `require` croisé (Navy ne require pas Buildings ; `samsOf` ne require pas Bots).
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N69–N70 n’ajoutent **pas** de remote ni de `require` croisé (Bots ne require pas Overlay ; `snapshotBoats` ne require pas Navy).
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -275,3 +275,7 @@ Piège N66 : `factoryBuf` n’est pas réentrant. `Trade.step` est unique par ti
 Piège N67 : `carrierBuf` / `targetBuf` ne sont pas réentrants. `stepCarriers` est unique par `Navy.step`. Dead carriers (`health <= 0`) restent dans `state.boats` (respawn) mais **hors** `carrierBuf` et hors cibles.
 
 Piège N68 : `samBuf` n’est pas réentrant. `samsOf` n’est appelé que depuis `Bots.decideNuke` (synchrone). Un appelant concurrent doit dupliquer le buffer. Le test N59 lit le **contenu**, pas `rawequal`.
+
+Piège N69 : `blastX/Y/Level` ne sont pas réentrants. `decideNuke` flatten une fois puis `scoreBlast` ; `Bots.blastValue` re-fill (banc unitaire). Ne pas appeler `blastValue` depuis la boucle 90. Index présent + set nil = score 0, **pas** de fallback hash.
+
+Piège N70 : `boatSnapBuf` n’est pas réentrant et est **partagé entre toutes les instances** `GameState` (module-level). `replicate()` est unique par tick. Overlay / tests doivent lire les champs tout de suite, pas stocker l’identité de table d’un tick sur l’autre. Truncate obligatoire : Overlay itère `for _, boat in boats`.
