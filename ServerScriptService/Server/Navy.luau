@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Marine : debarquements, commerce, retraite en mer (OpenFront).
+	Marine : debarquements, commerce, retraite en mer .
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,12 +22,26 @@ local KIND_CARRIER = 3
 local MAX_BFS_NODES = 24000
 
 local scratch = table.create(4, 0)
+-- Pools : findSeaPath est appele a chaque invasion, retraite, et vague
+-- commerciale. Allouer 40 960 octets + tables par appel saturait le GC
+-- sur un shard 8 humains / 10 bots (ISSUE-N37).
+local visitBuf = buffer.create(Config.TILE_COUNT)
+local parentScratch: { [number]: number } = {}
+local queueScratch: { number } = table.create(512)
+-- syncCarriers : table `seen` recyclee (ISSUE-N38). Pas d'alloc par tick.
+local carrierSeen: { [number]: boolean } = {}
+-- N63 : spawnTradeShips recycle (recette hardening N40). Pas d'alloc par vague.
+local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
+local candidateBuf: { number } = table.create(32)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
-	local visited = buffer.create(Config.TILE_COUNT)
-	local parent: { [number]: number } = {}
-	local queue = table.create(512)
+	buffer.fill(visitBuf, 0, 0)
+	table.clear(parentScratch)
+	table.clear(queueScratch)
+	local visited = visitBuf
+	local parent = parentScratch
+	local queue = queueScratch
 	local head = 1
 	local explored = 0
 
@@ -149,13 +163,26 @@ function Navy.beginRetreat(state: GameState, boat): boolean
 	return true
 end
 
+local function invasionTargetSlot(state: GameState, boat): number
+	-- Intention de launch, pas la souverainete courante (ISSUE-N49).
+	-- Fallback owner[targetTile] : transports deja en mer sans le champ.
+	if typeof(boat.targetSlot) == "number" then
+		return boat.targetSlot
+	end
+	local dest = boat.targetTile
+	if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+		return buffer.readu8(state.owner, dest)
+	end
+	return NEUTRAL
+end
+
 function Navy.retreatBoats(state: GameState, slot: number, targetOwner: number?): number
 	local n = 0
 	for _, boat in state.boats do
 		if boat.kind ~= KIND_TRANSPORT or boat.slot ~= slot or boat.retreating then
 			continue
 		end
-		local destOwner = buffer.readu8(state.owner, boat.targetTile)
+		local destOwner = invasionTargetSlot(state, boat)
 		if targetOwner == nil or destOwner == targetOwner then
 			if Navy.beginRetreat(state, boat) then
 				n += 1
@@ -197,7 +224,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
+	local ratio = Config.BOAT_TROOP_RATIO or 0.2
+	local troops = math.floor(ps.troops * ratio * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end
@@ -220,6 +248,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	ps.attacksLaunched += 1
 
 	local ox, oy = MapGen.fromIndex(origin)
+	-- targetSlot = faction visee au launch (ISSUE-N49). Sans ca, retreatBoats
+	-- lit owner[targetTile] et rate une invasion dont la cote a deja flippe.
 	table.insert(state.boats, {
 		id = state:nextId(),
 		slot = slot,
@@ -230,6 +260,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 		path = path,
 		step = 1,
 		targetTile = targetTile,
+		targetSlot = targetOwner,
 		homeTile = origin,
 		retreating = false,
 	})
@@ -255,7 +286,9 @@ local function resolveLanding(state: GameState, boat)
 	local targetOwner = buffer.readu8(state.owner, tile)
 
 	if targetOwner == boat.slot then
-		applyRetreatMalus(state, boat)
+		-- Arrivee sur notre terre (pas une retraite) : restitution integrale.
+		ps.troops += math.max(0, boat.troops)
+		boat.troops = 0
 		return
 	end
 
@@ -301,11 +334,57 @@ local function countTradeShips(state: GameState): number
 end
 
 local function spawnTradeShips(state: GameState, rng: Random)
-	local ports: { { index: number, slot: number, level: number } } = {}
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.PORT then
-			table.insert(ports, { index = index, slot = building.slot, level = building.level })
+	-- N63 contrat A (recette hardening N40, sans AimFront / bunkerCells) :
+	-- early-out cap AVANT flatten ; index portsByTile (PORT only, pas
+	-- _carriersDirty). portsBuf / candidateBuf recycles. Loi de tirage
+	-- inchangee (sort index, poids = level, canTrade embargo).
+	-- Appele toutes les TRADE_SHIP_INTERVAL ticks (45), pas 10 Hz.
+	local afloat = countTradeShips(state)
+	if afloat >= Config.MAX_TRADE_SHIPS then
+		return
+	end
+	local ports = portsBuf
+	local indexed = state.portsByTile
+	local n = 0
+	if indexed then
+		local nPorts = 0
+		for _ in indexed do
+			nPorts += 1
+			if nPorts >= 2 then
+				break
+			end
 		end
+		if nPorts < 2 then
+			return
+		end
+		for index, info in indexed do
+			n += 1
+			local rec = ports[n]
+			if rec then
+				rec.index = index
+				rec.slot = info.slot
+				rec.level = info.level
+			else
+				ports[n] = { index = index, slot = info.slot, level = info.level }
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.PORT then
+				n += 1
+				local rec = ports[n]
+				if rec then
+					rec.index = index
+					rec.slot = building.slot
+					rec.level = building.level
+				else
+					ports[n] = { index = index, slot = building.slot, level = building.level }
+				end
+			end
+		end
+	end
+	for i = #ports, n + 1, -1 do
+		ports[i] = nil
 	end
 	if #ports < 2 then
 		return
@@ -313,7 +392,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 	table.sort(ports, function(a, b)
 		return a.index < b.index
 	end)
-	local afloat = countTradeShips(state)
 	for _, source in ports do
 		if afloat >= Config.MAX_TRADE_SHIPS then
 			return
@@ -328,18 +406,18 @@ local function spawnTradeShips(state: GameState, rng: Random)
 		if not armed then
 			continue
 		end
-		local candidates: { number } = {}
+		table.clear(candidateBuf)
 		for i, other in ports do
 			if canTrade(state, source.slot, other.slot) then
 				for _ = 1, other.level do
-					table.insert(candidates, i)
+					table.insert(candidateBuf, i)
 				end
 			end
 		end
-		if #candidates == 0 then
+		if #candidateBuf == 0 then
 			continue
 		end
-		local target = ports[candidates[rng:NextInteger(1, #candidates)]]
+		local target = ports[candidateBuf[rng:NextInteger(1, #candidateBuf)]]
 		local path = Navy.findSeaPath(state, source.index, target.index)
 		if not path or #path > Config.BOAT_MAX_RANGE then
 			continue
@@ -387,8 +465,17 @@ local function resolveTrade(state: GameState, boat)
 end
 
 local function syncCarriers(state: GameState)
+	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
+	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
+	-- (ISSUE-N38). Le spawn/despawn reste identique ; N22 (shells) inchange.
+	if not state._carriersDirty then
+		return
+	end
+	state._carriersDirty = false
+
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
-	local seen: { [number]: boolean } = {}
+	table.clear(carrierSeen)
+	local seen = carrierSeen
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
 		if boat.kind ~= KIND_CARRIER then
@@ -409,25 +496,56 @@ local function syncCarriers(state: GameState)
 		end
 		seen[boat.homeTile] = true
 	end
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
-			local x, y = MapGen.fromIndex(index)
-			table.insert(state.boats, {
-				id = state:nextId(),
-				slot = building.slot,
-				kind = KIND_CARRIER,
-				troops = 0,
-				x = x,
-				y = y,
-				path = {},
-				step = 1,
-				targetTile = index,
-				homeTile = index,
-				angle = (index % 360) * math.pi / 180,
-				health = maxHp,
-				maxHealth = maxHp,
-				lastShellTick = 0,
-			})
+	-- N65 : spawn via navalBasesBySlot, pas le hash buildings. Garde
+	-- _carriersDirty (pas un scan 10 Hz). Fallback hash si l'index est nil.
+	if state.navalBasesBySlot then
+		for _, set in state.navalBasesBySlot do
+			for index in set do
+				if not seen[index] then
+					local building = state.buildings[index]
+					if building and building.kind == Config.BUILDING.NAVAL_BASE then
+						local x, y = MapGen.fromIndex(index)
+						table.insert(state.boats, {
+							id = state:nextId(),
+							slot = building.slot,
+							kind = KIND_CARRIER,
+							troops = 0,
+							x = x,
+							y = y,
+							path = {},
+							step = 1,
+							targetTile = index,
+							homeTile = index,
+							angle = (index % 360) * math.pi / 180,
+							health = maxHp,
+							maxHealth = maxHp,
+							lastShellTick = 0,
+						})
+					end
+				end
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
+				local x, y = MapGen.fromIndex(index)
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = building.slot,
+					kind = KIND_CARRIER,
+					troops = 0,
+					x = x,
+					y = y,
+					path = {},
+					step = 1,
+					targetTile = index,
+					homeTile = index,
+					angle = (index % 360) * math.pi / 180,
+					health = maxHp,
+					maxHealth = maxHp,
+					lastShellTick = 0,
+				})
+			end
 		end
 	end
 end
@@ -436,8 +554,8 @@ end
 	Warships (porte-avions / bases navales) — port OF WarshipExecution.
 
 	Priorité cibles : Transport > Warship > TradeShip.
-	Portée : WARSHIP_TARGET_RANGE (OF 130).
-	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (OF 20).
+	Portée : WARSHIP_TARGET_RANGE (130).
+	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (20).
 	Pas pilotable : orbite autour de la base (design Conquest).
 ]]
 local function stepCarriers(state: GameState)
@@ -608,10 +726,41 @@ function Navy.step(state: GameState, rng: Random)
 			continue
 		end
 
+		-- N51 : PORT d'arrivee detruit au combat (pas recycle — c'est N48).
+		-- Recette hardening fd1e / PR #37 option B. Sans ca le kind==2 reste
+		-- en mer jusqu'a step > #path, occupe MAX_TRADE_SHIPS, puis
+		-- resolveTrade no-op. Pas d'or, pas de malus vendeur. Capture
+		-- (transfer) : le PORT existe encore, le convoi continue.
+		-- destSlot = N49 transports, pas ici.
+		if boat.kind == KIND_TRADE then
+			local dest = state.buildings[boat.targetTile]
+			if not dest or dest.kind ~= Config.BUILDING.PORT then
+				table.remove(state.boats, i)
+				continue
+			end
+		end
+
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then
 			local destOwner = buffer.readu8(state.owner, boat.targetTile)
 			local destLand = state:isLand(boat.targetTile)
-			if destOwner == boat.slot or not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+			-- Cote deja a nous : les troupes debarquent, ce n'est pas une retraite.
+			-- Le malus BOAT_RETREAT_LOSS punirait un succes d'armes combinees.
+			if destOwner == boat.slot then
+				local owner = state.players[boat.slot]
+				if owner then
+					owner.troops += math.max(0, boat.troops)
+				end
+				boat.troops = 0
+				table.remove(state.boats, i)
+				continue
+			end
+			-- N53 option A : l'intention (targetSlot) n'est plus le proprio
+			-- courant → retraite, pas de tete de pont vs un tiers. Fallback
+			-- N49 : pas de targetSlot → pas de retraite auto (on debarque
+			-- chez qui tient la plage). Own-tile 100 % deja gere au-dessus.
+			-- inbound removePlayer lit encore owner[targetTile], volontaire.
+			local flipped = typeof(boat.targetSlot) == "number" and destOwner ~= boat.targetSlot
+			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) or flipped then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
 					table.remove(state.boats, i)
