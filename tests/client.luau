@@ -1545,12 +1545,19 @@ check("navires, missiles et interpolation", function()
 	local beforeY = overlay.units[3].currentY
 	-- N103 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover N101.
 	-- N116 : immobile = CFrame.new. Navire 1 (x=y=10) n'avance pas ; missile
-	-- continue de lerper. Leftover N103 (lookAt en mouvement) reste.
+	-- continue de lerper.
+	-- N117 : mouvement = fromEulerAnglesYXZ (pas lookAt). Leftover N116
+	-- (immobile) et leftover N103 (lerp sous yaw) restent verts.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
+	-- N117 : un second frame sous yaw euler ne casse pas le lerp missile.
+	local midX = overlay.units[3].currentX
+	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[3].currentX ~= midX, "lerp sous yaw euler fige")
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive au 2e frame")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
@@ -1669,6 +1676,10 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
+	-- N118 : compose CFrame.new * rotation. Plus de lookAt. Leftover
+	-- offset/shake Vector3 (N119/N120) reste.
+	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
 
 	--[[
 		Panoramique libre au clic du milieu, le geste CONQUEST.
