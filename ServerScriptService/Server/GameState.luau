@@ -181,6 +181,10 @@ export type GameState = typeof(setmetatable(
 		-- Index FACTORY (ISSUE-N45). Trade.step n'itere plus buildings a 10 Hz.
 		-- Recette portsByTile : pose/destroy/transfer/upgrade FACTORY seulement.
 		factoriesByTile: { [number]: { slot: number, level: number } },
+		-- Tous les batiments par camp (ISSUE-N46 / feel N62). Bots upgrade
+		-- et score nuke n'iterent plus le hash global. Distinct des index
+		-- par kind (bunkers/sams/silos/factories) : ici c'est tous kinds.
+		buildingsBySlot: { [number]: { [number]: true } },
 		-- Batiments dont cooldown > 0 (ISSUE-N43). stepCooldowns n'itere plus
 		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
 		coolingBuildings: { [number]: true },
@@ -263,6 +267,7 @@ function GameState.new(seed: number): GameState
 	self.samsBySlot = {}
 	self.silosBySlot = {}
 	self.factoriesByTile = {}
+	self.buildingsBySlot = {}
 	self.coolingBuildings = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
@@ -567,19 +572,41 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 		return
 	end
 
-	-- 1. Collecte des gares.
+	-- 1. Collecte des gares. N47 : buildingsBySlot[slot], pas le hash global.
+	-- Fallback hash si l'index est nil (tests partiels).
+	-- IS_STATION est declare plus bas : on inline les kinds ici.
 	local stations: { number } = {}
-	for index, building in self.buildings do
-		if
-			building.slot == slot
-			and (
-				building.kind == B.CITY
-				or building.kind == B.CAPITAL
-				or building.kind == B.PORT
-				or building.kind == B.FACTORY
-			)
-		then
-			table.insert(stations, index)
+	if self.buildingsBySlot then
+		local set = self.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = self.buildings[index]
+				if
+					building
+					and (
+						building.kind == B.CITY
+						or building.kind == B.CAPITAL
+						or building.kind == B.PORT
+						or building.kind == B.FACTORY
+					)
+				then
+					table.insert(stations, index)
+				end
+			end
+		end
+	else
+		for index, building in self.buildings do
+			if
+				building.slot == slot
+				and (
+					building.kind == B.CITY
+					or building.kind == B.CAPITAL
+					or building.kind == B.PORT
+					or building.kind == B.FACTORY
+				)
+			then
+				table.insert(stations, index)
+			end
 		end
 	end
 	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
@@ -830,6 +857,21 @@ local function indexFactory(self: GameState, index: number, slot: number, level:
 	end
 end
 
+-- Index tous kinds : Bots upgrade + score nuke (ISSUE-N46). Recette samsBySlot.
+-- Pas de require(Bots) depuis GameState.
+local function indexBuilding(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.buildingsBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.buildingsBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -837,6 +879,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
+	indexBuilding(self, slot, index, true)
 
 	if kind == B.DEFENSE then
 		indexBunker(self, slot, index, true)
@@ -909,6 +952,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	indexBuilding(self, previousSlot, index, false)
+	indexBuilding(self, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
@@ -943,6 +988,7 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	local previousSlot = building.slot
 	local previousKind = building.kind
+	indexBuilding(self, building.slot, index, false)
 	if building.kind == B.DEFENSE then
 		indexBunker(self, building.slot, index, false)
 	end
@@ -1138,10 +1184,23 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
-	for index, building in self.buildings do
-		if building.slot == slot then
-			self:destroyBuilding(index)
+	-- N46 : snapshot buildingsBySlot[slot] (destroy mute l'index). Fallback
+	-- hash si l'index est nil (tests partiels). Iterer le hash pendant
+	-- destroyBuilding peut sauter des cles.
+	local doomed: { number } = {}
+	if self.buildingsBySlot and self.buildingsBySlot[slot] then
+		for index in self.buildingsBySlot[slot] do
+			table.insert(doomed, index)
 		end
+	else
+		for index, building in self.buildings do
+			if building.slot == slot then
+				table.insert(doomed, index)
+			end
+		end
+	end
+	for _, index in doomed do
+		self:destroyBuilding(index)
 	end
 
 	-- Bateaux AVANT setOwner : un bateau n'a pas de targetSlot, on lit
@@ -1303,6 +1362,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.silosBySlot then
 		self.silosBySlot[slot] = nil
+	end
+	if self.buildingsBySlot then
+		self.buildingsBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

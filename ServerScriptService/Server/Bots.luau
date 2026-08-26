@@ -217,6 +217,42 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 	return sites
 end
 
+local function lowestUpgradable(state: GameState, slot: number): number?
+	local bestIndex: number? = nil
+	local bestLevel = math.huge
+	-- N46 option A : index buildingsBySlot, pas le hash global.
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = state.buildings[index]
+				if
+					building
+					and BuildingDefs.isUpgradable(building.kind)
+					and building.level < BuildingDefs.maxLevel(building.kind)
+					and building.level < bestLevel
+				then
+					bestIndex = index
+					bestLevel = building.level
+				end
+			end
+		end
+		return bestIndex
+	end
+	for index, building in state.buildings do
+		if
+			building.slot == slot
+			and BuildingDefs.isUpgradable(building.kind)
+			and building.level < BuildingDefs.maxLevel(building.kind)
+			and building.level < bestLevel
+		then
+			bestIndex = index
+			bestLevel = building.level
+		end
+	end
+	return bestIndex
+end
+
 local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
 	if ps.era < 2 or rng:NextNumber() > 0.32 then
 		return false
@@ -230,19 +266,7 @@ local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, r
 	-- ou une usine de niveau 3 valent trois exemplaires sans occuper trois
 	-- emplacements, et sans cette boucle les niveaux resteraient du contenu mort
 	-- dans toutes les parties contre l'IA.
-	local bestIndex: number? = nil
-	local bestLevel = math.huge
-	for index, building in state.buildings do
-		if
-			building.slot == ps.slot
-			and BuildingDefs.isUpgradable(building.kind)
-			and building.level < BuildingDefs.maxLevel(building.kind)
-			and building.level < bestLevel
-		then
-			bestIndex = index
-			bestLevel = building.level
-		end
-	end
+	local bestIndex = lowestUpgradable(state, ps.slot)
 	if not bestIndex then
 		return false
 	end
@@ -623,6 +647,38 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 	end
 end
 
+-- N46 : score d'emprise dans le rayon, via buildingsBySlot (plus le hash).
+local function blastValue(state: GameState, slot: number, tile: number, blast2: number): number
+	local x, y = MapGen.fromIndex(tile)
+	local value = 0
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for other in set do
+				local building = state.buildings[other]
+				if building then
+					local bx, by = MapGen.fromIndex(other)
+					local dx, dy = bx - x, by - y
+					if dx * dx + dy * dy <= blast2 then
+						value += building.level
+					end
+				end
+			end
+		end
+		return value
+	end
+	for other, building in state.buildings do
+		if building.slot == slot then
+			local bx, by = MapGen.fromIndex(other)
+			local dx, dy = bx - x, by - y
+			if dx * dx + dy * dy <= blast2 then
+				value += building.level
+			end
+		end
+	end
+	return value
+end
+
 local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Random)
 	if ps.siloCount == 0 or not Buildings.nukesUnlocked(state, ps.slot) then
 		return
@@ -736,17 +792,7 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 			continue
 		end
 
-		local x, y = MapGen.fromIndex(index)
-		local value = 0
-		for other, building in state.buildings do
-			if building.slot == bestSlot then
-				local bx, by = MapGen.fromIndex(other)
-				local dx, dy = bx - x, by - y
-				if dx * dx + dy * dy <= blast2 then
-					value += building.level
-				end
-			end
-		end
+		local value = blastValue(state, bestSlot, index, blast2)
 
 		if value > bestValue then
 			bestValue = value
@@ -872,5 +918,9 @@ function Bots.step(state: GameState, rng: Random)
 		decideNuke(state, ps, rng)
 	end
 end
+
+-- Banc N46 : selection / score sans passer par le rng de decide*.
+Bots.lowestUpgradable = lowestUpgradable
+Bots.blastValue = blastValue
 
 return Bots
