@@ -30,6 +30,56 @@ export type VictoryScreen = typeof(setmetatable({} :: any, VictoryScreen))
 
 local PODIUM = 5
 
+-- N173 : recycle les TextLabel Value du podium. Distinct previewFree (N172,
+-- tuiles miniature). Distinct flagFree (N171, bandes drapeau). Distinct
+-- chatFree (N170, catalogue HUD). Distinct feedFree (N167, fil notify).
+-- Name = "Value" obligatoire (FindFirstChild contrat). Parent = row
+-- (self.rows[i]), pas self.box / hud.feed / featuredPreview. Pas de
+-- UICorner / UIStroke (Value n'en a pas). Pas visual V110 (ne pas
+-- merger 9726). Distinct leftover N152 flame.
+local valueFree: { TextLabel } = {}
+VictoryScreen.valueFree = valueFree
+
+local function parkValue(row: GuiObject)
+	local previous = row:FindFirstChild("Value")
+	if previous and previous:IsA("TextLabel") then
+		if previous.Parent then
+			previous.Parent = nil
+		end
+		valueFree[#valueFree + 1] = previous :: TextLabel
+	end
+end
+
+local function takeValue(row: GuiObject, text: string): TextLabel
+	local n = #valueFree
+	local value: TextLabel
+	if n > 0 then
+		value = valueFree[n]
+		valueFree[n] = nil
+		value.Text = text
+		value.TextColor3 = C.textFaint
+		value.TextSize = T.body
+		value.FontFace = F.bold
+		value.BackgroundTransparency = 1
+		value.AnchorPoint = Vector2.new(1, 0)
+		value.Position = UDim2.new(1, 0, 0, 0)
+		value.Size = UDim2.fromOffset(70, 22)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.ZIndex = 32
+		value.Name = "Value"
+		value.Parent = row
+	else
+		value = Theme.label(row, text, T.body, C.textFaint)
+		value.Name = "Value"
+		value.AnchorPoint = Vector2.new(1, 0)
+		value.Position = UDim2.new(1, 0, 0, 0)
+		value.Size = UDim2.fromOffset(70, 22)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.ZIndex = 32
+	end
+	return value
+end
+
 function VictoryScreen.new(parent: GuiObject): VictoryScreen
 	local self = setmetatable({}, VictoryScreen) :: any
 
@@ -209,6 +259,9 @@ function VictoryScreen.show(
 		local item = ranked[i]
 		if not item then
 			row.Text = ""
+			-- N173 : ligne vide — parker Value s'il existe, sinon un score
+			-- fantôme survit. Pas Destroy. Pas de parcours de self.box.
+			parkValue(row)
 			continue
 		end
 		local info = roster[item.slot]
@@ -217,21 +270,13 @@ function VictoryScreen.show(
 		row.Text = `{i}.  {name}{mark}`
 		row.TextColor3 = if item.slot == mySlot then C.text else Theme.factionColor(item.slot)
 
-		-- On retire l'ancien score AVANT de creer le nouveau : les deux portent
-		-- le meme nom, donc chercher "le precedent" apres coup peut tomber sur
-		-- celui qu'on vient d'ajouter et l'effacer aussitot.
-		local previous = row:FindFirstChild("Value")
-		if previous then
-			previous:Destroy()
-		end
-
-		local value = Theme.label(row, tostring(item.tiles), T.body, C.textFaint)
-		value.Name = "Value"
-		value.AnchorPoint = Vector2.new(1, 0)
-		value.Position = UDim2.new(1, 0, 0, 0)
-		value.Size = UDim2.fromOffset(70, 22)
-		value.TextXAlignment = Enum.TextXAlignment.Right
-		value.ZIndex = 32
+		-- N173 : Parent = nil + push valueFree. Pas Destroy. On parque
+		-- AVANT de reprendre : les deux portent le meme Name, donc
+		-- chercher "le precedent" apres coup peut tomber sur celui
+		-- qu'on vient d'ajouter. Reset Text / TextXAlignment / Name.
+		-- Distinct N172 previewFree. Distinct leftover N152 flame.
+		parkValue(row)
+		takeValue(row, tostring(item.tiles))
 	end
 
 	local mine = if summary then summary[mySlot] else nil
