@@ -7037,6 +7037,39 @@ do
 end
 
 do
+	-- N74 : stripTerritory table.clear in-place. Hashes conservees
+	-- (rawequal), vides, second joueur intact (un buf module partage
+	-- aurait vide le voisin). Recette feel 1e43/a963 N94. Pas
+	-- stepDoomsday (N73) ni scan TILE_COUNT (N75).
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(3103)
+	local a = state:addPlayer(nil, "ClearA", Random.new(107), 0)
+	local b = state:addPlayer(nil, "ClearB", Random.new(108), 0)
+	if not a or not b then
+		fail("stripTerritory clear — spawn impossible")
+	else
+		local borderA, coastA = a.border, a.coast
+		local borderB = b.border
+		if next(borderA) == nil then
+			fail("stripTerritory clear — A sans frontiere avant strip")
+		else
+			ChantierB.stripTerritory(state, a)
+			if a.tiles ~= 0 then
+				fail(`stripTerritory clear — tiles={a.tiles}`)
+			elseif next(a.border) ~= nil or next(a.coast) ~= nil then
+				fail("stripTerritory clear — hashes non vides")
+			elseif not rawequal(borderA, a.border) or not rawequal(coastA, a.coast) then
+				fail("stripTerritory clear — hashes remplacees")
+			elseif next(borderB) == nil then
+				fail("stripTerritory clear — B videe (buf partage)")
+			else
+				print("stripTerritory : table.clear in-place, voisin intact (N74)")
+			end
+		end
+	end
+end
+
+do
 	-- N57 : playerStatsForReplicate recycle. 1 joueur 0 front → champs
 	-- honores, attackTargets nil, next(stats) = ce slot. launchAttack →
 	-- activeAttacks==1. removePlayer → slot absent. Second appel →
