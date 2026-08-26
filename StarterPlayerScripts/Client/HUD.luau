@@ -1276,7 +1276,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- au milieu). Groupement / LayoutOrder / task.delay(4.5) inchanges.
 	-- Distinct de V101/V102 (dirtyQueue, WorldRenderer — autre fichier).
 	-- Distinct de feel N106 (recycle Ground/Border — fermee V112).
-	-- MAX_FEED_ENTRIES=3 inchange. Pas reentrant. Ne pas inventer un
+	-- Overlay Blast recyclee (V113). MAX_FEED_ENTRIES=3 inchange. Pas reentrant. Ne pas inventer un
 	-- pool de TextLabel. FactoryOutput / SiloWarning fermees (V104).
 	-- Feux navire fermes (V105). Wake Transparency fermee (V106).
 	-- Flag pitch fermee (V107). CapitalFlag fermee (V108).
