@@ -36,6 +36,14 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 		return false, "Faction inconnue."
 	end
 
+	-- OF : immunite nucleaire ~5 s apres le spawn.
+	local immunity = Config.SPAWN_NUKE_IMMUNITY or 5
+	local spawnedAt = ps.spawnTick or 0
+	if state.tick < spawnedAt + immunity * Config.TICK_RATE then
+		local left = math.ceil((spawnedAt + immunity * Config.TICK_RATE - state.tick) / Config.TICK_RATE)
+		return false, `Immunite de deploiement : encore {left}s.`
+	end
+
 	local stats = Config.NUKE_STATS[kind]
 	if not stats then
 		return false, "Type de missile inconnu."
@@ -133,8 +141,8 @@ end
 --[[
 	Interception SAM — port OF SAMLauncherExecution.
 
-	Un seul SAM engage chaque missile (OF : exclusivite de cible).
-	Choix = plus proche batterie prete dans SAM_RANGE (OF defaultSamRange 70).
+	Un seul SAM engage chaque missile (: exclusivite de cible).
+	Choix = plus proche batterie prete dans SAM_RANGE (defaultSamRange 70).
 	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean
@@ -199,7 +207,7 @@ end
 --=============================================================================
 
 --[[
-	A mi-parcours, le MIRV libere ses ogives, modele OpenFront : chaque ogive
+	A mi-parcours, le MIRV libere ses ogives, regle CONQUEST : chaque ogive
 	devient un missile a part entiere, avec sa propre cible choisie SUR le
 	territoire de la victime, et chacune peut etre interceptee separement —
 	c'est ce qui rend une batterie SAM precieuse meme contre l'arme ultime.

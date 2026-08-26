@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Marine : debarquements, commerce, retraite en mer (OpenFront).
+	Marine : debarquements, commerce, retraite en mer .
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -436,8 +436,8 @@ end
 	Warships (porte-avions / bases navales) — port OF WarshipExecution.
 
 	Priorité cibles : Transport > Warship > TradeShip.
-	Portée : WARSHIP_TARGET_RANGE (OF 130).
-	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (OF 20).
+	Portée : WARSHIP_TARGET_RANGE (130).
+	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (20).
 	Pas pilotable : orbite autour de la base (design Conquest).
 ]]
 local function stepCarriers(state: GameState)

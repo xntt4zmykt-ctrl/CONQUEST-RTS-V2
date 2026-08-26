@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier 5 — isolation des fronts bateau (OpenFront AttackExecution).
+	Chantier 5 — isolation des fronts bateau (CONQUEST AttackExecution).
 
 	OF : si sourceTile != null, l'attaque ne se combine jamais avec un front terre.
 	seedBeachhead créait / renforçait le même Attack que le land → bug.
