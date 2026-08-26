@@ -228,6 +228,14 @@ check("identite, ere, diplomatie et classement", function()
 		)
 	end
 
+	-- V50 : leftover truncate. Premier update 12 slots, second un seul
+	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
+	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
+	assert(#hud.ranked == 1, "leftover ranked non truncate")
+	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	hud:update(stats, roster)
+
 	hud:setDiplomacy({
 		allies = { [2] = true },
 		incoming = { [3] = true },
@@ -975,6 +983,9 @@ check("accrochage du placement et bascule en amelioration", function()
 	local landing, status = resolve(origin :: number, Config.BUILDING.CITY)
 	assert(status == "exact", `terrain libre : statut {status} au lieu de "exact"`)
 	assert(landing == origin, "terrain libre : le fantome n'est pas sous le curseur")
+	-- V51 : deux resolve successifs, meme tuile / meme status (ctx recycle).
+	local landing2, status2 = resolve(origin :: number, Config.BUILDING.CITY)
+	assert(landing2 == landing and status2 == status, "resolve recycle diverge")
 
 	-- 2. Tuile occupee par un autre type : le clic est reporte a cote au lieu
 	-- d'etre refuse. C'est tout le changement de comportement.
