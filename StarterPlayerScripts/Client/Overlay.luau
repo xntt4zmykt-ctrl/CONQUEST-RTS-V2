@@ -718,9 +718,11 @@ end
 	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Distinct de
 	N115 (camion HV cuisable).
 	N117 : mouvement = `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`
-	(recette visual V65). Plus de lookAt deux Vector3 60 Hz. Roulis navire
-	Angles inchange (apres la compose yaw). Camera inchangee (leftover N118).
-	Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
+	(recette visual V65). Plus de lookAt deux Vector3 60 Hz.
+	N125 : roulis navire `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71,
+	portee pas mergee). Plus de CFrame.Angles 60 Hz. Roues camion leftover
+	N126. Camera N118 deja. Pas de RemoteFunction. HUD / UnitModels /
+	serveur non touches.
 ]]
 local function trackUnit(
 	self: Overlay,
@@ -978,10 +980,16 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- Vector3 60 Hz hors deplacement.
 		-- N117 : mouvement = translation * yaw euler (regard -Z vers la
 		-- cible). `dy` tuile = monde Z. Plus de lookAt deux Vector3.
-		-- Recette visual V65, portee pas mergee. Roulis Angles inchange
-		-- (apres la compose yaw). Extra missile inchange (N98). Camion /
-		-- chantier inchanges (N115 / N113). UnitModels.place inchange.
-		-- Camera inchangee (leftover N118).
+		-- Recette visual V65, portee pas mergee.
+		-- N125 : compose translation*yaw * euler. Plus de CFrame.Angles
+		-- 60 Hz. fromEulerAnglesYXZ(rx, 0, rz) ≡ Angles(rx, 0, rz)
+		-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
+		-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
+		-- Radar / flag / boom inchanges (N124). Yaw inchange (N117).
+		-- Roues camion leftover N126. Immobile : zero compose.
+		-- Recette visual V71, portee pas mergee. Extra missile inchange
+		-- (N98). Camion / chantier inchanges (N115 / N113).
+		-- UnitModels.place inchange. Camera inchangee (N118).
 		local frame
 		if mag <= 0.01 then
 			frame = CFrame.new(worldX, py, worldZ)
@@ -989,7 +997,9 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			frame = CFrame.new(worldX, py, worldZ)
 				* CFrame.fromEulerAnglesYXZ(0, math.atan2(dx, -dy), 0)
 			if not unit.isMissile then
-				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+				local rx = math.sin(now * 1.7 + unit.phase) * 0.018
+				local rz = math.sin(now * 2.1 + unit.phase) * 0.035
+				frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)
 			end
 		end
 		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)

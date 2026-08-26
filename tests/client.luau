@@ -1578,12 +1578,16 @@ check("navires, missiles et interpolation", function()
 	-- continue de lerper.
 	-- N117 : mouvement = fromEulerAnglesYXZ (pas lookAt). Leftover N116
 	-- (immobile) et leftover N103 (lerp sous yaw) restent verts.
+	-- N125 : roulis fromEulerAnglesYXZ (pas CFrame.Angles). Immobile
+	-- (navire 1) : zero compose — leftover N116 doit rester vert.
+	-- Recette visual V71, portee pas mergee.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
-	-- N117 : un second frame sous yaw euler ne casse pas le lerp missile.
+	-- N117 / N125 : un second frame sous yaw+roulis euler ne casse pas
+	-- le lerp missile.
 	local midX = overlay.units[3].currentX
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= midX, "lerp sous yaw euler fige")
