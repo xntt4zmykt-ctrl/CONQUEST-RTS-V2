@@ -22,12 +22,136 @@ local KIND_CARRIER = 3
 local MAX_BFS_NODES = 24000
 
 local scratch = table.create(4, 0)
+-- Pools : findSeaPath est appele a chaque invasion, retraite, et vague
+-- commerciale. Allouer 40 960 octets + tables par appel saturait le GC
+-- sur un shard 8 humains / 10 bots (ISSUE-N31). Recette feel N37, sans
+-- le wrap AimFront.
+local visitBuf = buffer.create(Config.TILE_COUNT)
+local parentScratch: { [number]: number } = {}
+local queueScratch: { number } = table.create(512)
+-- N64 : walk scratch pour reconstruire le trajet. Le tableau rendu au
+-- bateau reste unique (boat.path prend possession). Ne jamais
+-- `return pathWalkBuf` : un second appel aliaserait le trajet du premier.
+-- Recette feel 69f4 N83.
+local pathWalkBuf: { number } = table.create(256)
+-- syncCarriers : table `seen` recyclee (ISSUE-N34). Pas d'alloc par tick.
+local carrierSeen: { [number]: boolean } = {}
+-- stepCarriers : listes recyclees (ISSUE-N39 contrat B). Pas d'alloc par
+-- tick, early-out si 0 carrier ou 0 candidat hostile.
+local carrierBuf = table.create(18)
+local targetBuf = table.create(48)
+-- spawnTradeShips : listes recyclees (ISSUE-N40 contrat A). Pas d'alloc
+-- ports/candidats par vague. Index GameState.portsByTile, pas buildings.
+local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
+local candidateBuf: { number } = table.create(32)
+-- N96 : bateau live recycle (leftover N40/N51). Contrat A free-list.
+-- spawn pop/cree, swap-pop array puis push (N105). path unique (N64)
+-- a chaque spawn — ne pas reutiliser l'ancien tableau. Couvre
+-- transport / trade / carrier. Pool module survit a GameState.new.
+-- Ne pas require depuis GameState (cycle). Ne pas porter retreating
+-- Overlay (feel N56). table.clear du record interdit. Un leftover
+-- _sink = coule immediat.
+type BoatRec = {
+	id: number,
+	slot: number,
+	kind: number,
+	troops: number,
+	x: number,
+	y: number,
+	path: { number },
+	step: number,
+	targetTile: number,
+	homeTile: number?,
+	angle: number?,
+	retreating: boolean?,
+	health: number?,
+	maxHealth: number?,
+	lastShellTick: number?,
+	_sink: boolean?,
+	_sunkUntil: number?,
+}
+local boatFree: { BoatRec } = table.create(8)
+Navy.boatFree = boatFree
+
+local function acquireBoat(
+	id: number,
+	slot: number,
+	kind: number,
+	troops: number,
+	x: number,
+	y: number,
+	path: { number },
+	step: number,
+	targetTile: number,
+	homeTile: number,
+	retreating: boolean?,
+	angle: number?,
+	health: number?,
+	maxHealth: number?,
+	lastShellTick: number?
+): BoatRec
+	local rec = table.remove(boatFree)
+	if rec == nil then
+		rec = {
+			id = id,
+			slot = slot,
+			kind = kind,
+			troops = troops,
+			x = x,
+			y = y,
+			path = path,
+			step = step,
+			targetTile = targetTile,
+			homeTile = homeTile,
+			retreating = retreating,
+			angle = angle,
+			health = health,
+			maxHealth = maxHealth,
+			lastShellTick = lastShellTick,
+		}
+	else
+		rec.id = id
+		rec.slot = slot
+		rec.kind = kind
+		rec.troops = troops
+		rec.x = x
+		rec.y = y
+		rec.path = path
+		rec.step = step
+		rec.targetTile = targetTile
+		rec.homeTile = homeTile
+		rec.retreating = retreating
+		rec.angle = angle
+		rec.health = health
+		rec.maxHealth = maxHealth
+		rec.lastShellTick = lastShellTick
+		rec._sink = nil
+		rec._sunkUntil = nil
+	end
+	return rec
+end
+
+local function despawnBoat(state: GameState, i: number)
+	-- N105 : swap-pop (recette despawnMissile N100). Callers reverse
+	-- while + decrement toujours : l'item swappe venait d'un indice
+	-- plus haut (deja visite). Overlay lit snapshot N51, pas l'ordre
+	-- live. Push boatFree APRES le swap (N96).
+	local boats = state.boats
+	local boat = boats[i]
+	local last = #boats
+	boats[i] = boats[last]
+	boats[last] = nil
+	table.insert(boatFree, boat :: BoatRec)
+end
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
-	local visited = buffer.create(Config.TILE_COUNT)
-	local parent: { [number]: number } = {}
-	local queue = table.create(512)
+	buffer.fill(visitBuf, 0, 0)
+	table.clear(parentScratch)
+	table.clear(queueScratch)
+	local visited = visitBuf
+	local parent = parentScratch
+	local queue = queueScratch
 	local head = 1
 	local explored = 0
 
@@ -53,17 +177,25 @@ function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): {
 		for i = 1, count do
 			local nb = scratch[i]
 			if nb == toTile then
-				local path = { toTile }
+				-- Walk : toTile puis current jusqu'a fromTile exclu.
+				-- Copie inverse dans un tableau neuf — boat.path unique.
+				local walkN = 0
+				walkN += 1
+				pathWalkBuf[walkN] = toTile
 				local node = current
 				while node ~= fromTile do
-					table.insert(path, node)
+					walkN += 1
+					pathWalkBuf[walkN] = node
 					node = parent[node]
 				end
-				local reversed = table.create(#path)
-				for k = #path, 1, -1 do
-					table.insert(reversed, path[k])
+				for wi = #pathWalkBuf, walkN + 1, -1 do
+					pathWalkBuf[wi] = nil
 				end
-				return reversed
+				local out = table.create(walkN)
+				for wi = 1, walkN do
+					out[wi] = pathWalkBuf[walkN - wi + 1]
+				end
+				return out
 			end
 			if buffer.readu8(terrain, nb) == OCEAN and buffer.readu8(visited, nb) == 0 then
 				buffer.writeu8(visited, nb, 1)
@@ -197,7 +329,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
+	local ratio = Config.BOAT_TROOP_RATIO or 0.2
+	local troops = math.floor(ps.troops * ratio * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end
@@ -220,19 +353,10 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	ps.attacksLaunched += 1
 
 	local ox, oy = MapGen.fromIndex(origin)
-	table.insert(state.boats, {
-		id = state:nextId(),
-		slot = slot,
-		kind = KIND_TRANSPORT,
-		troops = troops,
-		x = ox,
-		y = oy,
-		path = path,
-		step = 1,
-		targetTile = targetTile,
-		homeTile = origin,
-		retreating = false,
-	})
+	table.insert(
+		state.boats,
+		acquireBoat(state:nextId(), slot, KIND_TRANSPORT, troops, ox, oy, path, 1, targetTile, origin, false)
+	)
 
 	state:sound("boatLaunch", slot)
 	return true, `Debarquement en route — {troops} troupes.`
@@ -255,7 +379,9 @@ local function resolveLanding(state: GameState, boat)
 	local targetOwner = buffer.readu8(state.owner, tile)
 
 	if targetOwner == boat.slot then
-		applyRetreatMalus(state, boat)
+		-- Arrivee sur notre terre (pas une retraite) : restitution integrale.
+		ps.troops += math.max(0, boat.troops)
+		boat.troops = 0
 		return
 	end
 
@@ -301,11 +427,45 @@ local function countTradeShips(state: GameState): number
 end
 
 local function spawnTradeShips(state: GameState, rng: Random)
-	local ports: { { index: number, slot: number, level: number } } = {}
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.PORT then
-			table.insert(ports, { index = index, slot = building.slot, level = building.level })
+	-- N40 contrat A : early-out cap AVANT flatten ; index portsByTile
+	-- (PORT only, pas _carriersDirty). portsBuf / candidateBuf recycles.
+	-- Loi de tirage inchangee (sort index, poids = level, canTrade embargo).
+	local afloat = countTradeShips(state)
+	if afloat >= Config.MAX_TRADE_SHIPS then
+		return
+	end
+	local ports = portsBuf
+	local indexed = state.portsByTile
+	local n = 0
+	if indexed then
+		for index, info in indexed do
+			n += 1
+			local rec = ports[n]
+			if rec then
+				rec.index = index
+				rec.slot = info.slot
+				rec.level = info.level
+			else
+				ports[n] = { index = index, slot = info.slot, level = info.level }
+			end
 		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.PORT then
+				n += 1
+				local rec = ports[n]
+				if rec then
+					rec.index = index
+					rec.slot = building.slot
+					rec.level = building.level
+				else
+					ports[n] = { index = index, slot = building.slot, level = building.level }
+				end
+			end
+		end
+	end
+	for i = #ports, n + 1, -1 do
+		ports[i] = nil
 	end
 	if #ports < 2 then
 		return
@@ -313,7 +473,6 @@ local function spawnTradeShips(state: GameState, rng: Random)
 	table.sort(ports, function(a, b)
 		return a.index < b.index
 	end)
-	local afloat = countTradeShips(state)
 	for _, source in ports do
 		if afloat >= Config.MAX_TRADE_SHIPS then
 			return
@@ -328,35 +487,27 @@ local function spawnTradeShips(state: GameState, rng: Random)
 		if not armed then
 			continue
 		end
-		local candidates: { number } = {}
+		table.clear(candidateBuf)
 		for i, other in ports do
 			if canTrade(state, source.slot, other.slot) then
 				for _ = 1, other.level do
-					table.insert(candidates, i)
+					table.insert(candidateBuf, i)
 				end
 			end
 		end
-		if #candidates == 0 then
+		if #candidateBuf == 0 then
 			continue
 		end
-		local target = ports[candidates[rng:NextInteger(1, #candidates)]]
+		local target = ports[candidateBuf[rng:NextInteger(1, #candidateBuf)]]
 		local path = Navy.findSeaPath(state, source.index, target.index)
 		if not path or #path > Config.BOAT_MAX_RANGE then
 			continue
 		end
 		local ox, oy = MapGen.fromIndex(source.index)
-		table.insert(state.boats, {
-			id = state:nextId(),
-			slot = source.slot,
-			kind = KIND_TRADE,
-			troops = 0,
-			x = ox,
-			y = oy,
-			path = path,
-			step = 1,
-			targetTile = target.index,
-			homeTile = source.index,
-		})
+		table.insert(
+			state.boats,
+			acquireBoat(state:nextId(), source.slot, KIND_TRADE, 0, ox, oy, path, 1, target.index, source.index)
+		)
 		afloat += 1
 	end
 end
@@ -387,16 +538,32 @@ local function resolveTrade(state: GameState, boat)
 end
 
 local function syncCarriers(state: GameState)
+	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
+	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
+	-- (ISSUE-N34). Recette feel N38, sans AimFront. Spawn : navalBasesBySlot
+	-- (ISSUE-N48 / feel N65), pas le hash. Ciblage obus : N39 (listes
+	-- recyclees, pas 10 Hz nested sur tout state.boats).
+	if not state._carriersDirty then
+		return
+	end
+	state._carriersDirty = false
+
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
-	local seen: { [number]: boolean } = {}
-	for i = #state.boats, 1, -1 do
-		local boat = state.boats[i]
+	table.clear(carrierSeen)
+	local seen = carrierSeen
+	-- N105 : while reverse + swap-pop. Decrement toujours apres despawn
+	-- (et apres continue) : l'item swappe venait d'un indice plus haut.
+	local iSeen = #state.boats
+	while iSeen >= 1 do
+		local boat = state.boats[iSeen]
 		if boat.kind ~= KIND_CARRIER then
+			iSeen -= 1
 			continue
 		end
 		local base = state.buildings[boat.homeTile]
 		if not base or base.kind ~= Config.BUILDING.NAVAL_BASE then
-			table.remove(state.boats, i)
+			despawnBoat(state, iSeen)
+			iSeen -= 1
 			continue
 		end
 		boat.slot = base.slot
@@ -408,26 +575,67 @@ local function syncCarriers(state: GameState)
 			boat.lastShellTick = 0
 		end
 		seen[boat.homeTile] = true
+		iSeen -= 1
 	end
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
-			local x, y = MapGen.fromIndex(index)
-			table.insert(state.boats, {
-				id = state:nextId(),
-				slot = building.slot,
-				kind = KIND_CARRIER,
-				troops = 0,
-				x = x,
-				y = y,
-				path = {},
-				step = 1,
-				targetTile = index,
-				homeTile = index,
-				angle = (index % 360) * math.pi / 180,
-				health = maxHp,
-				maxHealth = maxHp,
-				lastShellTick = 0,
-			})
+	-- N48 : spawn via navalBasesBySlot, pas le hash buildings. Garde
+	-- _carriersDirty (pas un scan 10 Hz). Fallback hash si l'index est nil.
+	-- Recette feel N65, sans AimFront. Un PORT n'est jamais un carrier.
+	if state.navalBasesBySlot then
+		for _, set in state.navalBasesBySlot do
+			for index in set do
+				if not seen[index] then
+					local building = state.buildings[index]
+					if building and building.kind == Config.BUILDING.NAVAL_BASE then
+						local x, y = MapGen.fromIndex(index)
+						table.insert(
+							state.boats,
+							acquireBoat(
+								state:nextId(),
+								building.slot,
+								KIND_CARRIER,
+								0,
+								x,
+								y,
+								{},
+								1,
+								index,
+								index,
+								nil,
+								(index % 360) * math.pi / 180,
+								maxHp,
+								maxHp,
+								0
+							)
+						)
+					end
+				end
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
+				local x, y = MapGen.fromIndex(index)
+				table.insert(
+					state.boats,
+					acquireBoat(
+						state:nextId(),
+						building.slot,
+						KIND_CARRIER,
+						0,
+						x,
+						y,
+						{},
+						1,
+						index,
+						index,
+						nil,
+						(index % 360) * math.pi / 180,
+						maxHp,
+						maxHp,
+						0
+					)
+				)
+			end
 		end
 	end
 end
@@ -460,118 +668,148 @@ local function stepCarriers(state: GameState)
 		boat.y = hy + math.sin(boat.angle) * patrolR
 	end
 
-	-- 2. Shell fire (rate-limited), OF priority
-	for _, carrier in state.boats do
-		if carrier.kind ~= KIND_CARRIER then
-			continue
+	-- 2. Shell fire (rate-limited), OF priority.
+	-- N39 contrat B : une passe pour lister carriers vivants et cibles
+	-- possibles (pools module-level). Early-out si 0 carrier ou aucun
+	-- bateau d'un autre slot. Priorite / areAllied / degats inchanges.
+	-- Pas de spatial hash (contrat A) : ticket separe si le late-game
+	-- le justifie. spawnTradeShips = N40 (index PORT, pas nested buildings).
+	table.clear(carrierBuf)
+	table.clear(targetBuf)
+	for _, boat in state.boats do
+		if boat.kind == KIND_CARRIER then
+			if (boat.health or 1) > 0 then
+				table.insert(carrierBuf, boat)
+			end
+			if (boat.health or 0) > 0 then
+				table.insert(targetBuf, boat)
+			end
+		elseif boat.kind == KIND_TRANSPORT or boat.kind == KIND_TRADE then
+			table.insert(targetBuf, boat)
 		end
-		if (carrier.health or 1) <= 0 then
-			continue
-		end
-		local last = carrier.lastShellTick or 0
-		if state.tick - last < shellRate then
-			continue
-		end
+	end
 
-		local best = nil
-		local bestPri = 99
-		local bestDist = math.huge
+	local hasHostile = false
+	if #carrierBuf > 0 then
+		for _, target in targetBuf do
+			for _, carrier in carrierBuf do
+				if target.id ~= carrier.id and target.slot ~= carrier.slot then
+					hasHostile = true
+					break
+				end
+			end
+			if hasHostile then
+				break
+			end
+		end
+	end
 
-		for _, target in state.boats do
-			if target.id == carrier.id then
+	if hasHostile then
+		for _, carrier in carrierBuf do
+			local last = carrier.lastShellTick or 0
+			if state.tick - last < shellRate then
 				continue
 			end
-			if target.slot == carrier.slot then
-				continue
-			end
-			if state:areAllied(carrier.slot, target.slot) then
-				continue
-			end
 
-			local pri
-			if target.kind == KIND_TRANSPORT then
-				pri = 0
-			elseif target.kind == KIND_CARRIER then
-				if (target.health or 0) <= 0 then
+			local best = nil
+			local bestPri = 99
+			local bestDist = math.huge
+
+			for _, target in targetBuf do
+				if target.id == carrier.id then
 					continue
 				end
-				pri = 1
-			elseif target.kind == KIND_TRADE then
-				pri = 2
-			else
+				if target.slot == carrier.slot then
+					continue
+				end
+				if state:areAllied(carrier.slot, target.slot) then
+					continue
+				end
+
+				local pri
+				if target.kind == KIND_TRANSPORT then
+					pri = 0
+				elseif target.kind == KIND_CARRIER then
+					pri = 1
+				elseif target.kind == KIND_TRADE then
+					pri = 2
+				else
+					continue
+				end
+
+				local dx = carrier.x - target.x
+				local dy = carrier.y - target.y
+				local d2 = dx * dx + dy * dy
+				if d2 > targetR2 then
+					continue
+				end
+				if pri < bestPri or (pri == bestPri and d2 < bestDist) then
+					best = target
+					bestPri = pri
+					bestDist = d2
+				end
+			end
+
+			if not best then
 				continue
 			end
 
-			local dx = carrier.x - target.x
-			local dy = carrier.y - target.y
-			local d2 = dx * dx + dy * dy
-			if d2 > targetR2 then
-				continue
-			end
-			if pri < bestPri or (pri == bestPri and d2 < bestDist) then
-				best = target
-				bestPri = pri
-				bestDist = d2
-			end
-		end
+			carrier.lastShellTick = state.tick
 
-		if not best then
-			continue
-		end
-
-		carrier.lastShellTick = state.tick
-
-		if best.kind == KIND_TRANSPORT then
-			best.troops -= best.troops * transportDmg
-			if best.troops < Config.MIN_BOAT_TROOPS then
-				local owner = state.players[best.slot]
+			if best.kind == KIND_TRANSPORT then
+				best.troops -= best.troops * transportDmg
+				if best.troops < Config.MIN_BOAT_TROOPS then
+					local owner = state.players[best.slot]
+					local defender = state.players[carrier.slot]
+					state:notify("Ton convoi a ete coule en mer.", "bad", best.slot)
+					if defender then
+						state:notify(
+							`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
+							"good",
+							carrier.slot
+						)
+					end
+					state:sound("boatLand")
+					best.troops = 0
+					best._sink = true
+				end
+			elseif best.kind == KIND_TRADE and tradeSink then
 				local defender = state.players[carrier.slot]
-				state:notify("Ton convoi a ete coule en mer.", "bad", best.slot)
+				local owner = state.players[best.slot]
+				state:notify("Un convoi marchand a ete coule.", "bad", best.slot)
 				if defender then
 					state:notify(
-						`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
+						`Ta flotte a pirate un convoi{if owner then ` de {owner.name}` else ""}.`,
 						"good",
 						carrier.slot
 					)
 				end
-				state:sound("boatLand")
-				best.troops = 0
 				best._sink = true
-			end
-		elseif best.kind == KIND_TRADE and tradeSink then
-			local defender = state.players[carrier.slot]
-			local owner = state.players[best.slot]
-			state:notify("Un convoi marchand a ete coule.", "bad", best.slot)
-			if defender then
-				state:notify(
-					`Ta flotte a pirate un convoi{if owner then ` de {owner.name}` else ""}.`,
-					"good",
-					carrier.slot
-				)
-			end
-			best._sink = true
-		elseif best.kind == KIND_CARRIER then
-			best.health = (best.health or 100) - warshipShell
-			if best.health <= 0 then
-				local owner = state.players[best.slot]
-				local defender = state.players[carrier.slot]
-				state:notify("Ton navire de guerre a ete coule.", "bad", best.slot)
-				if defender then
-					state:notify(
-						`Ta flotte a coule un navire ennemi{if owner then ` de {owner.name}` else ""}.`,
-						"good",
-						carrier.slot
-					)
+			elseif best.kind == KIND_CARRIER then
+				best.health = (best.health or 100) - warshipShell
+				if best.health <= 0 then
+					local owner = state.players[best.slot]
+					local defender = state.players[carrier.slot]
+					state:notify("Ton navire de guerre a ete coule.", "bad", best.slot)
+					if defender then
+						state:notify(
+							`Ta flotte a coule un navire ennemi{if owner then ` de {owner.name}` else ""}.`,
+							"good",
+							carrier.slot
+						)
+					end
+					state:sound("boatLand")
+					best._sink = true
 				end
-				state:sound("boatLand")
-				best._sink = true
 			end
 		end
 	end
 
 	-- 3. Remove sunk boats (not carriers tied to base unless health 0)
-	for i = #state.boats, 1, -1 do
-		local boat = state.boats[i]
+	-- N105 : while reverse + swap-pop. Decrement toujours.
+	local iSink = #state.boats
+	while iSink >= 1 do
+		local boat = state.boats[iSink]
 		if boat._sink then
 			if boat.kind == KIND_CARRIER then
 				-- Warship sunk: remove until base respawns next sync (delay via flag)
@@ -582,7 +820,7 @@ local function stepCarriers(state: GameState)
 				local hx, hy = MapGen.fromIndex(boat.homeTile)
 				boat.x, boat.y = hx, hy
 			else
-				table.remove(state.boats, i)
+				despawnBoat(state, iSink)
 			end
 		elseif boat.kind == KIND_CARRIER and boat.health == 0 then
 			local untilTick = boat._sunkUntil or 0
@@ -592,6 +830,7 @@ local function stepCarriers(state: GameState)
 				boat.lastShellTick = state.tick
 			end
 		end
+		iSink -= 1
 	end
 end
 
@@ -602,19 +841,51 @@ function Navy.step(state: GameState, rng: Random)
 		spawnTradeShips(state, rng)
 	end
 
-	for i = #state.boats, 1, -1 do
+	-- N105 : while reverse + swap-pop. Decrement toujours apres despawn
+	-- (et apres continue) : l'item swappe venait d'un indice plus haut.
+	local i = #state.boats
+	while i >= 1 do
 		local boat = state.boats[i]
 		if boat.kind == KIND_CARRIER then
+			i -= 1
 			continue
+		end
+
+		-- N35 : PORT d'arrivee detruit au combat (pas recycle — c'est N32).
+		-- Sans ca le kind==2 reste en mer jusqu'a step > #path, occupe
+		-- MAX_TRADE_SHIPS, puis resolveTrade no-op. Contrat B : couler
+		-- des que buildings[targetTile] n'est plus un PORT. Pas d'or,
+		-- pas de malus vendeur. Capture (transfer) : le PORT existe
+		-- encore, le convoi continue. destSlot = N28 transports, pas ici.
+		if boat.kind == KIND_TRADE then
+			local dest = state.buildings[boat.targetTile]
+			if not dest or dest.kind ~= Config.BUILDING.PORT then
+				despawnBoat(state, i)
+				i -= 1
+				continue
+			end
 		end
 
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then
 			local destOwner = buffer.readu8(state.owner, boat.targetTile)
 			local destLand = state:isLand(boat.targetTile)
-			if destOwner == boat.slot or not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+			-- Cote deja a nous : les troupes debarquent, ce n'est pas une retraite.
+			-- Le malus BOAT_RETREAT_LOSS punirait un succes d'armes combinees.
+			if destOwner == boat.slot then
+				local owner = state.players[boat.slot]
+				if owner then
+					owner.troops += math.max(0, boat.troops)
+				end
+				boat.troops = 0
+				despawnBoat(state, i)
+				i -= 1
+				continue
+			end
+			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
-					table.remove(state.boats, i)
+					despawnBoat(state, i)
+					i -= 1
 					continue
 				end
 			end
@@ -644,8 +915,9 @@ function Navy.step(state: GameState, rng: Random)
 			elseif boat.kind == KIND_TRADE then
 				resolveTrade(state, boat)
 			end
-			table.remove(state.boats, i)
+			despawnBoat(state, i)
 		end
+		i -= 1
 	end
 end
 

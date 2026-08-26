@@ -67,6 +67,17 @@ local HEURISTIC_WEIGHT = 2
 ]]
 local MAX_EXPANDED = 24000
 
+-- N101 : Heap + hashes module (leftover N99). Heap.clear / table.clear
+-- avant chaque recherche — pas Heap.new() ni `= {}`. Le tableau
+-- retourne reste unique (N64 path) : Overlay construit des Parts
+-- dessus, un alias ferait sauter la voie. Distinct de N65
+-- (stationBuf serveur, le client retrace). Distinct de N99 (Heap
+-- Attack pendant la vie).
+local searchHeap = Heap.new()
+local cameFrom: { [number]: number } = {}
+local bestCost: { [number]: number } = {}
+local arrivedBy: { [number]: number } = {}
+
 --=============================================================================
 -- Recherche
 --=============================================================================
@@ -129,19 +140,21 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 
 	local goalX, goalY = MapGen.fromIndex(to)
 
-	local cameFrom: { [number]: number } = {}
-	local bestCost: { [number]: number } = { [from] = 0 }
+	-- Leftover cameFrom / bestCost = trace fantome (banc voies / N101).
+	table.clear(cameFrom)
+	table.clear(bestCost)
+	table.clear(arrivedBy)
+	bestCost[from] = 0
 	-- Delta d'indice par lequel on est arrive sur une case : sert a savoir si
 	-- le pas suivant est un virage.
-	local arrivedBy: { [number]: number } = {}
 
-	local heap = Heap.new()
-	Heap.push(heap, from, 0)
+	Heap.clear(searchHeap)
+	Heap.push(searchHeap, from, 0)
 
 	local expanded = 0
 
-	while not Heap.isEmpty(heap) do
-		local current = Heap.pop(heap)
+	while not Heap.isEmpty(searchHeap) do
+		local current = Heap.pop(searchHeap)
 		if not current then
 			break
 		end
@@ -190,7 +203,7 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 				arrivedBy[neighbor] = delta
 
 				local remaining = math.abs(nx - goalX) + math.abs(ny - goalY)
-				Heap.push(heap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
+				Heap.push(searchHeap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
 			end
 		end
 	end
@@ -230,6 +243,47 @@ export type Run = {
 	horizontal: boolean,
 }
 
+-- N103 : tableau + records Run module (leftover N101). Contrat A —
+-- retour module, Overlay itere sync puis construit des Parts (ne
+-- stocke pas le tableau). Truncate leftover AVANT fill : un leftover
+-- out[i] = troncon fantome (banc N103). Path find reste unique
+-- (N101 / N64). Distinct de N65 (stationBuf serveur). Distinct de
+-- N103 feel historique (Overlay lookAt). Non reentrant.
+local runBuf: { Run } = table.create(8)
+local runRecPool: { Run } = table.create(8)
+RailPath.runBuf = runBuf
+
+local function acquireRun(): Run
+	local last = #runRecPool
+	local rec = runRecPool[last]
+	if rec then
+		runRecPool[last] = nil
+		return rec
+	end
+	return {
+		fromIndex = 0,
+		toIndex = 0,
+		length = 0,
+		horizontal = false,
+	}
+end
+
+local function truncateRuns()
+	for i = #runBuf, 1, -1 do
+		runRecPool[#runRecPool + 1] = runBuf[i]
+		runBuf[i] = nil
+	end
+end
+
+local function pushRun(fromIndex: number, toIndex: number, length: number, horizontal: boolean)
+	local rec = acquireRun()
+	rec.fromIndex = fromIndex
+	rec.toIndex = toIndex
+	rec.length = length
+	rec.horizontal = horizontal
+	runBuf[#runBuf + 1] = rec
+end
+
 --[[
 	Regroupe les cases consecutives de meme direction en tronçons droits.
 
@@ -239,9 +293,10 @@ export type Run = {
 	l'algorithme evite les virages qu'il y a si peu de tronçons a produire.
 ]]
 function RailPath.runs(path: { number }): { Run }
-	local out: { Run } = {}
+	-- Leftover # = voie sur la mauvaise gare (banc N103).
+	truncateRuns()
 	if #path < 2 then
-		return out
+		return runBuf
 	end
 
 	local startIndex = path[1]
@@ -255,12 +310,7 @@ function RailPath.runs(path: { number }): { Run }
 		if currentDelta ~= nil and delta ~= currentDelta then
 			local x1, y1 = MapGen.fromIndex(startIndex)
 			local x2, y2 = MapGen.fromIndex(previous)
-			table.insert(out, {
-				fromIndex = startIndex,
-				toIndex = previous,
-				length = math.abs(x2 - x1) + math.abs(y2 - y1) + 1,
-				horizontal = y1 == y2,
-			})
+			pushRun(startIndex, previous, math.abs(x2 - x1) + math.abs(y2 - y1) + 1, y1 == y2)
 			startIndex = previous
 		end
 
@@ -270,17 +320,14 @@ function RailPath.runs(path: { number }): { Run }
 
 	local x1, y1 = MapGen.fromIndex(startIndex)
 	local x2, y2 = MapGen.fromIndex(previous)
-	table.insert(out, {
-		fromIndex = startIndex,
-		toIndex = previous,
-		length = math.abs(x2 - x1) + math.abs(y2 - y1) + 1,
-		horizontal = y1 == y2,
-	})
+	pushRun(startIndex, previous, math.abs(x2 - x1) + math.abs(y2 - y1) + 1, y1 == y2)
 
-	return out
+	return runBuf
 end
 
 RailPath.TURN_PENALTY = TURN_PENALTY
 RailPath.WATER_PENALTY = WATER_PENALTY
+-- Banc N101 : rawequal Heap module. Pas replique.
+RailPath.searchHeap = searchHeap
 
 return RailPath
