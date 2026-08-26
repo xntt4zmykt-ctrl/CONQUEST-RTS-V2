@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Interface de commandement, calee sur la disposition du jeu de reference
-	(OpenFront) :
+	Interface de commandement, calee sur la disposition CONQUEST
+	 :
 
 	  haut gauche     la carte d'identite : nation, doctrine, territoire
 	  haut droit      la session : chrono, recherche, reglages
@@ -55,7 +55,7 @@ local MAX_FEED_ENTRIES = 3
 local FEED_ENTRY_HEIGHT = 21
 
 --[[
-	Geometrie, disposition du jeu de reference.
+	Geometrie, disposition CONQUEST.
 
 	Les hauteurs sont derivees, jamais recopiees : le panneau de controle, les
 	feuilles et la barre tactile s'empilent depuis la meme reference, donc
@@ -382,7 +382,7 @@ end
 	qu'on y gagne est ailleurs — la structure dit maintenant ce qu'elle fait, et
 	un calque entier peut etre masque, decale ou fondu d'un seul geste.
 
-	Il n'y a plus de calque bas : la disposition OpenFront ne laisse plus rien
+	Il n'y a plus de calque bas : la disposition CONQUEST ne laisse plus rien
 	de permanent en bas d'ecran, et un calque vide aurait juste laisse croire
 	que quelque chose y vit encore.
 
@@ -549,7 +549,7 @@ end
 	Ligne 2 : ce qui part — le curseur d'engagement et le chiffre envoye.
 	Ligne 3 : ce que j'ai — une pastille comptee par type de batiment.
 
-	C'est la forme du jeu de reference : le joueur y pose les yeux entre deux
+	C'est la forme CONQUEST : le joueur y pose les yeux entre deux
 	ordres, sans jamais quitter le bas de l'ecran ou sa main est deja. Les
 	puces sont des contours colores plutot que des fonds pleins : trois blocs
 	opaques cote a cote feraient un semafor, trois contours restent des puces.
@@ -1619,7 +1619,7 @@ end
 --=============================================================================
 
 --[[
-	Le catalogue predefini, modele OpenFront : pas de texte libre, donc pas
+	Le catalogue predefini, regle CONQUEST : pas de texte libre, donc pas
 	d'insulte ni de barriere de langue. Deux temps seulement — on choisit un
 	message, et s'il exige une cible, on la designe dans la liste des nations.
 ]]
