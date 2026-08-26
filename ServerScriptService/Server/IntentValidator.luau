@@ -55,6 +55,9 @@ export type Context = {
 }
 
 local queue: { Intent } = {}
+-- N82 contrat B : pool parallele. flush nil queue[i] (#queue == 0) sans
+-- detruire les records. enqueue reecrit intentPool[n] si present.
+local intentPool: { Intent } = {}
 local lastSequence: { [number]: number } = {} -- userId -> last accepted seq
 local windowStart: { [number]: number } = {}
 local windowCount: { [number]: number } = {}
@@ -299,14 +302,29 @@ function IntentValidator.enqueue(
 		lastSequence[userId] = sequence
 	end
 
-	table.insert(queue, {
-		player = player,
-		userId = userId,
-		slot = slot,
-		sequence = sequence or 0,
-		actionType = actionType,
-		payload = payload,
-	})
+	-- N82 : reecrit un record recycle. payload = reference live (possession
+	-- RemoteEvent — ne pas la pooler). Truncate leftover = flush, pas ici.
+	local n = #queue + 1
+	local rec = intentPool[n]
+	if rec == nil then
+		rec = {
+			player = player,
+			userId = userId,
+			slot = slot,
+			sequence = sequence or 0,
+			actionType = actionType,
+			payload = payload,
+		}
+		intentPool[n] = rec
+	else
+		rec.player = player
+		rec.userId = userId
+		rec.slot = slot
+		rec.sequence = sequence or 0
+		rec.actionType = actionType
+		rec.payload = payload
+	end
+	queue[n] = rec
 	return true, nil
 end
 
@@ -449,14 +467,12 @@ end
 	A appeler en tete de tick, avant bots et systemes.
 ]]
 function IntentValidator.flush(ctx: Context): number
-	if #queue == 0 then
+	local n = #queue
+	if n == 0 then
 		return 0
 	end
 
-	local batch = queue
-	queue = {}
-
-	table.sort(batch, function(a, b)
+	table.sort(queue, function(a, b)
 		if a.userId ~= b.userId then
 			return a.userId < b.userId
 		end
@@ -467,7 +483,8 @@ function IntentValidator.flush(ctx: Context): number
 	end)
 
 	local applied = 0
-	for _, intent in batch do
+	for i = 1, n do
+		local intent = queue[i]
 		-- Revalider presence : elimination entre enqueue et flush.
 		if not ctx.state.players[intent.slot] then
 			bumpRefuse("Eliminated")
@@ -488,11 +505,21 @@ function IntentValidator.flush(ctx: Context): number
 		applyOne(ctx, intent)
 		applied += 1
 	end
+
+	-- N82 contrat B : #queue == 0, records conserves dans intentPool.
+	-- Un Intent fantome ici = double apply (le banc sequence / pending le voit).
+	for i = 1, n do
+		queue[i] = nil
+	end
 	return applied
 end
 
 function IntentValidator.pendingCount(): number
 	return #queue
 end
+
+-- Banc N82 : rawequal record [1], #queue == 0 apres flush. Pas replique.
+IntentValidator.queue = queue
+IntentValidator.intentPool = intentPool
 
 return IntentValidator

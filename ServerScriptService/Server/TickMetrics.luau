@@ -42,6 +42,26 @@ local totals = {
 	maxDeltaBytes = 0,
 	maxTickMs = 0,
 }
+-- N81 : 1 record + 2 nested module-level. formatReport lit tout de suite ;
+-- un 2e snapshot reecrit les champs (pas d'early-out).
+local p95Buf = {
+	changedTiles = 0,
+	deltaBytes = 0,
+	tickMs = 0,
+	dirtyChunks = 0,
+}
+local p99Buf = {
+	changedTiles = 0,
+	deltaBytes = 0,
+	tickMs = 0,
+	dirtyChunks = 0,
+}
+local snapBuf = {
+	samples = 0,
+	totals = totals,
+	p95 = p95Buf,
+	p99 = p99Buf,
+}
 
 local function chunkOf(index: number): number
 	local w = Config.MAP_WIDTH
@@ -139,8 +159,8 @@ end
 function TickMetrics.snapshot()
 	-- N79 : 4 arrays module. N80 contrat B : iterer 1..historyCount, pas
 	-- #history (les Sample restent apres reset). Truncate leftover avant
-	-- percentile — un [601] fantome fausserait p95. Leftover table de
-	-- retour / p95 / p99 → N81.
+	-- percentile — un [601] fantome fausserait p95. N81 : snapBuf +
+	-- p95Buf / p99Buf, pas une table neuve.
 	local n = historyCount
 	for i = 1, n do
 		local sample = history[i]
@@ -154,22 +174,16 @@ function TickMetrics.snapshot()
 	truncateMetric(msBuf, n)
 	truncateMetric(chunksBuf, n)
 
-	return {
-		samples = n,
-		totals = totals,
-		p95 = {
-			changedTiles = percentile(changedBuf, 0.95),
-			deltaBytes = percentile(bytesBuf, 0.95),
-			tickMs = percentile(msBuf, 0.95),
-			dirtyChunks = percentile(chunksBuf, 0.95),
-		},
-		p99 = {
-			changedTiles = percentile(changedBuf, 0.99),
-			deltaBytes = percentile(bytesBuf, 0.99),
-			tickMs = percentile(msBuf, 0.99),
-			dirtyChunks = percentile(chunksBuf, 0.99),
-		},
-	}
+	snapBuf.samples = n
+	p95Buf.changedTiles = percentile(changedBuf, 0.95)
+	p95Buf.deltaBytes = percentile(bytesBuf, 0.95)
+	p95Buf.tickMs = percentile(msBuf, 0.95)
+	p95Buf.dirtyChunks = percentile(chunksBuf, 0.95)
+	p99Buf.changedTiles = percentile(changedBuf, 0.99)
+	p99Buf.deltaBytes = percentile(bytesBuf, 0.99)
+	p99Buf.tickMs = percentile(msBuf, 0.99)
+	p99Buf.dirtyChunks = percentile(chunksBuf, 0.99)
+	return snapBuf
 end
 
 function TickMetrics.reset()
@@ -211,6 +225,7 @@ end
 
 -- Banc N78 : rawequal seenBuf / Sample recycle. Pas replique.
 -- Banc N79 : rawequal des 4 arrays. Banc N80 : historyCount / Sample pool.
+-- Banc N81 : rawequal snapBuf / p95Buf / p99Buf.
 TickMetrics.HISTORY_CAP = HISTORY_CAP
 TickMetrics.history = history
 TickMetrics.historyCount = historyCount
@@ -219,5 +234,8 @@ TickMetrics.changedBuf = changedBuf
 TickMetrics.bytesBuf = bytesBuf
 TickMetrics.msBuf = msBuf
 TickMetrics.chunksBuf = chunksBuf
+TickMetrics.snapBuf = snapBuf
+TickMetrics.p95Buf = p95Buf
+TickMetrics.p99Buf = p99Buf
 
 return TickMetrics
