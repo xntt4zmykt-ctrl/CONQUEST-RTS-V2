@@ -984,6 +984,12 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.targetMarks then
 		self.targetMarks[slot] = nil
+		-- Inbound : sinon l'alliance voit encore le slot recycle comme cible.
+		for marker, target in self.targetMarks do
+			if target == slot then
+				self.targetMarks[marker] = nil
+			end
+		end
 	end
 
 	self.players[slot] = nil
@@ -1288,18 +1294,31 @@ end
 	lequel le front continue de se battre. Une retraite instantanee ferait de
 	chaque engagement un essai sans risque ; le delai rend la decision
 	couteuse a prendre, et les survivants rentrent ensuite au pays.
+
+	L'ordre vise le couple (attaquant, cible), pas le premier front du tableau :
+	terre + tete de pont (`isBeachhead`) coexistents apres BoatFront. Un return
+	au premier match laissait l'autre se battre, et le second geste refusait
+	"deja ordonnee".
 ]]
 function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	local found = false
+	local ordered = false
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
-			if atk.retreatAt then
-				return false, "La retraite est deja ordonnee."
+			found = true
+			if not atk.retreatAt then
+				atk.retreatAt = self.tick + Config.RETREAT_DELAY
+				ordered = true
 			end
-			atk.retreatAt = self.tick + Config.RETREAT_DELAY
-			return true, "Retraite ordonnee : le front se degage."
 		end
 	end
-	return false, "Aucune offensive sur ce front."
+	if not found then
+		return false, "Aucune offensive sur ce front."
+	end
+	if not ordered then
+		return false, "La retraite est deja ordonnee."
+	end
+	return true, "Retraite ordonnee : le front se degage."
 end
 
 --[[
