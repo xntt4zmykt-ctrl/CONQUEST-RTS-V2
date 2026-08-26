@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Menu principal, cale sur l'ecran d'accueil du jeu de reference (OpenFront).
+	Menu principal, cale sur l'ecran d'accueil du direction visuelle CONQUEST.
 
 	Disposition 1:1, adaptee a notre contexte (un serveur, des bots, pas de
 	salons inter-serveurs) :
@@ -14,7 +14,7 @@
 
 	Leurs cartes de maps deviennent nos cartes de modes : chacune montre un
 	apercu reel du terrain genere (graine fixe par mode), son rythme et son
-	remplissage. La ou OpenFront promet une partie qui commence, nous montrons
+	remplissage. La ou d'autres titres du genre promet une partie qui commence, nous montrons
 	exactement ce que le joueur va affronter.
 
 	Le drapeau est dessine a la volee a partir d'un motif et de deux ou trois
@@ -77,26 +77,70 @@ export type MainMenu = typeof(setmetatable({} :: any, MainMenu))
 -- Drapeaux
 --=============================================================================
 
---[[
-	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
-	vocabulaire vexillologique reel avec quatre Frames au maximum.
-]]
-function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+-- N171 : recycle les Frame bandes. Distinct chatFree (N170, catalogue HUD).
+-- Distinct feedFree (N167, fil notify). Distinct drawTerrainPreview leftover
+-- N172 (Destroy miniature conserve). Pas de Theme.corner sur les bandes —
+-- le UICorner vit sur le parent (pastille / cellule). Parent = argument
+-- parent (playerFlag, identityFlag, flagCell, Intro.flagFrame). Pas
+-- chatFree. Pas visual V107 (ne pas merger ee95).
+local flagFree: { Frame } = {}
+MainMenu.flagFree = flagFree
+
+local function parkFlagBands(parent: GuiObject)
 	for _, child in parent:GetChildren() do
 		if child:IsA("Frame") then
-			child:Destroy()
+			if child.Parent then
+				child.Parent = nil
+			end
+			flagFree[#flagFree + 1] = child :: Frame
 		end
 	end
+end
 
-	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
-		local f = Instance.new("Frame")
+local function takeFlagBand(
+	parent: GuiObject,
+	position: UDim2,
+	size: UDim2,
+	color: Color3,
+	rotation: number?
+): Frame
+	local n = #flagFree
+	local f: Frame
+	if n > 0 then
+		f = flagFree[n]
+		flagFree[n] = nil
 		f.BackgroundColor3 = color
 		f.BorderSizePixel = 0
 		f.Position = position
 		f.Size = size
 		f.Rotation = rotation or 0
 		f.Parent = parent
-		return f
+	else
+		f = Instance.new("Frame")
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.Position = position
+		f.Size = size
+		f.Rotation = rotation or 0
+		f.Parent = parent
+	end
+	return f
+end
+
+--[[
+	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
+	vocabulaire vexillologique reel avec quatre Frames au maximum.
+]]
+function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+	-- N171 : Parent = nil + push flagFree. Pas Destroy. Filtre IsA("Frame")
+	-- conserve (UICorner / UIStroke / TextLabel du parent intacts). Reset
+	-- Rotation obligatoire (diagonal -30 vs vertical 0). Distinct N170
+	-- chatFree. Distinct leftover N152 flame. Distinct leftover N172
+	-- drawTerrainPreview. Pas Theme.corner au reuse. Pas de Name.
+	parkFlagBands(parent)
+
+	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
+		return takeFlagBand(parent, position, size, color, rotation)
 	end
 
 	local colors = flag.colors
@@ -265,7 +309,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	gradient.Color = ColorSequence.new(Color3.fromRGB(14, 19, 30), Color3.fromRGB(5, 7, 12))
 	gradient.Parent = backdrop
 
-	-- La trame hexagonale du jeu de reference, traduite en diagonales legeres :
+	-- La trame hexagonale CONQUEST, traduite en diagonales legeres :
 	-- une profondeur de carte sans fausse image de fond.
 	local tacticalGrid = Instance.new("Frame")
 	tacticalGrid.Name = "TacticalGrid"
@@ -585,7 +629,7 @@ end
 --=============================================================================
 
 --[[
-	La grande carte centrale, calque de leur carte de map : apercu reel du
+	La grande carte centrale, apercu de carte CONQUEST : apercu reel du
 	terrain en plein cadre, degrade en bas, pastille de compte a rebours en
 	haut a droite, nom et rythme en bas a gauche, remplissage en bas a droite.
 ]]
@@ -682,7 +726,7 @@ function MainMenu.buildRightColumn(self: MainMenu)
 	right.ZIndex = 51
 	right.Parent = self.stage
 
-	-- La ou OpenFront montre un stream, nous montrons la partie qui tourne
+	-- La ou d'autres titres du genre montre un stream, nous montrons la partie qui tourne
 	-- reellement sur ce serveur : meme case, meme promesse, donnees vraies.
 	local liveChip = Theme.label(right, "EN DIRECT MAINTENANT", T.tiny, C.danger)
 	liveChip.Position = UDim2.fromOffset(0, 0)

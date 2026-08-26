@@ -8,7 +8,7 @@
 	ecrits separement finissent toujours par diverger — le joueur lit alors
 	87.5K sur la carte et 87 500 dans le classement, et se demande lequel ment.
 
-	La regle est celle du jeu de reference : **trois chiffres significatifs**,
+	La regle est celle CONQUEST : **trois chiffres significatifs**,
 	puis un suffixe. C'est ce qui produit 5.50K, 39.8K, 683K, 1.29M — la largeur
 	de la colonne ne bouge jamais, quel que soit l'ordre de grandeur.
 ]]
