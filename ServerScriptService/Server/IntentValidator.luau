@@ -54,6 +54,68 @@ export type Context = {
 	broadcastRoster: (() -> ())?,
 }
 
+-- N87 : Context 14 champs recycle (leftover N82). Un record, pas une map
+-- par slot. args en argument — ne pas require GameState (cycle). Closures
+-- slotOf / reply / refuse / broadcastRoster / now = references copiees,
+-- jamais recrees ici. Payload Intent reste live (N82 — ne pas pooler).
+-- Args nil / vides = champs a nil. Distinct de intentPool (N82).
+local contextBuf: any = {
+	state = nil,
+	matchPhase = nil,
+	matchId = nil,
+	slotOf = nil,
+	doctrineLockAt = nil,
+	now = nil,
+	buildings = nil,
+	navy = nil,
+	nukes = nil,
+	diplomacy = nil,
+	research = nil,
+	reply = nil,
+	refuse = nil,
+	broadcastRoster = nil,
+}
+
+local function resetContext(rec: any)
+	rec.state = nil
+	rec.matchPhase = nil
+	rec.matchId = nil
+	rec.slotOf = nil
+	rec.doctrineLockAt = nil
+	rec.now = nil
+	rec.buildings = nil
+	rec.navy = nil
+	rec.nukes = nil
+	rec.diplomacy = nil
+	rec.research = nil
+	rec.reply = nil
+	rec.refuse = nil
+	rec.broadcastRoster = nil
+end
+
+function IntentValidator.fillContext(args: any, buf: any?): any
+	local rec = buf or contextBuf
+	if args == nil or next(args) == nil then
+		resetContext(rec)
+		return rec
+	end
+	rec.state = args.state
+	rec.matchPhase = args.matchPhase
+	rec.matchId = args.matchId
+	rec.slotOf = args.slotOf
+	rec.doctrineLockAt = args.doctrineLockAt
+	rec.now = args.now
+	rec.buildings = args.buildings
+	rec.navy = args.navy
+	rec.nukes = args.nukes
+	rec.diplomacy = args.diplomacy
+	rec.research = args.research
+	rec.reply = args.reply
+	rec.refuse = args.refuse
+	rec.broadcastRoster = args.broadcastRoster
+	return rec
+end
+
 local queue: { Intent } = {}
 -- N82 contrat B : pool parallele. flush nil queue[i] (#queue == 0) sans
 -- detruire les records. enqueue reecrit intentPool[n] si present.
@@ -521,5 +583,7 @@ end
 -- Banc N82 : rawequal record [1], #queue == 0 apres flush. Pas replique.
 IntentValidator.queue = queue
 IntentValidator.intentPool = intentPool
+-- Banc N87 : rawequal Context. Pas replique.
+IntentValidator.contextBuf = contextBuf
 
 return IntentValidator

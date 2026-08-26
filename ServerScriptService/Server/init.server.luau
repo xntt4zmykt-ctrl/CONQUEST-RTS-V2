@@ -609,23 +609,43 @@ local function refuse(player: Player, reason: string, detail: string?)
 	end
 end
 
+-- N87 : args locaux mutes (pas un {} par appel). Le Context vit dans
+-- IntentValidator.contextBuf. Closures stables (upvalues) — fillContext
+-- les recopie, il n'en cree pas. now = os.clock (fonction), pas un
+-- timestamp fige. Payload RemoteEvent reste live (N82 — ne pas pooler).
+local contextArgs = {
+	state = nil,
+	matchPhase = nil,
+	matchId = nil,
+	slotOf = nil,
+	doctrineLockAt = nil,
+	now = nil,
+	buildings = nil,
+	navy = nil,
+	nukes = nil,
+	diplomacy = nil,
+	research = nil,
+	reply = nil,
+	refuse = nil,
+	broadcastRoster = nil,
+}
+
 local function intentContext()
-	return {
-		state = state,
-		matchPhase = matchPhase,
-		matchId = matchId,
-		slotOf = slotOf,
-		doctrineLockAt = doctrineLockAt,
-		now = os.clock,
-		buildings = Buildings,
-		navy = Navy,
-		nukes = Nukes,
-		diplomacy = Diplomacy,
-		research = Research,
-		reply = reply,
-		refuse = refuse,
-		broadcastRoster = broadcastRoster,
-	}
+	contextArgs.state = state
+	contextArgs.matchPhase = matchPhase
+	contextArgs.matchId = matchId
+	contextArgs.slotOf = slotOf
+	contextArgs.doctrineLockAt = doctrineLockAt
+	contextArgs.now = os.clock
+	contextArgs.buildings = Buildings
+	contextArgs.navy = Navy
+	contextArgs.nukes = Nukes
+	contextArgs.diplomacy = Diplomacy
+	contextArgs.research = Research
+	contextArgs.reply = reply
+	contextArgs.refuse = refuse
+	contextArgs.broadcastRoster = broadcastRoster
+	return IntentValidator.fillContext(contextArgs)
 end
 
 local function enqueueOrReject(player: Player, actionType: string, sequence: any, payload: { [string]: any })

@@ -53,21 +53,43 @@ end
 	elimines partis avant l'ecran. Ignore resultRecorded (disconnect / endMatch
 	deja grave). Ne liste pas les bots.
 ]]
+
+-- N88 : gravure fin de match recyclee (leftover N84/N86). Porteuse +
+-- records + hash seen. stats = reference live (N37 lookupStats), pas un
+-- clone. table.clear vu au debut — un leftover seen d'un Player recycle
+-- = skip XP. Semantique N37 inchangee (vivant + elimines, bots ignores,
+-- resultRecorded saute). Distinct de rosterBuf (N84) et matchUpdateBuf
+-- (N86). Ne pas require GameState (cycle).
+local recordBuf: { RecordTarget } = {}
+local recordRecPool: { RecordTarget } = {}
+local seenBuf: { [Player]: boolean } = {}
+
 function MatchLifecycle.endMatchRecords(
 	slotByPlayer: { [Player]: number }?,
 	players: any,
 	settledHumans: any,
 	resultRecorded: { [Player]: boolean }?
 ): { RecordTarget }
-	local out: { RecordTarget } = {}
-	local seen: { [Player]: boolean } = {}
+	table.clear(recordBuf)
+	table.clear(seenBuf)
+	local n = 0
 	if slotByPlayer then
 		for player, slot in slotByPlayer do
 			if player and not (resultRecorded and resultRecorded[player]) then
 				local stats = MatchLifecycle.lookupStats(players, settledHumans, slot)
 				if stats then
-					table.insert(out, { player = player, slot = slot, stats = stats })
-					seen[player] = true
+					n += 1
+					local rec = recordRecPool[n]
+					if rec == nil then
+						rec = { player = player, slot = slot, stats = stats }
+						recordRecPool[n] = rec
+					else
+						rec.player = player
+						rec.slot = slot
+						rec.stats = stats
+					end
+					recordBuf[n] = rec
+					seenBuf[player] = true
 				end
 			end
 		end
@@ -75,12 +97,22 @@ function MatchLifecycle.endMatchRecords(
 	if settledHumans then
 		for slot, stats in settledHumans do
 			local player = stats and stats.player
-			if player and not seen[player] and not (resultRecorded and resultRecorded[player]) then
-				table.insert(out, { player = player, slot = slot, stats = stats })
+			if player and not seenBuf[player] and not (resultRecorded and resultRecorded[player]) then
+				n += 1
+				local rec = recordRecPool[n]
+				if rec == nil then
+					rec = { player = player, slot = slot, stats = stats }
+					recordRecPool[n] = rec
+				else
+					rec.player = player
+					rec.slot = slot
+					rec.stats = stats
+				end
+				recordBuf[n] = rec
 			end
 		end
 	end
-	return out
+	return recordBuf
 end
 
 export type RosterRec = {
@@ -213,5 +245,8 @@ end
 
 -- Banc N86 : rawequal packet. Pas replique.
 MatchLifecycle.matchUpdateBuf = matchUpdateBuf
+-- Banc N88 : rawequal porteuse + record [1]. Pas replique.
+MatchLifecycle.recordBuf = recordBuf
+MatchLifecycle.recordRecPool = recordRecPool
 
 return MatchLifecycle
