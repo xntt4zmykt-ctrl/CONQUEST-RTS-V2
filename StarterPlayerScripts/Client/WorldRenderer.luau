@@ -568,7 +568,15 @@ function WorldRenderer.step(self: WorldRenderer, dt: number)
 	for _, ripple in self.oceanRipples do
 		local wave = math.sin(time * 1.45 + ripple.phase)
 		ripple.part.Transparency = 0.73 + wave * 0.09
-		ripple.part.CFrame = ripple.base + Vector3.new(wave * 0.45, 0, math.cos(time + ripple.phase) * 0.2)
+		-- V58 : X/Z en nombres depuis base. Plus de Vector3.new 60 Hz
+		-- (base + offset). Un CFrame.new. Feuillage inchange (V59).
+		-- Camion / unites inchanges (V57/V56). 0 glint = zéro alloc.
+		local base = ripple.base
+		ripple.part.CFrame = CFrame.new(
+			base.X + wave * 0.45,
+			base.Y,
+			base.Z + math.cos(time + ripple.phase) * 0.2
+		)
 	end
 	for _, leaf in self.animatedFoliage do
 		leaf.part.CFrame = leaf.base * CFrame.Angles(math.sin(time * 1.2 + leaf.phase) * 0.018, 0, math.cos(time + leaf.phase) * 0.014)
