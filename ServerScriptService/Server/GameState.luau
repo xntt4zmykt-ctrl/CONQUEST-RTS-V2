@@ -952,6 +952,29 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
+	-- Missiles AVANT setOwner : la cible est toIndex(floor(tx), floor(ty)).
+	-- Apres neutralisation, owner==NEUTRAL et on ne distinguerait plus une
+	-- frappe sur le disparu d'une frappe deja visee sur une cote vide.
+	-- Contrat B (ISSUE-N30) : annuler les ogives dont la tuile visee
+	-- appartenait au disparu. Pas de remboursement (ogive deja payee).
+	-- Une frappe visee sur un tiers reste en vol. Le tireur qui part perd
+	-- ses missiles (comme ses fronts). GameState ne require pas Nukes.
+	for i = #self.missiles, 1, -1 do
+		local missile = self.missiles[i]
+		if missile.slot == slot then
+			table.remove(self.missiles, i)
+		else
+			local tx = math.floor(missile.tx)
+			local ty = math.floor(missile.ty)
+			if MapGen.inBounds(tx, ty) then
+				local index = MapGen.toIndex(tx, ty)
+				if buffer.readu8(self.owner, index) == slot then
+					table.remove(self.missiles, i)
+				end
+			end
+		end
+	end
+
 	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
 	-- (deconnexion), jamais dans la boucle de tick.
 	for index = 0, Config.TILE_COUNT - 1 do
@@ -968,11 +991,6 @@ function GameState.removePlayer(self: GameState, slot: number)
 		elseif atk.target == slot then
 			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
-		end
-	end
-	for i = #self.missiles, 1, -1 do
-		if self.missiles[i].slot == slot then
-			table.remove(self.missiles, i)
 		end
 	end
 
