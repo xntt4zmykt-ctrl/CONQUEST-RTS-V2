@@ -18,6 +18,31 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+-- tryAnnex : pools module-level (ISSUE-N21). Meme pattern que findSeaPath N31.
+-- Cap poche 280 inchange ; ocean = abort (enclave terrestre only).
+local annexVisitBuf = buffer.create(Config.TILE_COUNT)
+local annexQueue: { number } = table.create(280)
+local annexPocket: { number } = table.create(280)
+
+-- N67 : cancelOpposingFronts / collapsing recycle (recette N60 + table.clear
+-- hash N61, feel N86). Hash sparse — ne pas iterer #doomedBuf. Truncate
+-- collapsing leftover AVANT traitement (recette N63). Non reentrant —
+-- stepAttacks unique par tick. Distinct de elimBuf (slots) et de
+-- retreatAttack (couple).
+type CollapseRec = { victim: number, captor: number }
+local doomedBuf: { [number]: boolean } = {}
+local collapsingBuf: { CollapseRec } = table.create(8)
+local collapseRecPool: { CollapseRec } = table.create(8)
+ChantierB.doomedBuf = doomedBuf
+-- N73 : liste temporaire du rot cadran (recette visual d3e2 V43).
+-- Array + truncate (recette N63 elimBuf). Distinct de N9 (scan
+-- O(carte) encore) et de N67 (collapsingBuf combat) et de N70
+-- (destroyBuf elimination). Truncate leftover AVANT l'arrachage ;
+-- reset n=0 / truncate a 0 APRES pour qu'un second slot du meme
+-- tick n'arrache pas les tuiles du premier. Pas reentrant.
+-- stepDoomsday unique par tick, mais boucle les slots.
+local stripBuf: { number } = table.create(64)
+ChantierB.stripBuf = stripBuf
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -39,17 +64,48 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local mag, speed = terrainMagSpeed(terrain)
 	local posted = false
 	if defender then
+		-- Index par camp (ISSUE-N36) + grille spatiale (ISSUE-N41) : 9 cellules
+		-- de cote DEFENSE_RADIUS, pas le scan lineaire de bunkersBySlot.
+		-- Le buffer `defense` n'est plus ecrit (Option A) ni lu ici.
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local DEF = Config.BUILDING.DEFENSE
-		for index, building in state.buildings do
-			if building.kind == DEF and building.slot == defender.slot then
-				local bx, by = MapGen.fromIndex(index)
-				local dx, dy = bx - cx, by - cy
-				if dx * dx + dy * dy <= r2 then
-					posted = true
+		local cellR = math.max(1, r)
+		local cells = state.bunkerCells and state.bunkerCells[defender.slot]
+		if cells then
+			local gx = math.floor(cx / cellR)
+			local gy = math.floor(cy / cellR)
+			for dx = -1, 1 do
+				if posted then
 					break
+				end
+				for dy = -1, 1 do
+					local bucket = cells[(gy + dy) * 1024 + (gx + dx)]
+					if bucket then
+						for index in bucket do
+							local bx, by = MapGen.fromIndex(index)
+							local ddx, ddy = bx - cx, by - cy
+							if ddx * ddx + ddy * ddy <= r2 then
+								posted = true
+								break
+							end
+						end
+					end
+					if posted then
+						break
+					end
+				end
+			end
+		else
+			local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+			if bunkers then
+				for index in bunkers do
+					local bx, by = MapGen.fromIndex(index)
+					local dx, dy = bx - cx, by - cy
+					if dx * dx + dy * dy <= r2 then
+						posted = true
+						break
+					end
 				end
 			end
 		end
@@ -98,11 +154,34 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
-	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	buffer.fill(annexVisitBuf, 0, 0)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
+	local visited = annexVisitBuf
+	local queue = annexQueue
+	local pocket = annexPocket
+
+	-- Le combat vivant appelle tryAnnex APRES setOwner : `seed` appartient
+	-- deja a l'attaquant. L'ancienne file `{ seed }` marquait visited puis
+	-- `continue` (owner ~= defender) sans jamais etendre les voisins — BFS
+	-- mort, aucune enclave annexee. On part des voisins defenseur du seed
+	-- (seed = coupe). Si seed est encore defenseur (appel avant setOwner),
+	-- on l'enfile comme avant.
+	buffer.writeu8(visited, seed, 1)
+	if buffer.readu8(state.owner, seed) == defenderSlot then
+		table.insert(queue, seed)
+	else
+		local n0 = MapGen.neighbors(seed, annexScratch)
+		for i = 1, n0 do
+			local nb = annexScratch[i]
+			if buffer.readu8(state.owner, nb) == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
 	local head = 1
-	local pocket: { number } = {}
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -123,8 +202,8 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
+			if owner == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
 				table.insert(queue, nb)
 			end
 		end
@@ -219,14 +298,14 @@ local function enqueueFront(state, atk, index)
 end
 
 function ChantierB.cancelOpposingFronts(state)
-	local doomed: { boolean } = {}
+	table.clear(doomedBuf)
 	for i = 1, #state.attacks do
-		if doomed[i] then
+		if doomedBuf[i] then
 			continue
 		end
 		local a = state.attacks[i]
 		for j = i + 1, #state.attacks do
-			if doomed[j] then
+			if doomedBuf[j] then
 				continue
 			end
 			local b = state.attacks[j]
@@ -235,22 +314,22 @@ function ChantierB.cancelOpposingFronts(state)
 				a.troops -= clash
 				b.troops -= clash
 				if a.troops <= 0 then
-					doomed[i] = true
+					doomedBuf[i] = true
 				end
 				if b.troops <= 0 then
-					doomed[j] = true
+					doomedBuf[j] = true
 				end
 			end
 		end
 	end
 	for i = #state.attacks, 1, -1 do
-		if doomed[i] or state.attacks[i].troops <= 0 then
+		if doomedBuf[i] or state.attacks[i].troops <= 0 then
 			local atk = state.attacks[i]
 			local owner = state.players[atk.attacker]
 			if owner and atk.troops > 0 then
 				owner.troops += atk.troops
 			end
-			table.remove(state.attacks, i)
+			state:releaseAttack(i)
 		end
 	end
 end
@@ -265,11 +344,16 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
-	ps.border = {}
-	ps.coast = {}
+	-- N74 : table.clear in-place. Un `= {}` neuf abandonnait les hashes
+	-- deja vides par setOwner. Un buf module partage serait mute par
+	-- setOwner du premier claimSpawn voisin.
+	table.clear(ps.border)
+	table.clear(ps.coast)
 end
 
 function ChantierB.placeDisk(state, slot, center)
@@ -366,26 +450,40 @@ function ChantierB.install(GameState, Nukes)
 	local origStepAttacks = GameState.stepAttacks
 	function GameState.stepAttacks(self)
 		ChantierB.cancelOpposingFronts(self)
-		local collapsing = {}
+		local collapseN = 0
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
-				table.remove(self.attacks, i)
+			if not attacker then
+				self:releaseAttack(i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				self:returnCommittedTroops(atk)
+				self:releaseAttack(i)
 				continue
 			end
 			if atk.retreatAt and self.tick >= atk.retreatAt then
 				attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par MAX_CAPTURES captures. Voir ISSUE-N1 / ISSUE-N11.
+			-- ISSUE-N38 : un pop dont owner ~= target ne compte plus comme
+			-- une capture. Cap brut MAX_POPS pour qu'un heap 100 % perime
+			-- ne boucle pas 10 000 fois.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
-			local guard = 0
-			while numTiles > 0 and guard < 80 do
-				guard += 1
+			local captures = 0
+			local pops = 0
+			local MAX_CAPTURES = 80
+			local MAX_POPS = 160
+			while numTiles > 0 and captures < MAX_CAPTURES and pops < MAX_POPS do
+				pops += 1
 				local index = Heap.pop(atk.frontier)
 				if not index then
 					break
@@ -394,6 +492,7 @@ function ChantierB.install(GameState, Nukes)
 				if buffer.readu8(self.owner, index) ~= atk.target then
 					continue
 				end
+				captures += 1
 				local attLoss, defLoss, used = ChantierB.attackLogic(self, atk.troops, attacker, defender, index)
 				if attLoss > atk.troops then
 					atk.troops = 0
@@ -416,14 +515,26 @@ function ChantierB.install(GameState, Nukes)
 				end
 			end
 			if defender and defender.tiles > 0 and defender.tiles < self:collapseThreshold() then
-				table.insert(collapsing, { victim = atk.target, captor = atk.attacker })
+				collapseN += 1
+				local rec = collapseRecPool[collapseN]
+				if rec == nil then
+					rec = { victim = 0, captor = 0 }
+					collapseRecPool[collapseN] = rec
+				end
+				rec.victim = atk.target
+				rec.captor = atk.attacker
+				collapsingBuf[collapseN] = rec
 			end
 			if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 				attacker.troops += math.max(0, atk.troops)
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 			end
 		end
-		for _, entry in collapsing do
+		for i = #collapsingBuf, collapseN + 1, -1 do
+			collapsingBuf[i] = nil
+		end
+		for i = 1, collapseN do
+			local entry = collapsingBuf[i]
 			local victim = self.players[entry.victim]
 			if victim and victim.tiles > 0 and victim.tiles < self:collapseThreshold() then
 				if not victim.isBot then
@@ -473,6 +584,14 @@ function ChantierB.install(GameState, Nukes)
 				self.doomUnderSince[slot] = nil
 				continue
 			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une
+			-- armee fantome. On EFFACE les timers : sinon un AFK strip puis
+			-- claimSpawn herite d'un warn deja ecoule et saigne au premier tick.
+			if ps.awaitingSpawn or ps.tiles == 0 then
+				self.doomWarnedAt[slot] = nil
+				self.doomUnderSince[slot] = nil
+				continue
+			end
 			if not self.doomWarnedAt[slot] then
 				self.doomWarnedAt[slot] = elapsed
 				if not ps.isBot then
@@ -498,16 +617,21 @@ function ChantierB.install(GameState, Nukes)
 			if quota <= 0 or ps.tiles <= 0 then
 				continue
 			end
-			local ripped, toStrip = 0, {}
+			local ripped, n = 0, 0
 			for index = 0, Config.TILE_COUNT - 1 do
 				if buffer.readu8(self.owner, index) == slot then
-					table.insert(toStrip, index)
-					if #toStrip >= quota * 4 then
+					n += 1
+					stripBuf[n] = index
+					if n >= quota * 4 then
 						break
 					end
 				end
 			end
-			for _, index in toStrip do
+			for i = #stripBuf, n + 1, -1 do
+				stripBuf[i] = nil
+			end
+			for i = 1, n do
+				local index = stripBuf[i]
 				if ripped >= quota then
 					break
 				end
@@ -518,6 +642,9 @@ function ChantierB.install(GameState, Nukes)
 					self:setOwner(index, NEUTRAL)
 					ripped += 1
 				end
+			end
+			for i = n, 1, -1 do
+				stripBuf[i] = nil
 			end
 		end
 	end
