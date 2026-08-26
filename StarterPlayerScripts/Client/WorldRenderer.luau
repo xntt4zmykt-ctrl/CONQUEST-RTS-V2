@@ -38,6 +38,17 @@ local CHUNK = Config.CHUNK_SIZE
 local OCEAN = Config.TERRAIN.OCEAN
 local NEUTRAL = Config.NEUTRAL_SLOT
 
+-- N95 : applyDelta recycle gains / losses / others (recette visual V48).
+-- Distinct de N2 (skip-si-inchangé payload) et de N72 (dirtyIndexBuf serveur).
+-- Non reentrant — applyDelta synchrone unique par frame. Truncate leftover
+-- AVANT return (vague A rejouerait un splash sur une tuile de vague B).
+-- Early-out count == 0 : truncate a 0, retourner les pools (JAMAIS {}).
+-- Overlay n'appelle pas applyDelta ; Effects lit les listes tout de suite
+-- et n'en conserve pas l'identite. Retourner les pools est licite.
+local gainBuf: { number } = table.create(16)
+local lossBuf: { number } = table.create(16)
+local otherBuf: { number } = table.create(16)
+
 local WorldRenderer = {}
 WorldRenderer.__index = WorldRenderer
 
@@ -338,6 +349,30 @@ function WorldRenderer.chunkKeyAt(self: WorldRenderer, x: number, y: number): nu
 	return buffer.readu8(self.owner, index) * KEY_STRIDE + terrain
 end
 
+-- N104 : rebuildChunk hisse meshKeyAt (recette N85/N102). Upvalues DEDIEES —
+-- ne PAS reutiliser borderTerrain : rebuildChunk appelle buildChunkBorders
+-- APRES le greedy, et celui-ci ecrase ses propres upvalues. Non reentrant
+-- (synchrone, budget 3 sequentiels). Poser meshTerrain / meshOwner AU DEBUT
+-- de rebuildChunk. Meme loi que chunkKeyAt (ocean = nil, sinon
+-- owner * KEY_STRIDE + terrain). Overlay n'appelle pas rebuildChunk.
+-- Pas de RemoteFunction. chunkKeyAt reste (simulate.luau le commente).
+local meshTerrain: buffer? = nil
+local meshOwner: buffer? = nil
+
+local function meshKeyAt(x: number, y: number): number?
+	local terrain = meshTerrain
+	local owner = meshOwner
+	if not terrain or not owner then
+		return nil
+	end
+	local index = MapGen.toIndex(x, y)
+	local kind = buffer.readu8(terrain, index)
+	if kind == OCEAN then
+		return nil
+	end
+	return buffer.readu8(owner, index) * KEY_STRIDE + kind
+end
+
 --=============================================================================
 -- Frontieres
 --=============================================================================
@@ -360,6 +395,77 @@ end
 local BORDER_THICKNESS = 0.8 * Config.WORLD_SCALE
 local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 
+-- N102 : buildChunkBorders hisse ownerOf / emit (recette N85 ctxState).
+-- Non reentrant — rebuildChunk est synchrone, un chunk a la fois. Poser
+-- borderTerrain / borderOwner / borderFolder / borderSurface AU DEBUT
+-- de buildChunkBorders. Un leftover `self` d'un chunk precedent colorerait
+-- le voisin. Overlay n'appelle pas buildChunkBorders. Pas de RemoteFunction.
+-- Ne pas table.clone de BORDER_PASSES. Ne pas recycler les Parts (N106).
+local borderTerrain: buffer? = nil
+local borderOwner: buffer? = nil
+local borderFolder: Folder? = nil
+local borderSurface = 0
+local borderDrawn = 0
+
+local BORDER_PASSES = {
+	{ dx = 0, dy = -1 },
+	{ dx = 0, dy = 1 },
+	{ dx = -1, dy = 0 },
+	{ dx = 1, dy = 0 },
+}
+
+local function ownerOf(x: number, y: number): number?
+	local terrain = borderTerrain
+	local owner = borderOwner
+	if not terrain or not owner then
+		return nil
+	end
+	if x < 0 or x >= W or y < 0 or y >= H then
+		return nil
+	end
+	local index = MapGen.toIndex(x, y)
+	if buffer.readu8(terrain, index) == OCEAN then
+		return nil
+	end
+	local slot = buffer.readu8(owner, index)
+	return if slot == NEUTRAL then nil else slot
+end
+
+local function emit(slot: number, ax: number, ay: number, bx: number, by: number, dx: number, dy: number)
+	local folder = borderFolder
+	if not folder then
+		return
+	end
+	local a = WorldSpace.tileToWorld(ax, ay)
+	local b = WorldSpace.tileToWorld(bx, by)
+	local inset = TILE / 2 - BORDER_THICKNESS / 2
+
+	local horizontal = dy ~= 0
+	local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
+
+	local part = Instance.new("Part")
+	part.Name = "Border"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Color = borderColor(slot)
+	part.Size = if horizontal
+		then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
+		else Vector3.new(BORDER_THICKNESS, 0.12 * Config.WORLD_SCALE, length)
+	part.CFrame = CFrame.new(
+		(a.X + b.X) / 2 + dx * inset,
+		borderSurface,
+		(a.Z + b.Z) / 2 + dy * inset
+	)
+	part.Parent = folder
+	borderDrawn += 1
+end
+
 --[[
 	Trace le contour des territoires d'un chunk.
 
@@ -376,6 +482,9 @@ local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 	long. Une frontiere de cent tuiles coute alors une poignee de Parts au lieu
 	de cent : c'est la meme economie que la fusion gloutonne du sol, appliquee a
 	une dimension de moins.
+
+	N102 : ownerOf / emit / BORDER_PASSES hissees au module (recette N85).
+	Plus de closures ni de table `passes` par chunk sale.
 ]]
 function WorldRenderer.buildChunkBorders(
 	self: WorldRenderer,
@@ -385,53 +494,11 @@ function WorldRenderer.buildChunkBorders(
 	x1: number,
 	y1: number
 ): number
-	local drawn = 0
-	local surface = Config.LAND_HEIGHT + BORDER_LIFT
-
-	-- Proprietaire d'une tuile, ou nil si elle est en mer ou sans maitre : dans
-	-- les deux cas elle ne porte pas de frontiere.
-	local function ownerOf(x: number, y: number): number?
-		if x < 0 or x >= W or y < 0 or y >= H then
-			return nil
-		end
-		local index = MapGen.toIndex(x, y)
-		if buffer.readu8(self.terrain, index) == OCEAN then
-			return nil
-		end
-		local slot = buffer.readu8(self.owner, index)
-		return if slot == NEUTRAL then nil else slot
-	end
-
-	local function emit(slot: number, ax: number, ay: number, bx: number, by: number, dx: number, dy: number)
-		local a = WorldSpace.tileToWorld(ax, ay)
-		local b = WorldSpace.tileToWorld(bx, by)
-		local inset = TILE / 2 - BORDER_THICKNESS / 2
-
-		local horizontal = dy ~= 0
-		local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
-
-		local part = Instance.new("Part")
-		part.Name = "Border"
-		part.Anchored = true
-		part.CanCollide = false
-		part.CanTouch = false
-		part.CanQuery = false
-		part.CastShadow = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
-		part.Color = borderColor(slot)
-		part.Size = if horizontal
-			then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
-			else Vector3.new(BORDER_THICKNESS, 0.12 * Config.WORLD_SCALE, length)
-		part.CFrame = CFrame.new(
-			(a.X + b.X) / 2 + dx * inset,
-			surface,
-			(a.Z + b.Z) / 2 + dy * inset
-		)
-		part.Parent = folder
-		drawn += 1
-	end
+	borderTerrain = self.terrain
+	borderOwner = self.owner
+	borderFolder = folder
+	borderSurface = Config.LAND_HEIGHT + BORDER_LIFT
+	borderDrawn = 0
 
 	--[[
 		Deux balayages : les cotes nord/sud se fusionnent le long des lignes, les
@@ -439,14 +506,7 @@ function WorldRenderer.buildChunkBorders(
 		quatre fois la meme boucle a une permutation d'axe pres — et quatre
 		occasions de se tromper d'indice.
 	]]
-	local passes = {
-		{ dx = 0, dy = -1 },
-		{ dx = 0, dy = 1 },
-		{ dx = -1, dy = 0 },
-		{ dx = 1, dy = 0 },
-	}
-
-	for _, pass in passes do
+	for _, pass in BORDER_PASSES do
 		local alongRow = pass.dy ~= 0
 
 		local outerFrom = if alongRow then cy else cx
@@ -488,7 +548,7 @@ function WorldRenderer.buildChunkBorders(
 		end
 	end
 
-	return drawn
+	return borderDrawn
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
@@ -512,9 +572,11 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	local x1 = math.min(cx + CHUNK - 1, W - 1)
 	local y1 = math.min(cy + CHUNK - 1, H - 1)
 
-	local rects = GreedyMesh.rectangles(function(x, y)
-		return self:chunkKeyAt(x, y)
-	end, cx, cy, x1, y1, self.meshScratch)
+	-- N104 : poser AVANT rectangles. Ne pas partager borderTerrain (N102) :
+	-- buildChunkBorders mute ses upvalues apres le greedy.
+	meshTerrain = self.terrain
+	meshOwner = self.owner
+	local rects = GreedyMesh.rectangles(meshKeyAt, cx, cy, x1, y1, self.meshScratch)
 
 	for _, rect in rects do
 		local terrain = rect.key % KEY_STRIDE
@@ -604,35 +666,59 @@ function WorldRenderer.applyDelta(
 ): (number, { number }, { number }, { number })
 	local count = buffer.len(delta) // 5
 
-	local gains: { number } = {} -- arrachees a une faction par le joueur local
-	local losses: { number } = {} -- perdues par le joueur local
-	local others: { number } = {} -- prises entre tierces factions
+	-- Colonisation du neutre : aucun effet. Prise sur une faction :
+	-- gains si nextOwner == mySlot, losses si previous == mySlot, others sinon.
+	local nG, nL, nO = 0, 0, 0
+	if count > 0 then
+		for i = 0, count - 1 do
+			local offset = i * 5
+			local index = buffer.readu32(delta, offset)
+			if index >= W * H then
+				continue
+			end
 
-	for i = 0, count - 1 do
-		local offset = i * 5
-		local index = buffer.readu32(delta, offset)
-		if index >= W * H then
-			continue
-		end
+			local previous = buffer.readu8(self.owner, index)
+			local nextOwner = buffer.readu8(delta, offset + 4)
 
-		local previous = buffer.readu8(self.owner, index)
-		local nextOwner = buffer.readu8(delta, offset + 4)
+			buffer.writeu8(self.owner, index, nextOwner)
+			self:markTileDirty(index)
 
-		buffer.writeu8(self.owner, index, nextOwner)
-		self:markTileDirty(index)
-
-		if previous ~= NEUTRAL then
-			if nextOwner == mySlot then
-				table.insert(gains, index)
-			elseif previous == mySlot then
-				table.insert(losses, index)
-			else
-				table.insert(others, index)
+			if previous ~= NEUTRAL then
+				if nextOwner == mySlot then
+					nG += 1
+					gainBuf[nG] = index
+				elseif previous == mySlot then
+					nL += 1
+					lossBuf[nL] = index
+				else
+					nO += 1
+					otherBuf[nO] = index
+				end
 			end
 		end
 	end
+	for i = #gainBuf, nG + 1, -1 do
+		gainBuf[i] = nil
+	end
+	for i = #lossBuf, nL + 1, -1 do
+		lossBuf[i] = nil
+	end
+	for i = #otherBuf, nO + 1, -1 do
+		otherBuf[i] = nil
+	end
 
-	return count, gains, losses, others
+	return count, gainBuf, lossBuf, otherBuf
+end
+
+--[[
+	Remplace le buffer owner entier (resync) et salit tous les chunks.
+]]
+function WorldRenderer.applyOwnerSnapshot(self: WorldRenderer, owner: buffer)
+	local len = math.min(buffer.len(owner), buffer.len(self.owner))
+	buffer.copy(self.owner, 0, owner, 0, len)
+	for chunk = 0, self.totalChunks - 1 do
+		self:markChunkDirty(chunk)
+	end
 end
 
 -- Avancement de la construction initiale, entre 0 et 1.
