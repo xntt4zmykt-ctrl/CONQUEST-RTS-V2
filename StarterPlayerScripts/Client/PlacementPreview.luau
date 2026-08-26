@@ -63,6 +63,88 @@ local previewCtx: Placement.Context = {
 }
 PlacementPreview.previewCtx = previewCtx
 
+-- N183 : parkGhost / takeGhost hoistes pour setKind sans Destroy.
+-- Skip Parent nil (deja parke par hide / setKind(nil) puis un
+-- second setKind). Push ghostFree (Model, pas FactionLabels /
+-- buildingFree / ringFree / previewFree / placeRootFree). take
+-- Kind match, Name Ghost, Parent self.root. SetAttribute Kind
+-- apres create (create pose Name = Building{kind}, setKind
+-- ecrase Ghost). Recette leftover N182. Pas merger visual V76
+-- Size rayon. Distinct leftover N152 flame. Distinct leftover
+-- N182 labelFree. Overlay non touche. FactionLabels non touche.
+-- BuildingModels.create construction inchange. destroy()
+-- parkPlaceRoot (N186, enfants laisses, leftover Ghost →
+-- ghostFree au take). Ne pas vider ghostFree. Pas de delay.
+local function parkGhost(self: PlacementPreview, model: Model)
+	if not model.Parent then
+		return
+	end
+	model.Parent = nil
+	local pool = self.ghostFree
+	if not pool then
+		pool = {}
+		self.ghostFree = pool
+	end
+	pool[#pool + 1] = model
+end
+
+local function takeGhost(self: PlacementPreview, kind: number): Model?
+	local free = self.ghostFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last:GetAttribute("Kind") == kind then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand:GetAttribute("Kind") == kind then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+-- N186 : parkPlaceRoot / takePlaceRoot hoistes pour destroy()
+-- + new() sans Destroy du Folder Placement rematch. Skip
+-- Parent nil (deja parke par un second destroy()). Push
+-- placeRootFree (Folder, pas ghostFree / worldFree /
+-- previewFree MainMenu / worldChildFree). take n'importe
+-- quel Folder, Name Placement, Parent parent. Footprint
+-- FindFirstChild reuse, sinon construction inchangee. Ghost
+-- leftover → parkGhost (N183 existant). Recette leftover
+-- N185. Pas merger visual V76. Distinct leftover N152 flame.
+-- Distinct leftover N185 worldFree. Overlay non touche.
+-- WorldRenderer non touche. setKind N183 inchange. euler
+-- N129 inchange. Ne pas vider placeRootFree. Pas de delay.
+local placeRootFree: { Folder } = {}
+
+local function parkPlaceRoot(root: Folder)
+	if not root.Parent then
+		return
+	end
+	root.Parent = nil
+	placeRootFree[#placeRootFree + 1] = root
+end
+
+local function takePlaceRoot(): Folder?
+	local n = #placeRootFree
+	if n == 0 then
+		return nil
+	end
+	local last = placeRootFree[n]
+	placeRootFree[n] = nil
+	return last
+end
+
 function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPreview
 	local self = setmetatable({}, PlacementPreview) :: any
 
@@ -71,26 +153,46 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	self.tile = nil
 	self.model = nil
 
-	local root = Instance.new("Folder")
+	-- N186 : take Folder leftover avant create. Name Placement /
+	-- Parent parent reposes au reuse (rematch init.client).
+	-- Footprint reuse si present. Ghost leftover → ghostFree
+	-- (N183 per-instance, se repeuple au take).
+	local root = takePlaceRoot()
+	if not root then
+		root = Instance.new("Folder")
+	end
 	root.Name = "Placement"
 	root.Parent = parent
 	self.root = root
 
 	-- Disque d'emprise, toujours present : c'est lui qui ancre le fantome au
 	-- sol et rend la tuile visee sans ambiguite.
-	local footprint = Instance.new("Part")
-	footprint.Name = "Footprint"
-	footprint.Anchored = true
-	footprint.CanCollide = false
-	footprint.CanTouch = false
-	footprint.CanQuery = false
-	footprint.CastShadow = false
-	footprint.Shape = Enum.PartType.Cylinder
-	footprint.Material = Enum.Material.Neon
-	footprint.Transparency = 1
-	footprint.Size = Vector3.new(0.3, 10, 10)
-	footprint.Parent = root
+	local existing = root:FindFirstChild("Footprint")
+	local footprint: Part
+	if existing and existing:IsA("Part") then
+		footprint = existing
+		footprint.Transparency = 1
+	else
+		footprint = Instance.new("Part")
+		footprint.Name = "Footprint"
+		footprint.Anchored = true
+		footprint.CanCollide = false
+		footprint.CanTouch = false
+		footprint.CanQuery = false
+		footprint.CastShadow = false
+		footprint.Shape = Enum.PartType.Cylinder
+		footprint.Material = Enum.Material.Neon
+		footprint.Transparency = 1
+		footprint.Size = Vector3.new(0.3, 10, 10)
+		footprint.Parent = root
+	end
 	self.footprint = footprint
+
+	for _, child in root:GetChildren() do
+		if child ~= footprint and child:IsA("Model") and (child.Name == "Ghost" or child:GetAttribute("Kind") ~= nil) then
+			parkGhost(self, child)
+		end
+	end
 
 	return self
 end
@@ -133,56 +235,6 @@ function PlacementPreview.resolve(
 		return resolution.tile, "upgrade"
 	end
 	return resolution.tile, if resolution.tile == tile then "exact" else "snap"
-end
-
--- N183 : parkGhost / takeGhost hoistes pour setKind sans Destroy.
--- Skip Parent nil (deja parke par hide / setKind(nil) puis un
--- second setKind). Push ghostFree (Model, pas FactionLabels /
--- buildingFree / ringFree / previewFree). take Kind match,
--- Name Ghost, Parent self.root. SetAttribute Kind apres create
--- (create pose Name = Building{kind}, setKind ecrase Ghost).
--- Recette leftover N182. Pas merger visual V76 Size rayon.
--- Distinct leftover N152 flame. Distinct leftover N182
--- labelFree. Overlay non touche. FactionLabels non touche.
--- BuildingModels.create construction inchange. destroy()
--- self.root:Destroy inchange. Footprint non poole. Ne pas
--- vider ghostFree. Pas de delay.
-local function parkGhost(self: PlacementPreview, model: Model)
-	if not model.Parent then
-		return
-	end
-	model.Parent = nil
-	local pool = self.ghostFree
-	if not pool then
-		pool = {}
-		self.ghostFree = pool
-	end
-	pool[#pool + 1] = model
-end
-
-local function takeGhost(self: PlacementPreview, kind: number): Model?
-	local free = self.ghostFree
-	if not free then
-		return nil
-	end
-	local n = #free
-	if n == 0 then
-		return nil
-	end
-	local last = free[n]
-	if last:GetAttribute("Kind") == kind then
-		free[n] = nil
-		return last
-	end
-	for i = n - 1, 1, -1 do
-		local cand = free[i]
-		if cand:GetAttribute("Kind") == kind then
-			free[i] = free[n]
-			free[n] = nil
-			return cand
-		end
-	end
-	return nil
 end
 
 --=============================================================================
@@ -297,7 +349,14 @@ function PlacementPreview.hide(self: PlacementPreview)
 end
 
 function PlacementPreview.destroy(self: PlacementPreview)
-	self.root:Destroy()
+	-- N186 : rematch park Folder existant. Pas Destroy. Enfants
+	-- laisses (new() Footprint reuse + leftover Ghost → ghostFree).
+	-- Skip Parent nil (parkPlaceRoot). Pas take (new() deja).
+	-- Pas setKind. Pas Overlay. Pas WorldRenderer. Pas euler
+	-- N129. Pas init.client. Recette leftover N185. Pas merger
+	-- visual V76. Distinct leftover N152 flame. Distinct leftover
+	-- N187 Minimap.destroy.
+	parkPlaceRoot(self.root)
 end
 
 return PlacementPreview

@@ -678,6 +678,14 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(
 	matchPhase = "playing"
 	clientSequence = 0
 
+	-- N186 : preview:destroy() AVANT world:destroy(). Sinon
+	-- parkWorldChildren avale le Folder Placement (nested →
+	-- worldChildFree, pas placeRootFree) et new() recree.
+	-- Ne pas nil preview avant destroy. PlacementPreview.new
+	-- apres WorldRenderer.new conserve plus bas.
+	if preview then
+		preview:destroy()
+	end
 	if world then
 		world:destroy()
 	end

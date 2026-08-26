@@ -1583,6 +1583,10 @@ check("apercu de placement pour chaque batiment", function()
 	-- N152 flame. Pas overlay:clear() ni labels:clear() ici. Check
 	-- etiquettes leftover N182 doit rester vert. Check accrochage
 	-- (setKind CITY deja) doit rester vert.
+	-- N186 : destroy() parkPlaceRoot, pas Destroy. Pas d'appel
+	-- destroy() ici (volerait preview.root aux checks accrochage).
+	-- Leftover N183 (ghostFree) reste au-dessus. WorldRenderer N185
+	-- inchange. setKind N183 inchange. euler N129 inchange.
 	preview:setKind(Config.BUILDING.CITY)
 	local ghostSnap = preview.model
 	assert(ghostSnap ~= nil, "Ghost CITY N183 absent apres setKind")
