@@ -7064,6 +7064,138 @@ do
 end
 
 do
+	-- N81 : gatherSites recycle siteBuf. Spawn (frontiere non vide) →
+	-- DEFENSE #>=1, chaque index dans ps.border, #<=60. Second appel
+	-- → rawequal. table.clear(border) → #==0 (truncate, pas de fuite).
+	-- PORT sans cote → #==0.
+	local state = GameState.new(1082)
+	local ps = state:addPlayer(nil, "SiteA", Random.new(81), 0)
+	if not ps then
+		fail("gatherSites — spawn impossible")
+	else
+		local borderN = 0
+		for _ in ps.border do
+			borderN += 1
+		end
+		if borderN < 1 then
+			fail("gatherSites — frontiere vide au spawn")
+		else
+			local rng = Random.new(82)
+			local first = Bots.gatherSites(state, ps, Config.BUILDING.DEFENSE, rng)
+			local n = 0
+			local foreign = false
+			for _, index in first do
+				n += 1
+				if not ps.border[index] then
+					foreign = true
+				end
+			end
+			if n < 1 or #first < 1 then
+				fail(`gatherSites — DEFENSE vide (n={n} #{#first})`)
+			elseif n > 60 or #first > 60 then
+				fail(`gatherSites — DEFENSE cap depasse (n={n} #{#first})`)
+			elseif foreign then
+				fail("gatherSites — tuile hors frontiere")
+			else
+				local again = Bots.gatherSites(state, ps, Config.BUILDING.DEFENSE, rng)
+				if not rawequal(first, again) then
+					fail("gatherSites — rawequal")
+				else
+					print("gatherSites : DEFENSE frontiere, rawequal, cap 60 (N81)")
+					table.clear(ps.border)
+					local empty = Bots.gatherSites(state, ps, Config.BUILDING.DEFENSE, rng)
+					if #empty ~= 0 then
+						fail(`gatherSites — truncate border fuite (#{#empty})`)
+					else
+						table.clear(ps.coast)
+						local port = Bots.gatherSites(state, ps, Config.BUILDING.PORT, rng)
+						if #port ~= 0 then
+							fail(`gatherSites — PORT sans cote non vide (#{#port})`)
+						else
+							print("gatherSites : truncate border + PORT sans cote (N81)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N82 : stepElimination recycle elimBuf. 1 vivant → length 0,
+	-- second appel rawequal. Strip toutes les tuiles (NEUTRAL, pas
+	-- d'attaque, pas de bateau) → length 1, slot present, players nil.
+	-- Nouvelle instance + 1 vivant → length 0 (truncate inter-instances).
+	local state = GameState.new(1083)
+	local ps = state:addPlayer(nil, "ElimA", Random.new(83), 0)
+	if not ps then
+		fail("elimBuf — spawn impossible")
+	else
+		local first = state:stepElimination()
+		if #first ~= 0 then
+			fail(`elimBuf — vivant elimine (#{#first})`)
+		else
+			local again = state:stepElimination()
+			if not rawequal(first, again) then
+				fail("elimBuf — rawequal")
+			else
+				print("elimBuf : vivant length 0, rawequal (N82)")
+				local goneSlot = ps.slot
+				local toStrip: { number } = {}
+				for index = 0, Config.TILE_COUNT - 1 do
+					if buffer.readu8(state.owner, index) == goneSlot then
+						table.insert(toStrip, index)
+					end
+				end
+				for _, index in toStrip do
+					state:setOwner(index, Config.NEUTRAL_SLOT)
+				end
+				if ps.tiles ~= 0 then
+					fail(`elimBuf — tiles={ps.tiles} apres strip`)
+				else
+					local doomed = state:stepElimination()
+					local n = 0
+					local saw = false
+					for _, slot in doomed do
+						n += 1
+						if slot == goneSlot then
+							saw = true
+						end
+					end
+					if n ~= 1 or #doomed ~= 1 then
+						fail(`elimBuf — length {n}/#{#doomed}, attendu 1`)
+					elseif not saw then
+						fail("elimBuf — slot absent de la liste")
+					elseif state.players[goneSlot] ~= nil then
+						fail("elimBuf — PlayerState encore vivant")
+					else
+						print("elimBuf : strip → length 1, slot disparu (N82)")
+						local other = GameState.new(1084)
+						local alive = other:addPlayer(nil, "ElimB", Random.new(84), 0)
+						if not alive then
+							fail("elimBuf — second spawn impossible")
+						else
+							local leftover = other:stepElimination()
+							local leak = false
+							for _, slot in leftover do
+								if slot == goneSlot then
+									leak = true
+								end
+							end
+							if #leftover ~= 0 or leak then
+								fail(`elimBuf — fuite inter-instances (#{#leftover})`)
+							else
+								print("elimBuf : truncate 1→0 inter-instances (N82)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
