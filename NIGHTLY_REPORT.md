@@ -1,9 +1,9 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 11)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 12)
 
-Déclencheur : ouverture de la **PR #34** (`cursor/analyse-nocturne-du-codebase-350e`) — sequence playing obligatoire, `bunkersBySlot`, specs N43–N45.
+Déclencheur : ouverture de la **PR #36** (`cursor/analyse-nocturne-du-codebase-9975`) — inbound transports/missiles, aura defense coupée, specs N46–N48.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-9975`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#34.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-fd0b`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#36.
 
 ---
 
@@ -15,37 +15,38 @@ Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle 
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #34 (passe 10) : claims vérifiés.** Sequence playing `>= 1` (`ALLOW_UNSEQUENCED_INTENTS=false`), `bunkersBySlot` Option B, lobby ratio/doctrine nil OK. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #36 (passe 11) : claims vérifiés.** Transports inbound `kind==1` restitués 100 % avant `setOwner`, missiles contrat B (`toIndex(floor(tx),floor(ty))`, pas de refund, tiers conservé), `applyDefenseAura` plus appelé. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #34 a documenté (N43, N44, N45 Option A)**. Recettes = hardening 915c / c68a, pas une nouvelle sémantique. Feel n’avait toujours pas les inbound transports/missiles.
+Cette passe a **livré ce que #36 a documenté (N46, N47, N48)**. Recettes = hardening 915c / 1dbe / 69b4, pas une nouvelle sémantique. Feel n’avait toujours pas `requestIsLive`, cadran/colis recycle, ni convois `kind==2`.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #34
+## 2. Revue PR #36
 
-| Claim #34 | Réalité à l’ouverture |
+| Claim #36 | Réalité à l’ouverture |
 |---|---|
-| Playing : sequence entière `>= 1` (N41) | Oui. Lobby `SetAttackRatio` / `ChooseDoctrine` : nil OK. |
-| `attackLogic` lit `bunkersBySlot` (N42) | Oui. pose / destroy / transfer / removePlayer. Capture suit le camp. |
-| Specs N43–N45 | **Corrigés ici.** |
+| Transports inbound restitués (N43) | Oui. `kind==1`, avant `setOwner`, 100 %, pas de require Navy. |
+| Missiles inbound contrat B (N44) | Oui. `toIndex(floor(tx),floor(ty))`, pas de refund, tiers conservé. |
+| `applyDefenseAura` writes mortes (N45 A) | Oui. Index `bunkersBySlot` inchangé. |
+| Specs N46–N48 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27/#30/#31/#33 hardening, #19/#21/#22/#24/#26/#28/#29/#32/#34 feel. **#34 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30←#31←#33) reste distincte. Hardening 69b4 (convois `kind==2`) n’est pas encore une PR listée ici au moment du fetch.
+PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27/#30/#31/#33/#35 hardening, #19/#21/#22/#24/#26/#28/#29/#32/#34/#36 feel. **#36 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30←#31←#33←#35) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N43–N45 du rapport #34.
+Feel #19 inchangé. Pas de réinvention : N46–N48 du rapport #36.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| Transports inbound non restitués (N43) | `GameState.luau` | `removePlayer` détruisait seulement `boat.slot == departing`. Un transport ennemi vers la côte survivait ; après `setOwner` → NEUTRAL, `Navy.step` ne retraite pas et `resolveLanding` pose une tête de pont hors `MAX_ACTIVE_ATTACKS`. Recette 915c : `kind==1`, **avant** `setOwner`, restitution 100 %, pas `require Navy`. |
-| Missiles inbound vs slot recyclé (N44) | `GameState.luau` | `Nukes.step` explose sur `tx, ty` sans re-vérifier le propriétaire. Kick → `addPlayer` recycle → `findSpawn` dans le splash. Recette c68a contrat B : `toIndex(floor(tx),floor(ty))`, pas de refund, tiers conservé. |
-| `applyDefenseAura` writes mortes (N45 A) | `GameState.luau`, `ChantierB.luau` | Disque `DEFENSE_RADIUS=30` → jusqu’à 3721 `readu8`+`writeu8` par pose/destroy. Après `install()`, `attackLogic` lit `bunkersBySlot`, pas le buffer. Appels retirés ; fonction conservée pour `tileCost` hors install. |
+| `Diplomacy.request` bloqué par une inverse périmée (N46) | `Diplomacy.luau` | `accept` refuse déjà une expiry et **return false sans enfiler**. `Bots.step` tourne **avant** `Diplomacy.step`. Recette 915c : `requestIsLive` ; inverse live → `accept` ; périmée → clear + enfiler. **`accept` / `areAllied` non touchés.** |
+| Cadran / colis au recycle (N47) | `GameState.luau` | `doomWarnedAt` / `doomUnderSince` indexés par slot ; `tradeDeliveries` par tuile (`delivery.slot` = payeur). Recette 1dbe : purge **après** destroy / inbound boats-missiles / `setOwner` ; ceinture `addPlayer`. `stepDoomsday` inchangé. |
+| Convoi marchand inbound (N48) | `GameState.luau` | `kind==2` d’autrui survivait ; JoinRequest + PORT sur la même tuile → **les deux camps encaissent**. Recette 69b4 contrat B : couler avant `setOwner` via `owner[targetTile]`, pas d’or, pas de malus vendeur, tiers conservé. Pas de require Navy. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), `Diplomacy.request` inverse périmée (N46), cadran/colis recycle (N47), convoi marchand inbound (N48), bateau allié = retraite 25 % (N10.8 design).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), `retreatBoats` / `targetSlot` (N49), `findSpawn` splash (N50), convoi vs PORT détruit au combat (N51), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK (cadran non effacé si `tiles==0`).
 
 ---
 
@@ -59,79 +60,81 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 
 - **Combat vivant** = `ChantierB.stepAttacks`, pas le corps de `GameState.stepAttacks`.
 - **Vérité d’équilibrage** = `ChantierB.apply(Config)` après `install()`, pas `Config.luau` seul.
-- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`.
+- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert ; hardening N29).
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **AimFront wrap** = re-visée du front terre du couple ; jamais `isBeachhead`.
 - **`tryAnnex`** = BFS depuis les voisins défenseur du seed déjà capturé ; océan abort ; pool N37-like.
 - **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, pas un scan 10 Hz.
 - **Posted bunker** = index `bunkersBySlot`, pas le hash `buildings` ni le buffer `defense` (écritures coupées, N45).
-- **Inbound `removePlayer`** = transports `kind==1` restitués 100 % + missiles contrat B, **avant** `setOwner`. Bateaux/missiles **du** partant détruits.
+- **Inbound `removePlayer`** = diplo + transports `kind==1` (100 %) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`. Bateaux/missiles **du** partant détruits.
+- **`Diplomacy.request`** = inverse live → acceptation ; inverse périmée → clear + enfiler (plus de silence d’un tick).
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N46–N48)
+## 5. Issues worker-ready (nouveaux, N49–N51)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N32/N34/N36–N45 = faits. N27 = doc only. N35 restant écritures → **N45 fait**.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N32/N34/N36–N48 = faits. N27 = doc only.
 
 ---
 
-### ISSUE-N46 — `Diplomacy.request` bloqué par une inverse périmée (feel)
+### ISSUE-N49 — `retreatBoats` ignore un flip de côte (feel)
 
-**Priorité :** P2 diplomatie / bots. Déjà livré sur hardening 915c / PR #31 ; **absent de la ligne feel**.
+**Priorité :** P2 combat / comptabilité navale. Spécifié sur hardening 915c (N28 restant) ; **absent de la ligne feel**. Distinct de N43 (inbound `removePlayer` déjà fermé) et de N10.8 (malus allié en mer).
 
-**Problème :** `Diplomacy.request` voit `requests[to][from]` et appelle `accept`. `accept` refuse déjà une expiry (`tick >= expiry`) et **return false sans enfiler** la nouvelle demande. `Bots.step` tourne **avant** `Diplomacy.step` : une proposition inverse périmée reste dans `requests[]` ce tick. 1 tick (ou 12 pour une tribu) de diplomatie bloquée — même classe que `areAllied` / `viewFor`.
+**Problème :** `Navy.retreatBoats(state, slot, targetOwner)` filtre `buffer.readu8(owner, boat.targetTile) == targetOwner`. Un transport n’a **pas** de `targetSlot` au `launchInvasion`. Conséquences :
 
-Feel a le garde `accept` (passe 4) mais **pas** le `requestIsLive` dans `request`. Hardening 915c : si inverse périmée → `theirs[from] = nil` puis enfiler.
+1. `retreatAttack(A, B)` ne rappelle **pas** une invasion si la côte a déjà changé de main (neutre, tiers) — les troupes restent en mer vers un quai qui n’est plus B.
+2. Le wrapper `SystemsBootstrap.retreatAttack` appelle `retreatBoats` même si `origRetreat` a dit « déjà ordonnée » : un 2e geste peut encore rappeler des bateaux tardifs.
 
-**Pourquoi 20K CCU :** 18 factions Classique, bots qui se proposent en boucle. Un tick de silence diplomatique à chaque expiration croisée fausse les pactes late-game (et donc les fronts autorisés).
+**Pourquoi 20K CCU :** late-game invasions + flip de côte le même tick que la retraite. Sans `targetSlot`, la retraite est une lecture de carte, pas une intention.
 
 **Worker :**
 
-1. Porter la recette 915c, ne pas inventer. Extraire `requestIsLive(state, expiry) = typeof(expiry)=="number" and state.tick < expiry` (true legacy). Dans `Diplomacy.request`, si inverse présente et live → `accept` ; si périmée → clear + enfiler la nouvelle. Ne **pas** signer un pacte sur une expiry.
-2. Inverse **vivante** : toujours acceptation (croisement).
-3. Test : B→A enfilée, `requests[B][A]=0`, `tick=1`, `request(A,B)` OK, pacte **non** signé, `requests[A][B]` posé, inverse B→A absente. Second test : inverse live → pacte signé. Banc 6000 ticks vert.
-4. Fichiers : `Diplomacy.luau`, `tests/simulate.luau`. Ne pas toucher `accept` / `areAllied` dans le même PR.
+1. Stocker `targetSlot` (faction visée au launch) sur le transport dans `Navy.launchInvasion`.
+2. `retreatBoats` filtre `boat.targetSlot == targetOwner` (fallback `owner[targetTile]` si le champ manque — bateaux déjà en mer).
+3. Test : invasion en mer vs B → flip de la côte à un tiers → `retreatAttack(A, B)` rappelle le transport. Second test : wrapper 2e geste — documenter si les bateaux tardifs doivent partir.
+4. Fichiers : `Navy.luau` (`launchInvasion`, `retreatBoats`), éventuellement `SystemsBootstrap.retreatAttack`, `tests/simulate.luau`.
 
-**Contraintes :** server-authoritative. Feel apply immédiat inchangé. Recette = 915c. Ne pas mixer avec N19 (embargo allié).
+**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N33). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % N43). Recette = hardening N28 restant. **N49 feel ≠ N28 feel historique (RequestSnapshot mort, déjà ouvert).**
 
 ---
 
-### ISSUE-N47 — Cadran `doomWarnedAt` / colis `tradeDeliveries` au recycle (feel)
+### ISSUE-N50 — `findSpawn` ignore splash / fallout d’une frappe tiers (feel)
 
-**Priorité :** P2 slot recyclé. Déjà livré sur hardening 1dbe / PR #30 ; **absent de la ligne feel**.
+**Priorité :** P3 nucléaire / spawn. Reste du contrat C (hardening N33). Contrat B (ogive visée sur le disparu) = **N44 fait**.
 
-**Problème :** `removePlayer` feel purge diplo inbound + transports/missiles (N43/N44) mais **pas** `doomWarnedAt` / `doomUnderSince` (indexés par slot, créés par `ChantierB.new`) ni `tradeDeliveries` (indexés par tuile, `delivery.slot` = payeur). `Trade.step` tourne **avant** `stepElimination`. Un `JoinRequest` entre deux ticks recycle le slot : l’héritier hérite warn/drain/rot, ou une usine reposée sur la même tuile encaisse le colis du disparu.
+**Problème :** une frappe **déjà visée sur un voisin** dont le cratère recouvre l’ancien capital / le `SPAWN_RADIUS` de `findSpawn`. `addPlayer` choisit un disque terrestre libre, sans lire `state.missiles` ni `state.fallout`. L’héritier spawn, `Nukes.step` explose, SAM de l’héritier n’existait pas au `engaged`.
 
-**Pourquoi 20K CCU :** 8 humains / shard, déconnexions lobby. Doomsday drain sur un spawn neuf = wipe hors intention. Or fantôme = comptabilité cassée.
+**Pourquoi 20K CCU :** moins chaud que N44 (il faut un voisin sous missile + spawn coincé dans le rayon). Distinct du contrat B déjà livré (`nuke third-party` doit rester vert).
 
 **Worker :**
 
-1. Porter 1dbe, ne pas inventer. Dans `removePlayer`, **après** destroy buildings / inbound boats-missiles / `setOwner` : `doomWarnedAt[slot]=nil`, `doomUnderSince[slot]=nil` ; pour chaque `tradeDeliveries[index]` si `delivery.slot==departing` alors nil ; `tradeCooldowns[index]` nil si plus de bâtiment.
-2. Ne pas changer `stepDoomsday` / `Doomsday` / `TRADE_GOLD_*`.
-3. Test : poser `doomWarnedAt[B]=999`, `removePlayer(B)`, `addPlayer` recycle → cadran nil. Colis `tradeDeliveries[usineB]` → nil après `removePlayer(B)`. Banc 6000 ticks vert.
-4. Fichiers : `GameState.luau`, `tests/simulate.luau`. Ne pas mixer avec N9 (`stepDoomsday` O(TILE_COUNT)) ni N48 (navire trade, pas colis terrestre).
+1. Ne **pas** rouvrir le contrat B. Options : (C1) `findSpawn` refuse un centre dont un missile en vol a `toIndex(floor(tx),floor(ty))` à distance `NUKE_STATS[kind].radius` (ogive : `missile.radius`) ; (C2) `findSpawn` refuse `state.fallout[index] > tick` ; (C3) documenter « le territoire, pas le joueur » pour le splash tiers.
+2. Test : A tire sur C (capitale), `removePlayer(B)`, forcer le spawn de l’héritier dans le rayon (tuiles libres), `Nukes.step`. Assert selon C1/C2/C3. `nuke third-party` inchangé.
+3. Fichiers : `GameState.findSpawn` / `addPlayer`, éventuellement `Nukes`, `tests/simulate.luau`.
 
-**Contraintes :** server-only. Feel inchangé. Recette = 1dbe.
+**Contraintes :** ne pas annuler une frappe tiers (régression N44). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Recette = hardening N33. **N50 feel ≠ N33 feel historique (`BOAT_LANDING_BONUS` mort, toujours ouvert).**
 
 ---
 
-### ISSUE-N48 — Convoi marchand inbound vers le port d’un disparu (feel)
+### ISSUE-N51 — Convoi vs PORT détruit au combat (cap `MAX_TRADE_SHIPS`) (feel)
 
-**Priorité :** P2 économie / slot recyclé. Spécifié sur hardening c68a (N32) ; **livré sur hardening 69b4** (contrat B, coulé avant `setOwner`) ; **absent de la ligne feel**. Distinct de N47 (colis terrestre `tradeDeliveries`).
+**Priorité :** P3 économie / congestion. Reste de N48 hors recycle. Spécifié sur hardening 69b4 (N35).
 
-**Problème :** `removePlayer` détruit les bâtiments **du** disparu, puis laisse les `kind==2` (trade) d’**autrui** en mer. `resolveTrade` no-op si le port d’arrivée a disparu — jusqu’ici anodin. Un `JoinRequest` recycle + `placeBuilding(PORT)` sur **la même tuile** avant l’arrivée : `destination.slot` est l’héritier, `canTrade` passe, **les deux camps encaissent**. Le convoi occupe aussi `MAX_TRADE_SHIPS` jusqu’à l’arrivée.
+**Problème :** N48 coule le convoi inbound au **recycle de slot**. Si le PORT d’arrivée est **détruit au combat** (`destroyBuilding` / capture) **sans** `removePlayer`, le `kind==2` reste en mer jusqu’à `step > #path`, puis `resolveTrade` no-op (bâtiment absent). Il occupe `MAX_TRADE_SHIPS` (24) pendant tout le transit. Pas d’or fantôme (pas de rebuild du même tick par un héritier — ça, N48 l’a fermé).
 
-**Pourquoi 20K CCU :** disconnect lobby 8 humains + rebuild port sur l’ancienne côte. Or fantôme + congestion `MAX_TRADE_SHIPS`.
+**Pourquoi 20K CCU :** late-game raids de ports + 24 slots globaux. Un camp peut saturer le cap avec des convois morts. Distinct de N20 (gold HUD) et du contrat B recycle.
 
 **Worker — choisir UNE option :**
 
-1. **(A)** stocker `destSlot` au spawn, `resolveTrade` exige `destination.slot == destSlot` ; **(B)** `removePlayer` coule les trade ships dont `owner[targetTile]` / bâtiment port == disparu **avant** `destroyBuilding` ; **(C)** documenter le paiement à l’héritier comme volontaire.
-2. Si A ou B : pas de gold à l’héritier. Ne pas taxer le vendeur (le convoi n’est pas une retraite).
-3. Test : convoi A→port B → `removePlayer(B)` → `addPlayer` recycle → reposer un PORT sur la même tuile → `Navy.step` jusqu’à arrivée. Assert : or héritier inchangé (A/B) **ou** commentaire + assert volontaire (C). Second test : convoi A→C, B part, or A et C versés.
-4. Fichiers : `Navy.luau` (`spawnTradeShips`, `resolveTrade`) et/ou `GameState.removePlayer`, `tests/simulate.luau`.
+1. **(A)** stocker `destSlot` au spawn, `resolveTrade` exige `destination.slot == destSlot`, et `Navy.step` coule dès que `buildings[targetTile]` n’est plus un PORT ; **(B)** `Navy.step` coule tout `kind==2` dont le PORT d’arrivée a disparu (pas d’attente fin de path) ; **(C)** documenter la congestion comme volontaire.
+2. **Recette livrée sur hardening fd1e / PR #37 = option B.** Dans `Navy.step`, avant resolveLanding : si `kind==TRADE` et `buildings[targetTile]` n’est plus un PORT → `table.remove`. Capture (`transferBuilding`) : le PORT existe encore → le convoi continue. Pas d’or, pas de malus vendeur.
+3. Si A ou B : pas d’or. Ne pas taxer le vendeur. Ne pas recâbler N48 (recycle déjà coulé dans `removePlayer`).
+4. Test : convoi A→port B, `destroyBuilding(portB)` **sans** `removePlayer`, `Navy.step`. Assert : plus de `kind==2` (A/B) **ou** commentaire + assert volontaire (C). Second test : capture du PORT (transfer) → convoi survit. Troisième : N48 recycle toujours vert.
+5. Fichiers : `Navy.luau` (`Navy.step` ; ne pas toucher `spawnTradeShips` si B), `tests/simulate.luau`.
 
-**Contraintes :** pas de `require(Navy)` depuis GameState (si purge dans `removePlayer`, filtrer `kind==2` comme `kind==1`). Ne pas toucher `TRADE_GOLD_*`. Ne pas mixer avec N43 (transports `kind==1` déjà livrés) ni N47 (colis terrestre). Recette = 69b4, pas une nouvelle sémantique. Pas de RemoteFunction.
+**Contraintes :** pas de `require(Navy)` depuis GameState. Ne pas toucher `TRADE_GOLD_*`. Ne pas mixer avec N49 `targetSlot` transports (champs distincts : `destSlot` convoi ≠ `targetSlot` invasion). Pas de RemoteFunction. Recette = **fd1e / PR #37**, pas une nouvelle sémantique. **N51 feel ≠ N35 feel historique (aura, déjà fait).**
 
 ---
 
@@ -143,7 +146,7 @@ Feel a le garde `accept` (passe 4) mais **pas** le `requestIsLive` dans `request
 | N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
-| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap) |
+| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas) |
 | N6 | DataStore debounce / retry / merge additif | P2 | ouvert (`math.max` perd les +1 concurrents) |
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert |
@@ -181,14 +184,17 @@ Feel a le garde `accept` (passe 4) mais **pas** le `requestIsLive` dans `request
 | N40 | Éliminés skip `Persistence.record` | P1 | **fait** passe 9 |
 | N41 | Sequence `nil` bypass idempotence | P2 | **fait** passe 10 |
 | N42 | `attackLogic` index bunkers | P1 | **fait** passe 10 |
-| N43 | Transports inbound `removePlayer` (feel) | P2 | **fait** cette passe (port 915c) |
-| N44 | Missiles inbound vs slot recyclé | P2 | **fait** cette passe (port c68a) |
-| N45 | `applyDefenseAura` writes mortes | P3 | **fait** cette passe (Option A) |
-| N46 | `Diplomacy.request` inverse périmée | P2 | **nouveau** (port 915c) |
-| N47 | Cadran / colis recycle feel | P2 | **nouveau** (port 1dbe) |
-| N48 | Convoi marchand inbound | P2 | **nouveau** (port 69b4 / spec c68a N32) |
+| N43 | Transports inbound `removePlayer` (feel) | P2 | **fait** passe 11 |
+| N44 | Missiles inbound vs slot recyclé | P2 | **fait** passe 11 |
+| N45 | `applyDefenseAura` writes mortes | P3 | **fait** passe 11 |
+| N46 | `Diplomacy.request` inverse périmée | P2 | **fait** cette passe (port 915c) |
+| N47 | Cadran / colis recycle feel | P2 | **fait** cette passe (port 1dbe) |
+| N48 | Convoi marchand inbound | P2 | **fait** cette passe (port 69b4) |
+| N49 | `retreatBoats` / `targetSlot` après flip | P2 | **nouveau** (port hardening N28 restant) |
+| N50 | `findSpawn` splash / fallout | P3 | **nouveau** (port hardening N33) |
+| N51 | Convoi vs PORT détruit au combat | P3 | **nouveau** (port hardening N35) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -258,15 +264,21 @@ nuke inbound : ogive annulee, pas de remboursement, heritier intact
 nuke third-party : frappe visee sur un tiers conservee
 nuke attacker leave : missiles du tireur detruits
 defense aura : buffer non ecrit, index pose/destroy OK
+request stale reverse : proposition perimee ignoree, nouvelle demande enfilee
+request live reverse : croisement vivant signe le pacte
+doomsday recycle : timers cadran purges au recycle de slot
+colis recycle : colis / cooldown purges au recycle de slot
+trade inbound : convoi coule, pas d'or a l'heritier
+trade third-party : convoi A→C conserve, or verse
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.36 p95TickMs=1.17
+metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.37 p95TickMs=1.17
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur. N43–N45 sont server-only : banc client inchangé.
+Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur. N46–N48 sont server-only : banc client inchangé.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass11.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass12.log`
 
 Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live).
 
@@ -274,6 +286,6 @@ Studio / client Roblox réel : non exercé dans cet environnement (pas de DataMo
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement). `bunkersBySlot` est un champ d’état, pas un module. N43/N44 n’ajoutent **pas** de `require Navy` / `require Nukes` depuis `GameState`.
+Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement). `bunkersBySlot` est un champ d’état, pas un module. N46 n’ajoute **pas** de require. N47/N48 n’ajoutent **pas** de `require Navy` / `require Nukes` / `require Trade` depuis `GameState`.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
