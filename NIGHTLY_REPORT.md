@@ -1,9 +1,9 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 9)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 10)
 
-Déclencheur : ouverture de la **PR #29** (`cursor/analyse-nocturne-du-codebase-6be5`) — AimFront re-vise, findSeaPath pool, specs N38–N39.
+Déclencheur : ouverture de la **PR #32** (`cursor/analyse-nocturne-du-codebase-e541`) — carriers dirty, tryAnnex réparé, seq après apply, settledHumans, specs N41–N42.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-e541`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#29.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-350e`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#32.
 
 ---
 
@@ -15,46 +15,45 @@ Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle 
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #29 (passe 8) : claims vérifiés.** AimFront re-vise le front terre (`not isBeachhead`) y compris si `sourceTile` est déjà posé. `findSeaPath` pool `visitBuf` / `parentScratch` / `queueScratch` (`buffer.fill(buf, 0, 0)`). JoinRequest refuse `nan` / `inf`. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #32 (passe 9) : claims vérifiés.** `_carriersDirty` NAVAL_BASE, `tryAnnex` BFS depuis voisins défenseur du seed déjà capturé, `lastSequence` seulement si `applyOne` OK, `settledHumans` pour Persistence. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #29 a documenté (N38, N39)** plus deux correctifs d’autorité clairs : N29 (sequence après apply) et N40 (snapshot réputation des éliminés). **Bug collatéral N39 :** `tryAnnex` était mort — le seed est déjà capturé (`setOwner` avant l’appel), la file `{ seed }` faisait `continue` sans étendre les voisins.
+Cette passe a **livré ce que #32 a documenté (N41, N42)**. Option B pour les bunkers : le buffer `defense` n’encode pas le slot, donc Option A (lire u8) aurait donné le bonus à l’ancien proprio après capture.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #29
+## 2. Revue PR #32
 
-| Claim #29 | Réalité à l’ouverture |
+| Claim #32 | Réalité à l’ouverture |
 |---|---|
-| AimFront re-vise le front terre (`not isBeachhead`) | Oui. Wrap Bootstrap **après** BoatFront. Tests aim re-vise / aim beachhead. |
-| `findSeaPath` pool `visitBuf` / `parent` / `queue` | Oui. `buffer.fill(buf, 0, 0)`. Test 4 appels identiques. |
-| JoinRequest refuse `nan` / `inf` | Oui. `nationId ~= nationId` + `math.abs == math.huge`. Hors bundle. |
-| Specs N38–N39 | **Corrigés ici.** N39 incluait un BFS mort (voir §3). |
+| `syncCarriers` dirty NAVAL_BASE | Oui. pose / capture / destroy. `table.clear(carrierSeen)`. |
+| `tryAnnex` pool + BFS voisins du seed capturé | Oui. Océan abort. Plafond 280. |
+| Sequence commitée après apply réussi (N29) | Oui. |
+| `settledHumans` Persistence des éliminés (N40) | Oui. Bots ignorés. |
+| Specs N41–N42 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27/#30 hardening, #19/#21/#22/#24/#26/#28/#29 feel. **#29 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27/#30/#31 hardening, #19/#21/#22/#24/#26/#28/#29/#32 feel. **#32 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30←#31) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N38 dirty flag du rapport #29, N39 pooling + réparation du BFS.
+Feel #19 inchangé. Pas de réinvention : N41 et N42 du rapport #32.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `syncCarriers` O(B) + `seen` jetable chaque tick (N38) | `Navy.luau`, `GameState.luau` | Dirty `_carriersDirty` levé par `placeBuilding` / `destroyBuilding` / `transferBuilding` si `NAVAL_BASE`. `table.clear(carrierSeen)` module-level. No-op 9 ticks sur 10. Cadence / portée / priorité shells **inchangées** (N22). |
-| `tryAnnex` allouait visited/queue/pocket + **BFS mort** (N39) | `ChantierB.luau` | Pool `annexVisitBuf` / `annexQueue` / `annexPocket`. Seed déjà attaquant : départ = voisins défenseur (coupe). Océan = abort. Plafond 280 inchangé. Sans le fix seed, **aucune enclave n’était annexée**. |
-| Sequence commitée avant apply (N29) | `IntentValidator.luau` | `lastSequence` seulement si `applyOne` renvoie true. Un clic océan / or insuffisant ne brûle plus le numéro. Doublon d’un succès = toujours `DuplicateSequence`. |
-| Éliminés jamais `Persistence.record` (N40) | `GameState.luau`, `init.server.luau` | `removePlayer` snapshotte `settledHumans[slot]` (humains only). `endMatch` / `onPlayerRemoving` gravent défaite + XP + trahisons. Bots ignorés. DataStore hors bundle. |
+| `sequence == nil` bypass idempotence (N41) | `IntentValidator.luau`, `Config.luau` | Playing : entier `>= 1` obligatoire. Lobby `SetAttackRatio` / `ChooseDoctrine` : nil OK. `ALLOW_UNSEQUENCED_INTENTS` défaut false. Un client modifié ne rejoue plus Attack/Build/Boat dans la fenêtre 20/s sans numéro. Client officiel déjà séquencé : banc client inchangé. |
+| `attackLogic` scan O(B) par tuile (N42) | `ChantierB.luau`, `GameState.luau` | `bunkersBySlot[slot][tile]` maintenu à pose / destroy / transfer / removePlayer. Combat itère 0–8 bunkers du défenseur, plus le hash ~90–200. Capture : l’index suit le camp (le buffer u8 ne le peut pas). `DEFENSE_POST_*` / rayon / `guard < 80` inchangés. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), scan bunkers combat (N31), RequestSnapshot client (N28), landing bonus mort (N33), buffer defense mort (N35), bateau allié = retraite 25 % (N10.8 design), sequence nil compat (N41).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), `applyDefenseAura` écritures (N45), bateau allié = retraite 25 % (N10.8 design).
 
 ---
 
 ## 4. Cartographie
 
 ```
-init.server  → IntentValidator.enqueue (apply immédiat, seq après succès) → tick :
+init.server  → IntentValidator.enqueue (seq obligatoire en playing, apply immédiat) → tick :
   Bots.step → Navy.step (syncCarriers si dirty) → Nukes.step → Trade.step → Diplomacy.step → GameState.step → replicate(fireDeployed)
 SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), BoatFront, AimFront, tribus, spawn bots différé 15 s
 ```
@@ -66,75 +65,77 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **AimFront wrap** = re-visée du front terre du couple ; jamais `isBeachhead`.
 - **`tryAnnex`** = BFS depuis les voisins défenseur du seed déjà capturé ; océan abort ; pool N37-like.
 - **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, pas un scan 10 Hz.
+- **Posted bunker** = index `bunkersBySlot`, pas le hash `buildings` ni le buffer `defense` (falloff sans slot).
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N41–N42)
+## 5. Issues worker-ready (nouveaux, N43–N45)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N31, N33, N35 restent ouverts.** N20/N21/N23/N24/N26/N29/N30/N32/N34/N36–N40 = faits. N27 = doc only.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29/N30/N32/N34/N36–N42 = faits. N27 = doc only. N31+N35 fermés par N42 (posted) ; N35 restant = écritures buffer → **N45**.
 
 ---
 
-### ISSUE-N41 — `IntentValidator` accepte `sequence == nil` (bypass idempotence)
+### ISSUE-N43 — Transports inbound non restitués dans `removePlayer` (feel)
 
-**Priorité :** P2 anti-exploit (le client officiel envoie toujours un entier).
+**Priorité :** P2 comptabilité marine. Déjà livré sur hardening 915c / PR #31 ; **absent de la ligne feel**.
 
-**Problème :** `checkSequence` :
+**Problème :** `removePlayer` détruit les bateaux `boat.slot == slot` (le partant) puis `setOwner` → NEUTRAL. Les transports **ennemis** en route vers ses côtes survivent. Au tick suivant `Navy.step` voit `destOwner == NEUTRAL` (terre), n’enclenche pas la retraite, et `resolveLanding` pose une tête de pont gratuite sur un empire vide.
 
-```
-if sequence == nil then
-    -- Compat : intention sans numero — acceptee mais non idempotente.
-    return true, nil
-end
-```
+Hardening 915c restitue 100 % des `kind == 1` inbound **avant** `setOwner`, sans `require Navy`.
 
-Un client modifié omet le dernier argument RemoteEvent et rejoue le même ordre dans la fenêtre `INTENT_RATE_LIMIT_PER_SEC` (20/s). L’or / les troupes restent serveur, donc ce n’est **pas** un give-item. Ça double les `launchAttack` / `Build` / dons dans la limite.
-
-N29 vient de rendre la sequence **non brûlée** sur apply raté : un client honnête retry le même numéro. Un client sans numéro n’a toujours aucun garde d’idempotence.
-
-**Pourquoi 20K CCU :** 1 700 shards. Un exploit de spam d’intents n’explose pas l’économie (prix serveur) mais sature `stepAttacks` / `Navy.launchInvasion` (fronts, bateaux, `guard < 80`). Le rate limit 20/s est le seul filet.
+**Pourquoi 20K CCU :** 1 700 shards. Un kick / une élimination au moment d’un débarquement crée une tête de pont hors `MAX_ACTIVE_ATTACKS` (BoatFront gare seulement au cap, N5). Troupes « nées » d’un joueur disparu faussent `troops` vs tuiles.
 
 **Worker :**
 
-1. Exiger un entier `sequence >= 1` pour toute action mutante en `playing` (`Attack`, `Boat`, `Build`, `Nuke`, `Diplomacy`, `Research`, `Retreat`, `Upgrade`, `QuickChat`). Garder `nil` **uniquement** si un flag `Config.ALLOW_UNSEQUENCED_INTENTS` (défaut false) — ou supprimer le branchement.
-2. `SetAttackRatio` / `ChooseDoctrine` en lobby : sequence optionnelle OK (pas de mutation de carte).
-3. Test : `enqueue(..., nil, { index = land })` → `InvalidSchema`. `enqueue(..., 1, ...)` puis `enqueue(..., 1, ...)` → `DuplicateSequence`. Banc client inchangé (le client officiel envoie déjà un compteur).
-4. Fichiers : `IntentValidator.luau`, `tests/simulate.luau`. Ne pas toucher `init.client.luau` sauf si le compteur n’est pas envoyé sur un remote (vérifier `AttackOrder` etc.).
+1. Dans `GameState.removePlayer`, **avant** la boucle `setOwner` → NEUTRAL, parcourir `self.boats` à l’envers. Si `kind == 1` et `slot ~= departing` et `buffer.readu8(owner, targetTile) == departing` : `players[boat.slot].troops += boat.troops` (100 %, pas `BOAT_RETREAT_LOSS`), `table.remove`. Pas de `require Navy`.
+2. Les bateaux du partant restent détruits sans restitution (plus de `PlayerState`).
+3. Test : A envahit une côte de B ; `removePlayer(B)` ; troupes de A = avant + cargo ; 0 transport A en mer ; aucune beachhead `isBeachhead` A→ex-B. Banc 6000 ticks vert.
+4. Fichiers : `GameState.luau`, `tests/simulate.luau`. Ne pas toucher `Navy.step` / `resolveLanding` dans le même PR.
 
-**Contraintes :** server-authoritative. Feel apply immédiat inchangé. Ne pas mixer avec N14 (lockstep). Pas de RemoteFunction.
+**Contraintes :** server-authoritative. Feel apply immédiat inchangé. Ne pas mixer avec N33 (`BOAT_LANDING_BONUS`) ni N10.8 (allié = retraite 25 %). Recette = 915c, pas une nouvelle sémantique.
 
 ---
 
-### ISSUE-N42 — `attackLogic` scanne tous les `buildings` par tuile capturée (ferme N31 + N35)
+### ISSUE-N44 — Missiles inbound vs slot recyclé (feel)
 
-**Priorité :** P1 perf combat. Détache le buffer `defense` mort (N35) du scan bunkers (N31).
+**Priorité :** P2 anti-grief / spawn. Déjà livré sur hardening c68a (contrat B, pas de refund) ; **absent de la ligne feel**.
 
-**Problème :** combat vivant, **chaque tuile** dans `guard < 80` :
+**Problème :** `removePlayer` jette `missiles[i].slot == slot` (tirs du partant) mais **pas** les ogives en vol vers ses tuiles. `Nukes.step` explose sur `tx, ty` sans re-vérifier le propriétaire. `addPlayer` recycle le slot ; `findSpawn` peut poser le suivant dans le rayon d’un MIRV encore en vol.
 
-```
-for index, building in state.buildings do
-    if building.kind == DEF and building.slot == defender.slot then
-        -- distance DEFENSE_RADIUS (30 après apply)
-```
+Hardening c68a : annulation inbound **avant** `setOwner`, `toIndex(floor(tx), floor(ty))`, pas de refund, tirs vers un **tiers** conservés.
 
-Jusqu’à 80 × N fronts × hash `buildings` (~90–200 en milieu de partie) par tick. `GameState.applyDefenseAura` **écrit** déjà `state.defense` (u8, falloff) à pose/destroy bunker, mais `attackLogic` **ne le lit jamais**. Deux systèmes, un seul utilisé, le plus cher.
+**Pourquoi 20K CCU :** 8 humains / shard, déconnexions fréquentes. Nuke lancé → victime kick → spawn du suivant dans le splash = wipe hors intention.
 
-**Pourquoi 20K CCU :** hitch dans `stepAttacks`, déjà borné par `guard < 80`. 8 humains qui percent le même tick = 80 scans hash. Le p95 headless (1.27 ms, 0 humain) **sous-estime** : pas de 8 clients + IntentValidator. N38/N39 ont retiré l’allocator marine/annex ; le scan bunkers est le prochain O(B) dans la hot path.
+**Worker :**
 
-**Worker — choisir UNE option, pas les deux dans le même PR :**
+1. Porter la recette c68a, ne pas inventer. Dans `removePlayer`, **avant** `setOwner` : pour chaque missile dont l’épicentre tombe sur une tuile `owner == departing`, `table.remove` (pas de refund `NUKE_STATS`). Conserver les missiles du partant (déjà filtrés par `slot == departing`) et ceux qui visent un autre camp.
+2. Ne pas changer SAM / chance / range / CD / `SPAWN_NUKE_IMMUNITY`.
+3. Test : silo A → capitale B ; `removePlayer(B)` avant impact ; nouveau spawn B2 survit ; un missile A→C (tiers) reste en vol. Banc client inchangé.
+4. Fichiers : `GameState.luau` (et `Nukes.luau` seulement si l’index tuile n’est pas dérivable de `tx, ty`). `tests/simulate.luau`.
 
-**Option A (recommandée, OpenFront-like) :** `posted = buffer.readu8(state.defense, tile) > 0` (ou seuil `Config.DEFENSE_POST_THRESHOLD`). Supprimer la boucle buildings dans `attackLogic`. Vérifier que `applyDefenseAura` est bien appelé à pose **et** destroy (déjà le cas). Capture d’un bunker : `transferBuilding` ne réapplique PAS l’aura (même tuile, même rayon, seul `slot` change) — `posted` doit tester le **défenseur actuel**, donc option A est fausse si le buffer n’est pas par-camp.
+**Contraintes :** server-only. Feel prep=0 inchangé. Ne pas mixer avec N9 (`stepDoomsday`) ni N45. Recette = c68a, pas une nouvelle sémantique.
 
-**Donc option A ne marche que si** le buffer encode le slot, ou si on passe à l’option B.
+---
 
-**Option B (sûre, index) :** table `state.bunkersBySlot[slot] = { tile, ... }` maintenue dans `placeBuilding` / `destroyBuilding` / `transferBuilding` / `removePlayer`. `attackLogic` itère **uniquement** les bunkers du défenseur (O(bunkers_défenseur), typiquement 0–8). Recyclage `table.clear` interdit de recréer la liste par tuile.
+### ISSUE-N45 — `applyDefenseAura` écrit un buffer que plus personne ne lit
 
-3. Ne pas changer `DEFENSE_POST_BONUS` / `DEFENSE_POST_SPEED_BONUS` / `DEFENSE_RADIUS`. Ne pas baisser `guard < 80` dans le même PR.
-4. Test : bunker à portée → `posted` (pertes attaquant ×5) ; bunker hors rayon → pas de bonus ; capture du bunker → le nouveau proprio bénéficie, l’ancien non. Banc 6000 ticks vert.
-5. Fichiers : `ChantierB.luau` (`attackLogic`), `GameState.luau` (index si B). Pas le stub `GameState.stepAttacks`.
+**Priorité :** P3 perf pose/destroy. Suite de N35 après N42.
 
-**Contraintes :** déterminisme identique à l’ancien scan (même rayon euclidien). Server-only. Feel apply immédiat inchangé. Ne pas mixer avec N18 (heap) ni N11 (`MAX_TILES_PER_TICK`).
+**Problème :** `placeBuilding` / `destroyBuilding` DEFENSE appellent encore `applyDefenseAura` : disque `DEFENSE_RADIUS=30` → jusqu’à 3721 `readu8`+`writeu8` par pose/destroy. Après `ChantierB.install()`, `GameState.tileCost` (seul lecteur) est **remplacé** par `attackLogic`. Le buffer `defense` n’est lu nulle part en prod. N42 a fermé le combat ; les écritures restent.
+
+**Pourquoi 20K CCU :** pas la hot path tick, mais un humain qui pose 8 bunkers = ~30k writes synchrones dans l’intent (apply immédiat). Hitch perceptible sur shard chargé. Mémoire 40 960 octets mortes par match.
+
+**Worker — choisir UNE option :**
+
+**Option A :** supprimer les appels `applyDefenseAura` et, plus tard, le buffer. Garder la fonction un tick pour le `tileCost` mort (tests hors install). Documenter.
+
+**Option B :** restaurer `ChantierB` `tileCost` pour **additionner** posted (index) et falloff buffer — alors les écritures redeviennent vivantes. Change l’éco (coût tuile), pas seulement posted ×5. Interdit dans le même PR que N11 / N18.
+
+3. Test : pose + destroy bunker, 6000 ticks vert. Si A : aucun `buffer.readu8(state.defense)` dans `ChantierB`. Si B : coût d’une tuile sous bunker > tuile nue, capture du bunker ne change pas le falloff (même tuile).
+4. Fichiers : `GameState.luau` (appels), éventuellement `ChantierB.luau` si B.
+
+**Contraintes :** ne pas casser N42 (posted = index, pas u8). Server-only. Feel inchangé.
 
 ---
 
@@ -157,7 +158,7 @@ Jusqu’à 80 × N fronts × hash `buildings` (~90–200 en milieu de partie) pa
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
 | N14 | Apply immédiat vs lockstep (feel #19) | P1 | ouvert (produit) |
 | N15 | `PREPARATION_DURATION=0` vs gardes `combatUnlocked` | P2 | ouvert |
-| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 | aura → N35 / **N42** ; mer → **N37 fait** |
+| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 | **N37+N42 faits** ; écritures → **N45** |
 | N17 | Humains éliminés occupent le cap | P2 | ouvert |
 | N18 | Heap AimFront ≠ ChantierB / BoatFront | P2 | ouvert (frontier mixte mag vs TERRAIN_COST) |
 | N19 | Embargo allié + tribus auto-accept | P2 | ouvert |
@@ -170,22 +171,25 @@ Jusqu’à 80 × N fronts × hash `buildings` (~90–200 en milieu de partie) pa
 | N26 | SAM chance 0.55 vs 1.0 | P1 | **fait** Config=1.0 |
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert |
-| N29 | Seq commitée avant apply | P3 | **fait** cette passe |
+| N29 | Seq commitée avant apply | P3 | **fait** passe 9 |
 | N30 | Stub `seedBeachhead` faux | P3 | **fait** `error(...)` |
-| N31 | Scan bunkers O(B) | P1 | ouvert → **N42** pour le worker |
+| N31 | Scan bunkers O(B) | P1 | **fait** cette passe (N42) |
 | N32 | `viewFor` requests expirées | P3 | **fait** |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
 | N34 | `areAllied` ignore expiry pacte | P2 | **fait** passe 7 |
-| N35 | `applyDefenseAura` buffer mort | P2 | ouvert → **N42** |
+| N35 | `applyDefenseAura` buffer mort (posted) | P2 | **fait** posted=index ; écritures → **N45** |
 | N36 | AimFront figé après premier lancer | P2 | **fait** passe 8 |
 | N37 | `findSeaPath` alloc 40k / appel | P2 | **fait** passe 8 |
-| N38 | `syncCarriers` O(B) / tick | P2 | **fait** cette passe |
-| N39 | `tryAnnex` alloc + BFS mort | P2 | **fait** cette passe |
-| N40 | Éliminés skip `Persistence.record` | P1 | **fait** cette passe |
-| N41 | Sequence `nil` bypass idempotence | P2 | **nouveau** |
-| N42 | `attackLogic` index bunkers / lire `defense` | P1 | **nouveau** (ferme N31+N35) |
+| N38 | `syncCarriers` O(B) / tick | P2 | **fait** passe 9 |
+| N39 | `tryAnnex` alloc + BFS mort | P2 | **fait** passe 9 |
+| N40 | Éliminés skip `Persistence.record` | P1 | **fait** passe 9 |
+| N41 | Sequence `nil` bypass idempotence | P2 | **fait** cette passe |
+| N42 | `attackLogic` index bunkers | P1 | **fait** cette passe (ferme N31 + posted N35) |
+| N43 | Transports inbound `removePlayer` (feel) | P2 | **nouveau** (port 915c) |
+| N44 | Missiles inbound vs slot recyclé | P2 | **nouveau** |
+| N45 | `applyDefenseAura` writes mortes | P3 | **nouveau** |
 
-Textes worker-ready N1–N25, N28, N31, N33, N35 : PR #21 / #22 / #24 / #26 / #29 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -196,7 +200,7 @@ Textes worker-ready N1–N25, N28, N31, N33, N35 : PR #21 / #22 / #24 / #26 / #2
 | `START_TROOPS` | 150 | 8000 | oui |
 | `GROWTH_RATE` | 0.012 | 0 | formule custom |
 | `MAX_TILES_PER_TICK` | 400 | 56 | **non** (`guard<80`) |
-| `DEFENSE_RADIUS` | 6 | 30 | scan buildings (N31/N42), pas le buffer (N35) |
+| `DEFENSE_RADIUS` | 6 | 30 | index bunkers (N42), pas le buffer (N45) |
 | `BOAT_TROOP_RATIO` | 0.2 | 0.2 | oui |
 | `RETREAT_LOSS` | 0.25 | 0.25 | oui |
 | `SAM_INTERCEPT_CHANCE` | **1.0** | 1.0 | oui (N26 clos) |
@@ -208,6 +212,7 @@ Textes worker-ready N1–N25, N28, N31, N33, N35 : PR #21 / #22 / #24 / #26 / #2
 | `MAX_BOATS_PER_PLAYER` | 6 | 6 | oui (N25) |
 | `PREPARATION_DURATION` | 0 | 0 | forcé true |
 | `ALLIANCE_DURATION` | 3000 | 3000 | oui (`areAllied` + `Diplomacy.step`) |
+| `ALLOW_UNSEQUENCED_INTENTS` | **false** | n/a | oui (N41) |
 
 ---
 
@@ -226,6 +231,7 @@ intentions : QuickChat cooldown honore
 intentions : QuickChat 2-args refuse, 3-args marque
 intentions : diplomatie self et sequence inf refusees
 intentions : sequence committee apres apply reussi (N29)
+intentions : sequence nil refusee en playing, optionnelle en lobby (N41)
 beachhead : frontier voisins, pas de remboursement
 aim reinforce : un seul front apres deux lancers
 aim re-vise : second lancer ancre sourceTile
@@ -246,15 +252,16 @@ syncCarriers dirty : pose / capture / destroy OK
 tryAnnex poche terrestre : 8 tuiles annexees, pool reutilise
 tryAnnex ocean : poche cotiere refusee
 settledHumans : snapshot humain elimine, bot ignore
+attackLogic bunkers : posted / hors rayon / capture OK
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.37 p95TickMs=1.27
+metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.37 p95TickMs=1.20
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur.
+Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur. Le client officiel envoie déjà `nextSequence()` : N41 ne le touche pas.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass9.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass10.log`
 
 Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live).
 
@@ -262,6 +269,6 @@ Studio / client Roblox réel : non exercé dans cet environnement (pas de DataMo
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement).
+Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement). `bunkersBySlot` est un champ d’état, pas un module.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
