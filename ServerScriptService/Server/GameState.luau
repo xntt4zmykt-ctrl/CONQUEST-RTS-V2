@@ -74,6 +74,8 @@ export type PlayerState = {
 	capitalsCaptured: number,
 	buildingsBuilt: number,
 	attacksLaunched: number,
+	-- Tick de pose de capitale (immunite nucleaire OF).
+	spawnTick: number?,
 }
 
 export type Attack = {
@@ -100,9 +102,14 @@ export type Boat = {
 	path: { number },
 	step: number,
 	targetTile: number,
+	-- Faction visee au launchInvasion (ISSUE-N49). Distinct de targetTile :
+	-- la cote peut flipper (neutre / tiers) pendant le transit.
+	targetSlot: number?,
 	-- Porte-avions uniquement : base d'attache et angle d'orbite.
 	homeTile: number?,
 	angle: number?,
+	-- Transport en retraite : targetTile = cote d'origine, pas l'invasion.
+	retreating: boolean?,
 }
 
 export type Missile = {
@@ -150,6 +157,27 @@ export type GameState = typeof(setmetatable(
 		boats: { Boat },
 		missiles: { Missile },
 		buildings: { [number]: Building },
+		-- Index O(1) des bunkers par camp. attackLogic (hot path) ne scanne
+		-- plus le hash buildings entier (ISSUE-N42). Le buffer `defense` reste
+		-- la source du cout de tuile (falloff), pas du flag posted.
+		bunkersBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des batteries SAM par camp. tryIntercept (N57) n'itere
+		-- plus le hash buildings entier ; recette bunkersBySlot.
+		samsBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des silos par camp. Nukes.launch / stepCooldowns (N60)
+		-- n'iterent plus le hash buildings ; recette samsBySlot.
+		silosBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des usines par camp. Trade.step (N61) n'itere plus le hash.
+		factoriesBySlot: { [number]: { [number]: true } },
+		-- Tous les batiments par camp. Bots upgrade + score nuke (N62).
+		buildingsBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des bases navales par camp. syncCarriers spawn (N65)
+		-- n'itere plus le hash buildings ; recette samsBySlot. Distinct de
+		-- portsByTile (PORT) et de _carriersDirty (garde le flag evenementiel).
+		navalBasesBySlot: { [number]: { [number]: true } },
+		-- PORT par tuile (slot + level). spawnTradeShips (N63), recette
+		-- hardening N40 / portsByTile. Distinct de _carriersDirty (NAVAL_BASE).
+		portsByTile: { [number]: { slot: number, level: number } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -174,6 +202,19 @@ export type GameState = typeof(setmetatable(
 		mode: any,
 		events: { { text: string, kind: string, only: number? } },
 		combatUnlocked: boolean,
+		-- Navy.syncCarriers : leve par place/destroy/transfer NAVAL_BASE.
+		_carriersDirty: boolean,
+		-- Snapshot humain elimine (removePlayer) pour Persistence.record
+		-- a endMatch / disconnect. Sans ca les elimines n'ont ni defaite ni XP.
+		settledHumans: {
+			[number]: {
+				player: Player?,
+				betrayals: number,
+				capturedTiles: number,
+				capitalsCaptured: number,
+				buildingsBuilt: number,
+			},
+		},
 	},
 	GameState
 ))
@@ -188,6 +229,37 @@ local borderScratch = table.create(4, 0)
 -- Troisieme tampon : frontPriority est appele depuis la boucle de stepAttacks,
 -- qui itere deja sur `scratch`. Le partager ecraserait la liste en cours.
 local priorityScratch = table.create(4, 0)
+-- N70 : UnitSnapshot bateaux recycle (recette factoryBuf / N66). Inner
+-- payloads reecrits, pas recrees. Non reentrant — replicate() unique / tick.
+local boatSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+		retreating: boolean,
+	}
+} =
+	table.create(48)
+-- N71 : UnitSnapshot missiles recycle (recette boatSnapBuf / N70). Champs
+-- uniquement Types.MissileSnapshot — pas sx/sy/progress/speed.
+local missileSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+} =
+	table.create(16)
+-- N72 : indices dirty pour flushOwnerDelta. Le buffer outbound reste neuf
+-- (RemoteEvent). Early-out dirty vide sans allouer.
+local dirtyIndexBuf: { number } = table.create(64)
 
 --=============================================================================
 -- Construction
@@ -208,6 +280,13 @@ function GameState.new(seed: number): GameState
 	self.boats = {}
 	self.missiles = {}
 	self.buildings = {}
+	self.bunkersBySlot = {}
+	self.samsBySlot = {}
+	self.silosBySlot = {}
+	self.factoriesBySlot = {}
+	self.buildingsBySlot = {}
+	self.navalBasesBySlot = {}
+	self.portsByTile = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -237,6 +316,8 @@ function GameState.new(seed: number): GameState
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
 	self.combatUnlocked = true
+	self._carriersDirty = false
+	self.settledHumans = {}
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -396,7 +477,9 @@ end
 -- Batiments
 --=============================================================================
 
--- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+-- Aura falloff du buffer `defense`. Morte apres ChantierB.install() :
+-- attackLogic lit bunkersBySlot (N42), plus ce buffer. Les appels pose/destroy
+-- ont ete retires (ISSUE-N45 Option A). Conservee pour tileCost hors install.
 function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
 	local cx, cy = MapGen.fromIndex(index)
 	local radius = Config.DEFENSE_RADIUS
@@ -505,19 +588,41 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 		return
 	end
 
-	-- 1. Collecte des gares.
+	-- 1. Collecte des gares. N64 : buildingsBySlot[slot], pas le hash global.
+	-- Fallback hash si l'index est nil (tests partiels).
+	-- IS_STATION est declare plus bas : on inline les kinds ici.
 	local stations: { number } = {}
-	for index, building in self.buildings do
-		if
-			building.slot == slot
-			and (
-				building.kind == B.CITY
-				or building.kind == B.CAPITAL
-				or building.kind == B.PORT
-				or building.kind == B.FACTORY
-			)
-		then
-			table.insert(stations, index)
+	if self.buildingsBySlot then
+		local set = self.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = self.buildings[index]
+				if
+					building
+					and (
+						building.kind == B.CITY
+						or building.kind == B.CAPITAL
+						or building.kind == B.PORT
+						or building.kind == B.FACTORY
+					)
+				then
+					table.insert(stations, index)
+				end
+			end
+		end
+	else
+		for index, building in self.buildings do
+			if
+				building.slot == slot
+				and (
+					building.kind == B.CITY
+					or building.kind == B.CAPITAL
+					or building.kind == B.PORT
+					or building.kind == B.FACTORY
+				)
+			then
+				table.insert(stations, index)
+			end
 		end
 	end
 	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
@@ -617,7 +722,10 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 				periodSum += math.max(1, math.ceil(d / Config.TRUCK_SPEED)) + Config.TRUCK_COOLDOWN
 			end
 			local n = #links
-			income += (goldSum * building.level) / (periodSum / n)
+			-- Meme multiplicateurs que Trade.deliveryValue : × liens via
+			-- /(periodSum/n), × TRAIN_STOP_BONUS (plafonne a +80 %).
+			local stopBonus = 1 + math.min(0.8, (n - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+			income += (goldSum * building.level * stopBonus) / (periodSum / n)
 		end
 	end
 
@@ -679,6 +787,61 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+-- Index bunker / SAM / silo / usine / tous / bases navales : pose / capture /
+-- destroy seulement, jamais dans le tick.
+local function indexPosted(
+	_self: GameState,
+	bySlot: { [number]: { [number]: true } },
+	slot: number,
+	index: number,
+	present: boolean
+)
+	local set = bySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			bySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
+local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.bunkersBySlot, slot, index, present)
+end
+
+local function indexSam(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.samsBySlot, slot, index, present)
+end
+
+local function indexSilo(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.silosBySlot, slot, index, present)
+end
+
+local function indexFactory(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.factoriesBySlot, slot, index, present)
+end
+
+local function indexBuilding(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.buildingsBySlot, slot, index, present)
+end
+
+local function indexNavalBase(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.navalBasesBySlot, slot, index, present)
+end
+
+-- N63 : PORT only. level vit ici pour ponderer spawnTradeShips sans relire
+-- le hash. Distinct de _carriersDirty (NAVAL_BASE).
+local function indexPort(self: GameState, index: number, slot: number, level: number, present: boolean)
+	if present then
+		self.portsByTile[index] = { slot = slot, level = level }
+	else
+		self.portsByTile[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -686,9 +849,26 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
+	indexBuilding(self, slot, index, true)
 
 	if kind == B.DEFENSE then
-		self:applyDefenseAura(index, 1)
+		indexBunker(self, slot, index, true)
+	end
+	if kind == B.SAM then
+		indexSam(self, slot, index, true)
+	end
+	if kind == B.SILO then
+		indexSilo(self, slot, index, true)
+	end
+	if kind == B.FACTORY then
+		indexFactory(self, slot, index, true)
+	end
+	if kind == B.PORT then
+		indexPort(self, index, slot, 1, true)
+	end
+	if kind == B.NAVAL_BASE then
+		indexNavalBase(self, slot, index, true)
+		self._carriersDirty = true
 	end
 	if IS_STATION[kind] then
 		self:refreshRailNetwork(slot)
@@ -716,6 +896,9 @@ function GameState.upgradeBuilding(self: GameState, index: number): number?
 	building.level += 1
 	self:countBuilding(building.slot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, true)
+	end
 
 	-- Le niveau d'une usine pese sur le rendement de sa grappe.
 	if building.kind == B.FACTORY then
@@ -737,6 +920,32 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	indexBuilding(self, previousSlot, index, false)
+	indexBuilding(self, newSlot, index, true)
+	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, previousSlot, index, false)
+		indexNavalBase(self, newSlot, index, true)
+		self._carriersDirty = true
+	end
+	if building.kind == B.DEFENSE then
+		indexBunker(self, previousSlot, index, false)
+		indexBunker(self, newSlot, index, true)
+	end
+	if building.kind == B.SAM then
+		indexSam(self, previousSlot, index, false)
+		indexSam(self, newSlot, index, true)
+	end
+	if building.kind == B.SILO then
+		indexSilo(self, previousSlot, index, false)
+		indexSilo(self, newSlot, index, true)
+	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, previousSlot, index, false)
+		indexFactory(self, newSlot, index, true)
+	end
+	if building.kind == B.PORT then
+		indexPort(self, index, newSlot, building.level, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -750,12 +959,31 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	local previousSlot = building.slot
 	local previousKind = building.kind
+	indexBuilding(self, building.slot, index, false)
 	if building.kind == B.DEFENSE then
-		self:applyDefenseAura(index, -1)
+		indexBunker(self, building.slot, index, false)
+	end
+	if building.kind == B.SAM then
+		indexSam(self, building.slot, index, false)
+	end
+	if building.kind == B.SILO then
+		indexSilo(self, building.slot, index, false)
+	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, building.slot, index, false)
+	end
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, false)
+	end
+	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
+	if previousKind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[previousKind] then
 		self:refreshRailNetwork(previousSlot)
 	end
@@ -766,12 +994,105 @@ end
 --=============================================================================
 
 --[[
+	C1 ogive + C2 fallout + N54 MIRV bus. Isolation voisinage = isSpawnIsolated
+	(N55, partagee findSpawn / claimSpawn). Pas d'annulation de frappe
+	(contrat B / N44).
+
+	Rayon d'exclusion :
+	- ogive / ATOM / H : missile.radius ou NUKE_STATS[kind].radius
+	- MIRV bus (`kind==MIRV` et `not warhead`) : spread + warheadRadius
+	  (le bus a radius=0 ; les ogives peuvent retomber jusqu'a `spread` et
+	  craterer de `warheadRadius`). SPAWN_RADIUS est ajoute autour du centre.
+]]
+function GameState.isSpawnSafe(self: GameState, center: number): boolean
+	if center < 0 or center >= Config.TILE_COUNT then
+		return false
+	end
+	if not self:isLand(center) then
+		return false
+	end
+
+	local radius = Config.SPAWN_RADIUS
+	local check = radius + 3
+	local x, y = MapGen.fromIndex(center)
+	local missiles = self.missiles
+	local fallout = self.fallout
+	local now = self.tick
+
+	if missiles then
+		for _, missile in missiles do
+			local stats = Config.NUKE_STATS[missile.kind]
+			local blast: number
+			if missile.kind == Config.NUKE.MIRV and not missile.warhead then
+				local spread = (stats and stats.spread) or 16
+				local warheadR = (stats and stats.warheadRadius) or 5
+				blast = spread + warheadR
+			else
+				local raw = missile.radius or (if stats then stats.radius else 8)
+				blast = if typeof(raw) == "number" then raw else 0
+			end
+			if blast > 0 then
+				local mx = math.floor(missile.tx)
+				local my = math.floor(missile.ty)
+				if MapGen.inBounds(mx, my) then
+					local dx, dy = x - mx, y - my
+					local limit = blast + radius
+					if dx * dx + dy * dy <= limit * limit then
+						return false
+					end
+				end
+			end
+		end
+	end
+
+	if fallout then
+		for dy = -check, check do
+			for dx = -check, check do
+				local nx, ny = x + dx, y + dy
+				if MapGen.inBounds(nx, ny) then
+					local idx = MapGen.toIndex(nx, ny)
+					if (fallout[idx] or 0) > now then
+						return false
+					end
+				end
+			end
+		end
+	end
+
+	return true
+end
+
+--[[
+	Carre SPAWN_RADIUS+3 entierement NEUTRAL (meme recette que findSpawn).
+	claimSpawn (N55) refuse un disque colle a un empire ; placeDisk ne peint
+	que du NEUTRAL et ne doit pas etre relache.
+]]
+function GameState.isSpawnIsolated(self: GameState, center: number): boolean
+	if center < 0 or center >= Config.TILE_COUNT then
+		return false
+	end
+	local check = Config.SPAWN_RADIUS + 3
+	local x, y = MapGen.fromIndex(center)
+	for dy = -check, check do
+		for dx = -check, check do
+			local nx, ny = x + dx, y + dy
+			if MapGen.inBounds(nx, ny) then
+				local idx = MapGen.toIndex(nx, ny)
+				if buffer.readu8(self.owner, idx) ~= NEUTRAL then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+--[[
 	Cherche une zone de spawn : une tuile de terre dont le disque alentour est
 	entierement libre, pour ne jamais coller deux joueurs au demarrage.
 ]]
 function GameState.findSpawn(self: GameState, rng: Random): number?
-	local radius = Config.SPAWN_RADIUS
-	local check = radius + 3
+	local check = Config.SPAWN_RADIUS + 3
 
 	for _ = 1, 6000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
@@ -779,27 +1100,107 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 		local center = MapGen.toIndex(x, y)
 
 		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
-			local ok = true
-			for dy = -check, check do
-				for dx = -check, check do
-					local nx, ny = x + dx, y + dy
-					if MapGen.inBounds(nx, ny) then
-						if buffer.readu8(self.owner, MapGen.toIndex(nx, ny)) ~= NEUTRAL then
-							ok = false
-							break
-						end
-					end
-				end
-				if not ok then
-					break
-				end
-			end
-			if ok then
+			-- N50 C1+C2 + N54 MIRV bus + N55 isolation.
+			if self:isSpawnSafe(center) and self:isSpawnIsolated(center) then
 				return center
 			end
 		end
 	end
 	return nil
+end
+
+--[[
+	Payload UnitSnapshot bateaux (10 Hz). Pas de path / homeTile (intention +
+	bandwidth). retreating = N56 : le HUD distingue retraite vs invasion.
+	init.server est hors bundle : ce helper est le contrat testable.
+	N70 : recycle boatSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotBoats(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+		retreating: boolean,
+	}
+}
+	local n = 0
+	for _, boat in self.boats do
+		n += 1
+		local rec = boatSnapBuf[n]
+		if rec == nil then
+			boatSnapBuf[n] = {
+				id = boat.id,
+				slot = boat.slot,
+				x = boat.x,
+				y = boat.y,
+				troops = math.floor(boat.troops),
+				kind = boat.kind,
+				retreating = boat.retreating == true,
+			}
+		else
+			rec.id = boat.id
+			rec.slot = boat.slot
+			rec.x = boat.x
+			rec.y = boat.y
+			rec.troops = math.floor(boat.troops)
+			rec.kind = boat.kind
+			rec.retreating = boat.retreating == true
+		end
+	end
+	for i = #boatSnapBuf, n + 1, -1 do
+		boatSnapBuf[i] = nil
+	end
+	return boatSnapBuf
+end
+
+--[[
+	Payload UnitSnapshot missiles (10 Hz). Pas de sx/sy/progress/speed
+	(Types.MissileSnapshot). Overlay interpolé via tx/ty seulement.
+	init.server est hors bundle : ce helper est le contrat testable.
+	N71 : recycle missileSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotMissiles(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+}
+	local n = 0
+	for _, missile in self.missiles do
+		n += 1
+		local rec = missileSnapBuf[n]
+		if rec == nil then
+			missileSnapBuf[n] = {
+				id = missile.id,
+				slot = missile.slot,
+				x = missile.x,
+				y = missile.y,
+				tx = missile.tx,
+				ty = missile.ty,
+				kind = missile.kind,
+			}
+		else
+			rec.id = missile.id
+			rec.slot = missile.slot
+			rec.x = missile.x
+			rec.y = missile.y
+			rec.tx = missile.tx
+			rec.ty = missile.ty
+			rec.kind = missile.kind
+		end
+	end
+	for i = #missileSnapBuf, n + 1, -1 do
+		missileSnapBuf[i] = nil
+	end
+	return missileSnapBuf
 end
 
 function GameState.addPlayer(
@@ -848,12 +1249,23 @@ function GameState.addPlayer(
 		capitalsCaptured = 0,
 		buildingsBuilt = 0,
 		attacksLaunched = 0,
+		spawnTick = 0,
 	}
 	self.players[slot] = state
+	self.settledHumans[slot] = nil
 	self.alliances[slot] = {}
 	self.allianceCooldowns[slot] = {}
 	self.requests[slot] = {}
 	self.embargoes[slot] = {}
+
+	-- Ceinture : un slot recycle n'herite pas du cadran du predecesseur
+	-- meme si removePlayer a ete contourne (spawn rate, tests). ISSUE-N47.
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
 
 	local center = self:findSpawn(rng)
 	if not center then
@@ -881,6 +1293,7 @@ function GameState.addPlayer(
 	-- La capitale est posee par le moteur, jamais achetee.
 	self:placeBuilding(center, B.CAPITAL, slot)
 	state.capitalTile = center
+	state.spawnTick = self.tick
 
 	return state
 end
@@ -891,35 +1304,117 @@ function GameState.removePlayer(self: GameState, slot: number)
 		return
 	end
 
-	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
-	-- dans la boucle de tick.
+	-- Humain elimine : graver les stats avant de detruire le PlayerState.
+	-- endMatch / onPlayerRemoving lisent settledHumans quand players[slot]
+	-- est deja nil (ISSUE-N40).
+	if not state.isBot and state.player then
+		self.settledHumans[slot] = {
+			player = state.player,
+			betrayals = state.betrayals,
+			capturedTiles = state.capturedTiles,
+			capitalsCaptured = state.capitalsCaptured,
+			buildingsBuilt = state.buildingsBuilt,
+		}
+	end
+
+	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
+	-- N62 : snapshot buildingsBySlot[slot] (destroy mute l'index). Fallback
+	-- hash si l'index est nil (tests partiels).
+	local doomed: { number } = {}
+	if self.buildingsBySlot and self.buildingsBySlot[slot] then
+		for index in self.buildingsBySlot[slot] do
+			table.insert(doomed, index)
+		end
+	else
+		for index, building in self.buildings do
+			if building.slot == slot then
+				table.insert(doomed, index)
+			end
+		end
+	end
+	for _, index in doomed do
+		self:destroyBuilding(index)
+	end
+
+	-- Transports AVANT setOwner (ISSUE-N43, recette 915c). N49 pose
+	-- targetSlot au launch, N53 retraite auto si owner ~= targetSlot
+	-- pendant Navy.step. L'inbound GC lit encore owner[targetTile] :
+	-- un transport peut viser B alors que la cote a deja flippe vers un
+	-- tiers. Apres neutralisation, destOwner==NEUTRAL et sans targetSlot
+	-- Navy.step ne retraite pas — resolveLanding pose une tete de pont
+	-- vs cote vide. Restitution 100 %, pas BOAT_RETREAT_LOSS. kind 1 =
+	-- transport. kind 2 = convoi (ISSUE-N48, recette 69b4) : couler, pas
+	-- d'or, pas de malus vendeur. Pas de require Navy (cycle Navy -> GameState).
+	for i = #self.boats, 1, -1 do
+		local boat = self.boats[i]
+		if boat.slot == slot then
+			table.remove(self.boats, i)
+		elseif boat.kind == 1 and not boat.retreating then
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
+					local attacker = self.players[boat.slot]
+					if attacker then
+						attacker.troops += math.max(0, boat.troops)
+					end
+					boat.troops = 0
+					table.remove(self.boats, i)
+				end
+			end
+		elseif boat.kind == 2 then
+			-- JoinRequest entre deux ticks recycle le slot, repose un PORT
+			-- sur la meme tuile, et resolveTrade verse l'or a l'heritier.
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
+					table.remove(self.boats, i)
+				end
+			end
+		end
+	end
+
+	-- Missiles AVANT setOwner (ISSUE-N44, recette c68a contrat B).
+	-- Cible = toIndex(floor(tx), floor(ty)). Pas de remboursement.
+	-- Frappe deja visee sur un tiers : conservee. Tireur qui part : detruit.
+	-- Pas de require Nukes (cycle).
+	for i = #self.missiles, 1, -1 do
+		local missile = self.missiles[i]
+		if missile.slot == slot then
+			table.remove(self.missiles, i)
+		else
+			local tx = math.floor(missile.tx)
+			local ty = math.floor(missile.ty)
+			if MapGen.inBounds(tx, ty) then
+				local index = MapGen.toIndex(tx, ty)
+				if buffer.readu8(self.owner, index) == slot then
+					table.remove(self.missiles, i)
+				end
+			end
+		end
+	end
+
+	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
+	-- (deconnexion), jamais dans la boucle de tick.
 	for index = 0, Config.TILE_COUNT - 1 do
 		if buffer.readu8(self.owner, index) == slot then
-			buffer.writeu8(self.owner, index, NEUTRAL)
-			self.dirty[index] = true
+			self:setOwner(index, NEUTRAL)
 		end
 	end
 
-	for index, building in self.buildings do
-		if building.slot == slot then
-			self:destroyBuilding(index)
-		end
-	end
-
+	-- Les troupes engagees contre ce slot doivent revenir a l'attaquant :
+	-- les jeter avec le front ferait disparaitre de la population sans
+	-- conquete (deconnexion / admin). L'attaquant qui part abandonne les
+	-- siennes : plus de PlayerState pour les recevoir.
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
+		if atk.attacker == slot then
 			table.remove(self.attacks, i)
-		end
-	end
-	for i = #self.boats, 1, -1 do
-		if self.boats[i].slot == slot then
-			table.remove(self.boats, i)
-		end
-	end
-	for i = #self.missiles, 1, -1 do
-		if self.missiles[i].slot == slot then
-			table.remove(self.missiles, i)
+		elseif atk.target == slot then
+			local attackerPs = self.players[atk.attacker]
+			if attackerPs then
+				attackerPs.troops += math.max(0, atk.troops)
+			end
+			table.remove(self.attacks, i)
 		end
 	end
 
@@ -939,6 +1434,67 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.allianceCooldowns[slot] = nil
 	self.requests[slot] = nil
 	self.embargoes[slot] = nil
+	self.targetMarks[slot] = nil
+	-- Propositions / embargos / marques / prolongations *vers* ce slot :
+	-- sinon viewFor, canTrade et extend gardent des cibles fantomes, et
+	-- addPlayer recycle le slot avec un embargo / une extension herites.
+	for _, targets in self.requests do
+		targets[slot] = nil
+	end
+	for _, set in self.embargoes do
+		set[slot] = nil
+	end
+	for marker, target in self.targetMarks do
+		if target == slot then
+			self.targetMarks[marker] = nil
+		end
+	end
+	if self.allianceExtensions then
+		for _, set in self.allianceExtensions do
+			set[slot] = nil
+		end
+		self.allianceExtensions[slot] = nil
+	end
+	if self.quickChatSent then
+		self.quickChatSent[slot] = nil
+	end
+	if self.quickChatLast then
+		self.quickChatLast[slot] = nil
+	end
+	self.bunkersBySlot[slot] = nil
+	self.samsBySlot[slot] = nil
+	self.silosBySlot[slot] = nil
+	self.factoriesBySlot[slot] = nil
+	self.buildingsBySlot[slot] = nil
+	self.navalBasesBySlot[slot] = nil
+
+	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
+	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.
+	-- ISSUE-N47, recette 1dbe. Apres destroy / inbound boats-missiles / setOwner.
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
+	-- Colis : indexes par tuile d'usine, mais delivery.slot est le payeur.
+	-- Trade.step tourne AVANT stepElimination : un JoinRequest entre deux
+	-- ticks peut reposer une usine sur la meme tuile avec le slot recycle
+	-- et encaisser le colis du disparu.
+	if self.tradeDeliveries then
+		for index, delivery in self.tradeDeliveries do
+			if delivery.slot == slot then
+				self.tradeDeliveries[index] = nil
+			end
+		end
+	end
+	if self.tradeCooldowns then
+		for index in self.tradeCooldowns do
+			if not self.buildings[index] then
+				self.tradeCooldowns[index] = nil
+			end
+		end
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
@@ -971,9 +1527,29 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 	return true
 end
 
+--[[
+	Un pacte stocke le tick d'echeance. Presence des deux directions ne suffit
+	pas : entre l'echeance et Diplomacy.step (Bots/Navy tourne avant), un Attack
+	flushé voyait encore "Tu es allie". `true` reste vivant pour les tests
+	d'alliance unidirectionnelle. Voir ISSUE-N34.
+]]
+local function pactStillLive(self: GameState, expiry: any): boolean
+	if expiry == nil then
+		return false
+	end
+	if typeof(expiry) == "number" then
+		return self.tick < expiry
+	end
+	return expiry == true
+end
+
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
-	local set = self.alliances[a]
-	return set ~= nil and set[b] ~= nil
+	local ab = self.alliances[a]
+	local ba = self.alliances[b]
+	if not ab or not ba then
+		return false
+	end
+	return pactStillLive(self, ab[b]) and pactStillLive(self, ba[a])
 end
 
 --=============================================================================
@@ -1083,7 +1659,7 @@ end
 	qui donne l'impression que le jeu prend des blocs au hasard, parce que c'est
 	exactement ce qu'il faisait.
 
-	Trois termes, repris du jeu de reference, et chacun produit un comportement
+	Trois termes, propres a CONQUEST, et chacun produit un comportement
 	que le joueur peut lire sur la carte :
 
 	  - **`+ tick`** — une tuile entree tot dans la file passe avant une tuile
@@ -1159,8 +1735,10 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 	end
 
 	-- Une seule offensive par couple attaquant/cible : relancer la renforce.
+	-- Jamais fusionner dans une tete de pont (BoatFront gare deja isBeachhead ;
+	-- ce garde tient si le wrap est absent).
 	for _, atk in self.attacks do
-		if atk.attacker == attackerSlot and atk.target == targetSlot then
+		if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 			attacker.troops -= committed
 			atk.troops += committed
 			return true, `Front renforce : {committed} troupes supplementaires.`
@@ -1215,21 +1793,32 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 end
 
 --[[
-	Rappelle une offensive en cours, modele OpenFront : l'ordre n'est pas
+	Rappelle une offensive en cours, regle CONQUEST : l'ordre n'est pas
 	honore immediatement mais apres un delai (RETREAT_DELAY ticks), pendant
 	lequel le front continue de se battre. Une retraite instantanee ferait de
 	chaque engagement un essai sans risque ; le delai rend la decision
 	couteuse a prendre, et les survivants rentrent ensuite au pays.
 ]]
 function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	-- Terre + tete de pont contre le meme slot sont deux Attack. Un clic
+	-- retraite doit les marquer tous (delai et malus inchanges).
+	local marked = 0
+	local already = 0
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			if atk.retreatAt then
-				return false, "La retraite est deja ordonnee."
+				already += 1
+			else
+				atk.retreatAt = self.tick + Config.RETREAT_DELAY
+				marked += 1
 			end
-			atk.retreatAt = self.tick + Config.RETREAT_DELAY
-			return true, "Retraite ordonnee : le front se degage."
 		end
+	end
+	if marked > 0 then
+		return true, "Retraite ordonnee : le front se degage."
+	end
+	if already > 0 then
+		return false, "La retraite est deja ordonnee."
 	end
 	return false, "Aucune offensive sur ce front."
 end
@@ -1237,25 +1826,14 @@ end
 --[[
 	Cree une tete de pont apres un debarquement : l'offensive demarre depuis une
 	tuile isolee, sans contact terrestre prealable.
-]]
-function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSlot: number, troops: number, tile: number)
-	for _, atk in self.attacks do
-		if atk.attacker == attackerSlot and atk.target == targetSlot then
-			atk.troops += troops
-			enqueueFront(self, atk, tile)
-			return
-		end
-	end
 
-	local attack: Attack = {
-		attacker = attackerSlot,
-		target = targetSlot,
-		troops = troops,
-		frontier = Heap.new(),
-		queued = {},
-	}
-	enqueueFront(self, attack, tile)
-	table.insert(self.attacks, attack)
+	Le vivant est `BoatFront.install()` : frontier = voisins encore a la
+	cible, flag `isBeachhead`, jamais de fusion terre. Ce stub leve pour
+	qu'un test / outil qui saute le bootstrap ne reintroduise pas le bug
+	(tuile debarquee enfilee + merge land). Voir ISSUE-N30.
+]]
+function GameState.seedBeachhead(_self: GameState, _attackerSlot: number, _targetSlot: number, _troops: number, _tile: number)
+	error("GameState.seedBeachhead requiert SystemsBootstrap/BoatFront.install()")
 end
 
 --[[
@@ -1548,21 +2126,28 @@ end
 --[[
 	Serialise les changements de proprietaire depuis le dernier appel, au format
 	[u32 index][u8 slot] repete. On n'envoie jamais la carte entiere.
+	N72 : recycle dirtyIndexBuf. Early-out dirty vide sans allouer. Le buffer
+	outbound reste neuf (RemoteEvent) — ne pas le recycler.
 ]]
 function GameState.flushOwnerDelta(self: GameState): buffer?
-	local indices = {}
-	for index in self.dirty do
-		table.insert(indices, index)
-	end
-	table.clear(self.dirty)
-
-	local count = #indices
-	if count == 0 then
+	if next(self.dirty) == nil then
+		table.clear(self.dirty)
 		return nil
 	end
 
-	local buf = buffer.create(count * 5)
-	for i, index in indices do
+	local n = 0
+	for index in self.dirty do
+		n += 1
+		dirtyIndexBuf[n] = index
+	end
+	for i = #dirtyIndexBuf, n + 1, -1 do
+		dirtyIndexBuf[i] = nil
+	end
+	table.clear(self.dirty)
+
+	local buf = buffer.create(n * 5)
+	for i = 1, n do
+		local index = dirtyIndexBuf[i]
 		local offset = (i - 1) * 5
 		buffer.writeu32(buf, offset, index)
 		buffer.writeu8(buf, offset + 4, buffer.readu8(self.owner, index))

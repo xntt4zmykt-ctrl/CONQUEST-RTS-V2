@@ -1,8 +1,8 @@
 --!strict
 --[[
-	Menu radial, modele OpenFront.
+	Menu radial, regle CONQUEST.
 
-	C'est la piece qui organise toute l'interface du jeu de reference, et la
+	C'est la piece qui organise toute l'interface CONQUEST, et la
 	raison pour laquelle son ecran reste vide : **aucun bouton d'action n'est
 	affiche en permanence**. On clique droit sur la case qu'on regarde deja, et
 	les actions viennent a l'endroit ou l'oeil se trouve — au lieu d'obliger a
@@ -13,7 +13,7 @@
 	propre territoire, alors qu'une barre permanente doit rester generique et
 	laisse le joueur decouvrir l'erreur apres coup.
 
-	Deux niveaux, comme dans OpenFront : l'anneau racine porte les modes, et
+	Deux niveaux, comme dans CONQUEST : l'anneau racine porte les modes, et
 	"Construire" remplace l'anneau par la liste des batiments sans fermer le
 	menu ni perdre la case visee.
 
