@@ -3305,6 +3305,159 @@ do
 end
 
 do
+	-- Transports inbound : removePlayer restitue 100 % (pas BOAT_RETREAT_LOSS)
+	-- et empeche seedBeachhead vs NEUTRAL / slot recycle.
+	local state = GameState.new(9596)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(103), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(104), 0)
+	if not invader or not defender then
+		fail("boat inbound — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and buffer.readu8(state.owner, index) == defender.slot then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat inbound — cote defenseur introuvable")
+		else
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			local gone = defender.slot
+			state:removePlayer(gone)
+			if math.abs(invader.troops - (1000 + committed)) > 0.01 then
+				fail(`boat inbound — troupes {invader.troops} attendu {1000 + committed} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat inbound — {leftover} transport(s) encore en mer`)
+			end
+			local attacksBefore = #state.attacks
+			Navy.step(state, Random.new(5))
+			if #state.attacks ~= attacksBefore then
+				fail("boat inbound — seedBeachhead apres removePlayer")
+			end
+			print("boat inbound : transports restitues, pas de tete de pont vs disparu")
+		end
+	end
+end
+
+do
+	-- L'attaquant qui part perd ses transports (comme ses fronts terre).
+	local state = GameState.new(9597)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Part", Random.new(105), 0)
+	local defender = state:addPlayer(nil, "Reste", Random.new(106), 0)
+	if not invader or not defender then
+		fail("boat attacker leave — spawn impossible")
+	else
+		local landing = defender.capitalTile or 0
+		invader.troops = 1000
+		table.insert(state.boats, {
+			id = 2,
+			slot = invader.slot,
+			kind = Navy.KIND_TRANSPORT,
+			troops = 400,
+			x = 0,
+			y = 0,
+			path = { landing },
+			step = 1,
+			targetTile = landing,
+			homeTile = landing,
+			retreating = false,
+		})
+		local gone = invader.slot
+		state:removePlayer(gone)
+		for _, boat in state.boats do
+			if boat.slot == gone then
+				fail("boat attacker leave — transport du disparu encore en mer")
+				break
+			end
+		end
+		print("boat attacker leave : transports de l'attaquant detruits")
+	end
+end
+
+do
+	-- Demande croisee : une proposition inverse PERIMEE ne doit pas bloquer
+	-- une nouvelle request (Bots.step avant Diplomacy.step).
+	local state = GameState.new(9698)
+	local a = state:addPlayer(nil, "A", Random.new(107), 0)
+	local b = state:addPlayer(nil, "B", Random.new(108), 0)
+	if not a or not b then
+		fail("request stale reverse — spawn impossible")
+	else
+		local okLive = Diplomacy.request(state, b.slot, a.slot)
+		if not okLive then
+			fail("request stale reverse — proposition initiale refusee")
+		else
+			state.requests[b.slot][a.slot] = 0
+			state.tick = 1
+			local ok, message = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail(`request stale reverse — nouvelle demande refusee ({tostring(message)})`)
+			end
+			if state:areAllied(a.slot, b.slot) then
+				fail("request stale reverse — pacte signe sur une proposition perimee")
+			end
+			local fromA = state.requests[a.slot]
+			if not fromA or fromA[b.slot] == nil then
+				fail("request stale reverse — nouvelle demande non enfilee")
+			end
+			local fromB = state.requests[b.slot]
+			if fromB and fromB[a.slot] ~= nil then
+				fail("request stale reverse — proposition perimee encore en table")
+			end
+			print("request stale reverse : proposition perimee ignoree, nouvelle demande enfilee")
+		end
+	end
+end
+
+do
+	-- Demande croisee VIVANTE : toujours une acceptation.
+	local state = GameState.new(9699)
+	local a = state:addPlayer(nil, "A", Random.new(109), 0)
+	local b = state:addPlayer(nil, "B", Random.new(110), 0)
+	if not a or not b then
+		fail("request live reverse — spawn impossible")
+	else
+		if not Diplomacy.request(state, b.slot, a.slot) then
+			fail("request live reverse — proposition initiale refusee")
+		else
+			local ok = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail("request live reverse — croisement vivant refuse")
+			end
+			if not state:areAllied(a.slot, b.slot) then
+				fail("request live reverse — pacte non signe")
+			end
+			print("request live reverse : croisement vivant signe le pacte")
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
