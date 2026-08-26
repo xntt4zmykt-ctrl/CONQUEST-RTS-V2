@@ -682,15 +682,16 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 		batterie elle-meme. C'est la suppression avant l'assaut — le SAM tombe,
 		et la vraie frappe passera au tour suivant.
 	]]
-	local samRange2 = Config.SAM_RANGE * Config.SAM_RANGE
 	local sams = Buildings.samsOf(state, bestSlot)
 
 	local function coveredBy(index: number): number?
 		local x, y = MapGen.fromIndex(index)
 		for _, samIndex in sams do
+			local building = state.buildings[samIndex]
+			local range = Nukes.samRange(if building then (building.level or 1) else 1)
 			local sx, sy = MapGen.fromIndex(samIndex)
 			local dx, dy = sx - x, sy - y
-			if dx * dx + dy * dy <= samRange2 then
+			if dx * dx + dy * dy <= range * range then
 				return samIndex
 			end
 		end

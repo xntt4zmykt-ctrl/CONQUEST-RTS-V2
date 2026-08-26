@@ -145,8 +145,14 @@ end
 	Choix = plus proche batterie prete dans SAM_RANGE (defaultSamRange 70).
 	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
-local function samRange(level: number): number
+-- Portee OF : 150 - 480/(level+5) ≈ 70 au niveau 1, ~90 au palier 3.
+-- Exporté pour que les bots previewent la même couverture que tryIntercept.
+function Nukes.samRange(level: number): number
 	return 150 - 480 / (level + 5)
+end
+
+local function samRange(level: number): number
+	return Nukes.samRange(level)
 end
 
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean

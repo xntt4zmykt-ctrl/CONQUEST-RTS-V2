@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	error("banc client : chargement impossible")
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -1477,4 +1477,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	error(`banc client : {failures} defaillance(s)`)
 end

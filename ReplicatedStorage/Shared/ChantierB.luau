@@ -40,14 +40,14 @@ end
 function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defender: any, tile: number)
 	local terrain = buffer.readu8(state.terrain, tile)
 	local mag, speed = terrainMagSpeed(terrain)
-	local DEF = Config.BUILDING.DEFENSE
 	local posted = false
-	if defender and (defender.buildingCounts[DEF] or 0) > 0 then
-		local cx, cy = MapGen.fromIndex(tile)
-		local r = Config.DEFENSE_RADIUS or 30
-		local r2 = r * r
-		for index, building in state.buildings do
-			if building.kind == DEF and building.slot == defender.slot then
+	if defender then
+		local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+		if bunkers then
+			local cx, cy = MapGen.fromIndex(tile)
+			local r = Config.DEFENSE_RADIUS or 30
+			local r2 = r * r
+			for index in bunkers do
 				local bx, by = MapGen.fromIndex(index)
 				local dx, dy = bx - cx, by - cy
 				if dx * dx + dy * dy <= r2 then
@@ -342,6 +342,7 @@ function ChantierB.stripTerritory(state, ps)
 	end
 	ps.tiles = 0
 	ps.capitalTile = nil
+	ps.spawnCenter = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
 	ps.coast = {}

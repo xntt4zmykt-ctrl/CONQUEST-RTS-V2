@@ -231,7 +231,7 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
-		if not isInteger(kind) then
+		if not isInteger(kind) or not Config.NUKE_STATS[kind] then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end

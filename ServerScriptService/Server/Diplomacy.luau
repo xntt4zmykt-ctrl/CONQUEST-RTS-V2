@@ -28,6 +28,15 @@ local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	end
 end
 
+-- Expiry numerique atteinte. `true` legacy (pacte sans date) n'expire pas ici.
+local function numericExpired(expiry: any, tick: number): boolean
+	return typeof(expiry) == "number" and tick >= expiry
+end
+
+local function requestIsLive(expiry: any, tick: number): boolean
+	return typeof(expiry) == "number" and tick < expiry
+end
+
 --=============================================================================
 -- Alliances
 --=============================================================================
@@ -377,7 +386,7 @@ function Diplomacy.step(state: GameState)
 	-- Expiration des propositions non traitees.
 	for from, targets in state.requests do
 		for to, expiry in targets do
-			if state.tick >= expiry then
+			if typeof(expiry) ~= "number" or numericExpired(expiry, state.tick) then
 				targets[to] = nil
 			end
 		end
@@ -398,8 +407,15 @@ function Diplomacy.step(state: GameState)
 	for a, set in state.alliances do
 		for b, expiry in set do
 			-- Une seule fois par paire.
-			if a < b and state.tick >= expiry then
-				table.insert(expired, { a = a, b = b })
+			if a < b then
+				-- `true` legacy = pacte vivant sans date (areAllied l'honore).
+				-- Toute autre non-number est corrompue : areAllied la refuse deja.
+				if expiry == true then
+					continue
+				end
+				if typeof(expiry) ~= "number" or numericExpired(expiry, state.tick) then
+					table.insert(expired, { a = a, b = b })
+				end
 			end
 		end
 	end
@@ -472,7 +488,9 @@ function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: num
 	local allySet = state.alliances[from]
 	if allySet then
 		for other in allySet do
-			state:notify(message, "info", other)
+			if state:areAllied(from, other) then
+				state:notify(message, "info", other)
+			end
 		end
 	end
 	return true, `{t.name} designee comme cible pour ton alliance.`
@@ -500,13 +518,16 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if requestIsLive(expiry, state.tick) then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if requestIsLive(expiry, state.tick) then
 			incoming[other] = true
 		end
 	end
