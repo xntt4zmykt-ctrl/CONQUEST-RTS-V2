@@ -85,8 +85,8 @@ local function addWake(visual: Visual)
 	-- retoucher les Bow). Distinct de V94 (LandingRamp pitch X=-8°,
 	-- kind==1 — ne PAS retoucher la rampe). Distinct de V95
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
-	-- corps). Distinct de leftover V97 (buildCarrier mesh
-	-- visual.parts). Distinct de V78 (LaunchWake Overlay, wakeRot
+	-- corps). Distinct de leftover V98 (CityWindows rest.X,
+	-- BuildingModels.animate). Distinct de V78 (LaunchWake Overlay, wakeRot
 	-- cuit, Y = OCEAN+0.12 — autre objet). Construction de
 	-- modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
@@ -140,7 +140,21 @@ local function buildCarrier(visual: Visual, faction: Color3)
 		mesh.Size = UnitModels.CARRIER_MESH_SCALE
 		mesh.CFrame = CFrame.new()
 		mesh.Parent = visual.model
-		table.insert(visual.parts, { part = mesh, offset = CFrame.new(), role = "hull" })
+		-- V97 : insert dans visual.pieces (pas visual.parts). Visual
+		-- n'exporte que pieces. Overlay place itere pieces — le mesh
+		-- serait invisible meme sans crash. Recette feel N148 —
+		-- ne PAS merger 7dff. CARRIER_MESH_ID reste "".
+		-- CARRIER_MESH_SCALE / MeshPart Name CarrierMesh / Size /
+		-- CFrame identite / role hull inchanges. Distinct de V96
+		-- (Fin roll Z=axis·π/2 — ne PAS retoucher les ailettes).
+		-- Distinct de V95 (MissileBody yaw Y=90°). Distinct de V93
+		-- (Bow yaw Y=π, meme buildCarrier — ne PAS retoucher les
+		-- Bow). Distinct de V92 (Wake, addWake apres buildCarrier).
+		-- Distinct de leftover V98 (CityWindows rest.X,
+		-- BuildingModels.animate — autre fichier). Chemin mort tant
+		-- que CARRIER_MESH_ID == "". Ne pas activer l'ID au banc
+		-- (stub MeshPart n'importe pas le mesh).
+		table.insert(visual.pieces, { part = mesh, offset = CFrame.new(), role = "hull" })
 		return
 	end
 
@@ -156,8 +170,8 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- retoucher les Wake). Distinct de V94 (LandingRamp pitch
 	-- X=-8°, kind==1 — ne PAS retoucher la rampe). Distinct de
 	-- V95 (MissileBody yaw Y=90°, cylindre — ne PAS retoucher
-	-- le corps). Distinct de leftover V97 (buildCarrier mesh
-	-- visual.parts).
+	-- le corps). Distinct de leftover V98 (CityWindows rest.X,
+	-- BuildingModels.animate).
 	-- Distinct de V78 (LaunchWake Overlay — autre objet).
 	-- Construction de modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
@@ -204,7 +218,8 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- Call site createBoat kind==1/2 (avant pont). Ne pas merger
 	-- feel c62f. Ne PAS retoucher LandingRamp (V94 deja). Ne PAS
 	-- retoucher MissileBody (V95 deja). Ne PAS retoucher Fin
-	-- (V96 deja). Leftover V97 buildCarrier mesh.
+	-- (V96 deja). Ne PAS retoucher le mesh carrier (V97 deja).
+	-- Leftover V98 CityWindows rest.X.
 	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
@@ -242,9 +257,9 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 		-- SAM interdits). Distinct de V93 (Bow yaw Y=π, carrier +
 		-- transport/cargo — ne PAS retoucher les Bow). Distinct de
 		-- V92 (Wake yaw Y=±11°, addWake — ne PAS retoucher les
-		-- Wake). Distinct de V95 (MissileBody yaw Y=90°, cylindre
-		-- — ne PAS retoucher le corps). Distinct de leftover V97
-		-- (buildCarrier mesh visual.parts). Distinct de V91
+	-- Wake). Distinct de V95 (MissileBody yaw Y=90°, cylindre
+	-- — ne PAS retoucher le corps). Distinct de leftover V98
+	-- (CityWindows rest.X, BuildingModels.animate). Distinct de V91
 		-- (rampes SAM, pitch X=-31°, BuildingModels — autre
 		-- fichier). Distinct de V78 (LaunchWake Overlay — autre
 		-- objet). Construction de modele, pas 60 Hz. addPart pose
@@ -289,7 +304,7 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- rampe). Distinct de V93 (Bow yaw Y=π). Distinct de V92
 	-- (Wake yaw Y=±11°, addWake). Distinct de V96 (Fin roll
 	-- Z=axis·π/2 — ne PAS retoucher les ailettes). Distinct de
-	-- leftover V97 (buildCarrier mesh visual.parts). Distinct
+	-- leftover V98 (CityWindows rest.X, BuildingModels.animate). Distinct
 	-- de V88 (cylinder() helper, Z=90°, BuildingModels — autre
 	-- fichier). Distinct de V78 (LaunchWake Overlay — autre
 	-- objet). Construction de modele, pas 60 Hz. addPart pose
@@ -311,8 +326,8 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
 	-- corps). Distinct de V94 (LandingRamp pitch X=-8°,
 	-- kind==1). Distinct de V93 (Bow yaw Y=π). Distinct de V92
-	-- (Wake yaw Y=±11°, addWake). Distinct de leftover V97
-	-- (buildCarrier mesh visual.parts). Distinct de V78
+	-- (Wake yaw Y=±11°, addWake). Distinct de leftover V98
+	-- (CityWindows rest.X, BuildingModels.animate). Distinct de V78
 	-- (LaunchWake Overlay — autre objet). Construction de
 	-- modele, pas 60 Hz. addPart pose part.CFrame = offset ;
 	-- Overlay place compose frame * offset ensuite. Size 0.22,
