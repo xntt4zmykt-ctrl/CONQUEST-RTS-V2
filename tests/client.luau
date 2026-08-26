@@ -2007,12 +2007,16 @@ check("navires, missiles et interpolation", function()
 	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
 	-- Pas de testFlushDelays ici — les Model restent parentés
 	-- (le flush + reuse rawequal est dans « vagues de conquete »).
-	-- Skip retraite splash id=1 N56. Missiles Destroy immédiat
-	-- (leftover N176). Leftover N161 splash, leftover N160 wake,
-	-- leftover N152 flame Size doivent rester verts. Recette
-	-- leftover N174, pas merger visual V112 Ground/Border.
-	-- Overlay.clear Destroy conservé. HUD dismissFree N174
-	-- (check vagues) inchange.
+	-- Skip retraite splash id=1 N56. Leftover N161 splash,
+	-- leftover N160 wake, leftover N152 flame Size doivent rester
+	-- verts. Recette leftover N174, pas merger visual V112.
+	-- Overlay.clear Destroy conservé (leftover N177). HUD
+	-- dismissFree N174 (check vagues) inchange.
+	-- N176 : Overlay applyUnits missile Parent=nil + ogiveFree.
+	-- Park **immédiat** (pas de delay, pas de testFlushDelays).
+	-- Snapshot après applyUnits({}, {}) plus bas ; reuse rawequal
+	-- est dans « vagues de conquete ». Extra rawequal **avant**
+	-- le despawn. Distinct shipFree. Pas merger visual V113.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -2024,7 +2028,16 @@ check("navires, missiles et interpolation", function()
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= midX, "lerp sous yaw euler fige")
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive au 2e frame")
+	-- N176 : snapshot Visual ogive id=3 **après** le park immédiat.
+	-- extra rawequal ci-dessus doit rester vert (record unité, pas
+	-- le Visual). Parent nil ou #ogiveFree. Pas de testFlushDelays.
+	-- Ne pas réutiliser l'id=3 encore vivant. Reuse dans vagues.
+	local pooledOgiveNav = overlay.units[3].visual
+	assert(pooledOgiveNav.isMissile == true, "snapshot ogive sans isMissile")
 	overlay:applyUnits({}, {})
+	assert(pooledOgiveNav.model.Parent == nil, "ogive encore parentee")
+	local ogivePoolNav = overlay.ogiveFree
+	assert(ogivePoolNav ~= nil and #ogivePoolNav >= 1, "ogives non poolees au park")
 	overlay:explosion(50, 50, 9)
 end)
 
@@ -2248,11 +2261,16 @@ check("vagues de conquete", function()
 	-- == 3. Pas d'assert autre Name. Recette leftover N173.
 	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
 	-- Le check navires n'a pas flushé ; ce flush pousse shipFree
-	-- (ids 1/2/4, missiles Destroy immédiat hors scope). Snapshot
-	-- avant applyUnits id=99 ; id=99 kind=1 slot=1 reparente le
-	-- transport (rawequal Parent overlay.root ou présence dans
-	-- shipFree). Distinct splashFree / wakeFree / dismissFree.
-	-- Pas #shipFree == 3. Pas d'assert autre Name. Recette leftover N174.
+	-- (ids 1/2/4). Snapshot avant applyUnits id=99 ; id=99 kind=1
+	-- slot=1 reparente le transport (rawequal Parent overlay.root
+	-- ou présence dans shipFree). Distinct splashFree / wakeFree /
+	-- dismissFree / ogiveFree. Pas #shipFree == 3. Pas d'assert
+	-- autre Name. Recette leftover N174.
+	-- N176 : le check navires a déjà parké l'ogive id=3 (immédiat).
+	-- Snapshot avant applyUnits id=88 ; id=88 kind=1 slot=1
+	-- reparente (rawequal Parent overlay.root ou présence dans
+	-- ogiveFree). Distinct shipFree. Pas #ogiveFree == 1. Pas
+	-- d'assert autre Name. Recette leftover N175.
 	local pooledDismiss = pooledFeed:FindFirstChild("Dismiss")
 	assert(pooledDismiss ~= nil and pooledDismiss:IsA("TextButton"), "snapshot Dismiss manquant")
 	testFlushDelays()
@@ -2299,11 +2317,38 @@ check("vagues de conquete", function()
 	assert(pooledShip ~= pooledGold, "shipFree partage goldFree")
 	assert(pooledShip ~= pooledDismiss, "shipFree partage dismissFree")
 	assert(pooledShip ~= pooledFeed, "shipFree partage feedFree")
+	-- N176 : snapshot ogive après park navires, avant applyUnits
+	-- id=88 (kind=1 slot=1 = ogive id=3). Distinct shipFree /
+	-- splashFree / wakeFree / dismissFree / feedFree.
+	local ogivePool = overlay.ogiveFree
+	assert(ogivePool ~= nil and #ogivePool >= 1, "ogives non poolees")
+	local pooledOgive = nil
+	for i = #ogivePool, 1, -1 do
+		local vis = ogivePool[i]
+		if vis.kind == 1 and vis.slot == 1 and vis.isMissile then
+			pooledOgive = vis
+			break
+		end
+	end
+	if pooledOgive == nil then
+		pooledOgive = ogivePool[#ogivePool]
+	end
+	assert(pooledOgive ~= nil, "snapshot ogive manquant")
+	assert(pooledOgive.model.Parent == nil, "ogive encore parentee")
+	assert(pooledOgive.isMissile == true, "navire pousse dans ogiveFree")
+	assert(pooledOgive ~= pooledShip, "ogiveFree partage shipFree")
+	assert(pooledOgive ~= pooledWake, "ogiveFree partage wakeFree")
+	assert(pooledOgive ~= pooledSplash, "ogiveFree partage splashFree")
+	assert(pooledOgive ~= pooledGold, "ogiveFree partage goldFree")
+	assert(pooledOgive ~= pooledDismiss, "ogiveFree partage dismissFree")
+	assert(pooledOgive ~= pooledFeed, "ogiveFree partage feedFree")
 	local ringN = #ringPool
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
-	}, {})
+	}, {
+		{ id = 88, slot = 1, x = 42, y = 42, tx = 62, ty = 62, kind = 1 },
+	})
 	assert(#wakePool == wakeN - 1, "wake non reutilise")
 	assert(rawequal(pooledWake.Parent, overlay.root), "wake non reparente")
 	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu au reuse")
@@ -2321,6 +2366,25 @@ check("vagues de conquete", function()
 	else
 		assert(rawequal(pooledShip.model.Parent, overlay.root), "navire recree")
 		assert(not pooledShip.isMissile, "reuse ogive")
+	end
+	-- N176 : id=88 kind=1 slot=1 consomme ogiveFree. Reset
+	-- Transparency construction. Parent overlay.root. Pas Destroy.
+	-- Kind+slot match. PointLight enfant conservé. extra frais
+	-- (pas recyclé dans ogiveFree). Pas de LaunchWake.
+	if pooledOgive.model.Parent == nil then
+		local inFree = false
+		for _, vis in ogivePool do
+			if rawequal(vis, pooledOgive) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ogive ni reparentee ni dans ogiveFree")
+	else
+		assert(rawequal(pooledOgive.model.Parent, overlay.root), "ogive recree")
+		assert(pooledOgive.isMissile == true, "reuse navire")
+		local flame = pooledOgive.model:FindFirstChild("EngineFlame")
+		assert(flame ~= nil and flame:FindFirstChildWhichIsA("PointLight") ~= nil, "PointLight enfant perdu au reuse")
 	end
 	-- N161 : despawn id=99 (pas retraite) consomme splashFree.
 	local splashN = #splashPool

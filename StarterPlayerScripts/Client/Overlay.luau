@@ -768,10 +768,11 @@ end
 -- splashFree (N161, cylindre despawn). Distinct wakeFree (N160, cylindre
 -- spawn). Distinct dismissFree (N174). Distinct valueFree (N173).
 -- Kind match obligatoire (transport / cargo / carrier). Slot match
--- obligatoire (recolor non sûr + teinte retraite N56). Missiles hors
--- scope (Destroy immédiat, leftover N176). Overlay.clear Destroy
--- conservé (teardown). createBoat construction inchangée. Pas visual
--- V112 (ne pas merger 3ba1). Distinct leftover N152 flame.
+-- obligatoire (recolor non sûr + teinte retraite N56). Missiles :
+-- ogiveFree N176 (liste séparée, pas shipFree). Overlay.clear Destroy
+-- conservé (teardown, leftover N177). createBoat construction
+-- inchangée. Pas visual V112 (ne pas merger 3ba1). Distinct leftover
+-- N152 flame.
 local function rememberShipRest(visual: any)
 	if visual.restTransparency then
 		return
@@ -823,6 +824,47 @@ local function takeShip(self: Overlay, kind: number, slot: number): any
 	return nil
 end
 
+-- N176 : Overlay.applyUnits branche isMissile. Plus de Destroy
+-- immédiat : Parent = nil + ogiveFree. Recette leftover N175
+-- (shipFree déjà, delay 0.95 s — ne pas partager, pas de delay
+-- ici). Nommer ogiveFree, pas missileFree (clash Nukes.missileFree
+-- serveur) ni shipFree / splashFree / wakeFree. Kind+slot match
+-- obligatoire (recolor Warhead / GuidanceBand non sûr). Snapshot
+-- rest Transparency/Color à l'insert (place() anime trail ; park
+-- sans tween Transparency=1). PointLight enfant de EngineFlame
+-- survit au Parent=nil — ne pas en recréer. extra tx/ty vit sur
+-- le record unité, pas le Visual. Overlay.clear Destroy conservé
+-- (leftover N177). createMissile construction inchangée. Pas
+-- visual V113 (ne pas merger 1aab). Distinct leftover N152 flame.
+local function restoreOgive(visual: any, parent: Instance)
+	restoreShip(visual, parent)
+end
+
+local function takeOgive(self: Overlay, kind: number, slot: number): any
+	local free = (self :: any).ogiveFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.kind == kind and last.slot == slot then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.kind == kind and cand.slot == slot then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
 local function trackUnit(
 	self: Overlay,
 	id: number,
@@ -837,13 +879,27 @@ local function trackUnit(
 	if not unit then
 		local visual
 		if isMissile then
-			visual = UnitModels.createMissile(self.root, slot, kind)
+			-- N176 : pop ogiveFree O(1) depuis la fin si kind+slot
+			-- match. Sinon scan court (n petit). Mismatch / vide =
+			-- createMissile une fois. Ne pas pop un navire (jamais
+			-- poussé ici). Reset Transparency / Color construction
+			-- (place() anime trail Transparency ; park sans tween
+			-- à 1). Parent = self.root. visual.pieces / PointLight
+			-- enfant conservés. extra n'est pas sur le Visual.
+			visual = takeOgive(self, kind, slot)
+			if visual then
+				restoreOgive(visual, self.root)
+			else
+				visual = UnitModels.createMissile(self.root, slot, kind)
+				rememberShipRest(visual)
+			end
+			visual.slot = slot
 		else
 			-- N175 : pop shipFree O(1) depuis la fin si kind+slot
 			-- match. Sinon scan court (n petit). Mismatch / vide =
 			-- createBoat une fois. Ne pas pop un carrier pour un
-			-- transport. Ne pas pop une ogive (missiles jamais
-			-- poussés). Reset Transparency / Color construction
+			-- transport. Ne pas pop une ogive (ogiveFree séparé).
+			-- Reset Transparency / Color construction
 			-- (tween despawn pose Transparency=1 ; retraite teinte
 			-- les Color). Parent = self.root. visual.pieces conservé.
 			visual = takeShip(self, kind, slot)
@@ -1060,8 +1116,9 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				-- Stocker le Visual entier (model + pieces + kind +
 				-- isMissile + rest Transparency/Color). Slot pour le
 				-- match takeShip. Skip missiles (branche else).
-				-- Overlay.clear Destroy conservé. splashFree / wakeFree
-				-- non partagés. Recette leftover N174.
+				-- Overlay.clear Destroy conservé (leftover N177).
+				-- splashFree / wakeFree / ogiveFree non partagés.
+				-- Recette leftover N174.
 				task.delay(0.95, function()
 					if unit.visual.model.Parent then
 						unit.visual.model.Parent = nil
@@ -1076,7 +1133,26 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 					end
 				end)
 			else
-				unit.visual.model:Destroy()
+				-- N176 : free-list ogiveFree, push si encore parenté
+				-- (un despawn fantôme ne double-push pas). Pas Destroy.
+				-- Immédiat (pas le delay 0.95 s navire). Stocker le
+				-- Visual entier (model + pieces + kind + isMissile +
+				-- rest Transparency/Color). Slot pour le match
+				-- takeOgive. Skip navires (branche not isMissile).
+				-- Overlay.clear Destroy conservé (leftover N177).
+				-- shipFree / splashFree / wakeFree non partagés.
+				-- Recette leftover N175, pas merger visual V113.
+				if unit.visual.model.Parent then
+					unit.visual.model.Parent = nil
+					rememberShipRest(unit.visual)
+					unit.visual.slot = unit.slot
+					local pool = self.ogiveFree
+					if not pool then
+						pool = {}
+						self.ogiveFree = pool
+					end
+					pool[#pool + 1] = unit.visual
+				end
 			end
 			self.units[id] = nil
 		end
