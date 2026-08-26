@@ -143,6 +143,15 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- arrivee colis, pas 60 Hz.
 	self.goldFree = {} :: { Part }
 
+	-- V129 : free-list modeles PAR overlay, indexee par kind
+	-- (pas ringFree / chatFree / blastFree). Recette analogique
+	-- V128 / V123 / feel N178 inline — ne PAS merger feel.
+	-- Leftover Parent = nil, pas Destroy. Kind+Level match au
+	-- take. Recolor meme kind+level inchange. Destroy modele
+	-- navire conserve. Overlay.clear Destroy conserve (V130).
+	-- Pas reentrant.
+	self.buildingFree = {} :: { [number]: { Model } }
+
 	return self
 end
 
@@ -243,6 +252,9 @@ local function makeBuilding(
 	model:SetAttribute("TintR", color.R)
 	model:SetAttribute("TintG", color.G)
 	model:SetAttribute("TintB", color.B)
+	model:SetAttribute("OriginX", base.X)
+	model:SetAttribute("OriginY", ground)
+	model:SetAttribute("OriginZ", base.Z)
 	model.Parent = parent
 	return model
 end
@@ -717,6 +729,132 @@ function Overlay.tally(self: Overlay, slot: number?, kind: number?, sign: number
 	bucket[kind] = math.max(0, (bucket[kind] or 0) + sign)
 end
 
+-- V129 : parker un modele (Parent = nil, push buildingFree[kind]).
+-- Recette analogique V128 chatFree / V123 ringFree / feel N178
+-- inline — ne PAS merger feel. Pas Destroy. Ne pas partager
+-- ringFree. Overlay.clear Destroy conserve (V130).
+local function parkBuilding(self: Overlay, model: Model)
+	local kind = model:GetAttribute("Kind") :: number?
+	if not kind or kind == 0 then
+		model.Parent = nil
+		return
+	end
+	for _, part in model:GetChildren() do
+		if part:IsA("BasePart") then
+			local rest = part:GetAttribute("RestCFrame") :: CFrame?
+			if rest then
+				part.CFrame = rest
+			end
+		end
+	end
+	model.Parent = nil
+	local free = self.buildingFree
+	local pool = free[kind]
+	if not pool then
+		pool = {}
+		free[kind] = pool
+	end
+	pool[#pool + 1] = model
+end
+
+-- Take Kind+Level (feel N178). Pool indexee par kind (spec V129).
+-- Scan depuis la fin : le cas courant (dernier parque = meme palier)
+-- est O(1) swap-pop.
+local function takeBuilding(self: Overlay, kind: number, level: number): Model?
+	local pool = self.buildingFree[kind]
+	if not pool then
+		return nil
+	end
+	for i = #pool, 1, -1 do
+		local candidate = pool[i]
+		if candidate:GetAttribute("Level") == level then
+			local last = #pool
+			pool[i] = pool[last]
+			pool[last] = nil
+			return candidate
+		end
+	end
+	return nil
+end
+
+-- Name / CFrame / Marker / Tint au reuse. RestCFrame traduit du
+-- delta d'origine. Recolor seulement si la faction change.
+local function relocateBuilding(model: Model, index: number, kind: number, slot: number, level: number, terrain: buffer)
+	local base = WorldSpace.indexToWorld(index)
+	local ground = WorldSpace.surfaceHeight(terrain, index)
+	local oldX = model:GetAttribute("OriginX") :: number?
+	local oldY = model:GetAttribute("OriginY") :: number?
+	local oldZ = model:GetAttribute("OriginZ") :: number?
+	if oldX and oldY and oldZ then
+		local dx = base.X - oldX
+		local dy = ground - oldY
+		local dz = base.Z - oldZ
+		if dx ~= 0 or dy ~= 0 or dz ~= 0 then
+			local delta = Vector3.new(dx, dy, dz)
+			for _, part in model:GetChildren() do
+				if part:IsA("BasePart") then
+					local rest = part:GetAttribute("RestCFrame") :: CFrame?
+					if rest then
+						rest = rest + delta
+						part:SetAttribute("RestCFrame", rest)
+						part.CFrame = rest
+					else
+						part.CFrame = part.CFrame + delta
+					end
+				end
+			end
+		else
+			for _, part in model:GetChildren() do
+				if part:IsA("BasePart") then
+					local rest = part:GetAttribute("RestCFrame") :: CFrame?
+					if rest then
+						part.CFrame = rest
+					end
+				end
+			end
+		end
+	end
+	model:SetAttribute("OriginX", base.X)
+	model:SetAttribute("OriginY", ground)
+	model:SetAttribute("OriginZ", base.Z)
+	model.Name = `Building{index}`
+
+	local color = colorFor(slot)
+	local prevR = model:GetAttribute("TintR") :: number?
+	local prevG = model:GetAttribute("TintG") :: number?
+	local prevB = model:GetAttribute("TintB") :: number?
+	if prevR and prevG and prevB then
+		local previous = Color3.new(prevR, prevG, prevB)
+		if previous.R ~= color.R or previous.G ~= color.G or previous.B ~= color.B then
+			BuildingModels.recolor(model, previous, color)
+		end
+	end
+	model:SetAttribute("Kind", kind)
+	model:SetAttribute("Slot", slot)
+	model:SetAttribute("Level", level)
+	model:SetAttribute("TintR", color.R)
+	model:SetAttribute("TintG", color.G)
+	model:SetAttribute("TintB", color.B)
+
+	local anchor = model:FindFirstChildWhichIsA("BasePart")
+	if not anchor then
+		return
+	end
+	local marker = anchor:FindFirstChild("Marker")
+	if marker and marker:IsA("BillboardGui") then
+		marker.StudsOffsetWorldSpace =
+			Vector3.new(base.X, ground + BuildingModels.heightOf(kind, level) + 3, base.Z) - anchor.Position
+		local label = marker:FindFirstChild("Symbol")
+		if label and label:IsA("TextLabel") then
+			label.TextColor3 = color
+			local outline = label:FindFirstChildWhichIsA("UIStroke")
+			if outline then
+				outline.Color = color
+			end
+		end
+	end
+end
+
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
 	for _, entry in deltas do
 		local existing = self.buildings[entry.index]
@@ -734,7 +872,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		if entry.kind == 0 then
 			self:syncFactoryRoutes(entry.index, nil, 0)
 			if existing then
-				existing:Destroy()
+				parkBuilding(self, existing)
 				self.buildings[entry.index] = nil
 			end
 			continue
@@ -773,18 +911,32 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 			continue
 		end
 
+		-- V129 : remplacement kind/level. Parker l'ancien, take le
+		-- nouveau kind+level (ou makeBuilding). Recette analogique
+		-- V128 / V123 / feel N178 inline — ne PAS merger feel.
+		-- playConstruction seulement si le modele est NEUF (pas
+		-- reuse, pas recolor). Destroy modele navire conserve.
+		-- Ne pas partager ringFree. Overlay.clear Destroy conserve
+		-- (V130).
 		if existing then
-			existing:Destroy()
+			parkBuilding(self, existing)
 		end
 
-		local model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		local model = takeBuilding(self, entry.kind, level)
+		local isNew = model == nil
+		if model then
+			relocateBuilding(model, entry.index, entry.kind, entry.slot, level, self.terrain)
+			model.Parent = self.root
+		else
+			model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		end
 		self.buildings[entry.index] = model
 		if entry.kind == Config.BUILDING.FACTORY then
 			model:SetAttribute("Routes", if entry.links then #entry.links else 0)
 			self:syncFactoryRoutes(entry.index, entry.links, entry.slot)
 		end
 
-		if os.clock() >= self.animateFrom then
+		if isNew and os.clock() >= self.animateFrom then
 			local base = WorldSpace.indexToWorld(entry.index)
 			local ground = WorldSpace.surfaceHeight(self.terrain, entry.index)
 			BuildingModels.playConstruction(model, Vector3.new(base.X, ground + 0.4, base.Z))
