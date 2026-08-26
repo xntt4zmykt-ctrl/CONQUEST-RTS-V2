@@ -54,6 +54,31 @@ local BOT_NAMES = {
 
 local botSlots: { number } = {}
 local scratch = table.create(4, 0)
+-- N61 : contacts frontaliers recycles (recette feel 2f5d N80).
+-- Appels sequentiels (decideDiplomacy x2, decideNavy, decideAttack) —
+-- jamais imbriques. Map, pas array : table.clear, pas de truncate.
+-- Slot sans joueur / sans frontiere → vide.
+local contactBuf: { [number]: number } = {}
+-- N72 : pactes recycles pour decideDiplomacy (recette visual d3e2 V42).
+-- Hash, table.clear, pas de truncate. Distinct de contactBuf (voisins
+-- de tuiles) et de viewBuf (HUD). Appels sequentiels par bot
+-- (Bots.step) — un second clear au bot suivant est voulu. Pas
+-- reentrant. Snapshot areAllied, pas la table brute alliances[]
+-- (Diplomacy.step tourne APRES Bots.step). Banc N72 : leftover
+-- apres breakAlliance (un clear oublie ferait une coalition fantome).
+local allyBuf: { [number]: boolean } = {}
+-- N62 : emplacements de pose recycles (recette feel 2f5d/b62d N81).
+-- Unique appelant synchrone (decideBuild). Array + truncate (recette
+-- N49), pas table.clear. Cap DEFENSE = 60. Non reentrant — decideBuild
+-- lit puis abandonne.
+local siteBuf: { number } = table.create(60)
+-- N50 : flatten buildingsBySlot une fois par visée (pas × 90 tuiles).
+-- Arrays parallèles, pas un spatial hash. Non réentrant — decideNuke
+-- est unique par bot par tick. blastValue (banc N46) réutilise le même pool.
+local blastX: { number } = table.create(48)
+local blastY: { number } = table.create(48)
+local blastLevel: { number } = table.create(48)
+local blastN = 0
 
 --=============================================================================
 -- Mise en place
@@ -77,11 +102,12 @@ end
 --=============================================================================
 
 -- Factions au contact terrestre, avec la longueur du front partage.
-local function neighborFactions(state: GameState, slot: number): { [number]: number }
+-- N61 : Bots.neighborFactions + contactBuf (recette samsOf / N49).
+function Bots.neighborFactions(state: GameState, slot: number): { [number]: number }
+	table.clear(contactBuf)
 	local ps = state.players[slot]
-	local contacts: { [number]: number } = {}
 	if not ps then
-		return contacts
+		return contactBuf
 	end
 
 	for index in ps.border do
@@ -91,13 +117,13 @@ local function neighborFactions(state: GameState, slot: number): { [number]: num
 			if state:isLand(nb) then
 				local other = buffer.readu8(state.owner, nb)
 				if other ~= slot then
-					contacts[other] = (contacts[other] or 0) + 1
+					contactBuf[other] = (contactBuf[other] or 0) + 1
 				end
 			end
 		end
 	end
 
-	return contacts
+	return contactBuf
 end
 
 -- Puissance percue d'une faction : ce que le bot compare avant d'attaquer.
@@ -135,6 +161,8 @@ local function humanTargetProtected(
 	-- joueur controle un territoire suffisant ou prend lui-meme de l'avance.
 	return target.tiles < Config.BOT_HUMAN_PROTECTION_TILES and attacker.tiles > target.tiles
 end
+-- Exporte pour les tribus (meme grace / meme protection tuiles).
+Bots.humanTargetProtected = humanTargetProtected
 
 -- Le leader ne doit pas seulement etre "la meilleure cible" : quand il a
 -- deja pris une avance nette, les factions secondaires doivent comprendre
@@ -180,21 +208,27 @@ end
 	tuiles frontieres ne marche pas, car l'ordre de parcours d'une table est
 	stable et un bot dont ces 60 tuiles sont a l'interieur des terres ne
 	construit alors *jamais* de port. On filtre donc sur le critere reel.
+
+	N62 : Bots.gatherSites + siteBuf (recette samsOf / N49, feel N81).
+	Caps 40/60/45 inchanges. Pas de shuffle — l'ordre de hash coast/border
+	est la loi.
 ]]
-local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: number, rng: Random): { number }
-	local sites: { number } = {}
+function Bots.gatherSites(state: GameState, ps: GameState.PlayerState, kind: number, rng: Random): { number }
+	local n = 0
 
 	if kind == B.PORT or kind == B.NAVAL_BASE then
 		for index in ps.coast do
-			table.insert(sites, index)
-			if #sites >= 40 then
+			n += 1
+			siteBuf[n] = index
+			if n >= 40 then
 				break
 			end
 		end
 	elseif kind == B.DEFENSE then
 		for index in ps.border do
-			table.insert(sites, index)
-			if #sites >= 60 then
+			n += 1
+			siteBuf[n] = index
+			if n >= 60 then
 				break
 			end
 		end
@@ -207,12 +241,52 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 			local y = rng:NextInteger(0, Config.MAP_HEIGHT - 1)
 			local index = MapGen.toIndex(x, y)
 			if buffer.readu8(state.owner, index) == ps.slot then
-				table.insert(sites, index)
+				n += 1
+				siteBuf[n] = index
 			end
 		end
 	end
 
-	return sites
+	for i = #siteBuf, n + 1, -1 do
+		siteBuf[i] = nil
+	end
+	return siteBuf
+end
+
+local function lowestUpgradable(state: GameState, slot: number): number?
+	local bestIndex: number? = nil
+	local bestLevel = math.huge
+	-- N46 option A : index buildingsBySlot, pas le hash global.
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = state.buildings[index]
+				if
+					building
+					and BuildingDefs.isUpgradable(building.kind)
+					and building.level < BuildingDefs.maxLevel(building.kind)
+					and building.level < bestLevel
+				then
+					bestIndex = index
+					bestLevel = building.level
+				end
+			end
+		end
+		return bestIndex
+	end
+	for index, building in state.buildings do
+		if
+			building.slot == slot
+			and BuildingDefs.isUpgradable(building.kind)
+			and building.level < BuildingDefs.maxLevel(building.kind)
+			and building.level < bestLevel
+		then
+			bestIndex = index
+			bestLevel = building.level
+		end
+	end
+	return bestIndex
 end
 
 local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
@@ -228,19 +302,7 @@ local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, r
 	-- ou une usine de niveau 3 valent trois exemplaires sans occuper trois
 	-- emplacements, et sans cette boucle les niveaux resteraient du contenu mort
 	-- dans toutes les parties contre l'IA.
-	local bestIndex: number? = nil
-	local bestLevel = math.huge
-	for index, building in state.buildings do
-		if
-			building.slot == ps.slot
-			and BuildingDefs.isUpgradable(building.kind)
-			and building.level < BuildingDefs.maxLevel(building.kind)
-			and building.level < bestLevel
-		then
-			bestIndex = index
-			bestLevel = building.level
-		end
-	end
+	local bestIndex = lowestUpgradable(state, ps.slot)
 	if not bestIndex then
 		return false
 	end
@@ -388,7 +450,7 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 		return -- on epargne plutot que de depenser au coup par coup
 	end
 
-	for _, index in gatherSites(state, ps, wanted, rng) do
+	for _, index in Bots.gatherSites(state, ps, wanted, rng) do
 		if Buildings.build(state, ps.slot, index, wanted) then
 			return
 		end
@@ -413,7 +475,12 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 		end
 	end
 
-	local allies = state.alliances[slot] or {}
+	table.clear(allyBuf)
+	for other in state.players do
+		if other ~= slot and state:areAllied(slot, other) then
+			allyBuf[other] = true
+		end
+	end
 	local leader, coalitionActive = dominantLeader(state)
 	local threatened = coalitionActive and leader ~= slot
 
@@ -438,7 +505,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 
 		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
 			for other, ps2 in state.players do
-				if other ~= slot and other ~= leader and not allies[other] then
+				if other ~= slot and other ~= leader and not allyBuf[other] then
 					Diplomacy.request(state, slot, other)
 					return
 				end
@@ -452,7 +519,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	--
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
-	for ally in allies do
+	for ally in allyBuf do
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
 		local protectedByCoalition = threatened and ally ~= leader
@@ -462,7 +529,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 			and mine > theirs * 2.2
 			and rng:NextNumber() < 0.25
 		then
-			local contacts = neighborFactions(state, slot)
+			local contacts = Bots.neighborFactions(state, slot)
 			if contacts[ally] and contacts[ally] > 4 then
 				Diplomacy.breakAlliance(state, slot, ally)
 				return
@@ -474,9 +541,9 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	-- Jamais au leader quand une coalition est active : s'abriter derriere le
 	-- geant revient a lui offrir la partie.
 	if rng:NextNumber() < 0.3 then
-		local contacts = neighborFactions(state, slot)
+		local contacts = Bots.neighborFactions(state, slot)
 		for other in contacts do
-			if other ~= NEUTRAL and not allies[other] and not (threatened and other == leader) then
+			if other ~= NEUTRAL and not allyBuf[other] and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
 					Diplomacy.request(state, slot, other)
 					return
@@ -517,10 +584,19 @@ local function decideChat(state: GameState, ps: GameState.PlayerState, rng: Rand
 		end
 	end
 	if worst then
+		local hasAlly = false
 		local allies = state.alliances[slot]
-		local hasAlly = allies ~= nil and next(allies) ~= nil
+		if allies then
+			for other in allies do
+				if state:areAllied(slot, other) then
+					hasAlly = true
+					break
+				end
+			end
+		end
 		-- Avec des allies on demande du renfort, seul on designe la menace a
 		-- toute la carte : dans les deux cas on cherche a ne pas mourir seul.
+		-- Un pacte perime encore present dans la table ne compte pas.
 		if hasAlly then
 			if Diplomacy.sendQuickChat(state, slot, "help_defend", worst) then
 				return
@@ -560,7 +636,7 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 		return
 	end
 
-	local contacts = neighborFactions(state, ps.slot)
+	local contacts = Bots.neighborFactions(state, ps.slot)
 	local hasLandTarget = false
 	for other in contacts do
 		if other ~= NEUTRAL or contacts[NEUTRAL] then
@@ -605,6 +681,62 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 			return
 		end
 	end
+end
+
+-- N50 : flatten buildingsBySlot dans blastBuf. Index present + set nil
+-- = buffer vide, score 0 (contrat N46 : pas de fallback hash).
+local function fillBlastBuf(state: GameState, slot: number)
+	local n = 0
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for other in set do
+				local building = state.buildings[other]
+				if building then
+					n += 1
+					local bx, by = MapGen.fromIndex(other)
+					blastX[n] = bx
+					blastY[n] = by
+					blastLevel[n] = building.level
+				end
+			end
+		end
+	else
+		for other, building in state.buildings do
+			if building.slot == slot then
+				n += 1
+				local bx, by = MapGen.fromIndex(other)
+				blastX[n] = bx
+				blastY[n] = by
+				blastLevel[n] = building.level
+			end
+		end
+	end
+	for i = #blastX, n + 1, -1 do
+		blastX[i] = nil
+		blastY[i] = nil
+		blastLevel[i] = nil
+	end
+	blastN = n
+end
+
+local function scoreBlast(tile: number, blast2: number): number
+	local x, y = MapGen.fromIndex(tile)
+	local value = 0
+	for i = 1, blastN do
+		local dx, dy = blastX[i] - x, blastY[i] - y
+		if dx * dx + dy * dy <= blast2 then
+			value += blastLevel[i]
+		end
+	end
+	return value
+end
+
+-- N46 : score d'emprise dans le rayon, via buildingsBySlot (plus le hash).
+-- N50 : fill unique ; le banc unitaire passe encore par cette API.
+local function blastValue(state: GameState, slot: number, tile: number, blast2: number): number
+	fillBlastBuf(state, slot)
+	return scoreBlast(tile, blast2)
 end
 
 local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Random)
@@ -701,6 +833,9 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 	end
 	local blast2 = blastRadius * blastRadius
 
+	-- N50 : un flatten, 90 scores. Pas blastValue × 90 (re-scan index).
+	fillBlastBuf(state, bestSlot)
+
 	local bestTile: number? = nil
 	local bestValue = -1
 	local shielded: number? = nil
@@ -720,17 +855,7 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 			continue
 		end
 
-		local x, y = MapGen.fromIndex(index)
-		local value = 0
-		for other, building in state.buildings do
-			if building.slot == bestSlot then
-				local bx, by = MapGen.fromIndex(other)
-				local dx, dy = bx - x, by - y
-				if dx * dx + dy * dy <= blast2 then
-					value += building.level
-				end
-			end
-		end
+		local value = scoreBlast(index, blast2)
 
 		if value > bestValue then
 			bestValue = value
@@ -758,7 +883,7 @@ local function decideAttack(state: GameState, ps: GameState.PlayerState, rng: Ra
 		return
 	end
 
-	local contacts = neighborFactions(state, ps.slot)
+	local contacts = Bots.neighborFactions(state, ps.slot)
 	local bestTarget: number? = nil
 	local bestScore = -math.huge
 	local leader, coalitionActive = dominantLeader(state)
@@ -856,5 +981,12 @@ function Bots.step(state: GameState, rng: Random)
 		decideNuke(state, ps, rng)
 	end
 end
+
+-- Banc N46 : selection / score sans passer par le rng de decide*.
+Bots.lowestUpgradable = lowestUpgradable
+Bots.blastValue = blastValue
+Bots.decideDiplomacy = decideDiplomacy
+-- Banc N72 : leftover apres breakAlliance. Pas replique.
+Bots.allyBuf = allyBuf
 
 return Bots

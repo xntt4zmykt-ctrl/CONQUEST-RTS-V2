@@ -40,6 +40,27 @@ local IS_DESTINATION = {
 	[B.FACTORY] = true,
 }
 
+-- Recycle le flatten FACTORY (ISSUE-N45). Trade.step tourne a 10 Hz.
+local factoriesBuf: { number } = {}
+
+-- N92 : un record par tuile d'usine (leftover N45, recette settledRecPool
+-- N89 / rosterRecPool N84). dispatch reecrit. Usine sans colis →
+-- tradeDeliveries[index] = nil (pas un leftover vivant). Pool module
+-- survit a GameState.new. Overlay lit onEvent("arrival") tout de suite
+-- — ne pas tenir le record au-dela du resolve. Ne pas pooler
+-- factory.links (N65, unique). Distinct de plunderPool (N85) et de
+-- portsByTile (N40).
+type DeliveryRec = {
+	to: number,
+	slot: number,
+	level: number,
+	links: number,
+	distance: number,
+	arrivalTick: number,
+}
+local deliveryPool: { [number]: DeliveryRec } = {}
+Trade.deliveryPool = deliveryPool
+
 local function tileDistance(a: number, b: number): number
 	local ax, ay = MapGen.fromIndex(a)
 	local bx, by = MapGen.fromIndex(b)
@@ -72,14 +93,26 @@ local function dispatch(state: GameState, rng: Random, index: number, factory: G
 	local distance = tileDistance(index, target)
 	local travel = math.max(1, math.ceil(distance / Config.TRUCK_SPEED))
 
-	state.tradeDeliveries[index] = {
-		to = target,
-		slot = factory.slot,
-		level = factory.level,
-		links = #links,
-		distance = distance,
-		arrivalTick = state.tick + travel,
-	}
+	local rec = deliveryPool[index]
+	if rec == nil then
+		rec = {
+			to = target,
+			slot = factory.slot,
+			level = factory.level,
+			links = #links,
+			distance = distance,
+			arrivalTick = state.tick + travel,
+		}
+		deliveryPool[index] = rec
+	else
+		rec.to = target
+		rec.slot = factory.slot
+		rec.level = factory.level
+		rec.links = #links
+		rec.distance = distance
+		rec.arrivalTick = state.tick + travel
+	end
+	state.tradeDeliveries[index] = rec
 	onEvent("dispatch", index, target, factory.slot, travel)
 end
 
@@ -105,7 +138,10 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 		return
 	end
 
-	local gold = deliveryValue(delivery.distance, factory.level, delivery.links)
+	-- Niveau snapshot au depart : upgrader l'usine en transit ne doit pas
+	-- augmenter un colis deja expedie. Fallback si un vieux payload n'a pas le champ.
+	local level = delivery.level or factory.level
+	local gold = deliveryValue(delivery.distance, level, delivery.links)
 	ps.gold += gold
 	onEvent("arrival", delivery.to, 0, delivery.slot, math.floor(gold))
 end
@@ -123,16 +159,32 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
 	-- depend de l'ordre interne de la table, et deux serveurs partis de la
 	-- meme graine divergeraient des le premier colis.
-	local factories: { number } = {}
-	for index, building in state.buildings do
-		if building.kind == B.FACTORY then
+	-- N45 : flatten depuis factoriesByTile, pas le hash buildings (recette
+	-- portsByTile). Sort par index inchange (RNG). Buffer recycle.
+	local factories = factoriesBuf
+	table.clear(factories)
+	local indexed = state.factoriesByTile
+	if indexed then
+		for index in indexed do
 			table.insert(factories, index)
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == B.FACTORY then
+				table.insert(factories, index)
+			end
 		end
 	end
 	table.sort(factories)
 
 	for _, index in factories do
 		local factory = state.buildings[index]
+		if not factory or factory.kind ~= B.FACTORY then
+			if indexed then
+				indexed[index] = nil
+			end
+			continue
+		end
 		local delivery = state.tradeDeliveries[index]
 		if delivery then
 			if state.tick >= delivery.arrivalTick then

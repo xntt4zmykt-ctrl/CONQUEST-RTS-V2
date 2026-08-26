@@ -300,6 +300,9 @@ Config.ATTACK_SPEND_RATE = 0.035 -- part du corps expeditionnaire depensee par t
 -- Delai avant qu'une retraite soit honoree, en ticks : le front continue de
 -- se battre pendant ce temps. Aligne sur notre boucle territoriale (20 ticks).
 Config.RETREAT_DELAY = 20
+-- Perte a la retraite terrestre (ChantierB.apply pose 0.25 ; constante
+-- documentee ici pour que le banc et un boot sans apply restent coherents).
+Config.RETREAT_LOSS = 0.25
 Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
@@ -449,7 +452,10 @@ Config.CARRIER_INTERCEPT_DAMAGE = 0.075 -- part des troupes du transport, par ti
 -- imprenable. C'est la mecanique qui ouvre la carte.
 
 Config.BOAT_SPEED = 0.85 -- tuiles par tick
-Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
+-- Charge 1/5 (port OF). La valeur 0.4 dans Config n'etait jamais lue :
+-- Navy embarquait `troops / 5`. On aligne constante et moteur.
+Config.BOAT_TROOP_RATIO = 0.2 -- part max de la reserve embarquee
+Config.BOAT_RETREAT_LOSS = 0.25 -- part perdue si le transport rentre au port
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
@@ -858,6 +864,8 @@ Config.RENDER_MODE = "Blocks" -- "Blocks" | "CanvasExperimental" | "LowDetail"
 
 -- Intentions reseau
 Config.INTENT_RATE_LIMIT_PER_SEC = 20
+Config.MAX_PENDING_INTENTS = 32 -- par joueur, file avant flush de tick
+Config.JOIN_COOLDOWN_SEC = 2 -- anti-spam JoinRequest
 Config.SNAPSHOT_COOLDOWN_SEC = 5
 Config.MAX_SNAPSHOTS_PER_MATCH = 12
 

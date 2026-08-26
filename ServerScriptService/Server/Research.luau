@@ -107,6 +107,11 @@ function Research.goldReserveFor(state: GameState, slot: number): number
 	return Research.eraCost(state, slot)
 end
 
+-- N58 : min courant, pas de table `ratios` (recette feel cc42 N77).
+-- Le HUD lit un number 0..1 (`eraProgress`), jamais la table
+-- intermediaire. Appele 10 Hz x slots depuis init.server replicate().
+-- Formule inchangee. Pas de buffer module-level (on ne retourne pas
+-- la table).
 function Research.progress(state: GameState, slot: number): number
 	local ps = state.players[slot]
 	if not ps or ps.era >= Eras.MAX_ID then
@@ -115,18 +120,11 @@ function Research.progress(state: GameState, slot: number): number
 
 	local next = Eras.get(ps.era + 1)
 	local cost = Research.eraCost(state, slot)
-	local ratios = {
-		if cost > 0 then ps.gold / cost else 1,
-		if next.requiredTiles > 0 then ps.tiles / next.requiredTiles else 1,
-	}
+	local lowest = if cost > 0 then ps.gold / cost else 1
+	lowest = math.min(lowest, if next.requiredTiles > 0 then ps.tiles / next.requiredTiles else 1)
 
 	for kind, count in next.requiredBuildings do
-		table.insert(ratios, (ps.buildingCounts[kind] or 0) / count)
-	end
-
-	local lowest = 1
-	for _, ratio in ratios do
-		lowest = math.min(lowest, ratio)
+		lowest = math.min(lowest, (ps.buildingCounts[kind] or 0) / count)
 	end
 	return math.clamp(lowest, 0, 1)
 end

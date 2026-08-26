@@ -17,6 +17,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
 local GameState = require(script.Parent.GameState)
 local Diplomacy = require(script.Parent.Diplomacy)
+local Bots = require(script.Parent.Bots)
 
 type GameState = GameState.GameState
 
@@ -113,6 +114,11 @@ local function decideAttack(state: GameState, ps, rng: Random)
 			continue
 		end
 		if not target.isBot and not target.isTribe then
+			-- Meme grace / protection tuiles que les bots : une tribu ne
+			-- contourne pas BOT_HUMAN_GRACE_DURATION.
+			if Bots.humanTargetProtected(state, ps, target) then
+				continue
+			end
 			if not state:holdsGrudge(ps.slot, other) and rng:NextNumber() > 0.12 then
 				continue
 			end
