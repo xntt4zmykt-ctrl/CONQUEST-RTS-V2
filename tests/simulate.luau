@@ -7905,10 +7905,11 @@ end
 do
 	-- N78 : TickMetrics recycle seenBuf + Sample ring. Deux
 	-- dirtyChunksFromDelta → rawequal seenBuf. 601 record →
-	-- #history == HISTORY_CAP, rawequal d'un Sample (pas 601 tables).
+	-- historyCount == HISTORY_CAP (contrat B N80 : #history reste
+	-- le pool). rawequal d'un Sample (pas 601 tables).
 	-- formatReport encore parseable. Apres formatReport du run
 	-- principal — reset ici ne fausse pas ticks=6000. Leftover
-	-- snapshot arrays = N79. Pas N76 / N77 / N53 / N2.
+	-- snapshot return = N81. Pas N76 / N77 / N53 / N2.
 	local delta = buffer.create(5)
 	buffer.writeu32(delta, 0, 1234)
 	buffer.writeu8(delta, 4, 1)
@@ -7936,8 +7937,8 @@ do
 				TickMetrics.record(i, 0, nil, 0)
 			end
 			local report = TickMetrics.formatReport()
-			if #TickMetrics.history ~= cap then
-				fail(`metrics hashes — history #{#TickMetrics.history}`)
+			if TickMetrics.historyCount ~= cap then
+				fail(`metrics hashes — historyCount {TickMetrics.historyCount}`)
 			elseif not rawequal(s1, TickMetrics.history[1]) then
 				fail("metrics hashes — Sample non recycle")
 			elseif not string.find(report, "ticks=", 1, true) then
@@ -7946,6 +7947,60 @@ do
 				print("metrics hashes : ring 601, Sample recycle, ticks= (N78)")
 			end
 		end
+	end
+end
+
+do
+	-- N79 : TickMetrics.snapshot recycle 4 arrays. Deux snapshot →
+	-- rawequal. History pleine (N78 vient de remplir 600) → leftover
+	-- [601] == nil. percentile mute : le 2e snapshot reecrit. Leftover
+	-- table de retour = N81. Pas N78 / N80 / N53 / N2.
+	local c0 = TickMetrics.changedBuf
+	local b0 = TickMetrics.bytesBuf
+	local m0 = TickMetrics.msBuf
+	local k0 = TickMetrics.chunksBuf
+	local snap1 = TickMetrics.snapshot()
+	local snap2 = TickMetrics.snapshot()
+	if not rawequal(c0, TickMetrics.changedBuf) or not rawequal(b0, TickMetrics.bytesBuf) then
+		fail("metrics snapshot — rawequal changed/bytes")
+	elseif not rawequal(m0, TickMetrics.msBuf) or not rawequal(k0, TickMetrics.chunksBuf) then
+		fail("metrics snapshot — rawequal ms/chunks")
+	elseif snap1.samples ~= TickMetrics.HISTORY_CAP or snap2.samples ~= TickMetrics.HISTORY_CAP then
+		fail(`metrics snapshot — samples {snap1.samples}/{snap2.samples}`)
+	elseif TickMetrics.changedBuf[TickMetrics.HISTORY_CAP + 1] ~= nil then
+		fail("metrics snapshot — leftover [601]")
+	elseif TickMetrics.bytesBuf[TickMetrics.HISTORY_CAP + 1] ~= nil then
+		fail("metrics snapshot — leftover bytes [601]")
+	else
+		print("metrics snapshot : 4 arrays rawequal, leftover 0 (N79)")
+	end
+end
+
+do
+	-- N80 : reset ne droppe pas le pool Sample (contrat B). 10 record,
+	-- reset, 1 record → rawequal history[1]. snapshot.samples == 1
+	-- (pas 10 fantomes). leftover N79 [2] == nil. formatReport ticks=1.
+	-- Pas N79 / N78 / N53. Ne pas reset avant le formatReport du run.
+	for i = 1, 10 do
+		TickMetrics.record(i, 0, nil, 0)
+	end
+	local s1 = TickMetrics.history[1]
+	TickMetrics.reset()
+	TickMetrics.record(1, 1, nil, 0.5)
+	local snap = TickMetrics.snapshot()
+	local report = TickMetrics.formatReport()
+	if not rawequal(s1, TickMetrics.history[1]) then
+		fail("metrics reset — Sample non recycle")
+	elseif TickMetrics.historyCount ~= 1 then
+		fail(`metrics reset — historyCount {TickMetrics.historyCount}`)
+	elseif snap.samples ~= 1 then
+		fail(`metrics reset — samples {snap.samples} fantomes`)
+	elseif TickMetrics.changedBuf[2] ~= nil then
+		fail("metrics reset — leftover [2] apres 1 sample")
+	elseif not string.find(report, "ticks=1", 1, true) then
+		fail("metrics reset — formatReport ticks")
+	else
+		print("metrics reset : pool Sample, samples=1, ticks=1 (N80)")
 	end
 end
 
