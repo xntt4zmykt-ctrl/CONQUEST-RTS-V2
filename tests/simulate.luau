@@ -2418,6 +2418,31 @@ do
 		end
 		ctx.now = os.clock
 		print("intentions : schema doctrine/nuke/diplomatie, ended, file OK")
+
+		-- QuickChat : le cooldown serveur doit faire echouer l'intent, pas un succes fantome.
+		IntentValidator.reset()
+		table.clear(replies)
+		state.tick = 10
+		local okChat = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 1, { messageId = "social_luck" })
+		if not okChat then
+			fail("intentions — QuickChat refuse a l'enqueue")
+		end
+		IntentValidator.flush(ctx)
+		local firstChat = replies[#replies]
+		if not firstChat or not firstChat.ok then
+			fail("intentions — premier QuickChat non applique")
+		end
+		table.clear(replies)
+		local okChat2 = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 2, { messageId = "social_luck" })
+		if not okChat2 then
+			fail("intentions — second QuickChat refuse a l'enqueue (devrait attendre le flush)")
+		end
+		IntentValidator.flush(ctx)
+		local secondChat = replies[#replies]
+		if not secondChat or secondChat.ok then
+			fail("intentions — QuickChat en cooldown rapporte un succes")
+		end
+		print("intentions : QuickChat cooldown honore")
 	end
 end
 
@@ -2436,6 +2461,12 @@ do
 		state.alliances[b.slot][a.slot] = true
 		if not state:areAllied(a.slot, b.slot) then
 			fail("areAllied faux sur un pacte symetrique")
+		end
+		-- Vue HUD : un pacte a une direction ne doit pas apparaitre comme alliance.
+		state.alliances[b.slot][a.slot] = nil
+		local oneWay = Diplomacy.viewFor(state, a.slot)
+		if oneWay.allies[b.slot] then
+			fail("viewFor — alliance unidirectionnelle exposee au HUD")
 		end
 	end
 end
@@ -2570,6 +2601,44 @@ do
 	if math.abs((Config.BOAT_TROOP_RATIO or 0) - 0.2) > 1e-9 then
 		fail(`BOAT_TROOP_RATIO={Config.BOAT_TROOP_RATIO} attendu 0.2 (charge 1/5)`)
 	end
+end
+
+do
+	-- Cadran : un humain pas encore spawn (tiles=0) ne doit pas saigner.
+	local Doomsday = __require("Doomsday")
+	local state = GameState.new(707)
+	state.mode = GameModes.get("blitz")
+	local leader = state:addPlayer(nil, "Leader", Random.new(7), 0)
+	local afk = state:addPlayer(nil, "Afk", Random.new(8), 0)
+	if not leader or not afk then
+		fail("doomsday spawn — spawn impossible")
+	else
+		local ChantierB = __require("ChantierB")
+		ChantierB.stripTerritory(state, afk)
+		afk.awaitingSpawn = true
+		afk.troops = 12000
+		local before = afk.troops
+		-- Au-dela de la grace (40 % de 600 s = 240 s).
+		state.tick = math.floor((state.mode.duration * 0.55) / Config.TICK_DT)
+		if not Doomsday.waveState(state.mode.duration, state.tick * Config.TICK_DT).armed then
+			fail("doomsday spawn — vague non armee dans le scenario de test")
+		elseif GameState.stepDoomsday then
+			GameState.stepDoomsday(state)
+			if afk.troops ~= before then
+				fail(`doomsday spawn — troupes AFK {before} -> {afk.troops}`)
+			end
+		else
+			fail("doomsday spawn — stepDoomsday absent")
+		end
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
+	print(
+		`combat vivant : MAX_TILES_PER_TICK={Config.MAX_TILES_PER_TICK} (inutilise) attackTilesPerTick(10k,nil,1)={perTick} guard=80`
+	)
 end
 
 do

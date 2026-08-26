@@ -142,6 +142,54 @@ local function broadcastRoster()
 	rosterUpdate:FireAllClients(buildRoster())
 end
 
+-- StateDelta / UnitSnapshot / explosions : uniquement les commandants deployes.
+-- FireAllClients facture aussi les joueurs encore au menu (Place MaxPlayers > 8).
+local function fireDeployed(remote, ...)
+	for player in slotByPlayer do
+		if player.Parent then
+			remote:FireClient(player, ...)
+		end
+	end
+end
+
+local function deployedCount(): number
+	local n = 0
+	for _ in slotByPlayer do
+		n += 1
+	end
+	return n
+end
+
+local function broadcastMatchUpdate(stats)
+	matchUpdate:FireAllClients({
+		phase = matchPhase,
+		stage = if matchPhase == "waiting"
+			then "waiting"
+			elseif matchPhase == "ended"
+			then "ended"
+			elseif state.combatUnlocked
+			then "combat"
+			else "preparation",
+		combatIn = if matchPhase == "waiting"
+			then Config.PREPARATION_DURATION
+			else math.max(0, combatStartsAt - os.clock()),
+		timeLeft = if matchPhase == "waiting"
+			then activeMode.duration
+			else math.max(0, matchEndsAt - os.clock()),
+		mode = activeMode.id,
+		players = deployedCount(),
+		maxPlayers = Config.PUBLIC_MATCH_CAPACITY,
+		maxHumans = Config.MAX_HUMAN_PLAYERS,
+		maxBots = Config.MAX_BOTS,
+		maxFactions = Config.MAX_TOTAL_FACTIONS,
+		renderMode = Config.RENDER_MODE,
+		winner = winnerSlot,
+		winnerName = winnerName,
+		restartIn = math.max(0, restartAt - os.clock()),
+		summary = if matchPhase == "ended" then stats else nil,
+	})
+end
+
 --[[
 	Fait apparaitre le personnage sur sa capitale.
 
@@ -213,12 +261,12 @@ local function flushEvents()
 	--[[
 		Butins de mise a mort.
 
-		Diffuse a tout le monde et pas seulement au vainqueur : voir une faction
-		se faire depouiller sous ses yeux est une information strategique — elle
-		dit qui vient de s'enrichir, et donc qui devient dangereux.
+		Diffuse a tous les commandants deployes (pas le menu) : voir une faction
+		se faire depouiller est une information strategique — qui s'enrichit,
+		donc qui devient dangereux.
 	]]
 	for _, loot in state.plunders do
-		plunderEvent:FireAllClients(loot.tile, loot.slot, loot.gold)
+		fireDeployed(plunderEvent, loot.tile, loot.slot, loot.gold)
 	end
 	table.clear(state.plunders)
 end
@@ -402,6 +450,10 @@ end
 local function deployPlayer(player: Player, nationId: number)
 	if slotByPlayer[player] then
 		return -- deja en jeu
+	end
+	if matchPhase == "ended" then
+		notify:FireClient(player, "La partie est terminee — attends la relance.", "info")
+		return
 	end
 
 	local humanCount = 0
@@ -695,11 +747,11 @@ local function replicate()
 			logisticsIncome = math.floor(logisticsIncome * 100) / 100,
 		}
 	end
-	stateDelta:FireAllClients(ownerDelta, stats)
+	fireDeployed(stateDelta, ownerDelta, stats)
 
 	local buildings = state:flushBuildingDelta()
 	if buildings then
-		buildingDelta:FireAllClients(buildings)
+		fireDeployed(buildingDelta, buildings)
 	end
 
 	-- Unites : peu nombreuses, donc envoyees en clair. L'instantane vide est
@@ -730,7 +782,7 @@ local function replicate()
 		})
 	end
 
-	unitSnapshot:FireAllClients(boats, missiles)
+	fireDeployed(unitSnapshot, boats, missiles)
 
 	-- La vue diplomatique est propre a chaque joueur, donc envoyee une fois par
 	-- seconde seulement — elle change rarement et coute cher a construire.
@@ -741,39 +793,7 @@ local function replicate()
 			diplomacyUpdate:FireClient(player, Diplomacy.viewFor(state, slot))
 		end
 
-		matchUpdate:FireAllClients({
-			phase = matchPhase,
-			stage = if matchPhase == "waiting"
-				then "waiting"
-				elseif matchPhase == "ended"
-				then "ended"
-				elseif state.combatUnlocked
-				then "combat"
-				else "preparation",
-			combatIn = if matchPhase == "waiting"
-				then Config.PREPARATION_DURATION
-				else math.max(0, combatStartsAt - os.clock()),
-			timeLeft = if matchPhase == "waiting"
-				then activeMode.duration
-				else math.max(0, matchEndsAt - os.clock()),
-			mode = activeMode.id,
-			players = (function()
-				local n = 0
-				for _ in slotByPlayer do
-					n += 1
-				end
-				return n
-			end)(),
-			maxPlayers = Config.PUBLIC_MATCH_CAPACITY,
-			maxHumans = Config.MAX_HUMAN_PLAYERS,
-			maxBots = Config.MAX_BOTS,
-			maxFactions = Config.MAX_TOTAL_FACTIONS,
-			renderMode = Config.RENDER_MODE,
-			winner = winnerSlot,
-			winnerName = winnerName,
-			restartIn = math.max(0, restartAt - os.clock()),
-			summary = if matchPhase == "ended" then stats else nil,
-		})
+		broadcastMatchUpdate(stats)
 	end
 
 	flushEvents()
@@ -781,7 +801,7 @@ local function replicate()
 end
 
 local function onExplosion(x: number, y: number, radius: number)
-	explosion:FireAllClients(x, y, radius)
+	fireDeployed(explosion, x, y, radius)
 end
 
 local accumulator = 0
@@ -792,7 +812,15 @@ local function stepOnce()
 	if matchPhase == "waiting" then
 		-- Carte figee : aucun tick economique, aucune expansion et surtout aucun
 		-- bot ne joue derriere le menu de selection.
-		state.tick += 1 -- cadence uniquement la replication du lobby
+		state.tick += 1
+		-- Lobby vide : MatchUpdate 1 Hz pour le menu, pas de StateDelta 10 Hz.
+		if next(slotByPlayer) == nil then
+			if state.tick % Config.TICK_RATE == 0 then
+				broadcastMatchUpdate(nil)
+			end
+			TickMetrics.record(state.tick, 0, nil, (os.clock() - tickStarted) * 1000)
+			return
+		end
 		local changed, delta = replicate()
 		TickMetrics.record(state.tick, changed, delta, (os.clock() - tickStarted) * 1000)
 		return
@@ -809,7 +837,7 @@ local function stepOnce()
 		Navy.step(state, rng)
 		Nukes.step(state, rng, onExplosion)
 		Trade.step(state, rng, function(action, a, b, slot, value)
-			tradeEvent:FireAllClients(action, a, b, slot, value)
+			fireDeployed(tradeEvent, action, a, b, slot, value)
 		end)
 		Diplomacy.step(state)
 		state:step()
@@ -818,6 +846,11 @@ local function stepOnce()
 		state.tick += 1
 		if os.clock() >= restartAt then
 			startMatch()
+			return
+		end
+		-- Ecran victoire : plus de sim, replication 1 Hz (summary HUD).
+		if state.tick % Config.TICK_RATE ~= 0 then
+			TickMetrics.record(state.tick, 0, nil, (os.clock() - tickStarted) * 1000)
 			return
 		end
 	end

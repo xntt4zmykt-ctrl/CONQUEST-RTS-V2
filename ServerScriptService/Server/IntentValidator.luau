@@ -395,17 +395,21 @@ local function applyOne(ctx: Context, intent: Intent)
 			elseif not state.players[targetSlot] then
 				ok, message = false, "Cette faction n'existe plus."
 			else
-				ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
-				ok = true
+				ok = ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
+				if not ok then
+					message = "Message trop frequent."
+				end
 			end
 		else
-			ctx.diplomacy.sendQuickChat(
+			ok = ctx.diplomacy.sendQuickChat(
 				state,
 				slot,
 				payload.messageId,
 				if isInteger(payload.targetSlot) then payload.targetSlot else nil
 			)
-			ok = true
+			if not ok then
+				message = "Message trop frequent."
+			end
 		end
 	end
 

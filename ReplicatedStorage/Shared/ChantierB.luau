@@ -382,6 +382,9 @@ function ChantierB.install(GameState, Nukes)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
@@ -473,6 +476,10 @@ function ChantierB.install(GameState, Nukes)
 			if slot == leaderSlot or ps.tiles >= required then
 				self.doomWarnedAt[slot] = nil
 				self.doomUnderSince[slot] = nil
+				continue
+			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une armee fantome.
+			if ps.awaitingSpawn or ps.tiles == 0 then
 				continue
 			end
 			if not self.doomWarnedAt[slot] then
