@@ -28,6 +28,51 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+-- N68 : samsOf recycle (recette factoryBuf / N66). Unique appelant synchrone
+-- (Bots.decideNuke). Pas reentrant — dupliquer le buffer si un second
+-- appelant concurrent apparait.
+local samBuf: { number } = table.create(8)
+-- N75 : prix HUD par slot (recette factoryBuf / N66). Pas de dirty flag :
+-- buildingCounts bouge souvent en combat ; clear+refill suffit. Pas reentrant
+-- — un seul replicate() par tick. Slot inconnu → emptyPriceBuf, pas math.huge.
+local priceBuf: { [number]: { [number]: number } } = {}
+local emptyPriceBuf: { [number]: number } = {}
+
+-- N85 : contextFor recycle le record + closures module (recette N78).
+-- Non reentrant — resolve est synchrone et unique. Slot inconnu → nil
+-- sans muter ctxBuf. Ne pas cloner : un ownerAt conserve lit le dernier
+-- ctxState. Overlay client construit son propre ctx (PlacementPreview).
+local ctxState: GameState? = nil
+
+local function ctxOwnerAt(index: number): number
+	local st = ctxState
+	if not st then
+		return Config.NEUTRAL_SLOT
+	end
+	return buffer.readu8(st.owner, index)
+end
+
+local function ctxBuildingAt(index: number): (number?, number?, number?)
+	local st = ctxState
+	if not st then
+		return nil, nil, nil
+	end
+	local building = st.buildings[index]
+	if not building then
+		return nil, nil, nil
+	end
+	return building.kind, building.slot, building.level
+end
+
+local ctxBuf: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = ctxOwnerAt,
+	buildingAt = ctxBuildingAt,
+}
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -38,22 +83,14 @@ function Buildings.contextFor(state: GameState, slot: number): Placement.Context
 		return nil
 	end
 
-	return {
-		slot = slot,
-		era = ps.era,
-		gold = ps.gold,
-		terrain = state.terrain,
-		ownerAt = function(index: number): number
-			return buffer.readu8(state.owner, index)
-		end,
-		buildingAt = function(index: number): (number?, number?, number?)
-			local building = state.buildings[index]
-			if not building then
-				return nil, nil, nil
-			end
-			return building.kind, building.slot, building.level
-		end,
-	}
+	ctxState = state
+	ctxBuf.slot = slot
+	ctxBuf.era = ps.era
+	ctxBuf.gold = ps.gold
+	ctxBuf.terrain = state.terrain
+	ctxBuf.ownerAt = ctxOwnerAt
+	ctxBuf.buildingAt = ctxBuildingAt
+	return ctxBuf
 end
 
 --[[
@@ -68,6 +105,29 @@ function Buildings.priceFor(state: GameState, slot: number, kind: number): numbe
 		return math.huge
 	end
 	return Placement.priceFor(ps.buildingCounts, kind, state:doctrineOf(slot).buildCost)
+end
+
+--[[
+	N75 : map des prix BUILDABLE pour un slot, recyclee. Wire inchange
+	`{ [kind]: number }`. Ne duplique pas Placement.priceFor. GameState ne
+	doit pas require Buildings (cycle).
+]]
+function Buildings.pricesFor(state: GameState, slot: number): { [number]: number }
+	if not state.players[slot] then
+		table.clear(emptyPriceBuf)
+		return emptyPriceBuf
+	end
+	local buf = priceBuf[slot]
+	if buf == nil then
+		buf = {}
+		priceBuf[slot] = buf
+	else
+		table.clear(buf)
+	end
+	for _, def in BuildingDefs.BUILDABLE do
+		buf[def.id] = Buildings.priceFor(state, slot, def.id)
+	end
+	return buf
 end
 
 --[[
@@ -101,7 +161,8 @@ local function describeBuild(state: GameState, slot: number, index: number, kind
 	local suffix = if snapped then " (reporte sur la case libre la plus proche)" else ""
 
 	if kind == B.CITY then
-		return `Ville construite : +900 capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
+		local cityPop = Config.CITY_LEVELS[1].popCapBonus
+		return `Ville construite : +{cityPop} capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
 	elseif kind == B.FACTORY then
 		local routes, income = state:logisticsFor(slot)
 		return `Usine raccordee : reseau de {routes} liaison(s) · +{string.format("%.1f", income * Config.TICK_RATE)} or/s.{suffix}`
@@ -240,20 +301,66 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.
+-- N59 : index samsBySlot (recette N57), fallback hash si l'index est nil.
+-- N68 : samBuf recycle ; truncate apres remplissage. Index present et
+-- set nil = zero SAM (pas de fallback hash).
 function Buildings.samsOf(state: GameState, slot: number): { number }
-	local out = {}
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == B.SAM then
-			table.insert(out, index)
+	local out = samBuf
+	local n = 0
+	if state.samsBySlot then
+		local set = state.samsBySlot[slot]
+		if set then
+			for index in set do
+				n += 1
+				out[n] = index
+			end
 		end
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == B.SAM then
+				n += 1
+				out[n] = index
+			end
+		end
+	end
+	for i = #out, n + 1, -1 do
+		out[i] = nil
 	end
 	return out
 end
 
+-- N60 : SAM via samsBySlot. Les silos portent aussi un cooldown
+-- (Nukes.launch / SILO_COOLDOWN) — la spec N60 « aucun autre cooldown
+-- vivant » etait fausse ; sans silosBySlot un silo resterait arme a jamais.
 function Buildings.stepCooldowns(state: GameState)
-	for _, building in state.buildings do
-		if building.cooldown > 0 then
-			building.cooldown -= 1
+	local sams = state.samsBySlot
+	local silos = state.silosBySlot
+	if sams == nil and silos == nil then
+		for _, building in state.buildings do
+			if building.cooldown > 0 then
+				building.cooldown -= 1
+			end
+		end
+		return
+	end
+	if sams then
+		for _, set in sams do
+			for index in set do
+				local building = state.buildings[index]
+				if building and building.cooldown > 0 then
+					building.cooldown -= 1
+				end
+			end
+		end
+	end
+	if silos then
+		for _, set in silos do
+			for index in set do
+				local building = state.buildings[index]
+				if building and building.cooldown > 0 then
+					building.cooldown -= 1
+				end
+			end
 		end
 	end
 end
