@@ -3528,6 +3528,159 @@ do
 end
 
 do
+	-- N87 : parkedBuf. 0 pont + deux lancers terre → 1 Attack, pas d'erreur.
+	-- 2 seedBeachhead du meme couple + launchAttack terre → 3 Attack,
+	-- troupes de pont intactes. Wrap sans pont apres un wrap a ponts
+	-- (autre instance) → pas de pont fantome.
+	local state = GameState.new(1087)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "ParkA", Random.new(61), 0)
+	local b = state:addPlayer(nil, "ParkB", Random.new(62), 0)
+	if not a or not b then
+		fail("parkedBuf — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contact: number? = nil
+		local inland: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) and buffer.readu8(state.owner, nb) ~= a.slot then
+					contact = index
+					inland = nb
+					break
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact or not inland then
+			fail("parkedBuf — pas de contact")
+		else
+			state:setOwner(inland, b.slot)
+			a.troops = 20000
+			a.attackRatio = 0.3
+			local launched = state:launchAttack(a.slot, b.slot)
+			if not launched or #state.attacks ~= 1 then
+				fail(`parkedBuf — 0 pont fronts={#state.attacks} ok={tostring(launched)}`)
+			else
+				a.troops = 20000
+				local launched2 = state:launchAttack(a.slot, b.slot)
+				if not launched2 or #state.attacks ~= 1 then
+					fail(`parkedBuf — second 0 pont fronts={#state.attacks}`)
+				else
+					print("parkedBuf : 0 pont, deux lancers, 1 front (N87)")
+					local bh = GameState.new(1088)
+					bh.combatUnlocked = true
+					local p = bh:addPlayer(nil, "ParkBh", Random.new(63), 0)
+					local q = bh:addPlayer(nil, "ParkTg", Random.new(64), 0)
+					if not p or not q then
+						fail("parkedBuf — spawn beachhead impossible")
+					else
+						local land: number? = nil
+						local tgt: number? = nil
+						for index in p.border do
+							local nn = MapGen.neighbors(index, scratch)
+							for i = 1, nn do
+								local nb = scratch[i]
+								if bh:isLand(nb) and buffer.readu8(bh.owner, nb) ~= p.slot then
+									land = index
+									tgt = nb
+									break
+								end
+							end
+							if land then
+								break
+							end
+						end
+						if not land or not tgt then
+							fail("parkedBuf — pas de contact beachhead")
+						else
+							bh:setOwner(tgt, q.slot)
+							p.troops = 20000
+							p.attackRatio = 0.3
+							bh:seedBeachhead(p.slot, q.slot, 800, land)
+							bh:seedBeachhead(p.slot, q.slot, 500, land)
+							local t800, t500 = false, false
+							local nBh = 0
+							for _, atk in bh.attacks do
+								if atk.isBeachhead then
+									nBh += 1
+									if atk.troops == 800 then
+										t800 = true
+									elseif atk.troops == 500 then
+										t500 = true
+									end
+								end
+							end
+							if nBh ~= 2 or not t800 or not t500 then
+								fail(`parkedBuf — seed {nBh} ponts (attendu 2)`)
+							else
+								local launched3 = bh:launchAttack(p.slot, q.slot)
+								local nBhAfter, nLand, intact800, intact500 = 0, 0, false, false
+								for _, atk in bh.attacks do
+									if atk.attacker == p.slot and atk.target == q.slot then
+										if atk.isBeachhead then
+											nBhAfter += 1
+											if atk.troops == 800 then
+												intact800 = true
+											elseif atk.troops == 500 then
+												intact500 = true
+											end
+										else
+											nLand += 1
+										end
+									end
+								end
+								if not launched3 or nBhAfter ~= 2 or nLand ~= 1 or #bh.attacks ~= 3 then
+									fail(
+										`parkedBuf — 2 ponts + terre ({nBhAfter}+{nLand} total={#bh.attacks})`
+									)
+								elseif not intact800 or not intact500 then
+									fail("parkedBuf — troupes de pont mutees")
+								else
+									print("parkedBuf : 2 ponts + 1 terre, troupes intactes (N87)")
+									local other = GameState.new(1089)
+									other.combatUnlocked = true
+									local r = other:addPlayer(nil, "ParkC", Random.new(65), 0)
+									local s = other:addPlayer(nil, "ParkD", Random.new(66), 0)
+									if not r or not s then
+										fail("parkedBuf — spawn leftover impossible")
+									else
+										local ghost = false
+										for _, atk in other.attacks do
+											if atk.isBeachhead then
+												ghost = true
+											end
+										end
+										r.troops = 20000
+										r.attackRatio = 0.3
+										local _ok4 = other:launchAttack(r.slot, s.slot)
+										local nGhost = 0
+										for _, atk in other.attacks do
+											if atk.isBeachhead then
+												nGhost += 1
+											end
+										end
+										if ghost or nGhost ~= 0 then
+											fail(`parkedBuf — pont fantome leftover ({nGhost})`)
+										else
+											print("parkedBuf : leftover 2→0, pas de pont fantome (N87)")
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- areAllied honore l'expiry AVANT Diplomacy.step (Bots/Navy/flush tournent avant).
 	local state = GameState.new(5155)
 	local a = state:addPlayer(nil, "Alpha", Random.new(91), 0)
@@ -7459,6 +7612,96 @@ do
 										fail("collapse recycle — territoire du captor inchange")
 									else
 										print("collapse recycle : butin + captor grandit (N86)")
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N88 : collapseRemainBuf / collapseLeftBuf. Slot sans tuile → return,
+	-- plunder inchange. Deux appels (victime deja a 0 puis autre victime
+	-- sur une autre instance) → pas de leftover de tuiles de A dans B.
+	local empty = GameState.new(1090)
+	local heir = empty:addPlayer(nil, "ColEmpty", Random.new(71), 0)
+	if not heir then
+		fail("collapse remain — spawn empty impossible")
+	else
+		local goldBefore = heir.gold
+		local plunderBefore = #empty.plunders
+		local tilesBefore = heir.tiles
+		empty:collapseFaction(99, heir.slot)
+		if #empty.plunders ~= plunderBefore or heir.gold ~= goldBefore or heir.tiles ~= tilesBefore then
+			fail("collapse remain — slot 99 a mute plunder/or/tuiles")
+		else
+			print("collapse remain : slot sans tuile, return, plunder inchange (N88)")
+			local s1 = GameState.new(1091)
+			local victimA = s1:addPlayer(nil, "ColA", Random.new(72), 0)
+			local captorA = s1:addPlayer(nil, "ColHA", Random.new(73), 0)
+			if not victimA or not captorA then
+				fail("collapse remain — spawn A impossible")
+			else
+				local center = victimA.capitalTile
+				if not center then
+					fail("collapse remain — A sans capitale")
+				else
+					local cx, cy = MapGen.fromIndex(center)
+					for dy = -6, 6 do
+						local nx, ny = cx + 5, cy + dy
+						if MapGen.inBounds(nx, ny) then
+							local index = MapGen.toIndex(nx, ny)
+							if s1:isLand(index) then
+								s1:setOwner(index, captorA.slot)
+							end
+						end
+					end
+					victimA.gold = 4000
+					s1:collapseFaction(victimA.slot, captorA.slot)
+					if victimA.tiles ~= 0 then
+						fail(`collapse remain — A conserve {victimA.tiles} tuiles`)
+					else
+						-- Second appel : victime deja a 0.
+						local plunderA = #s1.plunders
+						local goldA = captorA.gold
+						s1:collapseFaction(victimA.slot, captorA.slot)
+						if #s1.plunders ~= plunderA or captorA.gold ~= goldA then
+							fail("collapse remain — second collapse A re-pille")
+						else
+							print("collapse remain : victime a 0, second appel inerte (N88)")
+							local s2 = GameState.new(1092)
+							local victimB = s2:addPlayer(nil, "ColB", Random.new(74), 0)
+							local captorB = s2:addPlayer(nil, "ColHB", Random.new(75), 0)
+							if not victimB or not captorB then
+								fail("collapse remain — spawn B impossible")
+							else
+								local beforeB = victimB.tiles
+								local centerB = victimB.capitalTile
+								if not centerB then
+									fail("collapse remain — B sans capitale")
+								else
+									local bx, by = MapGen.fromIndex(centerB)
+									for dy = -6, 6 do
+										local nx, ny = bx + 5, by + dy
+										if MapGen.inBounds(nx, ny) then
+											local index = MapGen.toIndex(nx, ny)
+											if s2:isLand(index) then
+												s2:setOwner(index, captorB.slot)
+											end
+										end
+									end
+									victimB.gold = 2000
+									s2:collapseFaction(victimB.slot, captorB.slot)
+									if victimB.tiles ~= 0 then
+										fail(`collapse remain — leftover A dans B ({victimB.tiles} tuiles)`)
+									elseif beforeB > 0 and captorB.tiles <= 0 then
+										fail("collapse remain — B n'a rien transfere")
+									else
+										print("collapse remain : truncate A→B inter-instances (N88)")
 									end
 								end
 							end
