@@ -1194,6 +1194,8 @@ function HUD.notify(self: HUD, text: string, kind: string)
 
 	-- Retrait partage par l'expiration, le plafond d'entrees et la croix :
 	-- trois chemins, un seul endroit qui nettoie les deux index.
+	-- N167 : Parent = nil + push feedFree si encore parenté. Pas de
+	-- Destroy. Un delay fantôme (reparenté) ne double-push pas.
 	local function removeEntry(target: TextLabel)
 		if not target.Parent then
 			return
@@ -1208,51 +1210,99 @@ function HUD.notify(self: HUD, text: string, kind: string)
 				break
 			end
 		end
-		target:Destroy()
+		target.Parent = nil
+		local pool = self.feedFree
+		if pool then
+			pool[#pool + 1] = target
+		end
 	end
 
-	local entry = Instance.new("TextLabel")
+	-- N167 : free-list feedFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a l'expiration / plafond / croix : Parent = nil +
+	-- push. BuildRing reutilise deja (ringFree N166). Blast
+	-- reutilise deja (blastFree N165). Distinct flame leftover
+	-- N152 (Size = Vector3.new, ≠ visual V74 freeze). Distinct
+	-- N153 (decalage prefixe deja). Distinct visual V103 prefixe
+	-- (ne pas merger 7188). Distinct Effects textFree N158 (ne
+	-- pas partager). Dismiss table.remove(index) inchange.
+	-- Groupement / MAX=3 / task.delay(4.5) inchanges. Pas de Name
+	-- (comme textFree). Parent = self.feed (pas overlay.root).
+	-- Reset Text + couleurs + transparences + LayoutOrder avant
+	-- Parent. Pas Theme.corner / Theme.stroke au reuse (2e
+	-- UICorner). Recolor UIStroke existant. Recreer Dismiss si
+	-- le delay l'a Destroy. Lazy-init feedFree ici (pas HUD.new).
+	-- Recette leftover N166, pas merger visual. Overlay /
+	-- BuildingModels / UnitModels / Effects inchanges.
+	local feedFree = self.feedFree
+	if not feedFree then
+		feedFree = {}
+		self.feedFree = feedFree
+	end
+	local nFeed = #feedFree
+	local entry: TextLabel
+	local reused = nFeed > 0
+	if reused then
+		entry = feedFree[nFeed] :: TextLabel
+		feedFree[nFeed] = nil
+	else
+		entry = Instance.new("TextLabel")
+		entry.BorderSizePixel = 0
+		entry.FontFace = F.bold
+		entry.TextSize = T.small
+		entry.TextTruncate = Enum.TextTruncate.AtEnd
+	end
+	local born = self.feedCounter
 	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
 	entry.BackgroundColor3 = C.surface
 	entry.BackgroundTransparency = 0.14
-	entry.BorderSizePixel = 0
-	entry.FontFace = F.bold
-	entry.TextSize = T.small
+	entry.TextTransparency = 0
 	entry.TextColor3 = FEED_COLORS[kind] or C.text
 	entry.Text = text
-	entry.TextTruncate = Enum.TextTruncate.AtEnd
-	entry.LayoutOrder = self.feedCounter
+	entry.LayoutOrder = born
 	entry.Parent = self.feed
-	Theme.corner(entry, Theme.radius.sm)
-	Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
+	if reused then
+		local stroke = entry:FindFirstChildWhichIsA("UIStroke")
+		if stroke then
+			stroke.Color = FEED_COLORS[kind] or C.line
+		end
+	else
+		Theme.corner(entry, Theme.radius.sm)
+		Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
+	end
 
 	-- Le texte s'arrete avant la croix, sinon les longs messages passent
 	-- dessous et l'un des deux devient illisible.
-	local inset = Instance.new("UIPadding")
-	inset.PaddingRight = UDim.new(0, 20)
-	inset.Parent = entry
+	if not entry:FindFirstChildWhichIsA("UIPadding") then
+		local inset = Instance.new("UIPadding")
+		inset.PaddingRight = UDim.new(0, 20)
+		inset.Parent = entry
+	end
 
 	--[[
 		Croix de rejet. Un message qui reste — une demande d'alliance qu'on ne
 		veut pas traiter tout de suite — ne doit pas devenir un element
 		permanent : le joueur le degage, le minuteur le degage, mais l'un des
 		deux doit toujours pouvoir le faire tout de suite.
+
+		Le delay Destroy la croix : au reuse, la recreer si absente.
 	]]
-	local dismiss = Instance.new("TextButton")
-	dismiss.Name = "Dismiss"
-	dismiss.AnchorPoint = Vector2.new(1, 0.5)
-	dismiss.Position = UDim2.new(1, -3, 0.5, 0)
-	dismiss.Size = UDim2.fromOffset(14, 14)
-	dismiss.BackgroundTransparency = 1
-	dismiss.FontFace = F.bold
-	dismiss.TextSize = T.small
-	dismiss.TextColor3 = C.textFaint
-	dismiss.Text = "\u{00D7}"
-	dismiss.ZIndex = 2
-	dismiss.Parent = entry
-	dismiss.Activated:Connect(function()
-		removeEntry(entry)
-	end)
+	if not entry:FindFirstChild("Dismiss") then
+		local dismiss = Instance.new("TextButton")
+		dismiss.Name = "Dismiss"
+		dismiss.AnchorPoint = Vector2.new(1, 0.5)
+		dismiss.Position = UDim2.new(1, -3, 0.5, 0)
+		dismiss.Size = UDim2.fromOffset(14, 14)
+		dismiss.BackgroundTransparency = 1
+		dismiss.FontFace = F.bold
+		dismiss.TextSize = T.small
+		dismiss.TextColor3 = C.textFaint
+		dismiss.Text = "\u{00D7}"
+		dismiss.ZIndex = 2
+		dismiss.Parent = entry
+		dismiss.Activated:Connect(function()
+			removeEntry(entry)
+		end)
+	end
 
 	local sound = FEED_SOUNDS[kind]
 	if sound then
@@ -1268,13 +1318,15 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		-- FIFO conserve (le plus vieux reste en tete). n=3 : un shift
 		-- suffit, pas de feedHead (N112 est WorldRenderer). Appeler
 		-- removeEntry APRES le shift : table.find rate, pas de
-		-- double-retrait, Destroy + feedGroups nil. Dismiss
-		-- table.remove(index) inchange. MAX_FEED_ENTRIES = 3 inchange.
-		-- Groupement / LayoutOrder / task.delay(4.5) inchanges.
-		-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
-		-- V74 freeze). Distinct trail N151 (offset.Z). Distinct
-		-- dirtyHead N112. Recette hardening N110, portee pas mergee
-		-- (41e2). UnitModels / Overlay / WorldRenderer inchanges.
+		-- double-retrait, Parent=nil + feedGroups nil (N167, plus
+		-- Destroy). Dismiss table.remove(index) inchange.
+		-- MAX_FEED_ENTRIES = 3 inchange. Groupement / LayoutOrder /
+		-- task.delay(4.5) inchanges. Distinct flame leftover N152
+		-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct trail
+		-- N151 (offset.Z). Distinct dirtyHead N112. Distinct visual
+		-- V103 prefixe (ne pas merger 7188). Recette hardening N110,
+		-- portee pas mergee (41e2). UnitModels / Overlay /
+		-- WorldRenderer / BuildingModels inchanges.
 		local n = #self.feedEntries
 		local oldest = self.feedEntries[1]
 		for i = 1, n - 1 do
@@ -1288,6 +1340,11 @@ function HUD.notify(self: HUD, text: string, kind: string)
 
 	task.delay(4.5, function()
 		if not entry.Parent then
+			return
+		end
+		-- N167 : LayoutOrder change au reuse. Un delay ne doit pas
+		-- fondre le message reparenté (plafond N153 recycle avant 4.5 s).
+		if entry.LayoutOrder ~= born then
 			return
 		end
 		-- Le fondu ne touche que l'etiquette : la croix part d'elle-meme,

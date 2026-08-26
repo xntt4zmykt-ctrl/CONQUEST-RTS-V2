@@ -291,6 +291,12 @@ check("fil de notifications sature", function()
 	-- N152 flame Size (check navires) doit rester vert. Recette
 	-- hardening N110, portee pas mergee. UnitModels / Overlay non
 	-- touches.
+	-- N167 : free-list feedFree. Pas de testFlushDelays ici — le
+	-- harnais stubbe task.delay pour le rejet (les 40 notify ont
+	-- des delays en file jusqu'aux vagues). Dismiss Activated /
+	-- groupement / N153 prefixe inchanges. Recette leftover N166,
+	-- pas merger visual V103. Overlay / BuildingModels / Effects
+	-- non touches. Reuse rawequal est dans « vagues de conquete ».
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -1060,6 +1066,10 @@ check("pose et capture de chaque type de batiment", function()
 	-- BuildRing conservé. Parent = model (pas overlay.root).
 	-- Euler N136 inline. Leftover N162 DeliveryPulse sans flush
 	-- doit rester vert. Recette leftover N165, pas merger visual.
+	-- N167 : HUD notify feedFree. Pas de testFlushDelays dans le
+	-- check notifications (Dismiss stubbe delay). Reuse rawequal
+	-- est dans « vagues de conquete ». Leftover N152 flame Size
+	-- (check navires) doit rester vert.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
@@ -1883,6 +1893,13 @@ check("vagues de conquete", function()
 	-- overlay.buildings[factoryIndex], pas overlay.root, Name
 	-- BuildRing). Distinct blastFree / smokeFree / shockFree /
 	-- deliveryFree / pulseFree.
+	-- N167 : HUD notify free-list feedFree. Le check notifications
+	-- n'a pas flushé (Dismiss stubbe task.delay) ; ce flush pousse
+	-- les 3 entrées encore parentées du plafond + celles déjà
+	-- poolees par le cap N153. Snapshot avant applyUnits N160 **et**
+	-- avant applyBuildingDelta N166. Réparente (rawequal Parent
+	-- hud.feed, pas overlay.root). Distinct ringFree / blastFree /
+	-- textFree. Recréer Dismiss si Destroy par le delay.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -2014,6 +2031,23 @@ check("vagues de conquete", function()
 	assert(pooledBuildRing ~= pooledGold, "ringFree partage goldFree")
 	assert(pooledBuildRing ~= pooledDelivery, "ringFree partage deliveryFree")
 	assert(pooledBuildRing ~= pooledRing, "ringFree partage pulseFree")
+	-- N167 : flush ci-dessus a poussé les TextLabel du fil
+	-- (plafond N153 + expiration 4.5 s). Snapshot avant
+	-- applyUnits N160 **et** avant applyBuildingDelta N166.
+	local feedPool = hud.feedFree
+	assert(feedPool ~= nil and #feedPool >= 1, "entrees fil non poolees")
+	local pooledFeed = feedPool[#feedPool]
+	assert(pooledFeed.Parent == nil, "entree fil encore parentee")
+	assert(pooledFeed ~= pooledBuildRing, "feedFree partage ringFree")
+	assert(pooledFeed ~= pooledBlast, "feedFree partage blastFree")
+	assert(pooledFeed ~= pooledText, "feedFree partage textFree")
+	local feedN = #feedPool
+	hud:notify("n167 reuse", "good")
+	assert(#feedPool == feedN - 1, "entree fil non reutilisee")
+	assert(rawequal(pooledFeed.Parent, hud.feed), "entree fil non reparentee")
+	assert(not rawequal(pooledFeed.Parent, overlay.root), "entree fil reparentee a overlay.root")
+	assert(pooledFeed.Text == "n167 reuse", `reuse affiche "{pooledFeed.Text}"`)
+	assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse")
 	local ringN = #ringPool
 	local wakeN = #wakePool
 	overlay:applyUnits({
