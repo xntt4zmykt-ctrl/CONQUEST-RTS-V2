@@ -41,6 +41,10 @@ local TILE = Config.TILE_SIZE
 local HALF_W = Config.WORLD_WIDTH / 2
 local HALF_D = Config.WORLD_DEPTH / 2
 local TILE_HALF = TILE / 2
+-- N105 : lift camion en constante. path[i] reste au niveau chaussee ;
+-- on ajoute TRUCK_LIFT sans Vector3.new(0, 0.8, 0) 60 Hz.
+-- Recette visual V57, portee pas mergee. Unites inchangees (N103).
+local TRUCK_LIFT = 0.8
 
 --=============================================================================
 -- Construction
@@ -855,17 +859,32 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			end)
 			continue
 		end
-		local scaled = delivery.progress * (#route.path - 1)
-		local segmentIndex = math.min(#route.path - 1, math.floor(scaled) + 1)
-		local segmentProgress = scaled - math.floor(scaled)
-		local a = route.path[segmentIndex] + Vector3.new(0, 0.8, 0)
-		local b = route.path[segmentIndex + 1] + Vector3.new(0, 0.8, 0)
-		local direction = b - a
-		local position = a + direction * segmentProgress
-		local frame = CFrame.lookAt(position, position + direction)
+		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
+		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
+		-- Un lookAt. Roues : Angles conserve. Unites inchangees (N103).
+		-- Recette visual V57, portee pas mergee. Extra missile inchange (N98).
+		-- targetX inchange (N101). Une voie sans delivery ne rentre pas ici.
+		local path = route.path
+		local nSeg = #path - 1
+		local scaled = delivery.progress * nSeg
+		local floorScaled = math.floor(scaled)
+		local segmentIndex = math.min(nSeg, floorScaled + 1)
+		local segmentProgress = scaled - floorScaled
+		local a = path[segmentIndex]
+		local b = path[segmentIndex + 1]
+		local ax, ay, az = a.X, a.Y + TRUCK_LIFT, a.Z
+		local bx, by, bz = b.X, b.Y + TRUCK_LIFT, b.Z
+		local dx, dy, dz = bx - ax, by - ay, bz - az
+		local px = ax + dx * segmentProgress
+		local py = ay + dy * segmentProgress
+		local pz = az + dz * segmentProgress
+		local frame = CFrame.lookAt(Vector3.new(px, py, pz), Vector3.new(px + dx, py + dy, pz + dz))
 		for _, piece in route.truck do
-			local spin = if piece.part.Name == "Wheel" then CFrame.Angles(delivery.progress * math.pi * 20, 0, 0) else CFrame.new()
-			piece.part.CFrame = frame * piece.offset * spin
+			if piece.part.Name == "Wheel" then
+				piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
+			else
+				piece.part.CFrame = frame * piece.offset
+			end
 		end
 	end
 
