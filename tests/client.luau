@@ -1299,12 +1299,64 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	overlay:applyBuildingDelta(deltas)
 
+	-- N178 : snapshot CITY L3 (upgrade ci-dessus) avant kind=0.
+	-- Recapture slot=2 inchangée. Pas overlay:clear() (N177 déjà,
+	-- Destroy bâtiments leftover N179). Recette leftover N177,
+	-- pas merger visual V116. Distinct leftover N152 flame.
+	-- Leftover N166 ring / N162 pulse sans flush restent verts.
+	local citySnapIndex: number? = nil
+	local citySnap = nil
+	for _, entry in deltas do
+		if entry.kind == Config.BUILDING.CITY then
+			citySnapIndex = entry.index
+			citySnap = overlay.buildings[entry.index]
+			break
+		end
+	end
+	assert(citySnap ~= nil and citySnapIndex ~= nil, "snapshot ville N178 absent")
+
 	-- Destruction
 	for _, entry in deltas do
 		entry.kind = 0
 	end
 	overlay:applyBuildingDelta(deltas)
 	assert(next(overlay.routes) == nil, "une route detruite reste affichee")
+	assert(citySnap.Parent == nil, "ville N178 encore parentee")
+	local buildingPool = overlay.buildingFree
+	assert(buildingPool ~= nil and #buildingPool >= 1, "batiments non poolees")
+	local parked = false
+	for _, model in buildingPool do
+		if rawequal(model, citySnap) then
+			parked = true
+			break
+		end
+	end
+	assert(parked, "ville N178 absente de buildingFree")
+	assert(citySnap:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au park")
+	assert(citySnap:GetAttribute("Level") == 3, "Level perdu au park")
+
+	-- Reuse autre index, même kind+level. Name Building{index}
+	-- réécrit. Parent overlay.root. Pas Destroy. Kind+Level match.
+	-- Recapture same kind+level **non** rejouée ici (déjà plus haut).
+	local reuseIndex = citySnapIndex + 1
+	overlay:applyBuildingDelta({
+		{ index = reuseIndex, kind = Config.BUILDING.CITY, slot = 2, level = 3 },
+	})
+	if citySnap.Parent == nil then
+		local inFree = false
+		for _, model in buildingPool do
+			if rawequal(model, citySnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ville N178 ni reparentee ni dans buildingFree")
+	else
+		assert(rawequal(citySnap.Parent, overlay.root), "ville N178 recree")
+		assert(citySnap.Name == `Building{reuseIndex}`, "Name Building index perdu au reuse")
+		local kind, slot, level = overlay:buildingAt(reuseIndex)
+		assert(kind == Config.BUILDING.CITY and slot == 2 and level == 3, "inspecteur N178 faux")
+	end
 end)
 
 --[[
@@ -2467,7 +2519,8 @@ check("vagues de conquete", function()
 	-- Skip retraite splash N56. Distinct applyUnits despawn N176.
 	-- Pas #ogiveFree == 1. Pas d'assert autre Name. Recette leftover
 	-- N176. Pas merger visual V114. Bâtiments / routes Destroy
-	-- conservés (leftover N178).
+	-- conservés (leftover N179). N178 buildingFree déjà (check
+	-- pose). Pas d'assert pool bâtiments ici.
 	overlay:applyUnits({
 		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
 	}, {

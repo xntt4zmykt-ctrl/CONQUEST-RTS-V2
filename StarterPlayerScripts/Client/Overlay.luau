@@ -93,6 +93,10 @@ end
 
 function Overlay.clear(self: Overlay)
 	table.clear(self.counts)
+	-- Leftover N179 : teardown bâtiments encore Destroy. N178
+	-- parque seulement applyBuildingDelta (buildingFree). Un
+	-- Model Parent nil n'est pas dans self.buildings — clear
+	-- ne le voit pas. Ne pas vider buildingFree ici.
 	for _, part in self.buildings do
 		part:Destroy()
 	end
@@ -212,6 +216,7 @@ local function makeBuilding(
 	model:SetAttribute("Kind", kind)
 	model:SetAttribute("Slot", slot)
 	model:SetAttribute("Level", level)
+	model:SetAttribute("Index", index)
 	model:SetAttribute("TintR", color.R)
 	model:SetAttribute("TintG", color.G)
 	model:SetAttribute("TintB", color.B)
@@ -691,6 +696,139 @@ function Overlay.tally(self: Overlay, slot: number?, kind: number?, sign: number
 	bucket[kind] = math.max(0, (bucket[kind] or 0) + sign)
 end
 
+-- N178 : recycle les Model bâtiments au destroy / rebuild
+-- applyBuildingDelta. Plus de Destroy. Free-list buildingFree
+-- (pas shipFree / ogiveFree / ringFree). Take Kind+Level
+-- (silhouette palier N140). Name Building{index} + CFrame +
+-- Marker StudsOffsetWorldSpace à réécrire (l'index tuile
+-- change). Recapture same kind+level recolor déjà — aucun
+-- park. syncFactoryRoutes kind==0 AVANT le park. Skip
+-- Overlay.clear bâtiments (leftover N179). Skip
+-- syncFactoryRoutes Destroy (leftover N179). Recette leftover
+-- N177, pas merger visual V116 (eaa4). Distinct leftover N152
+-- flame. makeBuilding construction si mismatch. Pas de delay.
+local function parkBuilding(self: Overlay, model: Model)
+	if not model.Parent then
+		return
+	end
+	model.Parent = nil
+	local pool = self.buildingFree
+	if not pool then
+		pool = {}
+		self.buildingFree = pool
+	end
+	pool[#pool + 1] = model
+end
+
+local function takeBuilding(self: Overlay, kind: number, level: number): Model?
+	local free = self.buildingFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last:GetAttribute("Kind") == kind and last:GetAttribute("Level") == level then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand:GetAttribute("Kind") == kind and cand:GetAttribute("Level") == level then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+local function poseBuilding(
+	model: Model,
+	parent: Instance,
+	index: number,
+	kind: number,
+	slot: number,
+	level: number,
+	terrain: buffer
+)
+	local base = WorldSpace.indexToWorld(index)
+	local ground = WorldSpace.surfaceHeight(terrain, index)
+	local destX, destY, destZ = base.X, ground, base.Z
+	local oldIndex = model:GetAttribute("Index") :: number?
+	if typeof(oldIndex) ~= "number" then
+		oldIndex = tonumber(string.sub(model.Name, 9))
+	end
+	local originX, originY, originZ = destX, destY, destZ
+	if typeof(oldIndex) == "number" then
+		local oldBase = WorldSpace.indexToWorld(oldIndex)
+		originX = oldBase.X
+		originY = WorldSpace.surfaceHeight(terrain, oldIndex)
+		originZ = oldBase.Z
+	end
+	local dx, dy, dz = destX - originX, destY - originY, destZ - originZ
+	if dx ~= 0 or dy ~= 0 or dz ~= 0 then
+		local delta = Vector3.new(dx, dy, dz)
+		for _, part in model:GetChildren() do
+			if part:IsA("BasePart") then
+				local rest = part:GetAttribute("RestCFrame")
+				if rest then
+					part.CFrame = rest + delta
+				else
+					part.CFrame = part.CFrame + delta
+				end
+				part:SetAttribute("RestCFrame", part.CFrame)
+			end
+		end
+	else
+		for _, part in model:GetChildren() do
+			if part:IsA("BasePart") then
+				local rest = part:GetAttribute("RestCFrame")
+				if rest then
+					part.CFrame = rest
+				end
+			end
+		end
+	end
+
+	model.Name = `Building{index}`
+	model:SetAttribute("Index", index)
+
+	local nextColor = colorFor(slot)
+	local prevSlot = model:GetAttribute("Slot")
+	if prevSlot ~= slot then
+		local previous = Color3.new(
+			model:GetAttribute("TintR") :: number,
+			model:GetAttribute("TintG") :: number,
+			model:GetAttribute("TintB") :: number
+		)
+		BuildingModels.recolor(model, previous, nextColor)
+		local tintAnchor = model:FindFirstChildWhichIsA("BasePart")
+		local tintMarker = tintAnchor and tintAnchor:FindFirstChild("Marker")
+		local tintLabel = tintMarker and tintMarker:FindFirstChild("Symbol")
+		if tintLabel and tintLabel:IsA("TextLabel") then
+			tintLabel.TextColor3 = nextColor
+		end
+	end
+	model:SetAttribute("Slot", slot)
+	model:SetAttribute("TintR", nextColor.R)
+	model:SetAttribute("TintG", nextColor.G)
+	model:SetAttribute("TintB", nextColor.B)
+
+	local anchor = model:FindFirstChildWhichIsA("BasePart")
+	if anchor then
+		local marker = anchor:FindFirstChild("Marker")
+		if marker then
+			marker.StudsOffsetWorldSpace =
+				Vector3.new(base.X, ground + BuildingModels.heightOf(kind, level) + 3, base.Z) - anchor.Position
+		end
+	end
+
+	model.Parent = parent
+end
+
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
 	for _, entry in deltas do
 		local existing = self.buildings[entry.index]
@@ -708,7 +846,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		if entry.kind == 0 then
 			self:syncFactoryRoutes(entry.index, nil, 0)
 			if existing then
-				existing:Destroy()
+				parkBuilding(self, existing)
 				self.buildings[entry.index] = nil
 			end
 			continue
@@ -748,10 +886,15 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		end
 
 		if existing then
-			existing:Destroy()
+			parkBuilding(self, existing)
 		end
 
-		local model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		local model = takeBuilding(self, entry.kind, level)
+		if model then
+			poseBuilding(model, self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		else
+			model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		end
 		self.buildings[entry.index] = model
 		if entry.kind == Config.BUILDING.FACTORY then
 			model:SetAttribute("Routes", if entry.links then #entry.links else 0)
