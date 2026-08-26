@@ -42,6 +42,27 @@ local VALID = Color3.fromRGB(110, 235, 160)
 local SNAPPED = Color3.fromRGB(120, 200, 255)
 local INVALID = Color3.fromRGB(255, 105, 95)
 
+-- N92 : ctx hover recycle. Record + champs reecrits a chaque resolve
+-- (recette N85 ctxBuf serveur). Distinct de ctxBuf Buildings et de
+-- candBuf Placement. Unique appelant synchrone (resolve). Pas de
+-- RemoteFunction. Ne pas table.clone. ownerAt/buildingAt viennent
+-- du caller (init.client) — ne pas cacher si la tuile change de camp.
+local function previewOwnerAt(_index: number): number
+	return 0
+end
+local function previewBuildingAt(_index: number): (number?, number?, number?)
+	return nil, nil, nil
+end
+local previewCtx: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = previewOwnerAt,
+	buildingAt = previewBuildingAt,
+}
+PlacementPreview.previewCtx = previewCtx
+
 function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPreview
 	local self = setmetatable({}, PlacementPreview) :: any
 
@@ -97,16 +118,14 @@ function PlacementPreview.resolve(
 	counts: { [number]: number },
 	buildCostModifier: number
 ): (number, string)
-	local ctx: Placement.Context = {
-		slot = mySlot,
-		era = era,
-		gold = gold,
-		terrain = self.terrain,
-		ownerAt = ownerAt,
-		buildingAt = buildingAt,
-	}
+	previewCtx.slot = mySlot
+	previewCtx.era = era
+	previewCtx.gold = gold
+	previewCtx.terrain = self.terrain
+	previewCtx.ownerAt = ownerAt
+	previewCtx.buildingAt = buildingAt
 
-	local resolution = Placement.resolve(ctx, tile, kind, counts, buildCostModifier)
+	local resolution = Placement.resolve(previewCtx, tile, kind, counts, buildCostModifier)
 	if not resolution then
 		return tile, "invalid"
 	end
@@ -114,6 +133,56 @@ function PlacementPreview.resolve(
 		return resolution.tile, "upgrade"
 	end
 	return resolution.tile, if resolution.tile == tile then "exact" else "snap"
+end
+
+-- N183 : parkGhost / takeGhost hoistes pour setKind sans Destroy.
+-- Skip Parent nil (deja parke par hide / setKind(nil) puis un
+-- second setKind). Push ghostFree (Model, pas FactionLabels /
+-- buildingFree / ringFree / previewFree). take Kind match,
+-- Name Ghost, Parent self.root. SetAttribute Kind apres create
+-- (create pose Name = Building{kind}, setKind ecrase Ghost).
+-- Recette leftover N182. Pas merger visual V76 Size rayon.
+-- Distinct leftover N152 flame. Distinct leftover N182
+-- labelFree. Overlay non touche. FactionLabels non touche.
+-- BuildingModels.create construction inchange. destroy()
+-- self.root:Destroy inchange. Footprint non poole. Ne pas
+-- vider ghostFree. Pas de delay.
+local function parkGhost(self: PlacementPreview, model: Model)
+	if not model.Parent then
+		return
+	end
+	model.Parent = nil
+	local pool = self.ghostFree
+	if not pool then
+		pool = {}
+		self.ghostFree = pool
+	end
+	pool[#pool + 1] = model
+end
+
+local function takeGhost(self: PlacementPreview, kind: number): Model?
+	local free = self.ghostFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last:GetAttribute("Kind") == kind then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand:GetAttribute("Kind") == kind then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
 end
 
 --=============================================================================
@@ -128,7 +197,7 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 	self.tile = nil
 
 	if self.model then
-		self.model:Destroy()
+		parkGhost(self, self.model)
 		self.model = nil
 	end
 
@@ -139,7 +208,13 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 
 	-- Le fantome est construit une fois puis simplement deplace : le recreer a
 	-- chaque mouvement de souris produirait des dizaines de modeles par seconde.
-	local model = BuildingModels.create(kind, Theme.color.text, Vector3.zero)
+	-- N183 : take Kind match avant create. ForceField / Transparency 0.55
+	-- / CanQuery / CanCollide reposes au reuse (update recolore).
+	local model = takeGhost(self, kind)
+	if not model then
+		model = BuildingModels.create(kind, Theme.color.text, Vector3.zero)
+		model:SetAttribute("Kind", kind)
+	end
 	model.Name = "Ghost"
 	for _, part in model:GetChildren() do
 		if part:IsA("BasePart") then
@@ -207,7 +282,14 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 	self.footprint.Transparency = 0.6
 	self.footprint.Color = color
 	self.footprint.Size = Vector3.new(0.3, radius, radius)
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N129 : translation * euler Z=90. Plus de CFrame.Angles 60 Hz.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2)
+	-- (rx=0, ry=0 → Z seul). Angle 90° inchange. Hauteur ground + 0.4
+	-- inchangee (feel ≠ visual 0.42). Size Vector3.new inchange (API).
+	-- Pas de pulse (feel n'en a pas). Distinct LaunchWake N130 (evenement).
+	-- Distinct N127/N128 pieces navire. Distinct N124 Radar rest identite.
+	-- Recette visual V75 leftover deja sur 1b5c — portee euler, pas mergee.
+	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 end
 
 function PlacementPreview.hide(self: PlacementPreview)
