@@ -34,6 +34,7 @@ local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local Config = require(Shared:WaitForChild("Config"))
 local MapGen = require(Shared:WaitForChild("MapGen"))
+local SpawnHint = require(Shared:WaitForChild("SpawnHint"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
 local Doctrines = require(Shared:WaitForChild("Doctrines"))
 local Eras = require(Shared:WaitForChild("Eras"))
@@ -57,6 +58,20 @@ local VisualDirector = require(script.VisualDirector)
 
 local player = localPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+
+-- Sequence d'intention : idempotence cote serveur (dernier argument optionnel).
+local clientSequence = 0
+local function nextSequence(): number
+	clientSequence += 1
+	return clientSequence
+end
+
+local function fireOrder(remoteName: string, ...: any)
+	local packed = table.pack(...)
+	packed.n += 1
+	packed[packed.n] = nextSequence()
+	Remotes.get(remoteName):FireServer(table.unpack(packed, 1, packed.n))
+end
 
 -- Rojo/Play Solo peut relancer le LocalScript sans nettoyer immédiatement
 -- l'ancienne interface. Roblox suffixe parfois les doublons (`_1`, `_2`) :
@@ -247,22 +262,22 @@ local function executeTerritoryAction(action: string, index: number)
 	local targetSlot = w:ownerAt(index)
 
 	if action == "build" then
-		Remotes.get("BuildOrder"):FireServer(index, hud.buildKind)
+		fireOrder("BuildOrder", index, hud.buildKind)
 		return
 	end
 
 	if action == "upgrade" then
-		Remotes.get("UpgradeBuildingOrder"):FireServer(index)
+		fireOrder("UpgradeBuildingOrder", index)
 		return
 	end
 
 	if action == "boat" then
-		Remotes.get("BoatOrder"):FireServer(index)
+		fireOrder("BoatOrder", index)
 		return
 	end
 
 	if action == "nuke" then
-		Remotes.get("NukeOrder"):FireServer(index, hud.nukeKind)
+		fireOrder("NukeOrder", index, hud.nukeKind)
 		return
 	end
 
@@ -283,7 +298,7 @@ local function executeTerritoryAction(action: string, index: number)
 	-- Le serveur derive lui-meme la faction depuis la tuile exacte. Envoyer un
 	-- slot calcule par le buffer client pouvait cibler une ancienne faction si
 	-- un delta de conquete arrivait au meme moment que le clic.
-	Remotes.get("AttackOrder"):FireServer(index)
+	fireOrder("AttackOrder", index)
 	hud:recordTutorial("attack")
 end
 
@@ -326,27 +341,15 @@ local function inspectTerritory(index: number)
 end
 
 local function onTileClicked(index: number)
-	-- La fiche de territoire ne s'ouvre qu'en mode Attaquer, le seul ou le clic
-	-- sert aussi a inspecter. Dans les autres modes le clic EST un ordre :
-	-- ouvrir la fiche fermerait la palette et empecherait de poser plusieurs
-	-- batiments a la suite.
-	if hud.mode == "attack" then
-		inspectTerritory(index)
-	end
-	executeTerritoryAction(hud.mode, index)
+	-- Feel OpenFront : clic gauche = toujours attaquer / spawn.
+	-- Build, boat, nuke, retraite passent uniquement par le menu radial (clic droit).
+	inspectTerritory(index)
+	executeTerritoryAction("attack", index)
 end
 
 --[[
-	Menu radial : clic droit sur une case, modele OpenFront.
-
-	Il double les modes plutot que de les remplacer. Le clic gauche continue
-	d'appliquer le mode arme — c'est le geste rapide, celui qu'on repete pour
-	poser cinq batiments d'affilee — et le clic droit ouvre le menu sur la case
-	visee pour choisir explicitement, sans avoir a se souvenir du mode courant.
-
-	Un menu contextuel connait sa cible : il grise ce qui n'a pas de sens ici,
-	la ou une barre permanente reste generique et laisse decouvrir l'erreur
-	apres coup.
+	Menu radial : clic droit / appui long — construction, debarquement, nucleaire,
+	retraite. Le clic gauche reste reserve a l'attaque (pipeline OpenFront).
 ]]
 local radial = RadialMenu.new(screenGui)
 
@@ -356,17 +359,15 @@ radial.onAction = function(action: string, tile: number)
 		return
 	end
 	if action == "retreat" then
-		Remotes.get("RetreatOrder"):FireServer(tile)
+		fireOrder("RetreatOrder", tile)
 		return
 	end
-	hud:setMode(action :: any)
-	inspectTerritory(tile)
+	-- Une action radiale s'execute sur la case visee, sans armer un mode permanent.
 	executeTerritoryAction(action, tile)
 end
 
 radial.onBuild = function(kind: number, tile: number)
 	hud:setBuildKind(kind)
-	hud:setMode("build")
 	executeTerritoryAction("build", tile)
 end
 
@@ -579,7 +580,7 @@ end)
 --=============================================================================
 
 hud.onRatioChanged = function(ratio: number)
-	Remotes.get("SetAttackRatio"):FireServer(ratio)
+	fireOrder("SetAttackRatio", ratio)
 end
 
 -- Bouton "Capitale" de la barre tactile : meme effet que la touche Espace.
@@ -590,19 +591,19 @@ hud.onRecenter = function()
 end
 
 hud.onDoctrineChosen = function(doctrineId: number)
-	Remotes.get("ChooseDoctrine"):FireServer(doctrineId)
+	fireOrder("ChooseDoctrine", doctrineId)
 end
 
 hud.onDiplomacyAction = function(action: string, targetSlot: number)
-	Remotes.get("DiplomacyOrder"):FireServer(action, targetSlot)
+	fireOrder("DiplomacyOrder", action, targetSlot)
 end
 
 hud.onQuickChat = function(messageId: string, targetSlot: number?)
-	Remotes.get("QuickChat"):FireServer(messageId, targetSlot)
+	fireOrder("QuickChat", messageId, targetSlot)
 end
 
 hud.onResearch = function()
-	Remotes.get("ResearchOrder"):FireServer()
+	fireOrder("ResearchOrder")
 end
 
 hud.onBuildKindChanged = function(kind: number)
@@ -651,7 +652,14 @@ end
 -- Reseau
 --=============================================================================
 
-Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number, initialRoster, capital: number?, profile)
+Remotes.get("MapInit").OnClientEvent:Connect(function(
+	seed: number,
+	slot: number,
+	initialRoster,
+	capital: number?,
+	profile,
+	mapMeta
+)
 	hideTransientInterfaces()
 	menu.root.Visible = false
 	menu.root.GroupTransparency = 1
@@ -668,6 +676,7 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	roster = initialRoster
 	myCapital = capital
 	matchPhase = "playing"
+	clientSequence = 0
 
 	if world then
 		world:destroy()
@@ -686,6 +695,26 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	end
 
 	worldReady = false
+
+	-- Verifie le contrat de generation avant d'afficher la carte.
+	if typeof(mapMeta) == "table" then
+		local localTerrain = MapGen.generate(seed)
+		local localHash = MapGen.terrainHash(localTerrain)
+		if mapMeta.terrainHash ~= localHash
+			or mapMeta.mapId ~= Config.MAP_ID
+			or mapMeta.mapVersion ~= Config.MAP_VERSION
+			or mapMeta.generatorVersion ~= Config.GENERATOR_VERSION
+		then
+			warn(
+				`[CONQUEST RTS] desync carte : serveur hash={mapMeta.terrainHash} local={localHash} — snapshot owner inutile`
+			)
+			hud:notify("Carte desynchronisee — mets a jour le client, puis rejoins.", "bad")
+		end
+	end
+
+	if Config.RENDER_MODE ~= "Blocks" then
+		warn(`[CONQUEST RTS] RENDER_MODE={Config.RENDER_MODE} ignore — Blocks est le seul chemin de production`)
+	end
 
 	local built = WorldRenderer.new(seed)
 	world = built
@@ -725,6 +754,29 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(seed: number, slot: number
 	hud:setProfile(profile)
 	hud:selectFaction(nil)
 	hud.territoryPanel.Visible = false
+end)
+
+Remotes.get("OwnerSnapshot").OnClientEvent:Connect(function(owner: buffer, tick: number, _structureHash: number)
+	local w = world
+	if not w or typeof(owner) ~= "buffer" then
+		return
+	end
+	w:applyOwnerSnapshot(owner)
+	hud:notify(`Resynchronisation appliquee (tick {tick}).`, "good")
+end)
+
+Remotes.get("IntentReject").OnClientEvent:Connect(function(reason: string, detail: string?)
+	local text = detail or reason
+	if reason == "RateLimited" then
+		hud:notify(text or "Trop d'ordres — ralentis.", "bad")
+	elseif reason == "DuplicateSequence" or reason == "StaleSequence" then
+		-- Silent : replay reseau, pas une erreur joueur.
+		return
+	elseif reason == "NotPlaying" then
+		hud:notify("La partie n'a pas commence.", "info")
+	else
+		hud:notify(text or "Ordre refuse.", "bad")
+	end
 end)
 
 Remotes.get("RosterUpdate").OnClientEvent:Connect(function(newRoster)
@@ -926,6 +978,28 @@ end)
 -- Boucle de rendu
 --=============================================================================
 
+-- N99 : hover closures module (recette visual V53 / N85 ownerAt).
+-- Distinct de N92 (record previewCtx) et de N85 (ctxBuf serveur).
+-- Capturent world / overlay upvalues. Overlay nil → buildingAt nil.
+-- World nil → ownerAt 0. Pas de RemoteFunction. Pas de function inline
+-- dans RenderStepped. PlacementPreview / previewCtx (N92) non touches.
+local function previewOwnerAt(index: number): number
+	local w = world
+	if not w then
+		return 0
+	end
+	return w:ownerAt(index)
+end
+
+local function previewBuildingAt(index: number): (number?, number?, number?)
+	local o = overlay
+	if not o then
+		return nil, nil, nil
+	end
+	local kind, slot, level = o:buildingAt(index)
+	return kind, slot, level
+end
+
 RunService.RenderStepped:Connect(function(dt: number)
 	camera:step(dt)
 
@@ -972,16 +1046,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 				local landing, status = p:resolve(
 					tile,
 					hud.buildKind,
-					function(index)
-						return w:ownerAt(index)
-					end,
-					function(index)
-						if o then
-							local kind, slot, level = o:buildingAt(index)
-							return kind, slot, level
-						end
-						return nil, nil, nil
-					end,
+					previewOwnerAt,
+					previewBuildingAt,
 					mySlot,
 					hud.era,
 					hud.gold,
@@ -1007,8 +1073,18 @@ RunService.RenderStepped:Connect(function(dt: number)
 				local valid = false
 				local color = Theme.color.danger
 				if hud.mode == "attack" then
-					valid = land and owner ~= mySlot
-					color = if owner == 0 then Theme.color.accent else Theme.factionColor(owner)
+					-- N58 : en awaitingSpawn (tiles==0) le hover suit l'isolation
+					-- serveur (carre SPAWN_RADIUS+3 / r=6). Hint seulement :
+					-- splash/fallout restent un refus serveur possible.
+					local mine = stats[mySlot]
+					local awaitingSpawn = mine ~= nil and (mine.tiles or 0) == 0
+					if awaitingSpawn then
+						valid = SpawnHint.looksClaimable(w.terrain, w.owner, tile)
+						color = if valid then Theme.color.accent else Theme.color.danger
+					else
+						valid = land and owner ~= mySlot
+						color = if owner == 0 then Theme.color.accent else Theme.factionColor(owner)
+					end
 				elseif hud.mode == "boat" then
 					valid = land and owner ~= mySlot and MapGen.isCoastal(w.terrain, tile)
 					color = Theme.color.info
