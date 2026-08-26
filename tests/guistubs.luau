@@ -20,7 +20,23 @@ local function makeSignal()
 	local signal = { handlers = {} }
 	function signal:Connect(fn)
 		table.insert(self.handlers, fn)
-		return { Disconnect = function() end, Connected = true }
+		local conn = { Connected = true }
+		-- N170 : Disconnect doit retirer le handler. Un no-op laissait
+		-- Fire appeler toutes les Activated accumulees au reuse chat
+		-- (double-fire QuickChat, test messages rapides rouge).
+		function conn.Disconnect()
+			if not conn.Connected then
+				return
+			end
+			conn.Connected = false
+			for i, handler in signal.handlers do
+				if handler == fn then
+					table.remove(signal.handlers, i)
+					break
+				end
+			end
+		end
+		return conn
 	end
 	function signal:Once(fn)
 		return self:Connect(fn)
