@@ -235,6 +235,7 @@ local INSTANCE_CLASS_PARENTS = {
 	Folder = "Instance",
 	Part = "BasePart",
 	MeshPart = "BasePart",
+	SpawnLocation = "BasePart",
 	BasePart = "Instance",
 	Player = "Instance",
 }
@@ -372,8 +373,9 @@ end
 
 -- Workspace serveur : WorldBuilder.build (N191) relit FindFirstChild /
 -- GetChildren / Parent. Terrain:Clear no-op (SmoothTerrain d'une
--- partie precedente). Distinct leftover N192 clearDefaultScene
--- (Baseplate Destroy). Pas de GuiObject.
+-- partie precedente). WorldBuilder.clearDefaultScene (N192) relit
+-- Name Baseplate / IsA SpawnLocation, Parent = nil, studioFree
+-- (jamais take dans build). Pas de GuiObject.
 do
 	local workspaceInst = newInstance("Workspace")
 	workspaceInst.Name = "Workspace"

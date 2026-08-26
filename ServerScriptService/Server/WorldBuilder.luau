@@ -42,12 +42,26 @@ local WorldBuilder = {}
 -- Parent = nil). Recette leftover N184. Pas merger visual. Distinct
 -- leftover N190 ScreenGui. Distinct leftover N189 VisualDirector.
 -- Distinct leftover N152 flame. Distinct leftover N192
--- clearDefaultScene. Terrain:Clear inchange. WorldRenderer non
--- touche. Overlay non touche. init.client non touche. Ne pas vider
--- collisionFree. Pas de delay. Si park sans take : ne pas livrer.
--- Si take sans park enfants : ne pas livrer.
+-- clearDefaultScene (studioFree, jamais take ici). Terrain:Clear
+-- inchange. WorldRenderer non touche. Overlay non touche.
+-- init.client non touche. Ne pas vider collisionFree. Pas de delay.
+-- Si park sans take : ne pas livrer. Si take sans park enfants :
+-- ne pas livrer.
 local collisionFree: { Folder } = {}
 local collisionPartFree: { Part } = {}
+-- N192 : parkStudioDefault hoiste pour clearDefaultScene sans
+-- Destroy du leftover Baseplate / SpawnLocation. Skip Parent nil
+-- (deja parke par un second clearDefaultScene). Push studioFree
+-- (jamais take dans build — Baseplate n'est PAS une dalle Ground).
+-- Pas collisionPartFree / collisionFree (take Ground recevrait
+-- une dalle Studio 512²). Recette leftover N191 isolee. Pas merger
+-- visual. Distinct leftover N191 build. Distinct leftover N190
+-- ScreenGui. Distinct leftover N152 flame. Terrain:Clear inchange.
+-- WorldRenderer non touche. Overlay non touche. init.client non
+-- touche. Ne pas vider studioFree. Pas de delay. Si park dans
+-- collisionPartFree : ne pas livrer. Si take dans build : ne pas
+-- livrer. Si Parent=nil sans push : ne pas livrer.
+local studioFree: { Instance } = {}
 
 local function parkCollisionPart(part: Part)
 	if not part.Parent then
@@ -94,6 +108,14 @@ local function takeCollision(): Folder?
 	local last = collisionFree[n]
 	collisionFree[n] = nil
 	return last
+end
+
+local function parkStudioDefault(inst: Instance)
+	if not inst.Parent then
+		return
+	end
+	inst.Parent = nil
+	studioFree[#studioFree + 1] = inst
 end
 
 local function acquireCollisionPart(name: string): Part
@@ -237,11 +259,16 @@ end
 	Nettoie la scene par defaut de Studio. Sans ca, la baseplate d'origine
 	flotte au milieu de la carte et le point d'apparition par defaut projette
 	les joueurs a cote du monde.
+
+	N192 : park Baseplate / SpawnLocation (Parent = nil, studioFree)
+	au lieu de Destroy. Jamais recréés — aucun take dans build().
+	Skip Parent nil. Skip non-Baseplate / non-SpawnLocation (Terrain,
+	ConquestCollision, decoys). Pas collisionPartFree.
 ]]
 function WorldBuilder.clearDefaultScene()
 	for _, child in Workspace:GetChildren() do
 		if child.Name == "Baseplate" or child:IsA("SpawnLocation") then
-			child:Destroy()
+			parkStudioDefault(child)
 		end
 	end
 end

@@ -2507,6 +2507,66 @@ do
 	end
 end
 
+-- N192 : leftover Baseplate / SpawnLocation recycle (pas Destroy).
+-- clearDefaultScene Parent=nil + studioFree. Jamais recréés : aucun
+-- take dans build() (Baseplate ≠ Ground). Skip Parent nil. Skip
+-- non-Baseplate / non-SpawnLocation (Terrain, ConquestCollision,
+-- decoy). Pas collisionPartFree. Distinct leftover N191 build.
+-- Distinct leftover N190 ScreenGui. Distinct leftover N152 flame.
+do
+	local workspace = game:GetService("Workspace")
+	local collision = workspace:FindFirstChild("ConquestCollision")
+	local terrain = workspace.Terrain
+	local baseplate = Instance.new("Part")
+	baseplate.Name = "Baseplate"
+	baseplate.Parent = workspace
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "SpawnLocation"
+	spawn.Parent = workspace
+	local decoy = Instance.new("Part")
+	decoy.Name = "Decoy"
+	decoy.Parent = workspace
+	WorldBuilder.clearDefaultScene()
+	if baseplate.Parent ~= nil then
+		fail("studio leftover — Baseplate encore parentee")
+	elseif spawn.Parent ~= nil then
+		fail("studio leftover — SpawnLocation encore parentee")
+	elseif decoy.Parent == nil then
+		fail("studio leftover — decoy parkee (filtre Name/IsA)")
+	elseif terrain == nil or terrain.Parent == nil then
+		fail("studio leftover — Terrain parkee")
+	elseif collision ~= nil and collision.Parent == nil then
+		fail("studio leftover — ConquestCollision parkee")
+	else
+		WorldBuilder.clearDefaultScene()
+		if baseplate.Parent ~= nil then
+			fail("studio leftover — Baseplate reprise au second clear")
+		elseif spawn.Parent ~= nil then
+			fail("studio leftover — SpawnLocation repris au second clear")
+		else
+			local rebuilt = WorldBuilder.build(state.terrain)
+			local taken = false
+			for _, child in rebuilt:GetChildren() do
+				if rawequal(child, baseplate) or rawequal(child, spawn) then
+					taken = true
+					break
+				end
+			end
+			if taken then
+				fail("studio leftover — studioFree take dans build (collisionPartFree mix)")
+			elseif baseplate.Parent ~= nil then
+				fail("studio leftover — Baseplate repris par build")
+			elseif spawn.Parent ~= nil then
+				fail("studio leftover — SpawnLocation repris par build")
+			elseif decoy.Parent == nil then
+				fail("studio leftover — decoy detachee par build")
+			else
+				print("studio leftover : Baseplate/Spawn park, skip decoy, pas take build (N192)")
+			end
+		end
+	end
+end
+
 --=============================================================================
 -- P0 — hash carte, intentions, capacite, metrics
 --=============================================================================
