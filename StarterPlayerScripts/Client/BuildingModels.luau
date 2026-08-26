@@ -515,26 +515,57 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	end
 
 	-- Bague de chantier au sol
-	local ring = Instance.new("Part")
-	ring.Name = "BuildRing"
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
+	-- N166 : free-list ringFree (module), pop O(1) depuis la fin.
+	-- Pas de Destroy a total + 0.2 : Parent = nil + push si encore
+	-- parenté (un delay fantôme ne double-push pas). Overlay
+	-- explosion réutilise déjà (blastFree / smokeFree / shockFree
+	-- — ne pas partager). DeliveryPulse réutilise déjà
+	-- (deliveryFree — ne pas partager). Distinct flame leftover
+	-- N152 (Size = Vector3.new, ≠ visual V74 freeze). Distinct
+	-- HUD N153. Distinct N136 (euler déjà inline — ne pas cuire
+	-- un rot). Distinct visual V85 euler BuildRing (ne pas merger
+	-- 7be5). Name BuildRing conservé. Parent = model (pas
+	-- overlay.root). Reset Size (0.4, 3, 3) + Transparency 0.4 +
+	-- Color 255,214,130 + CFrame CFrame.new(ground) *
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) **avant** Tween
+	-- (ground varie ; le tween avait Size (0.4, 16, 16) /
+	-- Transparency 1). Tween Create conservé (Size /
+	-- Transparency restart). Drop / sort Y des parts inchanges.
+	-- Distinct OceanGlint N135 (yaw `angle`, OCEAN_LEVEL + 0.08).
+	-- Distinct Effects ring N134 (Y = 3, pulseFree). Distinct
+	-- Overlay Shockwave N133 / N163 (PLAINS + 0.5, shockFree).
+	-- Distinct Blast N165 (blastFree). Distinct BlastSmoke N164
+	-- (smokeFree). Lazy-init ringFree ici (pas Overlay.new, pas
+	-- BuildingModels.create). Recette leftover N165, pas merger
+	-- visual. HUD / UnitModels / Overlay / Effects /
+	-- PlacementPreview / animate / create inchanges.
+	local ringFree = BuildingModels.ringFree
+	if not ringFree then
+		ringFree = {}
+		BuildingModels.ringFree = ringFree
+	end
+	local nRing = #ringFree
+	local ring
+	if nRing > 0 then
+		ring = ringFree[nRing]
+		ringFree[nRing] = nil
+	else
+		ring = Instance.new("Part")
+		ring.Name = "BuildRing"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+	end
 	ring.Color = Color3.fromRGB(255, 214, 130)
 	ring.Transparency = 0.4
 	ring.Size = Vector3.new(0.4, 3, 3)
 	-- N136 : playConstruction BuildRing. Plus de CFrame.Angles.
 	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
-	-- ground Vector3 inchange. Tween Size/Transparency + task.delay
-	-- Destroy inchanges. Drop / sort Y des parts inchanges.
-	-- Distinct OceanGlint N135 (yaw `angle`, OCEAN_LEVEL + 0.08).
-	-- Distinct Effects ring N134 (Y = 3). Distinct Overlay Shockwave
-	-- N133 (PLAINS + 0.5). Distinct trunks leftover (buildDecorations).
-	-- animate / Overlay / WorldRenderer / Effects inchanges.
+	-- ground Vector3 inchange. Euler inline — ne pas cuire ringRot.
 	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
@@ -545,7 +576,9 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 
 	task.delay(total + 0.2, function()
 		if ring.Parent then
-			ring:Destroy()
+			ring.Parent = nil
+			local pool = BuildingModels.ringFree
+			pool[#pool + 1] = ring
 		end
 	end)
 end

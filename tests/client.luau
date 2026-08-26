@@ -1046,13 +1046,20 @@ check("pose et capture de chaque type de batiment", function()
 	-- testFlushDelays ici — le pulse reste parenté (le flush + reuse
 	-- rawequal est dans « vagues de conquete »). Name DeliveryPulse
 	-- conservé. Leftover N132 euler inline, leftover N136 BuildRing
-	-- doivent rester verts. Recette leftover N161, pas merger visual
+	-- euler, leftover N166 BuildRing pool **sans** flush doivent
+	-- rester verts. Recette leftover N161, pas merger visual
 	-- V80 wakeRot. Shockwave leftover N163 (check navires / vagues).
 	-- N136 : BuildRing fromEulerAnglesYXZ (pas CFrame.Angles). Cylindre
 	-- Z=90. playConstruction via applyBuildingDelta plus haut. Leftover
 	-- N132 pulse, leftover N113 rot chantier, leftover N135 OceanGlint
 	-- (check construction) doivent rester verts. Recette leftover N135,
 	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
+	-- N166 : BuildRing free-list ringFree. Pas de testFlushDelays
+	-- ici — les bagues restent parentées au model (le flush +
+	-- reuse rawequal est dans « vagues de conquete »). Name
+	-- BuildRing conservé. Parent = model (pas overlay.root).
+	-- Euler N136 inline. Leftover N162 DeliveryPulse sans flush
+	-- doit rester vert. Recette leftover N165, pas merger visual.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
@@ -1868,6 +1875,14 @@ check("vagues de conquete", function()
 	-- Blast). Distinct smokeFree / shockFree / deliveryFree /
 	-- splashFree / wakeFree / goldFree / pulseFree. PointLight
 	-- enfant réutilisé.
+	-- N166 : BuildRing free-list. Le check pose n'a pas flushé ;
+	-- ce flush pousse BuildingModels.ringFree (# >= 1). Snapshot
+	-- avant applyUnits N160 **et** avant applyBuildingDelta N162
+	-- (CITY+FACTORY animateFrom=0 consomme 2 bagues). Réparente
+	-- (rawequal Parent overlay.buildings[cityIndex] ou
+	-- overlay.buildings[factoryIndex], pas overlay.root, Name
+	-- BuildRing). Distinct blastFree / smokeFree / shockFree /
+	-- deliveryFree / pulseFree.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1982,6 +1997,24 @@ check("vagues de conquete", function()
 	assert(pooledBlast ~= pooledGold, "blastFree partage goldFree")
 	assert(pooledBlast ~= pooledDelivery, "blastFree partage deliveryFree")
 	assert(pooledBlast ~= pooledRing, "blastFree partage pulseFree")
+	-- N166 : flush ci-dessus a poussé les BuildRing de « pose »
+	-- (upgrade ville niveau 3, Destroy parent non récursif dans
+	-- les stubs). Snapshot avant applyUnits N160 ; reuse lors de
+	-- applyBuildingDelta CITY+FACTORY N162.
+	local ringPool = BuildingModels.ringFree
+	assert(ringPool ~= nil and #ringPool >= 1, "bagues chantier non poolees")
+	local pooledBuildRing = ringPool[#ringPool]
+	assert(pooledBuildRing.Parent == nil, "bague chantier encore parentee")
+	assert(pooledBuildRing.Name == "BuildRing", "Name BuildRing perdu")
+	assert(pooledBuildRing ~= pooledBlast, "ringFree partage blastFree")
+	assert(pooledBuildRing ~= pooledSmoke, "ringFree partage smokeFree")
+	assert(pooledBuildRing ~= pooledShock, "ringFree partage shockFree")
+	assert(pooledBuildRing ~= pooledWake, "ringFree partage wakeFree")
+	assert(pooledBuildRing ~= pooledSplash, "ringFree partage splashFree")
+	assert(pooledBuildRing ~= pooledGold, "ringFree partage goldFree")
+	assert(pooledBuildRing ~= pooledDelivery, "ringFree partage deliveryFree")
+	assert(pooledBuildRing ~= pooledRing, "ringFree partage pulseFree")
+	local ringN = #ringPool
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -2015,6 +2048,18 @@ check("vagues de conquete", function()
 		{ index = cityIndex, kind = Config.BUILDING.CITY, slot = 1, level = 1 },
 		{ index = factoryIndex, kind = Config.BUILDING.FACTORY, slot = 1, level = 1, links = { cityIndex } },
 	})
+	-- N166 : CITY puis FACTORY consomment 2 bagues. Reset Size
+	-- (0.4, 3, 3) + Transparency 0.4 + Color + CFrame avant Tween
+	-- (ground varie). Parent = model, pas overlay.root.
+	assert(#ringPool == math.max(0, ringN - 2), "bague chantier non reutilisee")
+	local cityModel = overlay.buildings[cityIndex]
+	local factoryModel = overlay.buildings[factoryIndex]
+	assert(
+		rawequal(pooledBuildRing.Parent, cityModel) or rawequal(pooledBuildRing.Parent, factoryModel),
+		"bague chantier non reparentee au model"
+	)
+	assert(pooledBuildRing.Name == "BuildRing", "Name BuildRing perdu au reuse")
+	assert(not rawequal(pooledBuildRing.Parent, overlay.root), "bague chantier reparentee a overlay.root")
 	local liveRoute = overlay.routes[factoryIndex * 100000 + cityIndex]
 	assert(liveRoute ~= nil, "voie N162 absente")
 	local deliveryN = #deliveryPool
