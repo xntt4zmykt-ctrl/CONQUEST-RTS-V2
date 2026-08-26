@@ -22,6 +22,7 @@ local neighborScratch = table.create(4, 0)
 -- Truncate leftover AVANT origLaunch — un leftover reinserait un pont
 -- fantome. Non reentrant — launchAttack synchrone. Distinct de N29
 -- (fusion beachhead, ouvert) et de N5 (cap, ouvert).
+-- N104 : park swap-pop SANS releaseAttack (recette N102). Gare live.
 local parkedBuf: { any } = table.create(8)
 BoatFront.parkedBuf = parkedBuf
 
@@ -83,23 +84,30 @@ function BoatFront.install(GameState)
 	local origLaunch = GameState.launchAttack
 	function GameState.launchAttack(self, attackerSlot: number, targetSlot: number)
 		local n = 0
-		for i = #self.attacks, 1, -1 do
-			local atk = self.attacks[i]
+		local attacks = self.attacks
+		-- N104 : swap-pop SANS releaseAttack (recette N102, gare live).
+		-- while reverse + decrement toujours : l'item swappe venait d'un
+		-- indice plus haut (deja visite). Un pont saute = fusion terre/mer.
+		local i = #attacks
+		while i >= 1 do
+			local atk = attacks[i]
 			if atk.isBeachhead then
 				n += 1
 				parkedBuf[n] = atk
-				-- N98 : gare live, NE PAS releaseAttack (le pont revient).
-				table.remove(self.attacks, i)
+				local last = #attacks
+				attacks[i] = attacks[last]
+				attacks[last] = nil
 			end
+			i -= 1
 		end
-		for i = n + 1, #parkedBuf do
-			parkedBuf[i] = nil
+		for j = n + 1, #parkedBuf do
+			parkedBuf[j] = nil
 		end
 
 		local ok, message = origLaunch(self, attackerSlot, targetSlot)
 
-		for i = 1, n do
-			table.insert(self.attacks, parkedBuf[i])
+		for j = 1, n do
+			table.insert(attacks, parkedBuf[j])
 		end
 
 		return ok, message
