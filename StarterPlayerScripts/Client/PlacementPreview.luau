@@ -43,6 +43,24 @@ local SNAPPED = Color3.fromRGB(96, 196, 255)
 local INVALID = Color3.fromRGB(255, 96, 96)
 local UPGRADE = Color3.fromRGB(255, 210, 96)
 
+-- V51 : resolve recycle previewCtxBuf (recette V40 ctxBuf / feel N92).
+-- Distinct de V40 (serveur Buildings) et de V47 (validTiles).
+-- Non reentrant — un seul fantome. Placement.resolve lit tout de suite
+-- et n'en conserve pas l'identite. Slot / closures poses sur le buf,
+-- pas de nouvelle table. Preview n'appelle pas validTiles.
+local previewCtxBuf: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = function(_index: number): number
+		return 0
+	end,
+	buildingAt = function(_index: number): (number?, number?, number?)
+		return nil, nil, nil
+	end,
+}
+
 function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPreview
 	local self = setmetatable({}, PlacementPreview) :: any
 
@@ -112,16 +130,14 @@ function PlacementPreview.resolve(
 	counts: { [number]: number },
 	buildCostModifier: number
 ): (number, string)
-	local ctx: Placement.Context = {
-		slot = mySlot,
-		era = era,
-		gold = gold,
-		terrain = self.terrain,
-		ownerAt = ownerAt,
-		buildingAt = buildingAt,
-	}
+	previewCtxBuf.slot = mySlot
+	previewCtxBuf.era = era
+	previewCtxBuf.gold = gold
+	previewCtxBuf.terrain = self.terrain
+	previewCtxBuf.ownerAt = ownerAt
+	previewCtxBuf.buildingAt = buildingAt
 
-	local resolution = Placement.resolve(ctx, tile, kind, counts, buildCostModifier)
+	local resolution = Placement.resolve(previewCtxBuf, tile, kind, counts, buildCostModifier)
 	if not resolution then
 		return tile, "invalid"
 	end
