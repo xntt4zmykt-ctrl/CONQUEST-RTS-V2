@@ -182,6 +182,13 @@ export type GameState = typeof(setmetatable(
 		silosBySlot: { [number]: { [number]: true } },
 		-- Tous les batiments par camp. Bots upgrade + score nuke (V22).
 		buildingsBySlot: { [number]: { [number]: true } },
+		-- Usines par camp. Trade.step 10 Hz (V20). Distinct de buildingsBySlot.
+		factoriesBySlot: { [number]: { [number]: true } },
+		-- PORT only, slot+level. spawnTradeShips (V21). Distinct de
+		-- _carriersDirty (NAVAL_BASE) et de buildingsBySlot (tous kinds).
+		portsByTile: { [number]: { slot: number, level: number } },
+		-- Bases navales par camp. syncCarriers spawn (V23). Garde _carriersDirty.
+		navalBasesBySlot: { [number]: { [number]: true } },
 		-- Batiments dont cooldown > 0 (V19). stepCooldowns n'itere plus
 		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
 		coolingBuildings: { [number]: true },
@@ -250,6 +257,9 @@ function GameState.new(seed: number): GameState
 	self.samsBySlot = {}
 	self.silosBySlot = {}
 	self.buildingsBySlot = {}
+	self.factoriesBySlot = {}
+	self.portsByTile = {}
+	self.navalBasesBySlot = {}
 	self.coolingBuildings = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
@@ -770,7 +780,14 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.SILO then
 		setSlotIndex(self.silosBySlot, slot, index, true)
 	end
+	if kind == B.FACTORY then
+		setSlotIndex(self.factoriesBySlot, slot, index, true)
+	end
+	if kind == B.PORT then
+		self.portsByTile[index] = { slot = slot, level = 1 }
+	end
 	if kind == B.NAVAL_BASE then
+		setSlotIndex(self.navalBasesBySlot, slot, index, true)
 		self._carriersDirty = true
 	end
 	if IS_STATION[kind] then
@@ -799,6 +816,9 @@ function GameState.upgradeBuilding(self: GameState, index: number): number?
 	building.level += 1
 	self:countBuilding(building.slot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.PORT then
+		self.portsByTile[index] = { slot = building.slot, level = building.level }
+	end
 
 	-- Le niveau d'une usine pese sur le rendement de sa grappe.
 	if building.kind == B.FACTORY then
@@ -823,6 +843,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	setSlotIndex(self.buildingsBySlot, previousSlot, index, false)
 	setSlotIndex(self.buildingsBySlot, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
+		setSlotIndex(self.navalBasesBySlot, previousSlot, index, false)
+		setSlotIndex(self.navalBasesBySlot, newSlot, index, true)
 		self._carriersDirty = true
 	end
 	if building.kind == B.DEFENSE then
@@ -836,6 +858,13 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	if building.kind == B.SILO then
 		setSlotIndex(self.silosBySlot, previousSlot, index, false)
 		setSlotIndex(self.silosBySlot, newSlot, index, true)
+	end
+	if building.kind == B.FACTORY then
+		setSlotIndex(self.factoriesBySlot, previousSlot, index, false)
+		setSlotIndex(self.factoriesBySlot, newSlot, index, true)
+	end
+	if building.kind == B.PORT then
+		self.portsByTile[index] = { slot = newSlot, level = building.level }
 	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
@@ -862,6 +891,15 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.SILO then
 		setSlotIndex(self.silosBySlot, previousSlot, index, false)
+	end
+	if building.kind == B.FACTORY then
+		setSlotIndex(self.factoriesBySlot, previousSlot, index, false)
+	end
+	if building.kind == B.PORT then
+		self.portsByTile[index] = nil
+	end
+	if building.kind == B.NAVAL_BASE then
+		setSlotIndex(self.navalBasesBySlot, previousSlot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1189,6 +1227,12 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.buildingsBySlot then
 		self.buildingsBySlot[slot] = nil
+	end
+	if self.factoriesBySlot then
+		self.factoriesBySlot[slot] = nil
+	end
+	if self.navalBasesBySlot then
+		self.navalBasesBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

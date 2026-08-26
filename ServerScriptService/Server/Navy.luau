@@ -25,6 +25,10 @@ local scratch = table.create(4, 0)
 local visitBuf = buffer.create(Config.TILE_COUNT)
 local parentPool: { [number]: number } = {}
 local queuePool = table.create(512)
+-- V21 : spawnTradeShips listes recyclees. Index GameState.portsByTile.
+local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
+local candidateBuf: { number } = table.create(32)
+local foreignBuf: { { index: number, slot: number, level: number, dist: number, portI: number } } = table.create(24)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -317,19 +321,52 @@ local function countTradeShips(state: GameState): number
 end
 
 local function spawnTradeShips(state: GameState, rng: Random)
-	local ports: { { index: number, slot: number, level: number } } = {}
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.PORT then
-			table.insert(ports, { index = index, slot = building.slot, level = building.level })
+	-- V21 : early-out cap AVANT flatten ; index portsByTile (PORT only).
+	-- Loi de tirage visuelle inchangee (manhattan, alliance, longCap).
+	-- Distinct de _carriersDirty (NAVAL_BASE).
+	local afloat = countTradeShips(state)
+	if afloat >= Config.MAX_TRADE_SHIPS then
+		return
+	end
+	local ports = portsBuf
+	local indexed = state.portsByTile
+	local n = 0
+	if indexed then
+		for index, info in indexed do
+			n += 1
+			local rec = ports[n]
+			if rec then
+				rec.index = index
+				rec.slot = info.slot
+				rec.level = info.level
+			else
+				ports[n] = { index = index, slot = info.slot, level = info.level }
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.PORT then
+				n += 1
+				local rec = ports[n]
+				if rec then
+					rec.index = index
+					rec.slot = building.slot
+					rec.level = building.level
+				else
+					ports[n] = { index = index, slot = building.slot, level = building.level }
+				end
+			end
 		end
 	end
-	if #ports < 2 then
+	for i = #ports, n + 1, -1 do
+		ports[i] = nil
+	end
+	if n < 2 then
 		return
 	end
 	table.sort(ports, function(a, b)
 		return a.index < b.index
 	end)
-	local afloat = countTradeShips(state)
 	for _, source in ports do
 		if afloat >= Config.MAX_TRADE_SHIPS then
 			return
@@ -344,23 +381,40 @@ local function spawnTradeShips(state: GameState, rng: Random)
 		if not armed then
 			continue
 		end
-		local candidates: { number } = {}
-		local foreign: { { index: number, slot: number, level: number, dist: number } } = {}
-		for _, other in ports do
+		local nForeign = 0
+		local foreign = foreignBuf
+		for i, other in ports do
 			if other.index ~= source.index and canTrade(state, source.slot, other.slot) then
-				table.insert(foreign, {
-					index = other.index,
-					slot = other.slot,
-					level = other.level,
-					dist = manhattan(source.index, other.index),
-				})
+				nForeign += 1
+				local rec = foreign[nForeign]
+				local dist = manhattan(source.index, other.index)
+				if rec then
+					rec.index = other.index
+					rec.slot = other.slot
+					rec.level = other.level
+					rec.dist = dist
+					rec.portI = i
+				else
+					foreign[nForeign] = {
+						index = other.index,
+						slot = other.slot,
+						level = other.level,
+						dist = dist,
+						portI = i,
+					}
+				end
 			end
 		end
-		table.sort(foreign, function(a, b)
-			return a.dist < b.dist
-		end)
-		local foreignCount = #foreign
-		local longCap = if foreignCount >= 4 then math.clamp(math.floor(foreignCount / 3), 4, foreignCount) else 0
+		for i = #foreign, nForeign + 1, -1 do
+			foreign[i] = nil
+		end
+		if nForeign >= 2 then
+			table.sort(foreign, function(a, b)
+				return a.dist < b.dist
+			end)
+		end
+		table.clear(candidateBuf)
+		local longCap = if nForeign >= 4 then math.clamp(math.floor(nForeign / 3), 4, nForeign) else 0
 		for rank, other in foreign do
 			local weight = other.level
 			if other.dist >= 300 and rank <= longCap then
@@ -370,18 +424,13 @@ local function spawnTradeShips(state: GameState, rng: Random)
 				weight += other.level
 			end
 			for _ = 1, weight do
-				for i, port in ports do
-					if port.index == other.index then
-						table.insert(candidates, i)
-						break
-					end
-				end
+				table.insert(candidateBuf, other.portI)
 			end
 		end
-		if #candidates == 0 then
+		if #candidateBuf == 0 then
 			continue
 		end
-		local target = ports[candidates[rng:NextInteger(1, #candidates)]]
+		local target = ports[candidateBuf[rng:NextInteger(1, #candidateBuf)]]
 		local path = Navy.findSeaPath(state, source.index, target.index)
 		if not path or #path > Config.BOAT_MAX_RANGE then
 			continue
@@ -433,6 +482,9 @@ end
 local carrierSeen: { [number]: boolean } = {}
 
 local function syncCarriers(state: GameState)
+	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
+	-- V23 : spawn via navalBasesBySlot. Garde _carriersDirty (pas un scan
+	-- 10 Hz). Ciblage obus nested : V24, pas ici.
 	if state._carriersDirty == false then
 		return
 	end
@@ -459,25 +511,57 @@ local function syncCarriers(state: GameState)
 		end
 		carrierSeen[boat.homeTile] = true
 	end
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.NAVAL_BASE and not carrierSeen[index] then
-			local x, y = MapGen.fromIndex(index)
-			table.insert(state.boats, {
-				id = state:nextId(),
-				slot = building.slot,
-				kind = KIND_CARRIER,
-				troops = 0,
-				x = x,
-				y = y,
-				path = {},
-				step = 1,
-				targetTile = index,
-				homeTile = index,
-				angle = (index % 360) * math.pi / 180,
-				health = maxHp,
-				maxHealth = maxHp,
-				lastShellTick = 0,
-			})
+	-- V23 : spawn via navalBasesBySlot, pas le hash buildings. Garde
+	-- _carriersDirty (pas un scan 10 Hz). Fallback hash si l'index est nil.
+	-- Un PORT n'est jamais un carrier.
+	if state.navalBasesBySlot then
+		for _, set in state.navalBasesBySlot do
+			for index in set do
+				if not carrierSeen[index] then
+					local building = state.buildings[index]
+					if building and building.kind == Config.BUILDING.NAVAL_BASE then
+						local x, y = MapGen.fromIndex(index)
+						table.insert(state.boats, {
+							id = state:nextId(),
+							slot = building.slot,
+							kind = KIND_CARRIER,
+							troops = 0,
+							x = x,
+							y = y,
+							path = {},
+							step = 1,
+							targetTile = index,
+							homeTile = index,
+							angle = (index % 360) * math.pi / 180,
+							health = maxHp,
+							maxHealth = maxHp,
+							lastShellTick = 0,
+						})
+					end
+				end
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.NAVAL_BASE and not carrierSeen[index] then
+				local x, y = MapGen.fromIndex(index)
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = building.slot,
+					kind = KIND_CARRIER,
+					troops = 0,
+					x = x,
+					y = y,
+					path = {},
+					step = 1,
+					targetTile = index,
+					homeTile = index,
+					angle = (index % 360) * math.pi / 180,
+					health = maxHp,
+					maxHealth = maxHp,
+					lastShellTick = 0,
+				})
+			end
 		end
 	end
 end

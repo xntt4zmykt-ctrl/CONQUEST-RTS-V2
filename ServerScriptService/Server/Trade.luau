@@ -33,6 +33,10 @@ local GameState = require(script.Parent.GameState)
 type GameState = GameState.GameState
 
 local Trade = {}
+Trade.lastFactoryVisits = 0
+
+-- V20 : liste usines recyclee (N66). Trade.step tourne a 10 Hz.
+local factoryBuf: { number } = table.create(16)
 
 local B = Config.BUILDING
 
@@ -127,16 +131,43 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
 	-- depend de l'ordre interne de la table, et deux serveurs partis de la
 	-- meme graine divergeraient des le premier colis.
-	local factories: { number } = {}
-	for index, building in state.buildings do
-		if building.kind == B.FACTORY then
-			table.insert(factories, index)
+	-- V20 : index factoriesBySlot (N61) + factoryBuf recycle (N66).
+	-- Fallback hash si l'index est nil (tests partiels).
+	local factories = factoryBuf
+	local n = 0
+	if state.factoriesBySlot then
+		for _, set in state.factoriesBySlot do
+			for index in set do
+				n += 1
+				factories[n] = index
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == B.FACTORY then
+				n += 1
+				factories[n] = index
+			end
 		end
 	end
-	table.sort(factories)
+	for i = #factories, n + 1, -1 do
+		factories[i] = nil
+	end
+	if n == 0 then
+		Trade.lastFactoryVisits = 0
+		return
+	end
+	if n >= 2 then
+		table.sort(factories)
+	end
+	Trade.lastFactoryVisits = n
 
-	for _, index in factories do
+	for i = 1, n do
+		local index = factories[i]
 		local factory = state.buildings[index]
+		if not factory or factory.kind ~= B.FACTORY then
+			continue
+		end
 		local delivery = state.tradeDeliveries[index]
 		if delivery then
 			if state.tick >= delivery.arrivalTick then
