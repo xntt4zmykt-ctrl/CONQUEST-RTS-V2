@@ -173,7 +173,18 @@ function WorldRenderer.buildOcean(self: WorldRenderer)
 		glint.Transparency = 0.74
 		glint.Size = Vector3.new(4 + i % 8, 0.05, 0.18 + (i % 3) * 0.08)
 		local angle = math.rad(-18 + (i % 9) * 4)
-		glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.Angles(0, angle, 0)
+		-- V84 : translation * fromEulerAnglesYXZ (yaw `angle` variable).
+		-- Plus de CFrame.Angles a la construction des chunks océan.
+		-- Formule `angle` inchangee. Y = OCEAN_LEVEL + 0.08 inchange.
+		-- Size / Transparency / Color / Name inchanges. Ne PAS cuire un
+		-- glintRot (yaw distinct par glint, pas une constante 90°).
+		-- Distinct de V58 (houle 60 Hz : X/Z nombres depuis `base`, pas
+		-- la pose initiale). Distinct de V83 (selectTile, pulseRot, Y =
+		-- surface+0.48). Distinct de V82 (onde, pulseRot, Y = surface+0.8).
+		-- Construction de chunk, pas 60 Hz. Recette feel N135 — ne pas
+		-- merger 595e. `base = glint.CFrame` APRES la pose (V58 lit base).
+		glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z)
+			* CFrame.fromEulerAnglesYXZ(0, angle, 0)
 		glint.Parent = self.root
 		table.insert(self.oceanRipples, {
 			part = glint,
