@@ -8353,6 +8353,145 @@ do
 	end
 end
 
+do
+	-- N87 : IntentValidator.fillContext recycle contextBuf.
+	-- Deux fill → rawequal record. matchPhase change → champ a jour.
+	-- Args nil / {} → champs nil. now = fonction pas un timestamp.
+	-- Closures recopiees (rawequal), jamais recrees. Banc N82 intentPool
+	-- inchange. Pas N85 / N86 / N88. Payload Intent non poole (N82).
+	local clock = os.clock
+	local slotOf = function(_p)
+		return 1
+	end
+	local reply = function(_p, _ok, _msg) end
+	local refuse = function(_p, _reason, _detail) end
+	local broadcast = function() end
+	local c1 = IntentValidator.fillContext({
+		state = "s1",
+		matchPhase = "playing",
+		matchId = "m1",
+		slotOf = slotOf,
+		doctrineLockAt = 10,
+		now = clock,
+		buildings = "b",
+		navy = "n",
+		nukes = "k",
+		diplomacy = "d",
+		research = "r",
+		reply = reply,
+		refuse = refuse,
+		broadcastRoster = broadcast,
+	})
+	local c2 = IntentValidator.fillContext({
+		state = "s2",
+		matchPhase = "ended",
+		matchId = "m2",
+		slotOf = slotOf,
+		doctrineLockAt = 20,
+		now = clock,
+		buildings = "b2",
+		navy = "n2",
+		nukes = "k2",
+		diplomacy = "d2",
+		research = "r2",
+		reply = reply,
+		refuse = refuse,
+		broadcastRoster = broadcast,
+	})
+	if not rawequal(c1, c2) or not rawequal(c1, IntentValidator.contextBuf) then
+		fail("intent context — rawequal record")
+	elseif c2.matchPhase ~= "ended" or c2.state ~= "s2" or c2.matchId ~= "m2" then
+		fail("intent context — matchPhase/state stale")
+	elseif c2.doctrineLockAt ~= 20 or not rawequal(c2.now, clock) then
+		fail("intent context — now/doctrineLockAt")
+	elseif not rawequal(c2.slotOf, slotOf) or not rawequal(c2.reply, reply) then
+		fail("intent context — closures recrees")
+	elseif not rawequal(c2.refuse, refuse) or not rawequal(c2.broadcastRoster, broadcast) then
+		fail("intent context — refuse/broadcast recrees")
+	else
+		local empty1 = IntentValidator.fillContext(nil)
+		local empty2 = IntentValidator.fillContext({})
+		if empty1.matchPhase ~= nil or empty1.state ~= nil or empty1.now ~= nil or empty1.slotOf ~= nil then
+			fail("intent context — args vides non reset")
+		elseif not rawequal(empty1, empty2) or not rawequal(empty1, IntentValidator.contextBuf) then
+			fail("intent context — args vides non recycle")
+		else
+			print("intent context : rawequal, phase, reset (N87)")
+		end
+	end
+end
+
+do
+	-- N88 : MatchLifecycle.endMatchRecords recycle recordBuf + records.
+	-- Deux appels → rawequal porteuse + record [1]. resultRecorded skip
+	-- → # == 0. 2e match autres slots → [1].player a jour, leftover #.
+	-- Banc N37 (elimine vu, bot ignore, pas de double-grave) inchange.
+	-- Pas N84 / N86 / N87. stats = live, pas un clone.
+	local pA = __newInstance("Player")
+	pA.Name = "GraveA"
+	pA.UserId = 201
+	local pB = __newInstance("Player")
+	pB.Name = "GraveB"
+	pB.UserId = 202
+	local pC = __newInstance("Player")
+	pC.Name = "GraveC"
+	pC.UserId = 203
+	local liveA = { player = pA, betrayals = 1, capturedTiles = 8 }
+	local liveB = { player = pB, betrayals = 0, capturedTiles = 3 }
+	local liveC = { player = pC, betrayals = 2, capturedTiles = 11 }
+	local recs1 = MatchLifecycle.endMatchRecords(
+		{ [pA] = 1, [pB] = 2 },
+		{ [1] = liveA, [2] = liveB },
+		nil,
+		{}
+	)
+	local recs2 = MatchLifecycle.endMatchRecords(
+		{ [pA] = 1, [pB] = 2 },
+		{ [1] = liveA, [2] = liveB },
+		nil,
+		{}
+	)
+	if not rawequal(recs1, recs2) or not rawequal(recs1, MatchLifecycle.recordBuf) then
+		fail("endMatch pool — rawequal porteuse")
+	elseif recs1[1] == nil or not rawequal(recs1[1], recs2[1]) then
+		fail("endMatch pool — rawequal record [1]")
+	elseif not rawequal(recs1[1], MatchLifecycle.recordRecPool[1]) then
+		fail("endMatch pool — recordRecPool[1] distinct")
+	elseif not rawequal(recs1[1].stats, liveA) and not rawequal(recs1[1].stats, liveB) then
+		fail("endMatch pool — stats pas live")
+	else
+		local skipped = MatchLifecycle.endMatchRecords(
+			{ [pA] = 1, [pB] = 2 },
+			{ [1] = liveA, [2] = liveB },
+			nil,
+			{ [pA] = true, [pB] = true }
+		)
+		if #skipped ~= 0 or skipped[1] ~= nil then
+			fail(`endMatch pool — leftover skip (#={#skipped})`)
+		else
+			local recs3 = MatchLifecycle.endMatchRecords(
+				{ [pC] = 7 },
+				{ [7] = liveC },
+				nil,
+				{}
+			)
+			if not rawequal(recs3, recs1) then
+				fail("endMatch pool — porteuse perdue au 2e match")
+			elseif not rawequal(recs3[1], recs1[1]) then
+				fail("endMatch pool — record [1] non recycle")
+			elseif recs3[1].player ~= pC or recs3[1].slot ~= 7 then
+				fail("endMatch pool — player/slot stale")
+			elseif not rawequal(recs3[1].stats, liveC) then
+				fail("endMatch pool — stats C clonees")
+			elseif recs3[2] ~= nil or #recs3 ~= 1 then
+				fail(`endMatch pool — leftover # ({#recs3})`)
+			else
+				print("endMatch pool : rawequal [1], skip, leftover (N88)")
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
