@@ -1792,8 +1792,13 @@ check("navires, missiles et interpolation", function()
 	-- N133 euler inline, leftover N161 splash, leftover N160
 	-- wake, leftover N152 flame Size doivent rester verts.
 	-- Recette leftover N162, pas merger visual V81 wakeRot.
-	-- BlastSmoke leftover N164 non touche. Blast sphère leftover
-	-- non touche. overlay:explosion plus bas ne leve pas.
+	-- N164 : BlastSmoke free-list smokeFree. Pas de
+	-- testFlushDelays ici — les 5 fumées restent parentées (le
+	-- flush + reuse rawequal est dans « vagues de conquete »).
+	-- Leftover N163 Shockwave, leftover N133 euler, leftover
+	-- N152 flame Size doivent rester verts. Recette leftover
+	-- N163, pas merger visual. Blast sphère leftover N165 non
+	-- touche. overlay:explosion plus bas ne leve pas.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1843,8 +1848,14 @@ check("vagues de conquete", function()
 	-- l'insert N160 ; apres les asserts N162, explosion(40,40,6)
 	-- (rayon ≠ 9) reparente la meme Part (rawequal Parent root,
 	-- Name Shockwave). Distinct deliveryFree / splashFree /
-	-- wakeFree / goldFree / pulseFree. Blast Destroy / BlastSmoke
-	-- Destroy conservés.
+	-- wakeFree / goldFree / pulseFree. Blast Destroy conservé.
+	-- N164 : BlastSmoke free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse smokeFree (# >= 5). Snapshot
+	-- avant l'insert N160 ; explosion(40,40,6) N163 consomme
+	-- 5 smokes (un par i). Réparente (rawequal d'au moins une
+	-- Part, Name BlastSmoke). Distinct shockFree / deliveryFree
+	-- / splashFree / wakeFree / goldFree / pulseFree. Blast
+	-- sphère leftover N165 Destroy conservé.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1932,6 +1943,19 @@ check("vagues de conquete", function()
 	assert(pooledShock ~= pooledGold, "shockFree partage goldFree")
 	assert(pooledShock ~= pooledDelivery, "shockFree partage deliveryFree")
 	assert(pooledShock ~= pooledRing, "shockFree partage pulseFree")
+	-- N164 : flush ci-dessus a poussé les 5 BlastSmoke de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse lors de explosion(40,40,6).
+	local smokePool = overlay.smokeFree
+	assert(smokePool ~= nil and #smokePool >= 5, "fumees non poolees")
+	local pooledSmoke = smokePool[#smokePool]
+	assert(pooledSmoke.Parent == nil, "fumee encore parente")
+	assert(pooledSmoke.Name == "BlastSmoke", "Name BlastSmoke perdu")
+	assert(pooledSmoke ~= pooledShock, "smokeFree partage shockFree")
+	assert(pooledSmoke ~= pooledWake, "smokeFree partage wakeFree")
+	assert(pooledSmoke ~= pooledSplash, "smokeFree partage splashFree")
+	assert(pooledSmoke ~= pooledGold, "smokeFree partage goldFree")
+	assert(pooledSmoke ~= pooledDelivery, "smokeFree partage deliveryFree")
+	assert(pooledSmoke ~= pooledRing, "smokeFree partage pulseFree")
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -1980,12 +2004,20 @@ check("vagues de conquete", function()
 	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu au reuse")
 	-- N163 : explosion(40, 40, 6) — rayon ≠ 9 du check navires.
 	-- Reset Size (0.32, 5, 5) + Transparency 0.12 avant Tween
-	-- (worldRadius change). Blast / BlastSmoke Destroy conservés.
+	-- (worldRadius change). Blast Destroy conservé.
+	-- N164 : la même explosion consomme 5 BlastSmoke. Reset Size
+	-- (5+i, 5+i, 5+i) + Transparency + Color + CFrame avant Tween
+	-- (i et ground varient). Blast sphère leftover N165 Destroy
+	-- conservé.
 	local shockN = #shockPool
+	local smokeN = #smokePool
 	overlay:explosion(40, 40, 6)
 	assert(#shockPool == shockN - 1, "onde choc non reutilise")
 	assert(rawequal(pooledShock.Parent, overlay.root), "onde choc non reparente")
 	assert(pooledShock.Name == "Shockwave", "Name Shockwave perdu au reuse")
+	assert(#smokePool == smokeN - 5, "fumee non reutilisee")
+	assert(rawequal(pooledSmoke.Parent, overlay.root), "fumee non reparentee")
+	assert(pooledSmoke.Name == "BlastSmoke", "Name BlastSmoke perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()

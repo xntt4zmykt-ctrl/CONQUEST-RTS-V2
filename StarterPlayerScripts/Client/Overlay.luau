@@ -1246,20 +1246,20 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Distinct DeliveryPulse N162 (deliveryFree, ne pas
 	-- partager). Distinct N133 (euler Shockwave déjà inline).
 	-- Distinct visual V81 Shockwave wakeRot (ne pas merger
-	-- 47c0). Distinct BlastSmoke leftover (Destroy, ne pas
-	-- fusionner). Distinct Blast sphère leftover (Destroy, ne
-	-- pas fusionner). Name Shockwave conservé. Reset Size
-	-- (0.32, 5, 5) + Transparency 0.12 + Color 255,229,181 au
-	-- reuse (le tween avait Size (0.32, worldRadius * 2.5,
-	-- worldRadius * 2.5) / Transparency 1 ; worldRadius
-	-- change). Euler N133 inline conservé. Tween Create
-	-- conservé (Size + Transparency restart). routePart non
-	-- modifié (LaunchWake / LandingSplash / DeliveryPulse /
-	-- BlastSmoke). Blast Destroy obligatoire. BlastSmoke
-	-- Destroy obligatoire. Recette leftover N162, pas merger
-	-- visual. HUD / UnitModels / Effects / PlacementPreview /
-	-- goldPopup / LaunchWake / LandingSplash / DeliveryPulse /
-	-- applyUnits / stepInterpolation inchangés.
+	-- 47c0). Distinct BlastSmoke N164 (smokeFree, ne pas
+	-- partager). Distinct Blast sphère leftover N165
+	-- (Destroy, ne pas fusionner). Name Shockwave conservé.
+	-- Reset Size (0.32, 5, 5) + Transparency 0.12 + Color
+	-- 255,229,181 au reuse (le tween avait Size (0.32,
+	-- worldRadius * 2.5, worldRadius * 2.5) / Transparency 1 ;
+	-- worldRadius change). Euler N133 inline conservé. Tween
+	-- Create conservé (Size + Transparency restart). routePart
+	-- non modifié (LaunchWake / LandingSplash / DeliveryPulse /
+	-- BlastSmoke). Blast Destroy obligatoire. Recette leftover
+	-- N162, pas merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / goldPopup / LaunchWake / LandingSplash /
+	-- DeliveryPulse / applyUnits / stepInterpolation
+	-- inchangés.
 	local free = self.shockFree
 	if not free then
 		free = {}
@@ -1296,11 +1296,58 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Colonne de fumee en volumes superposes. Elle est courte et stylisee pour
 	-- rester lisible de loin sans texture de particules externe.
+	-- N164 : free-list smokeFree, pop O(1) depuis la fin **par
+	-- itération**. Pas de Destroy a 2.5 s : Parent = nil + push
+	-- si encore parenté (un delay fantôme ne double-push pas).
+	-- Shockwave réutilise déjà (N163, shockFree — ne pas
+	-- partager). DeliveryPulse réutilise déjà (N162,
+	-- deliveryFree — ne pas partager). LandingSplash réutilise
+	-- déjà (N161, splashFree — ne pas partager). LaunchWake
+	-- réutilise déjà (N160, wakeFree — ne pas partager).
+	-- goldPopup réutilise déjà (N159, goldFree — ne pas
+	-- partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer smokeFree pulseFree
+	-- ni shockFree). Distinct floatingText N158. Distinct
+	-- goldPopup N159. Distinct LaunchWake N160. Distinct
+	-- LandingSplash N161. Distinct DeliveryPulse N162.
+	-- Distinct Shockwave N163 (shockFree, ne pas partager).
+	-- Distinct Blast sphère leftover N165 (Destroy, ne pas
+	-- fusionner). Distinct PointLight (parenté à Blast). Name
+	-- BlastSmoke conservé. Boucle i = 1, 5 inchangée (cinq
+	-- pops). Reset Size (5+i, 5+i, 5+i) + Transparency
+	-- 0.22 + i * 0.07 + Color 82+i*7, 76+i*6, 71+i*5 + CFrame
+	-- **avant** Tween (i et ground varient ; le tween lit
+	-- smoke.CFrame + Vector3 et smoke.Size * 2.1). Tween Create
+	-- conservé (CFrame / Size / Transparency restart).
+	-- routePart non modifié (LaunchWake / LandingSplash /
+	-- DeliveryPulse / Shockwave). Blast Destroy obligatoire.
+	-- PointLight obligatoire. Recette leftover N163, pas merger
+	-- visual. HUD / UnitModels / Effects / PlacementPreview /
+	-- goldPopup / LaunchWake / LandingSplash / DeliveryPulse /
+	-- Shockwave / applyUnits / stepInterpolation inchangés.
+	local smokeFree = self.smokeFree
+	if not smokeFree then
+		smokeFree = {}
+		self.smokeFree = smokeFree
+	end
 	for i = 1, 5 do
-		local smoke = routePart(self.root, "BlastSmoke", Vector3.new(5 + i, 5 + i, 5 + i), Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5), Enum.Material.SmoothPlastic)
-		smoke.Shape = Enum.PartType.Ball
+		local nSmoke = #smokeFree
+		local smoke
+		if nSmoke > 0 then
+			smoke = smokeFree[nSmoke]
+			smokeFree[nSmoke] = nil
+		else
+			smoke = routePart(self.root, "BlastSmoke", Vector3.new(5 + i, 5 + i, 5 + i), Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5), Enum.Material.SmoothPlastic)
+			smoke.Shape = Enum.PartType.Ball
+		end
+		smoke.Size = Vector3.new(5 + i, 5 + i, 5 + i)
 		smoke.Transparency = 0.22 + i * 0.07
+		smoke.Color = Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5)
 		smoke.CFrame = CFrame.new(ground.X + math.sin(i * 2.1) * 2, 7 + i * 5, ground.Z + math.cos(i * 1.7) * 2)
+		smoke.Parent = self.root
 		TweenService:Create(smoke, TweenInfo.new(1.7 + i * 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			CFrame = smoke.CFrame + Vector3.new(0, 18 + i * 3, 0),
 			Size = smoke.Size * 2.1,
@@ -1308,7 +1355,9 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		}):Play()
 		task.delay(2.5, function()
 			if smoke.Parent then
-				smoke:Destroy()
+				smoke.Parent = nil
+				local pool = self.smokeFree
+				pool[#pool + 1] = smoke
 			end
 		end)
 	end
