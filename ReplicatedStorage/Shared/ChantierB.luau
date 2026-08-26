@@ -24,6 +24,16 @@ local annexVisitBuf = buffer.create(Config.TILE_COUNT)
 local annexQueue: { number } = table.create(280)
 local annexPocket: { number } = table.create(280)
 
+-- N86 : cancelOpposingFronts / collapsing recycle (recette N79 + table.clear
+-- hash N80). Hash sparse — ne pas iterer #doomedBuf. Truncate collapsing
+-- leftover AVANT traitement (recette N82). Non reentrant — stepAttacks
+-- unique par tick. Distinct de elimBuf (slots) et de retreatAttack (couple).
+type CollapseRec = { victim: number, captor: number }
+local doomedBuf: { [number]: boolean } = {}
+local collapsingBuf: { CollapseRec } = table.create(8)
+local collapseRecPool: { CollapseRec } = table.create(8)
+ChantierB.doomedBuf = doomedBuf
+
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
 end
@@ -262,14 +272,14 @@ local function enqueueFront(state, atk, index)
 end
 
 function ChantierB.cancelOpposingFronts(state)
-	local doomed: { boolean } = {}
+	table.clear(doomedBuf)
 	for i = 1, #state.attacks do
-		if doomed[i] then
+		if doomedBuf[i] then
 			continue
 		end
 		local a = state.attacks[i]
 		for j = i + 1, #state.attacks do
-			if doomed[j] then
+			if doomedBuf[j] then
 				continue
 			end
 			local b = state.attacks[j]
@@ -278,16 +288,16 @@ function ChantierB.cancelOpposingFronts(state)
 				a.troops -= clash
 				b.troops -= clash
 				if a.troops <= 0 then
-					doomed[i] = true
+					doomedBuf[i] = true
 				end
 				if b.troops <= 0 then
-					doomed[j] = true
+					doomedBuf[j] = true
 				end
 			end
 		end
 	end
 	for i = #state.attacks, 1, -1 do
-		if doomed[i] or state.attacks[i].troops <= 0 then
+		if doomedBuf[i] or state.attacks[i].troops <= 0 then
 			local atk = state.attacks[i]
 			local owner = state.players[atk.attacker]
 			if owner and atk.troops > 0 then
@@ -412,7 +422,7 @@ function ChantierB.install(GameState, Nukes)
 	local origStepAttacks = GameState.stepAttacks
 	function GameState.stepAttacks(self)
 		ChantierB.cancelOpposingFronts(self)
-		local collapsing = {}
+		local collapseN = 0
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
@@ -474,14 +484,26 @@ function ChantierB.install(GameState, Nukes)
 				end
 			end
 			if defender and defender.tiles > 0 and defender.tiles < self:collapseThreshold() then
-				table.insert(collapsing, { victim = atk.target, captor = atk.attacker })
+				collapseN += 1
+				local rec = collapseRecPool[collapseN]
+				if rec == nil then
+					rec = { victim = 0, captor = 0 }
+					collapseRecPool[collapseN] = rec
+				end
+				rec.victim = atk.target
+				rec.captor = atk.attacker
+				collapsingBuf[collapseN] = rec
 			end
 			if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 				attacker.troops += math.max(0, atk.troops)
 				table.remove(self.attacks, i)
 			end
 		end
-		for _, entry in collapsing do
+		for i = #collapsingBuf, collapseN + 1, -1 do
+			collapsingBuf[i] = nil
+		end
+		for i = 1, collapseN do
+			local entry = collapsingBuf[i]
 			local victim = self.players[entry.victim]
 			if victim and victim.tiles > 0 and victim.tiles < self:collapseThreshold() then
 				if not victim.isBot then

@@ -6802,6 +6802,73 @@ do
 end
 
 do
+	-- N85 : contextFor recycle. Second appel → rawequal. Slot 99 → nil
+	-- sans muter ctxBuf. resolve pose encore une CITY. Apres A puis B,
+	-- un ownerAt conserve lit B (non reentrant, pas un clone).
+	local state = GameState.new(1085)
+	local a = state:addPlayer(nil, "CtxA", Random.new(31), 0)
+	local b = state:addPlayer(nil, "CtxB", Random.new(32), 0)
+	if not a or not b then
+		fail("contextFor — spawn impossible")
+	else
+		local first = Buildings.contextFor(state, a.slot)
+		local second = Buildings.contextFor(state, a.slot)
+		if not first or not rawequal(first, second) then
+			fail("contextFor — rawequal")
+		else
+			local keptSlot = first.slot
+			local ghost = Buildings.contextFor(state, 99)
+			if ghost ~= nil then
+				fail("contextFor — slot 99 non nil")
+			elseif first.slot ~= keptSlot then
+				fail("contextFor — slot 99 a mute ctxBuf")
+			else
+				local site: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						buffer.readu8(state.owner, index) == a.slot
+						and not state.buildings[index]
+						and state:isLand(index)
+					then
+						site = index
+						break
+					end
+				end
+				if not site then
+					fail("contextFor — tuile libre introuvable")
+				else
+					a.gold = 100000
+					local res, reason = Buildings.resolve(state, a.slot, site, Config.BUILDING.CITY)
+					if not res then
+						fail(`contextFor — resolve CITY refuse ({reason})`)
+					else
+						local ctxA = Buildings.contextFor(state, a.slot)
+						local ownerAtKept = if ctxA then ctxA.ownerAt else nil
+						local ctxB = Buildings.contextFor(state, b.slot)
+						local bTile: number? = nil
+						for index = 0, Config.TILE_COUNT - 1 do
+							if buffer.readu8(state.owner, index) == b.slot then
+								bTile = index
+								break
+							end
+						end
+						if not ownerAtKept or not ctxB or not bTile then
+							fail("contextFor — ctx B / tuile B absents")
+						elseif ownerAtKept(bTile) ~= b.slot then
+							fail("contextFor — ownerAt conserve lit encore A")
+						elseif not rawequal(ctxA, ctxB) then
+							fail("contextFor — ctx A/B identite distincte")
+						else
+							print("contextFor : rawequal, slot 99, resolve CITY, ownerAt lit B (N85)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- N76 : playerStatsForReplicate recycle. 1 joueur 0 front → champs
 	-- honores, attackTargets nil, next(stats) = ce slot. launchAttack →
 	-- activeAttacks==1. removePlayer → slot absent. Second appel →
@@ -7279,6 +7346,121 @@ do
 								fail(`elimBuf — fuite inter-instances (#{#leftover})`)
 							else
 								print("elimBuf : truncate 1→0 inter-instances (N82)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N86 : doomedBuf / collapsingBuf. Deux cancel sans fronts →
+	-- next(doomedBuf) == nil. Clash egal → fronts disparus, leftover 0
+	-- (pas de refund fantome). Defenseur sous seuil → collapseFaction
+	-- (butin + territoire du captor).
+	local ChantierB = __require("ChantierB")
+	local empty = GameState.new(1086)
+	ChantierB.cancelOpposingFronts(empty)
+	ChantierB.cancelOpposingFronts(empty)
+	if next(ChantierB.doomedBuf) ~= nil then
+		fail("doomedBuf — leftover apres cancel vide")
+	else
+		print("doomedBuf : deux cancel vides, next nil (N86)")
+		local state = GameState.new(1087)
+		local a = state:addPlayer(nil, "ClashA", Random.new(41), 0)
+		local b = state:addPlayer(nil, "ClashB", Random.new(42), 0)
+		if not a or not b then
+			fail("clash — spawn impossible")
+		else
+			local contact = nil
+			local scratch = table.create(4, 0)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+					local n = MapGen.neighbors(index, scratch)
+					for i = 1, n do
+						local nb = scratch[i]
+						if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+							state:setOwner(nb, b.slot)
+							contact = index
+							break
+						end
+					end
+				end
+				if contact then
+					break
+				end
+			end
+			if not contact then
+				fail("clash — pas de contact terrestre")
+			else
+				state.combatUnlocked = true
+				a.attackRatio = 1
+				b.attackRatio = 1
+				a.troops = 2000
+				b.troops = 2000
+				local okA = state:launchAttack(a.slot, b.slot)
+				local okB = state:launchAttack(b.slot, a.slot)
+				if not okA or not okB or #state.attacks ~= 2 then
+					fail(`clash — launch ({okA}/{okB} fronts={#state.attacks})`)
+				else
+					local afterA, afterB = a.troops, b.troops
+					ChantierB.cancelOpposingFronts(state)
+					if #state.attacks ~= 0 then
+						fail(`clash — fronts restants ({#state.attacks})`)
+					elseif a.troops ~= afterA or b.troops ~= afterB then
+						fail("clash — refund fantome des troupes clashed")
+					else
+						print("clash : fronts nuls, leftover 0 (N86)")
+						local col = GameState.new(1088)
+						local atk = col:addPlayer(nil, "ColAtk", Random.new(51), 0)
+						local def = col:addPlayer(nil, "ColDef", Random.new(52), 0)
+						if not atk or not def then
+							fail("collapse recycle — spawn impossible")
+						else
+							local colContact = nil
+							for index = 0, Config.TILE_COUNT - 1 do
+								if buffer.readu8(col.owner, index) == atk.slot and col:isLand(index) then
+									local n = MapGen.neighbors(index, scratch)
+									for i = 1, n do
+										local nb = scratch[i]
+										if col:isLand(nb) and buffer.readu8(col.owner, nb) == 0 then
+											col:setOwner(nb, def.slot)
+											colContact = index
+											break
+										end
+									end
+								end
+								if colContact then
+									break
+								end
+							end
+							if not colContact then
+								fail("collapse recycle — pas de contact terrestre")
+							elseif def.tiles >= col:collapseThreshold() then
+								fail(`collapse recycle — defenseur trop grand ({def.tiles})`)
+							else
+								col.combatUnlocked = true
+								atk.attackRatio = 0.5
+								atk.troops = 5000
+								def.troops = 100000
+								def.gold = 4000
+								local tilesBefore = atk.tiles
+								table.clear(col.plunders)
+								local launched = col:launchAttack(atk.slot, def.slot)
+								if not launched then
+									fail("collapse recycle — launchAttack refuse")
+								else
+									col:stepAttacks()
+									if #col.plunders == 0 then
+										fail("collapse recycle — collapseFaction non appele (pas de butin)")
+									elseif atk.tiles <= tilesBefore then
+										fail("collapse recycle — territoire du captor inchange")
+									else
+										print("collapse recycle : butin + captor grandit (N86)")
+									end
+								end
 							end
 						end
 					end
