@@ -1658,6 +1658,14 @@ check("navires, missiles et interpolation", function()
 	-- Sphere / fumee sans euler. Leftover N131 splash despawn, leftover
 	-- N130 wake spawn, leftover N125 yaw+roulis, leftover N116 immobile
 	-- doivent rester verts. Recette visual V75 leftover evenements Overlay.
+	-- N143 : UnitModels addWake fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Yaw Y=side*11° (deux sides). Leftover N133 Shockwave, leftover
+	-- N131 splash, leftover N130 LaunchWake Overlay, leftover N128
+	-- flag, leftover N127 radar, leftover N125 roulis, leftover N116
+	-- immobile, leftover N142 Interceptor (check modeles) doivent
+	-- rester verts. Recette leftover N142, pas merger visual.
+	-- Proue leftover N144 non touchee. BuildingModels / Overlay
+	-- inchanges.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")

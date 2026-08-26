@@ -75,6 +75,16 @@ local function baseVisual(kind: number, isMissile: boolean): Visual
 end
 
 local function addWake(visual: Visual)
+	-- N143 : houle addWake. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.rad(side * 11), 0) ≡ Angles(0, ±11°, 0).
+	-- Yaw Y=side*11° (side = ±1, ne pas figer). Offset
+	-- (side * 2.15, -0.68, 5.5), taille Vector3.new(1.15, 0.08, 6.5),
+	-- FOAM, Neon, Transparency = 0.62, Name = "Wake", role "wake"
+	-- inchanges. Deux sides ensemble. Distinct LaunchWake Overlay
+	-- N130 (Z=90, Y + 0.12). Distinct rampes SAM N142 (pitch -31°).
+	-- Distinct proue leftover N144 (Y=π). Distinct radar/flag place
+	-- N127/N128. Overlay / BuildingModels / WorldRenderer /
+	-- createMissile / Bow inchanges.
 	for side = -1, 1, 2 do
 		local wake = addPart(
 			visual,
@@ -82,7 +92,7 @@ local function addWake(visual: Visual)
 			"Wake",
 			Vector3.new(1.15, 0.08, 6.5),
 			FOAM,
-			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.Angles(0, math.rad(side * 11), 0),
+			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.fromEulerAnglesYXZ(0, math.rad(side * 11), 0),
 			Enum.Material.Neon,
 			"wake"
 		)
