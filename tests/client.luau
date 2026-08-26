@@ -1676,10 +1676,16 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
-	-- N118 : compose CFrame.new * rotation. Plus de lookAt. Leftover
-	-- offset/shake Vector3 (N119/N120) reste.
+	-- N118 : compose CFrame.new * rotation. Plus de lookAt.
+	-- N119 : shake nombres (punch + decroissance). Leftover offset
+	-- Vector3 (N120) reste.
 	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
 	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
+	camera:punch(1)
+	assert(camera.shake > 0, "punch n'arme pas le shake")
+	camera:step(1 / 60)
+	assert(camera.shake < 1, "shake ne decroit pas")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame apres shake")
 
 	--[[
 		Panoramique libre au clic du milieu, le geste CONQUEST.

@@ -518,20 +518,20 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 
 	local rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)
 	local offset = rotation:VectorToWorldSpace(Vector3.new(0, 0, self.distance))
-	local shake = Vector3.new(
-		math.sin(self.clock * 31) * self.shake * 0.65,
-		math.cos(self.clock * 37) * self.shake * 0.42,
-		math.sin(self.clock * 23) * self.shake * 0.5
-	)
 	-- N118 : pose = translation * rotation deja calculee. Plus de lookAt
 	-- deux Vector3 60 Hz. L'oeil tremble encore (shake sur la translation) ;
 	-- le biais lookAt(..., focus + shake * 0.18) est abandonne (visee
-	-- cosmétique, yaw/pitch portés par `rotation`). Vector3.new offset/shake
-	-- restent (leftover N119 / N120). Overlay unites / camion inchanges
-	-- (N117 / N116 / N115). Recette visual V66, portee pas mergee.
-	local ex = self.focus.X + offset.X + shake.X
-	local ey = self.focus.Y + offset.Y + shake.Y
-	local ez = self.focus.Z + offset.Z + shake.Z
+	-- cosmétique, yaw/pitch portés par `rotation`).
+	-- N119 : shake en nombres. Plus de Vector3.new 60 Hz. Coeffs 0.65 /
+	-- 0.42 / 0.5 et frequences 31 / 37 / 23 identiques. Recette visual V66
+	-- leftover shake, portee pas mergee (`926d`). Offset (0,0,distance)
+	-- leftover N120. Overlay unites / camion inchanges (N117 / N116 / N115).
+	local sx = math.sin(self.clock * 31) * self.shake * 0.65
+	local sy = math.cos(self.clock * 37) * self.shake * 0.42
+	local sz = math.sin(self.clock * 23) * self.shake * 0.5
+	local ex = self.focus.X + offset.X + sx
+	local ey = self.focus.Y + offset.Y + sy
+	local ez = self.focus.Z + offset.Z + sz
 	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
