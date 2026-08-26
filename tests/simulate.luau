@@ -240,6 +240,97 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5d. Index factoriesBySlot = usines (V20).
+	if state.factoriesBySlot then
+		local indexed = 0
+		for slot, set in state.factoriesBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building then
+					fail(`tick {tick} — factoriesBySlot[{slot}][{index}] orphelin`)
+				elseif building.kind ~= Config.BUILDING.FACTORY then
+					fail(`tick {tick} — factoriesBySlot[{slot}][{index}] kind={building.kind}`)
+				elseif building.slot ~= slot then
+					fail(`tick {tick} — factoriesBySlot[{slot}][{index}] slot={building.slot}`)
+				end
+			end
+		end
+		local realFactory = 0
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.FACTORY then
+				realFactory += 1
+				local set = state.factoriesBySlot[building.slot]
+				if not set or not set[index] then
+					fail(`tick {tick} — FACTORY {index} hors factoriesBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realFactory then
+			fail(`tick {tick} — factoriesBySlot count {indexed} != FACTORY {realFactory}`)
+		end
+	end
+
+	-- 5e. Index portsByTile = PORT slot+level (V21).
+	if state.portsByTile then
+		local indexed = 0
+		for index, info in state.portsByTile do
+			indexed += 1
+			local building = state.buildings[index]
+			if not building then
+				fail(`tick {tick} — portsByTile[{index}] orphelin`)
+			elseif building.kind ~= Config.BUILDING.PORT then
+				fail(`tick {tick} — portsByTile[{index}] kind={building.kind}`)
+			elseif building.slot ~= info.slot or building.level ~= info.level then
+				fail(`tick {tick} — portsByTile[{index}] slot/level derivent`)
+			end
+		end
+		local realPort = 0
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.PORT then
+				realPort += 1
+				local info = state.portsByTile[index]
+				if not info then
+					fail(`tick {tick} — PORT {index} hors portsByTile`)
+				end
+			end
+		end
+		if indexed ~= realPort then
+			fail(`tick {tick} — portsByTile count {indexed} != PORT {realPort}`)
+		end
+	end
+
+	-- 5f. Index navalBasesBySlot = NAVAL_BASE (V23).
+	if state.navalBasesBySlot then
+		local indexed = 0
+		for slot, set in state.navalBasesBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building then
+					fail(`tick {tick} — navalBasesBySlot[{slot}][{index}] orphelin`)
+				elseif building.kind ~= Config.BUILDING.NAVAL_BASE then
+					fail(`tick {tick} — navalBasesBySlot[{slot}][{index}] kind={building.kind}`)
+				elseif building.slot ~= slot then
+					fail(`tick {tick} — navalBasesBySlot[{slot}][{index}] slot={building.slot}`)
+				end
+			end
+		end
+		local realBase = 0
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.NAVAL_BASE then
+				realBase += 1
+				local set = state.navalBasesBySlot[building.slot]
+				if not set or not set[index] then
+					fail(`tick {tick} — NAVAL_BASE {index} hors navalBasesBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realBase then
+			fail(`tick {tick} — navalBasesBySlot count {indexed} != NAVAL_BASE {realBase}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -3655,6 +3746,292 @@ do
 end
 
 print("passe 20 : coolingBuildings, buildingsBySlot, samsOf recycle OK")
+
+--[[
+	Nightly passe 21 — revue PR #61 : factoriesBySlot + factoryBuf (V20),
+	portsByTile (V21), navalBasesBySlot (V23).
+]]
+do
+	local idx = GameState.new(2101)
+	local owner = idx:addPlayer(nil, "Usines", Random.new(81), 0)
+	local heir = idx:addPlayer(nil, "Heritier", Random.new(82), 0)
+	if not owner or not heir then
+		fail("factoriesBySlot — factions impossibles")
+	else
+		local factoryA: number? = nil
+		local factoryB: number? = nil
+		local city: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(idx.owner, index) == owner.slot and not idx.buildings[index] then
+				if not factoryA then
+					factoryA = index
+				elseif not factoryB then
+					factoryB = index
+				elseif not city then
+					city = index
+					break
+				end
+			end
+		end
+		if not factoryA or not factoryB or not city then
+			fail("factoriesBySlot — tuiles libres introuvables")
+		else
+			idx:placeBuilding(factoryA, Config.BUILDING.FACTORY, owner.slot)
+			idx:placeBuilding(factoryB, Config.BUILDING.FACTORY, owner.slot)
+			idx:placeBuilding(city, Config.BUILDING.CITY, owner.slot)
+			local set = idx.factoriesBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 2 then
+				fail(`factoriesBySlot — {count} usines indexees, attendu 2`)
+			elseif set and set[city] then
+				fail("factoriesBySlot — ville indexee comme usine")
+			end
+			Trade.step(idx, Random.new(1), function() end)
+			local visits = Trade.lastFactoryVisits or 0
+			if visits ~= 2 then
+				fail(`Trade.step — {visits} visites, attendu 2 (V20)`)
+			end
+			idx:setOwner(factoryA, heir.slot)
+			if idx.factoriesBySlot[owner.slot] and idx.factoriesBySlot[owner.slot][factoryA] then
+				fail("factoriesBySlot — capture laisse l'index chez le poseur")
+			elseif not (idx.factoriesBySlot[heir.slot] and idx.factoriesBySlot[heir.slot][factoryA]) then
+				fail("factoriesBySlot — capture n'indexe pas chez le nouvel camp")
+			end
+			local slotHeir = heir.slot
+			idx:removePlayer(slotHeir)
+			if idx.factoriesBySlot[slotHeir] ~= nil then
+				fail("factoriesBySlot — removePlayer laisse l'index du slot recycle")
+			end
+			idx:destroyBuilding(factoryB)
+			if idx.factoriesBySlot[owner.slot] and idx.factoriesBySlot[owner.slot][factoryB] then
+				fail("factoriesBySlot — destroy laisse l'index")
+			end
+		end
+	end
+end
+
+do
+	local empty = GameState.new(2102)
+	local owner = empty:addPlayer(nil, "SansUsine", Random.new(83), 0)
+	if not owner then
+		fail("factoryBuf — faction impossible")
+	else
+		Trade.step(empty, Random.new(2), function() end)
+		if (Trade.lastFactoryVisits or -1) ~= 0 then
+			fail(`factoryBuf — 0 usine visites={Trade.lastFactoryVisits}, attendu 0`)
+		end
+	end
+end
+
+do
+	local sea = GameState.new(2103)
+	local a = sea:addPlayer(nil, "PortA", Random.new(91), 0)
+	local b = sea:addPlayer(nil, "PortB", Random.new(92), 0)
+	if not a or not b then
+		fail("portsByTile — factions impossibles")
+	else
+		local coastal = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if sea:isLand(index) and MapGen.isCoastal(sea.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		local portC: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(sea, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if portA then
+			for _, third in coastal do
+				if third ~= portA and third ~= portB then
+					portC = third
+					break
+				end
+			end
+		end
+		if not portA or not portB or not portC then
+			fail("portsByTile — cotes reliees introuvables")
+		else
+			sea:setOwner(portA, a.slot)
+			sea:setOwner(portB, b.slot)
+			sea:setOwner(portC, a.slot)
+			sea:placeBuilding(portA, Config.BUILDING.PORT, a.slot)
+			sea:placeBuilding(portB, Config.BUILDING.PORT, b.slot)
+			sea:placeBuilding(portC, Config.BUILDING.PORT, a.slot)
+			sea:upgradeBuilding(portA)
+			local infoA = sea.portsByTile[portA]
+			local nPorts = 0
+			for _ in sea.portsByTile do
+				nPorts += 1
+			end
+			if nPorts ~= 3 then
+				fail(`portsByTile — {nPorts} ports, attendu 3`)
+			elseif not infoA or infoA.level ~= 2 or infoA.slot ~= a.slot then
+				fail("portsByTile — upgrade n'a pas mis a jour le niveau")
+			end
+			-- Cap atteint : pas de nouveau convoi (early-out avant flatten).
+			local far = MapGen.toIndex(Config.MAP_WIDTH - 1, Config.MAP_HEIGHT - 1)
+			for _ = 1, Config.MAX_TRADE_SHIPS do
+				table.insert(sea.boats, {
+					id = sea:nextId(),
+					slot = a.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = { far },
+					step = 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+			end
+			sea.tick = 0
+			Navy.step(sea, Random.new(3))
+			local afloat = 0
+			for _, boat in sea.boats do
+				if boat.kind == Navy.KIND_TRADE then
+					afloat += 1
+				end
+			end
+			if afloat ~= Config.MAX_TRADE_SHIPS then
+				fail(`portsByTile — cap {afloat} != {Config.MAX_TRADE_SHIPS}`)
+			end
+			sea:destroyBuilding(portC)
+			if sea.portsByTile[portC] then
+				fail("portsByTile — destroy laisse un orphelin")
+			end
+			local left = 0
+			for _ in sea.portsByTile do
+				left += 1
+			end
+			if left ~= 2 then
+				fail(`portsByTile — destroy laisse {left} ports, attendu 2`)
+			end
+		end
+	end
+end
+
+do
+	local one = GameState.new(2104)
+	local owner = one:addPlayer(nil, "UnPort", Random.new(93), 0)
+	if not owner then
+		fail("portsByTile <2 — faction impossible")
+	else
+		local coast: number? = nil
+		for index in owner.coast do
+			if not one.buildings[index] then
+				coast = index
+				break
+			end
+		end
+		if not coast then
+			fail("portsByTile <2 — cote introuvable")
+		else
+			one:placeBuilding(coast, Config.BUILDING.PORT, owner.slot)
+			one.tick = 0
+			Navy.step(one, Random.new(4))
+			local trades = 0
+			for _, boat in one.boats do
+				if boat.kind == Navy.KIND_TRADE then
+					trades += 1
+				end
+			end
+			if trades ~= 0 then
+				fail(`portsByTile <2 — {trades} convois avec un seul port`)
+			end
+		end
+	end
+end
+
+do
+	local navy = GameState.new(2105)
+	local owner = navy:addPlayer(nil, "Amiral", Random.new(94), 0)
+	local heir = navy:addPlayer(nil, "Second", Random.new(95), 0)
+	if not owner or not heir then
+		fail("navalBasesBySlot — factions impossibles")
+	else
+		local bases = {}
+		local portTile: number? = nil
+		for index in owner.coast do
+			if not navy.buildings[index] then
+				if #bases < 2 then
+					table.insert(bases, index)
+				elseif not portTile then
+					portTile = index
+					break
+				end
+			end
+		end
+		if #bases < 2 or not portTile then
+			fail("navalBasesBySlot — cotes libres insuffisantes")
+		else
+			navy:placeBuilding(bases[1], Config.BUILDING.NAVAL_BASE, owner.slot)
+			navy:placeBuilding(bases[2], Config.BUILDING.NAVAL_BASE, owner.slot)
+			navy:placeBuilding(portTile, Config.BUILDING.PORT, owner.slot)
+			local set = navy.navalBasesBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 2 then
+				fail(`navalBasesBySlot — {count} bases indexees, attendu 2`)
+			elseif set and set[portTile] then
+				fail("navalBasesBySlot — PORT indexe comme base")
+			elseif navy._carriersDirty ~= true then
+				fail("navalBasesBySlot — pose n'a pas leve _carriersDirty")
+			end
+			Navy.step(navy, Random.new(5))
+			if navy._carriersDirty ~= false then
+				fail("navalBasesBySlot — sync n'a pas consomme le drapeau")
+			end
+			local carriers = 0
+			for _, boat in navy.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					carriers += 1
+				end
+			end
+			if carriers ~= 2 then
+				fail(`navalBasesBySlot — {carriers} carriers, attendu 2 (PORT exclus)`)
+			end
+			navy:setOwner(bases[1], heir.slot)
+			if navy.navalBasesBySlot[owner.slot] and navy.navalBasesBySlot[owner.slot][bases[1]] then
+				fail("navalBasesBySlot — capture laisse l'index chez le poseur")
+			elseif not (navy.navalBasesBySlot[heir.slot] and navy.navalBasesBySlot[heir.slot][bases[1]]) then
+				fail("navalBasesBySlot — capture n'indexe pas chez le nouvel camp")
+			end
+			local gone = heir.slot
+			navy:removePlayer(gone)
+			if navy.navalBasesBySlot[gone] ~= nil then
+				fail("navalBasesBySlot — removePlayer laisse l'index du slot recycle")
+			end
+			navy:destroyBuilding(bases[2])
+			if navy.navalBasesBySlot[owner.slot] and navy.navalBasesBySlot[owner.slot][bases[2]] then
+				fail("navalBasesBySlot — destroy laisse l'index")
+			end
+		end
+	end
+end
+
+print("passe 21 : factoriesBySlot, portsByTile, navalBasesBySlot OK")
 
 do
 	local report = TickMetrics.formatReport()
