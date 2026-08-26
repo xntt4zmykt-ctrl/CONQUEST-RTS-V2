@@ -1264,7 +1264,23 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	self.feedGroups[text] = { entry = entry, count = 1 }
 
 	while #self.feedEntries > MAX_FEED_ENTRIES do
-		local oldest = table.remove(self.feedEntries, 1)
+		-- N153 : decalage prefixe in-place. Plus de table.remove(1).
+		-- FIFO conserve (le plus vieux reste en tete). n=3 : un shift
+		-- suffit, pas de feedHead (N112 est WorldRenderer). Appeler
+		-- removeEntry APRES le shift : table.find rate, pas de
+		-- double-retrait, Destroy + feedGroups nil. Dismiss
+		-- table.remove(index) inchange. MAX_FEED_ENTRIES = 3 inchange.
+		-- Groupement / LayoutOrder / task.delay(4.5) inchanges.
+		-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
+		-- V74 freeze). Distinct trail N151 (offset.Z). Distinct
+		-- dirtyHead N112. Recette hardening N110, portee pas mergee
+		-- (41e2). UnitModels / Overlay / WorldRenderer inchanges.
+		local n = #self.feedEntries
+		local oldest = self.feedEntries[1]
+		for i = 1, n - 1 do
+			self.feedEntries[i] = self.feedEntries[i + 1]
+		end
+		self.feedEntries[n] = nil
 		if oldest then
 			removeEntry(oldest)
 		end

@@ -286,6 +286,11 @@ check("identite, ere, diplomatie et classement", function()
 end)
 
 check("fil de notifications sature", function()
+	-- N153 : plafond notify decalage prefixe (pas table.remove(1)).
+	-- FIFO / MAX=3 / groupement / croix Dismiss inchanges. Leftover
+	-- N152 flame Size (check navires) doit rester vert. Recette
+	-- hardening N110, portee pas mergee. UnitModels / Overlay non
+	-- touches.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
