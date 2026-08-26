@@ -2,9 +2,11 @@
 --[[
 	Instrumentation de debit simulation / replication.
 
-	Mesure avant toute modification de MAX_TILES_PER_TICK : changedTiles,
-	dirtyChunks estimes, octets de delta, duree de tick. Les percentiles sont
-	calculables a partir de l'historique borne.
+	Mesure de debit simulation / replication.
+
+	`Config.MAX_TILES_PER_TICK` est mort apres install : le debit vivant est
+	`ChantierB.CAPTURE_GUARD` (80). Journaliser changedTiles / deltaBytes
+	avant toute modification de ce budget.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

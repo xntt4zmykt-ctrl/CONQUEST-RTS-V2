@@ -36,6 +36,28 @@ local STEEL = Color3.fromRGB(118, 130, 148)
 local WARNING = Color3.fromRGB(255, 196, 72)
 local MISSILE = Color3.fromRGB(236, 242, 250)
 
+-- Qualité basse : pas de Smoke ni d'ombres de PointLight. pcall : en banc
+-- headless UserSettings n'existe pas → on garde le FX (défaut = garder).
+local allowFx: boolean? = nil
+local function qualityAllowsFx(): boolean
+	if allowFx ~= nil then
+		return allowFx
+	end
+	local ok, allow = pcall(function()
+		local level = UserSettings():GetService("UserGameSettings").SavedQualityLevel
+		if level == Enum.SavedQualitySetting.Automatic then
+			return true
+		end
+		return level.Value >= Enum.SavedQualitySetting.QualityLevel4.Value
+	end)
+	if not ok then
+		allowFx = true
+	else
+		allowFx = allow == true
+	end
+	return allowFx
+end
+
 --=============================================================================
 -- Helpers
 --=============================================================================
@@ -102,12 +124,14 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 
 	local chimneyA = cylinder(model, Vector3.new(9 + (tier - 1) * 2, 1.15, 1.15), Vector3.new(2.7, roofY + 3.3, -1.8), STEEL)
 	chimneyA.Name = "Chimney"
-	local smoke = Instance.new("Smoke")
-	smoke.Color = Color3.fromRGB(145, 155, 166)
-	smoke.Opacity = 0.18
-	smoke.RiseVelocity = 2.4
-	smoke.Size = 2.6
-	smoke.Parent = chimneyA
+	if qualityAllowsFx() then
+		local smoke = Instance.new("Smoke")
+		smoke.Color = Color3.fromRGB(145, 155, 166)
+		smoke.Opacity = 0.18
+		smoke.RiseVelocity = 2.4
+		smoke.Size = 2.6
+		smoke.Parent = chimneyA
+	end
 	local chimneyB = cylinder(model, Vector3.new(7, 0.9, 0.9), Vector3.new(4, 7.5, 1.6), DARK)
 	chimneyB.Name = "Chimney"
 
@@ -121,7 +145,7 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	loadingLight.Color = WARNING
 	loadingLight.Brightness = 1.4
 	loadingLight.Range = 15
-	loadingLight.Shadows = true
+	loadingLight.Shadows = qualityAllowsFx()
 	loadingLight.Parent = output
 
 	-- Reservoir et conduite : petits details qui evitent l'effet "gros cube".
@@ -335,7 +359,7 @@ local function buildSam(model: Model, color: Color3, _level: number?)
 	radarLight.Color = Color3.fromRGB(120, 255, 160)
 	radarLight.Brightness = 1.8
 	radarLight.Range = 18
-	radarLight.Shadows = true
+	radarLight.Shadows = qualityAllowsFx()
 	radarLight.Parent = light
 end
 
