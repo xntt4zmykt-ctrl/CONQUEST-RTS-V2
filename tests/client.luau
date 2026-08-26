@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	os.exit(1)
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -227,6 +227,15 @@ check("identite, ere, diplomatie et classement", function()
 			"les factions ne sont plus triees par territoire decroissant"
 		)
 	end
+
+	-- N97 : leftover truncate. Premier update 12 slots, second un seul
+	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
+	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	-- N100 : comparateur module (rankByTiles) — meme loi tiles desc.
+	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
+	assert(#hud.ranked == 1, "leftover ranked non truncate")
+	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	hud:update(stats, roster)
 
 	hud:setDiplomacy({
 		allies = { [2] = true },
@@ -427,7 +436,7 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 end)
 
 --[[
-	Disposition OpenFront.
+	Disposition CONQUEST.
 
 	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
 	choses, et c'est exactement ce qui casse quand on deplace une interface :
@@ -501,7 +510,7 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		"la bille du curseur n'est pas dans le panneau de controle"
 	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
-	-- jeu de reference — la puce dit combien part, le curseur decide.
+	-- CONQUEST — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
@@ -657,6 +666,79 @@ check("construction du monde 3D", function()
 		guard += 1
 	end
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+	-- N106 : partCount = Ground+Border visibles, pas #GetChildren() d'orphelins.
+	local visible = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				visible += 1
+				assert(child.Parent == folder, "Ground/Border orphelin apres construction")
+			end
+		end
+	end
+	assert(world.partCount == visible, "partCount incoherent avec les Parts visibles")
+	-- N112 : curseur dirtyHead, file drainee. Plus de table.remove(1).
+	-- Leftover N106 (partCount) reste au-dessus. Truncate a la consommation.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
+	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
+
+	-- N114 : compact du prefixe consomme (seuil 32). 40 chunks sales,
+	-- 11 frames × budget 3 = tete 34 → compact des 7 restants a l'index 1.
+	-- Leftover N112 (drain → head 1, file vide) reste au-dessus.
+	-- Pas de table.remove. Recycle Parts N106 inchange.
+	local compactChunks = {}
+	for chunk in world.chunkFolders do
+		table.insert(compactChunks, chunk)
+		if #compactChunks >= 40 then
+			break
+		end
+	end
+	assert(#compactChunks >= 40, "pas assez de chunks pour tester le compact")
+	for _, chunk in compactChunks do
+		world:markChunkDirty(chunk)
+	end
+	assert(#world.dirtyQueue == 40, "file non remplie pour compact")
+	for _ = 1, 11 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1, "dirtyHead non reset apres compact")
+	assert(#world.dirtyQueue == 7, "reste non compacte vers l'index 1")
+	assert(world.dirtyQueue[8] == nil, "surplus non nile")
+	for _ = 1, 4 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1 and #world.dirtyQueue == 0, "file non drainee apres compact")
+
+	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
+	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
+	-- (partCount) reste au-dessus. Recette visual V58/V59, pas merger.
+	local nRipple = #world.oceanRipples
+	assert(nRipple > 0, "aucun reflet ocean")
+	local first = world.oceanRipples[1]
+	local glintPart = first.part
+	local glintBase = first.base
+	local nFoliage = #world.animatedFoliage
+	assert(nFoliage > 0, "aucune couronne")
+	local firstLeaf = world.animatedFoliage[1]
+	local leafPart = firstLeaf.part
+	local leafBase = firstLeaf.base
+	world:step(1 / 60)
+	world:step(1 / 60)
+	assert(#world.oceanRipples == nRipple, "reflets recrees")
+	assert(rawequal(world.oceanRipples[1].part, glintPart), "Part glint recree")
+	assert(glintPart.CFrame.X ~= glintBase.X or glintPart.CFrame.Z ~= glintBase.Z, "houle n'a pas bouge")
+	assert(glintPart.Transparency >= 0.64 and glintPart.Transparency <= 0.82, "Transparency hors bande")
+	assert(#world.animatedFoliage == nFoliage, "couronnes recrees")
+	assert(rawequal(world.animatedFoliage[1].part, leafPart), "Part couronne recree")
+	assert(leafPart.CFrame.Y ~= leafBase.Y, "feuillage n'a pas bouge")
+	local savedRipples = world.oceanRipples
+	world.oceanRipples = {}
+	world:step(1 / 60)
+	world.oceanRipples = savedRipples
+	local savedFoliage = world.animatedFoliage
+	world.animatedFoliage = {}
+	world:step(1 / 60)
+	world.animatedFoliage = savedFoliage
 end)
 
 check("calques d'entites, effets et apercu", function()
@@ -668,6 +750,76 @@ check("calques d'entites, effets et apercu", function()
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
+end)
+
+check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
+	local SpawnHint = __require("SpawnHint")
+	local Theme = __require("Theme")
+	local OCEAN = Config.TERRAIN.OCEAN
+	local owner = world.owner
+
+	local land: number? = nil
+	local ocean: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) == OCEAN then
+			if not ocean then
+				ocean = index
+			end
+		else
+			if not land then
+				land = index
+			end
+		end
+		if land and ocean then
+			break
+		end
+	end
+	assert(land ~= nil, "aucune terre")
+	assert(ocean ~= nil, "aucun ocean")
+	assert(SpawnHint.looksClaimable(terrain, owner, land), "disque isole encore rouge")
+	assert(not SpawnHint.looksClaimable(terrain, owner, ocean), "ocean colore comme spawn")
+
+	-- Peint tout le terre comme un empire sauf une lisiere (meme recette N55).
+	local occupier = 1
+	local pocket: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(owner, index, occupier)
+		end
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			local x, y = MapGen.fromIndex(index)
+			local adj = false
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					if dx ~= 0 or dy ~= 0 then
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local ni = MapGen.toIndex(nx, ny)
+							if buffer.readu8(terrain, ni) ~= OCEAN and buffer.readu8(owner, ni) == occupier then
+								adj = true
+							end
+						end
+					end
+				end
+			end
+			if adj then
+				buffer.writeu8(owner, index, 0)
+				pocket = index
+				break
+			end
+		end
+	end
+	assert(pocket ~= nil, "lisiere introuvable")
+	assert(not SpawnHint.looksClaimable(terrain, owner, pocket), "lisiere encore verte")
+	effects:previewTile(pocket, Theme.color.danger, false)
+	effects:clearActionPreview()
+
+	-- Restaure le buffer owner du monde (tout NEUTRAL) pour les checks suivants.
+	for index = 0, Config.TILE_COUNT - 1 do
+		buffer.writeu8(owner, index, 0)
+	end
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -776,6 +928,48 @@ check("pose et capture de chaque type de batiment", function()
 		`la voie ne s'allonge pas : {atStart} puis {partway}`
 	)
 
+	-- N110 : lift cuit dans layer.origin. Deux frames pendant le chantier :
+	-- Parts stables, Y asphalt ≠ shoulder. Leftover N109 (câble) est dans
+	-- modeles procéduraux. Recette visual V61, portee pas mergee.
+	assert(sample and sample.construction, "chantier absent a mi-voie")
+	local function namedPart(model, name)
+		for _, child in model:GetChildren() do
+			if child.Name == name then
+				return child
+			end
+		end
+		return nil
+	end
+	local road = namedPart(sample.model, "Road")
+	local shoulder = namedPart(sample.model, "Shoulder")
+	local mark = namedPart(sample.model, "CenterMark")
+	assert(road and shoulder and mark, "calques de voie absents")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift chaussee = accotement")
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(namedPart(sample.model, "Road"), road), "Road recree")
+	assert(rawequal(namedPart(sample.model, "Shoulder"), shoulder), "Shoulder recree")
+	assert(rawequal(namedPart(sample.model, "CenterMark"), mark), "CenterMark recree")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres interpolation")
+
+	-- N111 : ox/oy/oz + dx/dy/dz cuits. Deux frames pendant le chantier :
+	-- nombres, oy asphalt ≠ shoulder. Leftover N110 (Parts, Y) reste au-dessus.
+	-- Recette visual V62, portee pas mergee.
+	local firstSeg = sample.construction.segments[1]
+	assert(type(firstSeg.dx) == "number" and type(firstSeg.dy) == "number" and type(firstSeg.dz) == "number", "dx/dy/dz absents")
+	assert(type(firstSeg.layers[1].ox) == "number" and type(firstSeg.layers[1].oy) == "number", "ox/oy shoulder absents")
+	assert(firstSeg.layers[2].oy ~= firstSeg.layers[1].oy, "oy asphalt = shoulder")
+	assert(firstSeg.layers[3].oy ~= firstSeg.layers[2].oy, "oy bande = asphalt")
+	-- N113 : rot cuit a l'origine. Plus de lookAt 60 Hz. Leftover N111
+	-- (nombres) reste au-dessus. Recette visual V63, portee pas mergee.
+	assert(firstSeg.rot ~= nil and type(firstSeg.rot.X) == "number", "rot absent")
+	assert(firstSeg.rot.X == 0 and firstSeg.rot.Y == 0 and firstSeg.rot.Z == 0, "rot n'est pas a l'origine")
+	local bakedRot = firstSeg.rot
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(firstSeg.rot, bakedRot), "rot recree pendant le chantier")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres rot")
+
 	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
 	-- libere — sinon il resterait a tourner pour rien a chaque image.
 	for _ = 1, 30 do
@@ -794,6 +988,41 @@ check("pose et capture de chaque type de batiment", function()
 	overlay:applyBuildingDelta({ factoryEntry })
 	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
 	overlay:stepInterpolation(1 / 60)
+
+	-- N105 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
+	-- N115 : segRot cuit (meme index que segmentIndex). rawequal d'un frame a
+	-- l'autre. Leftover N113 (rot chantier) plus haut. Leftover N103/N116
+	-- (unités) reste dans le check navires. Voies encore vivantes ici ; la
+	-- destruction plus bas les vide (le check livraison n'en a plus).
+	-- Recette visual V64, portee pas mergee. Recette visual V57 leftover N105.
+	local _, liveRoute = routesOf(factoryEntry.index)
+	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
+	local firstSegRot = liveRoute.segRot[1]
+	assert(firstSegRot ~= nil and type(firstSegRot.X) == "number", "segRot[1] absent")
+	assert(firstSegRot.X == 0 and firstSegRot.Y == 0 and firstSegRot.Z == 0, "segRot n'est pas a l'origine")
+	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree pendant la livraison")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue au second frame")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree au second frame")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
+	local pulseFound = false
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "DeliveryPulse" then
+			pulseFound = true
+			break
+		end
+	end
+	assert(pulseFound, "pas de pulse a l'arrivee")
 
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
@@ -880,6 +1109,23 @@ check("modeles procéduraux : le palier change la silhouette", function()
 			`{name} : la hauteur de reference ne suit pas le palier`
 		)
 	end
+
+	-- N109 : câble Y depuis rest, plus de Vector3.new. Leftover N107/N108
+	-- (houle / feuillage) reste dans construction du monde. Radar / flag /
+	-- boom inchanges. Factory sans câble : animate ne lève pas.
+	-- Recette visual V60, portee pas mergee.
+	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	Building.animate(factory, 1, 1 / 60)
+	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local cable = port:FindFirstChild("PortCraneCable")
+	assert(cable and cable.CFrame, "PORT sans câble")
+	local rest = cable:GetAttribute("RestCFrame")
+	assert(rest, "câble sans RestCFrame")
+	local restY = rest.Y
+	Building.animate(port, 1, 1 / 60)
+	Building.animate(port, 2, 1 / 60)
+	assert(rawequal(port:FindFirstChild("PortCraneCable"), cable), "Part câble recreee")
+	assert(cable.CFrame.Y ~= restY, "câble n'a pas bouge")
 end)
 
 check("apercu de placement pour chaque batiment", function()
@@ -1186,6 +1432,11 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
 	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
 
+	-- N96 : owner tout NEUTRAL → plus d'ancres (leftover hash interdit).
+	local barren = buffer.create(Config.TILE_COUNT)
+	labels:refresh(barren, stats, roster)
+	assert(labels.labels[1] == nil and labels.labels[2] == nil, "etiquette fantome apres carte neutre")
+
 	labels:clear()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
 end)
@@ -1250,7 +1501,7 @@ end)
 
 check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
-		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
 		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
 	}, {
@@ -1261,7 +1512,52 @@ check("navires, missiles et interpolation", function()
 	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
 	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
 	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
+	-- N98 : extra missile mute, pas remplace. Navire : extra reste nil
+	-- (retraite N56 via retreatTinted).
+	assert(overlay.units[1].extra == nil, "un navire ne doit pas porter extra")
+	local extra = overlay.units[3].extra
+	assert(extra ~= nil and extra.tx == 60 and extra.ty == 60, "extra missile initial absent")
+	-- N101 : insert pose des nombres, plus de Vector2.
+	assert(type(overlay.units[1].targetX) == "number" and type(overlay.units[1].currentX) == "number", "navire target pas un nombre")
+	assert(overlay.units[1].targetX == 10 and overlay.units[1].targetY == 10, "navire target insert")
+	assert(overlay.units[3].targetX == 40 and overlay.units[3].currentY == 40, "missile target insert")
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "extra missile non mute")
+	assert(rawequal(extra, overlay.units[3].extra), "record extra missile remplace")
+	-- N101 : meme missile, x/y differents → mute target, rawequal du record.
+	local missileUnit = overlay.units[3]
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 50, y = 55, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].targetX == 50 and overlay.units[3].targetY == 55, "missile target non mute")
+	assert(rawequal(overlay.units[3], missileUnit), "record unite missile remplace")
+	local beforeX = overlay.units[3].currentX
+	local beforeY = overlay.units[3].currentY
+	-- N103 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover N101.
+	-- N116 : immobile = CFrame.new. Navire 1 (x=y=10) n'avance pas ; missile
+	-- continue de lerper.
+	-- N117 : mouvement = fromEulerAnglesYXZ (pas lookAt). Leftover N116
+	-- (immobile) et leftover N103 (lerp sous yaw) restent verts.
 	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
+	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
+	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
+	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
+	-- N117 : un second frame sous yaw euler ne casse pas le lerp missile.
+	local midX = overlay.units[3].currentX
+	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[3].currentX ~= midX, "lerp sous yaw euler fige")
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive au 2e frame")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
@@ -1285,7 +1581,93 @@ check("deltas de terrain et conquetes classees", function()
 	local changed, gains, losses, others = world:applyDelta(delta, 1)
 	assert(changed == 4, "le nombre de tuiles modifiees est faux")
 	assert(gains ~= nil and losses ~= nil and others ~= nil, "conquetes non classees")
+
+	-- N95 : prise sur une faction puis delta vide → leftover truncate.
+	-- Coloniser du neutre ne classe rien ; occuper en 2 puis capturer en 1
+	-- produit un gain. Le second applyDelta (payload vide) doit renvoyer
+	-- les memes pools a # == 0, sinon un splash fantome rejouerait la tuile.
+	local occupy = buffer.create(5)
+	buffer.writeu32(occupy, 0, 2100)
+	buffer.writeu8(occupy, 4, 2)
+	world:applyDelta(occupy, 1)
+	local capture = buffer.create(5)
+	buffer.writeu32(capture, 0, 2100)
+	buffer.writeu8(capture, 4, 1)
+	local _, g2, l2, o2 = world:applyDelta(capture, 1)
+	assert(#g2 == 1 and g2[1] == 2100, "prise locale non classee en gain")
+	assert(#l2 == 0 and #o2 == 0, "prise locale mal classee")
+	local empty = buffer.create(0)
+	local changed0, g3, l3, o3 = world:applyDelta(empty, 1)
+	assert(changed0 == 0, "delta vide count")
+	assert(#g3 == 0 and #l3 == 0 and #o3 == 0, "leftover applyDelta non truncate")
+	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
+
 	world:stepRebuilds()
+	world:stepRebuilds()
+	-- N112 : curseur, pas table.remove. Tete avancee ou file truncatee.
+	-- Leftover N106 (partCount / Ground recycle) reste plus bas.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead >= 1, "dirtyHead absent apres deltas")
+	if world.dirtyHead > #world.dirtyQueue then
+		assert(#world.dirtyQueue == 0 and world.dirtyHead == 1, "file non truncatee une fois consommee")
+	else
+		-- N114 : tant que la file vit, le prefixe consomme ne depasse pas 32.
+		assert(world.dirtyHead <= 32, "prefixe consomme non compacte")
+	end
+
+	-- N106 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
+	-- Parent = nil ; partCount = visibles. Recette N85, pas de pool global.
+	-- On prend un chunk TERRE (un chunk ocean n'a pas de Ground).
+	local sampleChunk: number? = nil
+	local sampleFolder = nil
+	local firstGround
+	for chunk, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" then
+				sampleChunk = chunk
+				sampleFolder = folder
+				firstGround = child
+				break
+			end
+		end
+		if sampleChunk then
+			break
+		end
+	end
+	assert(sampleChunk ~= nil and sampleFolder ~= nil and firstGround ~= nil, "aucun chunk terre")
+	world:rebuildChunk(sampleChunk)
+	local recycled
+	local groundKids = 0
+	for _, child in sampleFolder:GetChildren() do
+		if child.Name == "Ground" then
+			groundKids += 1
+			assert(child.Parent == sampleFolder, "Ground orphelin apres rebuild")
+			if not recycled then
+				recycled = child
+			end
+		elseif child.Name == "Border" then
+			assert(child.Parent == sampleFolder, "Border orphelin apres rebuild")
+		end
+	end
+	assert(rawequal(firstGround, recycled), "Ground non recycle")
+	local pool = world.chunkGround[sampleChunk]
+	assert(pool ~= nil and #pool >= groundKids, "pool Ground absent")
+	for i = 1, #pool do
+		local p = pool[i]
+		if i <= groundKids then
+			assert(p.Parent == sampleFolder, "Ground visible hors folder")
+		else
+			assert(p.Parent == nil, "leftover Ground encore parent")
+		end
+	end
+	local vis = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				vis += 1
+			end
+		end
+	end
+	assert(world.partCount == vis, "partCount incoherent apres recycle")
 end)
 
 check("camera strategique", function()
@@ -1294,9 +1676,13 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
+	-- N118 : compose CFrame.new * rotation. Plus de lookAt. Leftover
+	-- offset/shake Vector3 (N119/N120) reste.
+	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
 
 	--[[
-		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Panoramique libre au clic du milieu, le geste CONQUEST.
 		Les faux InputObject sont de simples tables : le code ne lit que
 		UserInputType, Position et Delta.
 	]]
@@ -1413,7 +1799,7 @@ end)
 	Barre d'action tactile.
 
 	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
-	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	que personne ne la force — c'est le contrat de la disposition CONQUEST. On
 	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
 	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
 
@@ -1471,4 +1857,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	os.exit(1)
 end

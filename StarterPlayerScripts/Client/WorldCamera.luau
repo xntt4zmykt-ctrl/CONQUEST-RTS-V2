@@ -105,7 +105,7 @@ function WorldCamera.bindActions(self: WorldCamera)
 		local newDistance = math.clamp(oldDistance * (1 - input.Position.Z * 0.12), MIN_DISTANCE, MAX_DISTANCE)
 		if newDistance ~= oldDistance then
 			--[[
-				Zoom vers le curseur, la signature du jeu de reference : le
+				Zoom vers le curseur, la signature CONQUEST : le
 				point sous la souris reste sous la souris. Sans ca, zoomer sur
 				une cible exige de reframer a chaque coup de molette — la mire
 				ne bougeant jamais, c'est toujours le centre de l'ecran qui
@@ -523,7 +523,16 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 		math.cos(self.clock * 37) * self.shake * 0.42,
 		math.sin(self.clock * 23) * self.shake * 0.5
 	)
-	self.camera.CFrame = CFrame.lookAt(self.focus + offset + shake, self.focus + shake * 0.18)
+	-- N118 : pose = translation * rotation deja calculee. Plus de lookAt
+	-- deux Vector3 60 Hz. L'oeil tremble encore (shake sur la translation) ;
+	-- le biais lookAt(..., focus + shake * 0.18) est abandonne (visee
+	-- cosmétique, yaw/pitch portés par `rotation`). Vector3.new offset/shake
+	-- restent (leftover N119 / N120). Overlay unites / camion inchanges
+	-- (N117 / N116 / N115). Recette visual V66, portee pas mergee.
+	local ex = self.focus.X + offset.X + shake.X
+	local ey = self.focus.Y + offset.Y + shake.Y
+	local ez = self.focus.Z + offset.Z + shake.Z
+	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
 	self.camera.FieldOfView += (targetFov - self.camera.FieldOfView) * (1 - math.exp(-8 * dt))
