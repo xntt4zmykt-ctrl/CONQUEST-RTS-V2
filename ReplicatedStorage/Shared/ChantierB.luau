@@ -617,9 +617,14 @@ function ChantierB.installSpawn(GameState)
 		if not self:isLand(index) then
 			return false, "Choisis une terre."
 		end
-		local best = index
-		if buffer.readu8(self.owner, index) ~= NEUTRAL then
-			best = nil
+		-- N52 : meme C1+C2 (+ N54 bus) que findSpawn. Une terre neutre dans
+		-- un crater n'est pas un spawn. Chercher plus loin dans r=6, ne jamais
+		-- poser quand meme. Isolation voisinage (disque entierement neutre) = N55.
+		local function isClaimable(i: number): boolean
+			return self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL and self:isSpawnSafe(i)
+		end
+		local best: number? = if isClaimable(index) then index else nil
+		if not best then
 			local ox, oy = MapGen.fromIndex(index)
 			for r = 1, 6 do
 				for dy = -r, r do
@@ -627,7 +632,7 @@ function ChantierB.installSpawn(GameState)
 						local nx, ny = ox + dx, oy + dy
 						if MapGen.inBounds(nx, ny) then
 							local i = MapGen.toIndex(nx, ny)
-							if self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL then
+							if isClaimable(i) then
 								best = i
 								break
 							end

@@ -675,7 +675,13 @@ function Navy.step(state: GameState, rng: Random)
 				table.remove(state.boats, i)
 				continue
 			end
-			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+			-- N53 option A : l'intention (targetSlot) n'est plus le proprio
+			-- courant → retraite, pas de tete de pont vs un tiers. Fallback
+			-- N49 : pas de targetSlot → pas de retraite auto (on debarque
+			-- chez qui tient la plage). Own-tile 100 % deja gere au-dessus.
+			-- inbound removePlayer lit encore owner[targetTile], volontaire.
+			local flipped = typeof(boat.targetSlot) == "number" and destOwner ~= boat.targetSlot
+			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) or flipped then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
 					table.remove(state.boats, i)

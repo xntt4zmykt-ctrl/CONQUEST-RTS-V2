@@ -825,15 +825,80 @@ end
 --=============================================================================
 
 --[[
+	C1 ogive + C2 fallout + N54 MIRV bus. Pas d'isolation voisinage (ca reste
+	findSpawn) et pas d'annulation de frappe (contrat B / N44).
+
+	Rayon d'exclusion :
+	- ogive / ATOM / H : missile.radius ou NUKE_STATS[kind].radius
+	- MIRV bus (`kind==MIRV` et `not warhead`) : spread + warheadRadius
+	  (le bus a radius=0 ; les ogives peuvent retomber jusqu'a `spread` et
+	  craterer de `warheadRadius`). SPAWN_RADIUS est ajoute autour du centre.
+]]
+function GameState.isSpawnSafe(self: GameState, center: number): boolean
+	if center < 0 or center >= Config.TILE_COUNT then
+		return false
+	end
+	if not self:isLand(center) then
+		return false
+	end
+
+	local radius = Config.SPAWN_RADIUS
+	local check = radius + 3
+	local x, y = MapGen.fromIndex(center)
+	local missiles = self.missiles
+	local fallout = self.fallout
+	local now = self.tick
+
+	if missiles then
+		for _, missile in missiles do
+			local stats = Config.NUKE_STATS[missile.kind]
+			local blast: number
+			if missile.kind == Config.NUKE.MIRV and not missile.warhead then
+				local spread = (stats and stats.spread) or 16
+				local warheadR = (stats and stats.warheadRadius) or 5
+				blast = spread + warheadR
+			else
+				local raw = missile.radius or (if stats then stats.radius else 8)
+				blast = if typeof(raw) == "number" then raw else 0
+			end
+			if blast > 0 then
+				local mx = math.floor(missile.tx)
+				local my = math.floor(missile.ty)
+				if MapGen.inBounds(mx, my) then
+					local dx, dy = x - mx, y - my
+					local limit = blast + radius
+					if dx * dx + dy * dy <= limit * limit then
+						return false
+					end
+				end
+			end
+		end
+	end
+
+	if fallout then
+		for dy = -check, check do
+			for dx = -check, check do
+				local nx, ny = x + dx, y + dy
+				if MapGen.inBounds(nx, ny) then
+					local idx = MapGen.toIndex(nx, ny)
+					if (fallout[idx] or 0) > now then
+						return false
+					end
+				end
+			end
+		end
+	end
+
+	return true
+end
+
+--[[
 	Cherche une zone de spawn : une tuile de terre dont le disque alentour est
 	entierement libre, pour ne jamais coller deux joueurs au demarrage.
 ]]
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
 	local check = radius + 3
-	local missiles = self.missiles
-	local fallout = self.fallout
-	local now = self.tick
 
 	for _ = 1, 6000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
@@ -841,48 +906,24 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 		local center = MapGen.toIndex(x, y)
 
 		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
+			-- N50 C1+C2 + N54 MIRV bus. Isolation voisinage reste ici.
+			if not self:isSpawnSafe(center) then
+				continue
+			end
 			local ok = true
-			-- N50 C1 : crater d'une ogive deja en vol (tiers inclus).
-			-- Rayon = missile.radius (ogive MIRV) ou NUKE_STATS[kind].radius.
-			-- Ne pas annuler la frappe (contrat B / N44). MIRV bus radius=0 : ignore.
-			if missiles then
-				for _, missile in missiles do
-					local stats = Config.NUKE_STATS[missile.kind]
-					local blast = missile.radius or (if stats then stats.radius else 8)
-					if typeof(blast) == "number" and blast > 0 then
-						local mx = math.floor(missile.tx)
-						local my = math.floor(missile.ty)
-						if MapGen.inBounds(mx, my) then
-							local dx, dy = x - mx, y - my
-							local limit = blast + radius
-							if dx * dx + dy * dy <= limit * limit then
-								ok = false
-								break
-							end
+			for dy = -check, check do
+				for dx = -check, check do
+					local nx, ny = x + dx, y + dy
+					if MapGen.inBounds(nx, ny) then
+						local idx = MapGen.toIndex(nx, ny)
+						if buffer.readu8(self.owner, idx) ~= NEUTRAL then
+							ok = false
+							break
 						end
 					end
 				end
-			end
-			if ok then
-				for dy = -check, check do
-					for dx = -check, check do
-						local nx, ny = x + dx, y + dy
-						if MapGen.inBounds(nx, ny) then
-							local idx = MapGen.toIndex(nx, ny)
-							if buffer.readu8(self.owner, idx) ~= NEUTRAL then
-								ok = false
-								break
-							end
-							-- N50 C2 : fallout encore chaud dans le disque de spawn.
-							if fallout and (fallout[idx] or 0) > now then
-								ok = false
-								break
-							end
-						end
-					end
-					if not ok then
-						break
-					end
+				if not ok then
+					break
 				end
 			end
 			if ok then
@@ -1015,13 +1056,14 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 
 	-- Transports AVANT setOwner (ISSUE-N43, recette 915c). N49 pose
-	-- targetSlot au launch, mais l'inbound GC lit encore owner[targetTile] :
+	-- targetSlot au launch, N53 retraite auto si owner ~= targetSlot
+	-- pendant Navy.step. L'inbound GC lit encore owner[targetTile] :
 	-- un transport peut viser B alors que la cote a deja flippe vers un
-	-- tiers. Apres neutralisation, destOwner==NEUTRAL et Navy.step ne
-	-- retraite pas — resolveLanding pose une tete de pont vs cote vide.
-	-- Restitution 100 %, pas BOAT_RETREAT_LOSS. kind 1 = transport.
-	-- kind 2 = convoi (ISSUE-N48, recette 69b4) : couler, pas d'or, pas de
-	-- malus vendeur. Pas de require Navy (cycle Navy -> GameState).
+	-- tiers. Apres neutralisation, destOwner==NEUTRAL et sans targetSlot
+	-- Navy.step ne retraite pas — resolveLanding pose une tete de pont
+	-- vs cote vide. Restitution 100 %, pas BOAT_RETREAT_LOSS. kind 1 =
+	-- transport. kind 2 = convoi (ISSUE-N48, recette 69b4) : couler, pas
+	-- d'or, pas de malus vendeur. Pas de require Navy (cycle Navy -> GameState).
 	for i = #self.boats, 1, -1 do
 		local boat = self.boats[i]
 		if boat.slot == slot then

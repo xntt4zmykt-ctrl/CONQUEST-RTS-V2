@@ -4817,6 +4817,261 @@ do
 end
 
 do
+	-- N52 : claimSpawn refuse un clic dans le crater d'une ogive (C1).
+	-- Recette = N50 etendu au clic. On peint le buffer pour ne laisser de
+	-- terre neutre que dans le crater : sans N52, claimSpawn y poserait.
+	local state = GameState.new(1053)
+	local occupier = state:addPlayer(nil, "Occupe", Random.new(205), 0)
+	local claimant = state:addPlayer(nil, "Colons", Random.new(206), 0)
+	if not occupier or not claimant then
+		fail("claimSpawn splash — spawn impossible")
+	else
+		local stats = Config.NUKE_STATS[Config.NUKE.ATOM]
+		local blast = (stats and stats.radius) or 12
+		local ox, oy = MapGen.fromIndex(occupier.capitalTile or 0)
+		local impact: number? = nil
+		local minDist = (blast + Config.SPAWN_RADIUS + 20) * (blast + Config.SPAWN_RADIUS + 20)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - ox, y - oy
+				if dx * dx + dy * dy > minDist then
+					impact = index
+					break
+				end
+			end
+		end
+		if not impact then
+			fail("claimSpawn splash — impact loin du spawn introuvable")
+		else
+			local ix, iy = MapGen.fromIndex(impact)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - ix, y - iy
+					if dx * dx + dy * dy > blast * blast then
+						buffer.writeu8(state.owner, index, occupier.slot)
+					else
+						buffer.writeu8(state.owner, index, 0)
+					end
+				end
+			end
+			table.insert(state.missiles, {
+				id = 53,
+				slot = occupier.slot,
+				kind = Config.NUKE.ATOM,
+				x = ix,
+				y = iy,
+				sx = ix,
+				sy = iy,
+				tx = ix,
+				ty = iy,
+				progress = 0.4,
+				speed = Config.MISSILE_SPEED,
+				radius = blast,
+			})
+			claimant.awaitingSpawn = true
+			local okClaim = state:claimSpawn(claimant.slot, impact)
+			if okClaim then
+				fail("claimSpawn splash — capitale posee dans le crater d'une ogive")
+			elseif #state.missiles ~= 1 then
+				fail("claimSpawn splash — frappe annulee (contrat B)")
+			else
+				print("claimSpawn splash : crater d'ogive refuse")
+			end
+		end
+	end
+end
+
+do
+	-- N53 option A : Navy.step retraite si owner[targetTile] ~= targetSlot,
+	-- sans geste retreatAttack. Pas de seedBeachhead vs le tiers.
+	local state = GameState.new(1054)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(54), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(55), 0)
+	local third = state:addPlayer(nil, "Tiers", Random.new(56), 0)
+	if not invader or not defender or not third then
+		fail("boat auto-retreat flip — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local fromTile: number? = nil
+		local toTile: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+			if fromTile then
+				break
+			end
+		end
+		if not fromTile or not toTile then
+			fail("boat auto-retreat flip — aucune paire cotiere reliee")
+		else
+			state:setOwner(fromTile, invader.slot)
+			state:setOwner(toTile, defender.slot)
+			invader.troops = 8000
+			local okLaunch, launchMsg = Navy.launchInvasion(state, invader.slot, toTile :: number)
+			if not okLaunch then
+				fail(`boat auto-retreat flip — launchInvasion refuse ({launchMsg})`)
+			else
+				local boat = state.boats[#state.boats]
+				if not boat or boat.kind ~= Navy.KIND_TRANSPORT or boat.targetSlot ~= defender.slot then
+					fail("boat auto-retreat flip — transport / targetSlot absent")
+				else
+					state:setOwner(toTile :: number, third.slot)
+					local attacksBefore = #state.attacks
+					local landedVsThird = false
+					local retreated = false
+					for _ = 1, 400 do
+						Navy.step(state, Random.new(57))
+						local still = false
+						for _, b in state.boats do
+							if b.kind == Navy.KIND_TRANSPORT and b.slot == invader.slot then
+								still = true
+								if b.retreating then
+									retreated = true
+								end
+							end
+						end
+						for _, atk in state.attacks do
+							if atk.attacker == invader.slot and atk.target == third.slot and atk.isBeachhead then
+								landedVsThird = true
+							end
+						end
+						if not still then
+							break
+						end
+					end
+					if landedVsThird or #state.attacks > attacksBefore then
+						fail("boat auto-retreat flip — tete de pont vs le tiers")
+					elseif not retreated then
+						-- Coulé (pas de route de retraite) : pas de pont non plus.
+						local leftover = 0
+						for _, b in state.boats do
+							if b.kind == Navy.KIND_TRANSPORT and b.slot == invader.slot then
+								leftover += 1
+							end
+						end
+						if leftover ~= 0 then
+							fail("boat auto-retreat flip — transport encore en route vers le tiers")
+						else
+							print("boat auto-retreat flip : transport coule, pas de pont vs le tiers")
+						end
+					else
+						print("boat auto-retreat flip : retraite auto, pas de pont vs le tiers")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N54 : findSpawn refuse un MIRV bus en vol (radius=0). Exclusion =
+	-- spread + warheadRadius (documente). Contrat B : on n'annule pas le bus.
+	local state = GameState.new(1055)
+	local occupier = state:addPlayer(nil, "Occupe", Random.new(207), 0)
+	if not occupier then
+		fail("findSpawn MIRV bus — spawn impossible")
+	else
+		local stats = Config.NUKE_STATS[Config.NUKE.MIRV]
+		local spread = (stats and stats.spread) or 16
+		local warheadR = (stats and stats.warheadRadius) or 5
+		local blast = spread + warheadR
+		local ox, oy = MapGen.fromIndex(occupier.capitalTile or 0)
+		local impact: number? = nil
+		local minDist = (blast + Config.SPAWN_RADIUS + 20) * (blast + Config.SPAWN_RADIUS + 20)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - ox, y - oy
+				if dx * dx + dy * dy > minDist then
+					impact = index
+					break
+				end
+			end
+		end
+		if not impact then
+			fail("findSpawn MIRV bus — impact loin du spawn introuvable")
+		else
+			local ix, iy = MapGen.fromIndex(impact)
+			local pocketR = Config.SPAWN_RADIUS + 8
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - ix, y - iy
+					if dx * dx + dy * dy > pocketR * pocketR then
+						buffer.writeu8(state.owner, index, occupier.slot)
+					else
+						buffer.writeu8(state.owner, index, 0)
+					end
+				end
+			end
+			table.insert(state.missiles, {
+				id = 54,
+				slot = occupier.slot,
+				kind = Config.NUKE.MIRV,
+				x = ix,
+				y = iy,
+				sx = ix,
+				sy = iy,
+				tx = ix,
+				ty = iy,
+				progress = 0.2,
+				speed = Config.MISSILE_SPEED,
+				warhead = false,
+				radius = 0,
+			})
+			local center = state:findSpawn(Random.new(208))
+			if center then
+				fail("findSpawn MIRV bus — spawn sous le spread d'un bus en vol")
+			elseif #state.missiles ~= 1 then
+				fail("findSpawn MIRV bus — bus annule (contrat B)")
+			else
+				-- Apres mock separation, C1 ogive (N50) continue de refuser.
+				local bus = table.remove(state.missiles, 1)
+				table.insert(state.missiles, {
+					id = 541,
+					slot = occupier.slot,
+					kind = Config.NUKE.MIRV,
+					x = ix,
+					y = iy,
+					sx = ix,
+					sy = iy,
+					tx = ix,
+					ty = iy,
+					progress = 0.7,
+					speed = Config.MISSILE_SPEED,
+					warhead = true,
+					radius = warheadR,
+				})
+				local afterSplit = state:findSpawn(Random.new(209))
+				if afterSplit then
+					fail("findSpawn MIRV bus — spawn sous une ogive scindee")
+				elseif bus == nil then
+					fail("findSpawn MIRV bus — bus perdu avant mock")
+				else
+					print("findSpawn MIRV bus : spread du bus refuse, ogive C1 intacte")
+				end
+			end
+		end
+	end
+end
+
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
