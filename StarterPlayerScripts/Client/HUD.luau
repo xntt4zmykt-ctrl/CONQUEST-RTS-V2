@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Interface de commandement, calee sur la disposition du jeu de reference
-	(OpenFront) :
+	Interface de commandement, calee sur la disposition CONQUEST
+	 :
 
 	  haut gauche     la carte d'identite : nation, doctrine, territoire
 	  haut droit      la session : chrono, recherche, reglages
@@ -55,7 +55,7 @@ local MAX_FEED_ENTRIES = 3
 local FEED_ENTRY_HEIGHT = 21
 
 --[[
-	Geometrie, disposition du jeu de reference.
+	Geometrie, disposition CONQUEST.
 
 	Les hauteurs sont derivees, jamais recopiees : le panneau de controle, les
 	feuilles et la barre tactile s'empilent depuis la meme reference, donc
@@ -178,7 +178,8 @@ local MODE_COLORS: { [string]: Color3 } = {
 
 export type Mode = "attack" | "build" | "boat" | "nuke"
 
-type Ranking = { { slot: number, tiles: number, troops: number, gold: number } }
+type RankRow = { slot: number, tiles: number, troops: number, gold: number }
+type Ranking = { RankRow }
 
 export type HUD = typeof(setmetatable({} :: any, HUD))
 
@@ -222,6 +223,72 @@ local function button(parent: GuiObject, text: string, size: number): TextButton
 	end)
 
 	return b
+end
+
+-- N170 : recycle les TextButton du catalogue chat. Distinct feedFree
+-- (N167, fil notify). Distinct Effects actionPreview (N169). Pas de
+-- Theme.corner / Theme.stroke au reuse. Parent = chatBody.
+local function parkChatButtons(self: HUD)
+	local chatFree = self.chatFree
+	if not chatFree then
+		chatFree = {}
+		self.chatFree = chatFree
+	end
+	local chatActivated = self.chatActivated
+	if not chatActivated then
+		chatActivated = {}
+		self.chatActivated = chatActivated
+	end
+	for _, child in self.chatBody:GetChildren() do
+		if child:IsA("TextButton") then
+			local conn = chatActivated[child]
+			if conn then
+				conn:Disconnect()
+				chatActivated[child] = nil
+			end
+			if child.Parent then
+				child.Parent = nil
+			end
+			chatFree[#chatFree + 1] = child
+		end
+	end
+end
+
+local function takeChatButton(self: HUD, text: string): TextButton
+	local chatFree = self.chatFree
+	if not chatFree then
+		chatFree = {}
+		self.chatFree = chatFree
+	end
+	local n = #chatFree
+	local b: TextButton
+	if n > 0 then
+		b = chatFree[n] :: TextButton
+		chatFree[n] = nil
+		b.Text = text
+		b.LayoutOrder = 0
+		b.TextColor3 = C.textMuted
+		b.TextXAlignment = Enum.TextXAlignment.Center
+		local base = b:GetAttribute("BaseColor") :: Color3
+		b.BackgroundColor3 = base
+		b.Parent = self.chatBody
+	else
+		b = button(self.chatBody, text, T.tiny)
+	end
+	return b
+end
+
+local function bindChatActivated(self: HUD, b: TextButton, fn: () -> ())
+	local chatActivated = self.chatActivated
+	if not chatActivated then
+		chatActivated = {}
+		self.chatActivated = chatActivated
+	end
+	local prev = chatActivated[b]
+	if prev then
+		prev:Disconnect()
+	end
+	chatActivated[b] = b.Activated:Connect(fn)
 end
 
 local function setSelected(b: TextButton, selected: boolean, accent: Color3?)
@@ -382,7 +449,7 @@ end
 	qu'on y gagne est ailleurs — la structure dit maintenant ce qu'elle fait, et
 	un calque entier peut etre masque, decale ou fondu d'un seul geste.
 
-	Il n'y a plus de calque bas : la disposition OpenFront ne laisse plus rien
+	Il n'y a plus de calque bas : la disposition CONQUEST ne laisse plus rien
 	de permanent en bas d'ecran, et un calque vide aurait juste laisse croire
 	que quelque chose y vit encore.
 
@@ -549,7 +616,7 @@ end
 	Ligne 2 : ce qui part — le curseur d'engagement et le chiffre envoye.
 	Ligne 3 : ce que j'ai — une pastille comptee par type de batiment.
 
-	C'est la forme du jeu de reference : le joueur y pose les yeux entre deux
+	C'est la forme CONQUEST : le joueur y pose les yeux entre deux
 	ordres, sans jamais quitter le bas de l'ecran ou sa main est deja. Les
 	puces sont des contours colores plutot que des fonds pleins : trois blocs
 	opaques cote a cote feraient un semafor, trois contours restent des puces.
@@ -1193,6 +1260,8 @@ function HUD.notify(self: HUD, text: string, kind: string)
 
 	-- Retrait partage par l'expiration, le plafond d'entrees et la croix :
 	-- trois chemins, un seul endroit qui nettoie les deux index.
+	-- N167 : Parent = nil + push feedFree si encore parenté. Pas de
+	-- Destroy. Un delay fantôme (reparenté) ne double-push pas.
 	local function removeEntry(target: TextLabel)
 		if not target.Parent then
 			return
@@ -1207,51 +1276,99 @@ function HUD.notify(self: HUD, text: string, kind: string)
 				break
 			end
 		end
-		target:Destroy()
+		target.Parent = nil
+		local pool = self.feedFree
+		if pool then
+			pool[#pool + 1] = target
+		end
 	end
 
-	local entry = Instance.new("TextLabel")
+	-- N167 : free-list feedFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a l'expiration / plafond / croix : Parent = nil +
+	-- push. BuildRing reutilise deja (ringFree N166). Blast
+	-- reutilise deja (blastFree N165). Distinct flame leftover
+	-- N152 (Size = Vector3.new, ≠ visual V74 freeze). Distinct
+	-- N153 (decalage prefixe deja). Distinct visual V103 prefixe
+	-- (ne pas merger 7188). Distinct Effects textFree N158 (ne
+	-- pas partager). Dismiss table.remove(index) inchange.
+	-- Groupement / MAX=3 / task.delay(4.5) inchanges. Pas de Name
+	-- (comme textFree). Parent = self.feed (pas overlay.root).
+	-- Reset Text + couleurs + transparences + LayoutOrder avant
+	-- Parent. Pas Theme.corner / Theme.stroke au reuse (2e
+	-- UICorner). Recolor UIStroke existant. Recreer Dismiss si
+	-- le delay l'a Destroy. Lazy-init feedFree ici (pas HUD.new).
+	-- Recette leftover N166, pas merger visual. Overlay /
+	-- BuildingModels / UnitModels / Effects inchanges.
+	local feedFree = self.feedFree
+	if not feedFree then
+		feedFree = {}
+		self.feedFree = feedFree
+	end
+	local nFeed = #feedFree
+	local entry: TextLabel
+	local reused = nFeed > 0
+	if reused then
+		entry = feedFree[nFeed] :: TextLabel
+		feedFree[nFeed] = nil
+	else
+		entry = Instance.new("TextLabel")
+		entry.BorderSizePixel = 0
+		entry.FontFace = F.bold
+		entry.TextSize = T.small
+		entry.TextTruncate = Enum.TextTruncate.AtEnd
+	end
+	local born = self.feedCounter
 	entry.Size = UDim2.new(1, 0, 0, FEED_ENTRY_HEIGHT)
 	entry.BackgroundColor3 = C.surface
 	entry.BackgroundTransparency = 0.14
-	entry.BorderSizePixel = 0
-	entry.FontFace = F.bold
-	entry.TextSize = T.small
+	entry.TextTransparency = 0
 	entry.TextColor3 = FEED_COLORS[kind] or C.text
 	entry.Text = text
-	entry.TextTruncate = Enum.TextTruncate.AtEnd
-	entry.LayoutOrder = self.feedCounter
+	entry.LayoutOrder = born
 	entry.Parent = self.feed
-	Theme.corner(entry, Theme.radius.sm)
-	Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
+	if reused then
+		local stroke = entry:FindFirstChildWhichIsA("UIStroke")
+		if stroke then
+			stroke.Color = FEED_COLORS[kind] or C.line
+		end
+	else
+		Theme.corner(entry, Theme.radius.sm)
+		Theme.stroke(entry, FEED_COLORS[kind] or C.line, 1)
+	end
 
 	-- Le texte s'arrete avant la croix, sinon les longs messages passent
 	-- dessous et l'un des deux devient illisible.
-	local inset = Instance.new("UIPadding")
-	inset.PaddingRight = UDim.new(0, 20)
-	inset.Parent = entry
+	if not entry:FindFirstChildWhichIsA("UIPadding") then
+		local inset = Instance.new("UIPadding")
+		inset.PaddingRight = UDim.new(0, 20)
+		inset.Parent = entry
+	end
 
 	--[[
 		Croix de rejet. Un message qui reste — une demande d'alliance qu'on ne
 		veut pas traiter tout de suite — ne doit pas devenir un element
 		permanent : le joueur le degage, le minuteur le degage, mais l'un des
 		deux doit toujours pouvoir le faire tout de suite.
+
+		Le delay Destroy la croix : au reuse, la recreer si absente.
 	]]
-	local dismiss = Instance.new("TextButton")
-	dismiss.Name = "Dismiss"
-	dismiss.AnchorPoint = Vector2.new(1, 0.5)
-	dismiss.Position = UDim2.new(1, -3, 0.5, 0)
-	dismiss.Size = UDim2.fromOffset(14, 14)
-	dismiss.BackgroundTransparency = 1
-	dismiss.FontFace = F.bold
-	dismiss.TextSize = T.small
-	dismiss.TextColor3 = C.textFaint
-	dismiss.Text = "\u{00D7}"
-	dismiss.ZIndex = 2
-	dismiss.Parent = entry
-	dismiss.Activated:Connect(function()
-		removeEntry(entry)
-	end)
+	if not entry:FindFirstChild("Dismiss") then
+		local dismiss = Instance.new("TextButton")
+		dismiss.Name = "Dismiss"
+		dismiss.AnchorPoint = Vector2.new(1, 0.5)
+		dismiss.Position = UDim2.new(1, -3, 0.5, 0)
+		dismiss.Size = UDim2.fromOffset(14, 14)
+		dismiss.BackgroundTransparency = 1
+		dismiss.FontFace = F.bold
+		dismiss.TextSize = T.small
+		dismiss.TextColor3 = C.textFaint
+		dismiss.Text = "\u{00D7}"
+		dismiss.ZIndex = 2
+		dismiss.Parent = entry
+		dismiss.Activated:Connect(function()
+			removeEntry(entry)
+		end)
+	end
 
 	local sound = FEED_SOUNDS[kind]
 	if sound then
@@ -1263,7 +1380,25 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	self.feedGroups[text] = { entry = entry, count = 1 }
 
 	while #self.feedEntries > MAX_FEED_ENTRIES do
-		local oldest = table.remove(self.feedEntries, 1)
+		-- N153 : decalage prefixe in-place. Plus de table.remove(1).
+		-- FIFO conserve (le plus vieux reste en tete). n=3 : un shift
+		-- suffit, pas de feedHead (N112 est WorldRenderer). Appeler
+		-- removeEntry APRES le shift : table.find rate, pas de
+		-- double-retrait, Parent=nil + feedGroups nil (N167, plus
+		-- Destroy). Dismiss table.remove(index) inchange.
+		-- MAX_FEED_ENTRIES = 3 inchange. Groupement / LayoutOrder /
+		-- task.delay(4.5) inchanges. Distinct flame leftover N152
+		-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct trail
+		-- N151 (offset.Z). Distinct dirtyHead N112. Distinct visual
+		-- V103 prefixe (ne pas merger 7188). Recette hardening N110,
+		-- portee pas mergee (41e2). UnitModels / Overlay /
+		-- WorldRenderer / BuildingModels inchanges.
+		local n = #self.feedEntries
+		local oldest = self.feedEntries[1]
+		for i = 1, n - 1 do
+			self.feedEntries[i] = self.feedEntries[i + 1]
+		end
+		self.feedEntries[n] = nil
 		if oldest then
 			removeEntry(oldest)
 		end
@@ -1271,6 +1406,11 @@ function HUD.notify(self: HUD, text: string, kind: string)
 
 	task.delay(4.5, function()
 		if not entry.Parent then
+			return
+		end
+		-- N167 : LayoutOrder change au reuse. Un delay ne doit pas
+		-- fondre le message reparenté (plafond N153 recycle avant 4.5 s).
+		if entry.LayoutOrder ~= born then
 			return
 		end
 		-- Le fondu ne touche que l'etiquette : la croix part d'elle-meme,
@@ -1619,7 +1759,7 @@ end
 --=============================================================================
 
 --[[
-	Le catalogue predefini, modele OpenFront : pas de texte libre, donc pas
+	Le catalogue predefini, regle CONQUEST : pas de texte libre, donc pas
 	d'insulte ni de barriere de langue. Deux temps seulement — on choisit un
 	message, et s'il exige une cible, on la designe dans la liste des nations.
 ]]
@@ -1655,14 +1795,20 @@ function HUD.buildChatSheet(self: HUD)
 		self.chatTabs[category.id] = tab
 	end
 
-	-- Zone des messages, a droite : reconstruite a chaque changement
-	-- d'onglet, elle est trop simple pour meriter un recyclage.
+	-- Zone des messages, a droite. N170 : UIGridLayout pose une fois,
+	-- TextButton recycles via chatFree (pas Destroy a chaque onglet).
 	local body = Instance.new("Frame")
 	body.BackgroundTransparency = 1
 	body.Position = UDim2.fromOffset(S.md + 94, 26)
 	body.Size = UDim2.new(1, -S.md * 2 - 94, 1, -34)
 	body.Parent = sheet
 	self.chatBody = body
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.new(0.5, -3, 0, 24)
+	grid.CellPadding = UDim2.fromOffset(6, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.Parent = body
 
 	self.chatCategory = QuickChat.CATEGORIES[1].id
 	self.chatPending = nil
@@ -1671,25 +1817,23 @@ function HUD.buildChatSheet(self: HUD)
 end
 
 function HUD.refreshChatSheet(self: HUD)
-	for _, child in self.chatBody:GetChildren() do
-		child:Destroy()
-	end
+	-- N170 : Parent = nil + push chatFree. Pas Destroy. Pas de second
+	-- UIGridLayout. Disconnect Activated avant rebranchement (oubli =
+	-- double-fire). MouseEnter/Leave conserves. Distinct feedFree N167.
+	-- Distinct actionPreview N169. Distinct flame leftover N152. Distinct
+	-- visual V103 (ne pas merger 7188). Dismiss delay Destroy conserve.
+	-- Parent = self.chatBody. Pas Theme.corner / stroke au reuse.
+	parkChatButtons(self)
 	for id, tab in self.chatTabs do
 		setSelected(tab, id == self.chatCategory)
 	end
 
-	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(0.5, -3, 0, 24)
-	grid.CellPadding = UDim2.fromOffset(6, 6)
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.Parent = self.chatBody
-
 	-- Deuxieme temps : la designation de la cible du message choisi.
 	local pending = self.chatPending
 	if pending then
-		local back = button(self.chatBody, "\u{2190} Retour", T.tiny)
+		local back = takeChatButton(self, "\u{2190} Retour")
 		back.LayoutOrder = 0
-		back.Activated:Connect(function()
+		bindChatActivated(self, back, function()
 			self.chatPending = nil
 			self:refreshChatSheet()
 		end)
@@ -1698,10 +1842,10 @@ function HUD.refreshChatSheet(self: HUD)
 		for slot, entry in self.roster do
 			if slot ~= self.mySlot then
 				order += 1
-				local b = button(self.chatBody, entry.name, T.tiny)
+				local b = takeChatButton(self, entry.name)
 				b.LayoutOrder = order
 				b.TextColor3 = Theme.factionColor(slot)
-				b.Activated:Connect(function()
+				bindChatActivated(self, b, function()
 					self:sendQuickChat(pending, slot)
 				end)
 			end
@@ -1716,10 +1860,10 @@ function HUD.refreshChatSheet(self: HUD)
 			-- Le trou de la cible se lit "..." dans le catalogue : le joueur
 			-- sait qu'il devra la designer au clic.
 			local label = string.gsub(entry.text, "{target}", "...")
-			local b = button(self.chatBody, label, T.tiny)
+			local b = takeChatButton(self, label)
 			b.LayoutOrder = order
 			b.TextXAlignment = Enum.TextXAlignment.Left
-			b.Activated:Connect(function()
+			bindChatActivated(self, b, function()
 				if entry.needsTarget then
 					self.chatPending = entry
 					self:refreshChatSheet()
@@ -2370,6 +2514,18 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	self.diploButtons.markTarget.Visible = not allied
 end
 
+-- N100 : HUD.update hoist rankByTiles (recette visual V54).
+-- Distinct de N97 (records ranked) et de N76 (playerStatsForReplicate).
+-- Non reentrant. Meme loi : tuiles desc, tie-break troupes desc.
+-- Ne PAS retoucher self.ranked / inner records (N97 deja).
+-- Pas de RemoteFunction. VictoryScreen / Overlay / init.client non touches.
+local function rankByTiles(a: RankRow, b: RankRow): boolean
+	if a.tiles == b.tiles then
+		return a.troops > b.troops
+	end
+	return a.tiles > b.tiles
+end
+
 --=============================================================================
 -- Rafraichissement par tick
 --=============================================================================
@@ -2495,21 +2651,33 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 	end
 
 	-- Classement trie par territoire : c'est la mesure qui decide la victoire.
-	local ranked: Ranking = {}
+	-- N97 : recycle self.ranked + inner records (recette visual V50 / boatSnapBuf).
+	-- Distinct de N96 (hash barycentre) et de N76 (playerStatsForReplicate).
+	-- Non reentrant. Truncate leftover AVANT table.sort (une ligne fantome
+	-- apparaitrait dans VictoryScreen.show / #hud.ranked).
+	-- Ne PAS table.insert. Ne PAS remplacer self.ranked.
+	local ranked: Ranking = self.ranked
+	local n = 0
 	local maxTiles = 1
 	for slot, s in stats do
-		table.insert(ranked, { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold })
+		n += 1
+		local rec = ranked[n]
+		if rec == nil then
+			ranked[n] = { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold }
+		else
+			rec.slot = slot
+			rec.tiles = s.tiles
+			rec.troops = s.troops
+			rec.gold = s.gold
+		end
 		if s.tiles > maxTiles then
 			maxTiles = s.tiles
 		end
 	end
-	table.sort(ranked, function(a, b)
-		if a.tiles == b.tiles then
-			return a.troops > b.troops
-		end
-		return a.tiles > b.tiles
-	end)
-	self.ranked = ranked
+	for i = #ranked, n + 1, -1 do
+		ranked[i] = nil
+	end
+	table.sort(ranked, rankByTiles)
 
 	--[[
 		Le classement maison a ete retire : la liste native de Roblox le donne
