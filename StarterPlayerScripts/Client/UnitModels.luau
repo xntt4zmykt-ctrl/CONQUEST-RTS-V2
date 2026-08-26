@@ -85,7 +85,7 @@ local function addWake(visual: Visual)
 	-- retoucher les Bow). Distinct de V94 (LandingRamp pitch X=-8°,
 	-- kind==1 — ne PAS retoucher la rampe). Distinct de V95
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
-	-- corps). Distinct de leftover V100 (trail offset.Z,
+	-- corps). Distinct de V100 (trail offset.Z,
 	-- UnitModels.place). Distinct de V78 (LaunchWake Overlay, wakeRot
 	-- cuit, Y = OCEAN+0.12 — autre objet). Construction de
 	-- modele, pas 60 Hz.
@@ -150,7 +150,7 @@ local function buildCarrier(visual: Visual, faction: Color3)
 		-- Distinct de V95 (MissileBody yaw Y=90°). Distinct de V93
 		-- (Bow yaw Y=π, meme buildCarrier — ne PAS retoucher les
 		-- Bow). Distinct de V92 (Wake, addWake apres buildCarrier).
-		-- Distinct de leftover V100 (trail offset.Z,
+		-- Distinct de V100 (trail offset.Z,
 		-- UnitModels.place). Chemin mort tant
 		-- que CARRIER_MESH_ID == "". Ne pas activer l'ID au banc
 		-- (stub MeshPart n'importe pas le mesh).
@@ -170,7 +170,7 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- retoucher les Wake). Distinct de V94 (LandingRamp pitch
 	-- X=-8°, kind==1 — ne PAS retoucher la rampe). Distinct de
 	-- V95 (MissileBody yaw Y=90°, cylindre — ne PAS retoucher
-	-- le corps). Distinct de leftover V100 (trail offset.Z,
+	-- le corps). Distinct de V100 (trail offset.Z,
 	-- UnitModels.place).
 	-- Distinct de V78 (LaunchWake Overlay — autre objet).
 	-- Construction de modele, pas 60 Hz.
@@ -219,7 +219,7 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- feel c62f. Ne PAS retoucher LandingRamp (V94 deja). Ne PAS
 	-- retoucher MissileBody (V95 deja). Ne PAS retoucher Fin
 	-- (V96 deja). Ne PAS retoucher le mesh carrier (V97 deja).
-	-- V98 CityWindows rest.X (BuildingModels.animate). V99 beacons rest.Z (BuildingModels.animate). Leftover V100 trail offset.Z.
+	-- V98 CityWindows rest.X (BuildingModels.animate). V99 beacons rest.Z (BuildingModels.animate). V100 trail offset.Z (UnitModels.place).
 	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
@@ -258,7 +258,7 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 		-- transport/cargo — ne PAS retoucher les Bow). Distinct de
 		-- V92 (Wake yaw Y=±11°, addWake — ne PAS retoucher les
 	-- Wake). Distinct de V95 (MissileBody yaw Y=90°, cylindre
-	-- — ne PAS retoucher le corps). Distinct de leftover V100
+	-- — ne PAS retoucher le corps). Distinct de V100
 	-- (trail offset.Z, UnitModels.place). Distinct de V91
 		-- (rampes SAM, pitch X=-31°, BuildingModels — autre
 		-- fichier). Distinct de V78 (LaunchWake Overlay — autre
@@ -304,7 +304,7 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- rampe). Distinct de V93 (Bow yaw Y=π). Distinct de V92
 	-- (Wake yaw Y=±11°, addWake). Distinct de V96 (Fin roll
 	-- Z=axis·π/2 — ne PAS retoucher les ailettes). Distinct de
-	-- leftover V100 (trail offset.Z, UnitModels.place). Distinct
+	-- V100 (trail offset.Z, UnitModels.place). Distinct
 	-- de V88 (cylinder() helper, Z=90°, BuildingModels — autre
 	-- fichier). Distinct de V78 (LaunchWake Overlay — autre
 	-- objet). Construction de modele, pas 60 Hz. addPart pose
@@ -326,8 +326,8 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
 	-- corps). Distinct de V94 (LandingRamp pitch X=-8°,
 	-- kind==1). Distinct de V93 (Bow yaw Y=π). Distinct de V92
-	-- (Wake yaw Y=±11°, addWake). Distinct de leftover V100
-	-- (trail offset.Z, UnitModels.place). Distinct de V78
+	-- (Wake yaw Y=±11°, addWake). Distinct de V100
+	-- (trail offset.Z, UnitModels.place — fermee ici). Distinct de V78
 	-- (LaunchWake Overlay — autre objet). Construction de
 	-- modele, pas 60 Hz. addPart pose part.CFrame = offset ;
 	-- Overlay place compose frame * offset ensuite. Size 0.22,
@@ -381,7 +381,19 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 		elseif piece.role == "flame" then
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
 		elseif piece.role == "trail" then
-			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Position.Z) * 0.035, 0.25, 0.9)
+			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z
+			-- 60 Hz (Position reconstruit un Vector3). offset est deja
+			-- un CFrame pose a createMissile. Amplitude 0.035,
+			-- frequence 9, clamp [0.25, 0.9] inchanges. Formule
+			-- ajoute au Transparency courant. Recette feel N151 —
+			-- ne PAS merger. Distinct de V99 (beacons rest.Z,
+			-- BuildingModels.animate — autre fichier). Distinct de
+			-- V74 (flame Size API). Distinct de V73 (radar/flag).
+			-- Distinct de V98 (CityWindows rest.X). FactoryOutput /
+			-- SiloWarning leftover separe (pas de Position). Trois
+			-- Parts Exhaust par missile. Construction createMissile
+			-- inchangee.
+			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Z) * 0.035, 0.25, 0.9)
 		elseif piece.role == "light" then
 			piece.part.Transparency = if math.sin(time * 3) > -0.2 then 0 else 0.45
 		end
