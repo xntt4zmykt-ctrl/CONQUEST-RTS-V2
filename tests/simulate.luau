@@ -2634,6 +2634,206 @@ do
 end
 
 do
+	-- Beachhead : la tuile debarquee est deja a l'attaquant. L'enfiler dans
+	-- la frontier faisait skip + remboursement le meme tick (invasions mortes).
+	local state = GameState.new(9191)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Debarque", Random.new(91), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(92), 0)
+	if not invader or not defender then
+		fail("beachhead — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local landing: number? = nil
+		local inland: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and nb ~= index then
+						landing, inland = index, nb
+						break
+					end
+				end
+			end
+			if landing then
+				break
+			end
+		end
+		if not landing or not inland then
+			fail("beachhead — paire terrestre introuvable")
+		else
+			state:setOwner(landing, invader.slot)
+			state:setOwner(inland, defender.slot)
+			local committed = 800
+			local troopsBefore = invader.troops
+			state:seedBeachhead(invader.slot, defender.slot, committed, landing)
+			if #state.attacks ~= 1 then
+				fail(`beachhead — {#state.attacks} fronts apres seed (attendu 1)`)
+			else
+				local atk = state.attacks[1]
+				if atk.queued[landing] then
+					fail("beachhead — la tuile debarquee est encore dans la frontier")
+				end
+				if not atk.queued[inland] then
+					fail("beachhead — le voisin cible n'est pas enfile")
+				end
+				if atk.frontier.size < 1 then
+					fail("beachhead — frontier vide")
+				end
+				state:step()
+				if invader.troops >= troopsBefore + committed then
+					fail("beachhead — troupes remboursees sans expansion")
+				end
+				local inlandOwner = buffer.readu8(state.owner, inland)
+				local still = false
+				for _, front in state.attacks do
+					if front.attacker == invader.slot then
+						still = true
+						break
+					end
+				end
+				if inlandOwner ~= invader.slot and not still then
+					fail("beachhead — ni capture ni front survivant")
+				end
+				print("beachhead : frontier voisins, pas de remboursement")
+			end
+		end
+	end
+end
+
+do
+	-- Renforcer un front vise ne doit pas creer un second Attack.
+	local state = GameState.new(4242)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Aimer", Random.new(11), 0)
+	if not a then
+		fail("aim reinforce — spawn impossible")
+	else
+		a.troops = 8000
+		a.attackRatio = 1
+		local scratch = table.create(4, 0)
+		local aimTile: number? = nil
+		local targetSlot: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) then
+					local owner = buffer.readu8(state.owner, nb)
+					if owner ~= a.slot then
+						aimTile = nb
+						targetSlot = owner
+						break
+					end
+				end
+			end
+			if aimTile then
+				break
+			end
+		end
+		if not aimTile or targetSlot == nil then
+			fail("aim reinforce — pas de contact")
+		else
+			a.aimTile = aimTile
+			local ok1 = state:launchAttack(a.slot, targetSlot)
+			if not ok1 then
+				fail("aim reinforce — premiere offensive refusee")
+			else
+				local n1 = #state.attacks
+				if n1 < 1 then
+					fail("aim reinforce — aucun front")
+				else
+					a.troops = 8000
+					a.aimTile = aimTile
+					state:launchAttack(a.slot, targetSlot)
+					if #state.attacks ~= n1 then
+						fail(`aim reinforce — fronts dupliques ({n1} -> {#state.attacks})`)
+					end
+					print("aim reinforce : un seul front apres deux lancers")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Colis : le niveau snapshot au depart, pas le niveau a l'arrivee.
+	local landState = GameState.new(2720)
+	local a = landState:addPlayer(nil, "Snapshot", Random.new(22), 0)
+	if not a then
+		fail("colis snapshot — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		local cityTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if landState:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				local cx, cy = fx + Config.TRUCK_SPEED + 3, fy
+				if MapGen.inBounds(cx, cy) then
+					local candidate = MapGen.toIndex(cx, cy)
+					if landState:isLand(candidate) then
+						factoryTile, cityTile = index, candidate
+						break
+					end
+				end
+			end
+		end
+		if not factoryTile or not cityTile then
+			fail("colis snapshot — paire terrestre introuvable")
+		else
+			landState:setOwner(factoryTile, a.slot)
+			landState:setOwner(cityTile, a.slot)
+			landState:placeBuilding(factoryTile, Config.BUILDING.FACTORY, a.slot)
+			landState:placeBuilding(cityTile, Config.BUILDING.CITY, a.slot)
+			landState.tick += 1
+			Trade.step(landState, Random.new(7), function() end)
+			local delivery = landState.tradeDeliveries[factoryTile]
+			if not delivery then
+				fail("colis snapshot — pas d'expedition")
+			else
+				local snapLevel = delivery.level
+				landState.buildings[factoryTile].level = snapLevel + 2
+				local goldBefore = a.gold
+				landState.tick = delivery.arrivalTick
+				Trade.step(landState, Random.new(9), function() end)
+				local gained = a.gold - goldBefore
+				local stopBonus = 1 + math.min(0.8, (delivery.links - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+				local expected = (Config.TRUCK_GOLD_BASE + delivery.distance * Config.TRUCK_GOLD_PER_TILE)
+					* snapLevel
+					* math.max(1, delivery.links)
+					* stopBonus
+				if math.abs(gained - expected) > 0.01 then
+					fail(`colis snapshot — gain {gained} attendu {expected} (niveau depart)`)
+				end
+				print("colis snapshot : niveau au depart honore")
+			end
+		end
+	end
+end
+
+do
+	-- Proposition expiree : refus meme si Diplomacy.step n'a pas encore nettoye.
+	local state = GameState.new(5153)
+	local a = state:addPlayer(nil, "Offrant", Random.new(71), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(72), 0)
+	if not a or not b then
+		fail("accept expire — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		state.tick += Config.ALLIANCE_REQUEST_TIMEOUT + 1
+		if Diplomacy.accept(state, a.slot, b.slot) then
+			fail("accept expire — proposition perimee encore honoree")
+		end
+		if state:areAllied(a.slot, b.slot) then
+			fail("accept expire — pacte cree hors delai")
+		end
+		print("accept expire : proposition perimee refusee")
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
