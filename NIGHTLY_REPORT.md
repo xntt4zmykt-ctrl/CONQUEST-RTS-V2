@@ -1,54 +1,54 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 50)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 51)
 
-Déclencheur : ouverture de la **PR #153** (`cursor/analyse-nocturne-du-codebase-5bde`) — UnitModels radar/flag euler, specs N129–N130.
+Déclencheur : ouverture de la **PR #155** (`cursor/analyse-nocturne-du-codebase-5655`) — PlacementPreview footprint / Overlay LaunchWake euler, specs N131–N132.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-5655`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#153.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-5aa9`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#155.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. Camera overview : lerp mire `fx/fy/fz` (N121) ; champs `focusX/Y/Z` (N122) ; shake `sx/sy/sz` (N119) ; offset YXZ `ox/oy/oz` (N120) ; pose `CFrame.new * rotation` (N118). Minimap : `setFocus(x,y,z)` nombres (N123). Radar / Flag / Boom : `fromEulerAnglesYXZ` (N124). Overlay navire : roulis `fromEulerAnglesYXZ` (N125). Overlay camion : roues `fromEulerAnglesYXZ` (N126). `UnitModels.place` radar : `fromEulerAnglesYXZ` (N127). `UnitModels.place` flag : `fromEulerAnglesYXZ` (N128). `PlacementPreview.update` footprint : `fromEulerAnglesYXZ` (N129). Overlay LaunchWake : `fromEulerAnglesYXZ` (N130). Overlay LandingSplash `CFrame.Angles` encore événement (leftover N131). Overlay DeliveryPulse `CFrame.Angles` événement (leftover N132).
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. Camera overview : lerp mire `fx/fy/fz` (N121) ; champs `focusX/Y/Z` (N122) ; shake `sx/sy/sz` (N119) ; offset YXZ `ox/oy/oz` (N120) ; pose `CFrame.new * rotation` (N118). Minimap : `setFocus(x,y,z)` nombres (N123). Radar / Flag / Boom : `fromEulerAnglesYXZ` (N124). Overlay navire : roulis `fromEulerAnglesYXZ` (N125). Overlay camion : roues `fromEulerAnglesYXZ` (N126). `UnitModels.place` radar : `fromEulerAnglesYXZ` (N127). `UnitModels.place` flag : `fromEulerAnglesYXZ` (N128). `PlacementPreview.update` footprint : `fromEulerAnglesYXZ` (N129). Overlay LaunchWake : `fromEulerAnglesYXZ` (N130). Overlay LandingSplash : `fromEulerAnglesYXZ` (N131). Overlay DeliveryPulse : `fromEulerAnglesYXZ` (N132). Overlay Shockwave `CFrame.Angles` encore événement (leftover N133). Effects `conquestPulse` ring `CFrame.Angles` événement (leftover N134).
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #153 (passe 49) : claims vérifiés.** `UnitModels.place` radar `piece.offset * fromEulerAnglesYXZ(0, time * 2.2, 0)` (N127) ; flag `piece.offset * fromEulerAnglesYXZ(rx, 0, 0)` (N128). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé. Visual **PR #151** (`1b5c`) a **fermé V73** — recette **portée** passe 49, **pas mergée**. Visual **PR #154** (`c0ec`) a **fermé V75** en parallèle (`CFrame.new * footprintRot`, pulse + 0.42) — feel N129 **porte** l’euler `fromEulerAnglesYXZ` du worker #153 (**pas** merger `c0ec` : pas de pulse, hauteur **0.4**).
+**PR #155 (passe 50) : claims vérifiés.** `PlacementPreview.update` footprint `CFrame.new(base.X, ground + 0.4, base.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))` (N129) ; Overlay LaunchWake `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))` (N130). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé. Visual **PR #154** (`c0ec`) a **fermé V75** — recette euler **portée** passe 50, **pas mergée**. Visual **PR #157** (`70a5`) a **fermé V76** Size rayon (feel Size = API, **pas merger**).
 
-Cette passe a **livré ce que #153 a documenté (N129, N130)**.
+Cette passe a **livré ce que #155 a documenté (N131, N132)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #153
+## 2. Revue PR #155
 
-| Claim #153 | Réalité à l’ouverture |
+| Claim #155 | Réalité à l’ouverture |
 |---|---|
-| `UnitModels.place` radar euler (N127) | Oui. `piece.offset * fromEulerAnglesYXZ(0, time * 2.2, 0)`. Recette visual V73 leftover, pas merger `1b5c`. |
-| `UnitModels.place` flag euler (N128) | Oui. `piece.offset * fromEulerAnglesYXZ(rx, 0, 0)` avec `rx = sin(time * 5) * 0.06`. Recette visual V73 leftover, pas merger `1b5c`. PlacementPreview `CFrame.Angles` restait (leftover N129). Overlay LaunchWake `CFrame.Angles` restait (leftover N130). |
-| Specs N129–N130 | **Corrigés ici.** N129 = `PlacementPreview.update` footprint `CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))` (leftover visual V75 **fermée** sur `c0ec` via `footprintRot` — **porté euler worker #153, pas mergé** ; feel hauteur **0.4**, **pas** de `self.pulse`). N130 = Overlay `applyUnits` insert `LaunchWake` `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))` (`c0ec` n’édite pas Overlay ; leftover événements). |
+| `PlacementPreview.update` footprint euler (N129) | Oui. `CFrame.new(base.X, ground + 0.4, base.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. Hauteur 0.4, pas de pulse. Recette visual V75 leftover, pas merger `c0ec`. |
+| Overlay LaunchWake euler (N130) | Oui. `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. Insert spawn navire seulement. Splash / pulse / shockwave restaient (leftover N131/N132). |
+| Specs N131–N132 | **Corrigés ici.** N131 = Overlay `applyUnits` despawn `LandingSplash` `CFrame.new(last.X, OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))` (skip retraite N56). N132 = Overlay `stepInterpolation` fin de `delivery` `CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #152/`0744` (N101–N104), feel jusqu’à #153, visuelles #39/…/`1b5c` V73 **fermé** + `c0ec` / PR #154 V74/V75 **fermés**. **#153 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `c0ec` / `1b5c` / `9793` ni hardening `0744` / `f593` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #156/`e291` (N103–N106), feel jusqu’à #155, visuelles #39/…/`c0ec` V75 **fermé** + `70a5` / PR #157 V76 **fermé**. **#155 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `70a5` / `c0ec` / `1b5c` ni hardening `e291` / `0744` sans rebase.
 
-**Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. N129/N130 sont cosmétique client. Risques documentés, non corrigés ici (hors N129/N130) : `JoinRequest` hors IntentValidator ; Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
+**Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. N131/N132 sont cosmétique client. Risques documentés, non corrigés ici (hors N131/N132) : `JoinRequest` hors IntentValidator ; Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
 
-**Revue combat/éco :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. `Trade.dispatch` `{}` encore (hardening N92, pas sur feel). Aucun bug clair sûr hors N129/N130. Latent hors hot path : `buildCarrier` mesh (`CARRIER_MESH_ID ~= ""`) écrit `visual.parts` au lieu de `visual.pieces` — mort tant que l’id est `""`, **non corrigé** (hors spec).
+**Revue combat/éco :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. `Trade.dispatch` `{}` encore (hardening N92, pas sur feel). Aucun bug clair sûr hors N131/N132. Latent hors hot path : `buildCarrier` mesh (`CARRIER_MESH_ID ~= ""`) écrit `visual.parts` au lieu de `visual.pieces` — mort tant que l’id est `""`, **non corrigé** (hors spec).
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N129–N130 du rapport #153. Commits séparés (N129 puis N130).
+Feel #19 inchangé. Pas de réinvention : N131–N132 du rapport #155. Commits séparés (N131 puis N132).
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `PlacementPreview.update` footprint `CFrame.Angles` 60 Hz (N129) | `PlacementPreview.luau` (`update` ligne `footprint.CFrame`), `tests/client.luau` (check apercu) | Leftover N128. `CFrame.new(base.X, ground + 0.4, base.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. Angle 90° / hauteur 0.4 inchangés. Pas de pulse. Pas `footprintRot` cuit (`c0ec` V75, **pas mergé** — `base` change à chaque tuile). Cosmétique. UnitModels N127/N128 **inchangés**. |
-| Overlay LaunchWake `CFrame.Angles` événement (N130) | `Overlay.luau` (`applyUnits` insert `LaunchWake`), `tests/client.luau` (check navires) | Leftover N129. `CFrame.new(origin.X, OCEAN_LEVEL + 0.12, origin.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. Offset Y + 0.12 / garde `not isMissile` / Tween Size inchangés. `stepInterpolation` **non** touché. Splash / pulse / shockwave **non** fermés (leftover N131/N132). Cosmétique. PlacementPreview N129 **inchangé**. |
+| Overlay LandingSplash `CFrame.Angles` événement (N131) | `Overlay.luau` (`applyUnits` despawn `LandingSplash`), `tests/client.luau` (check navires) | Leftover N130. `CFrame.new(last.X, OCEAN_LEVEL + 0.14, last.Z) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. Gardes `not isMissile` / `not retreating` (N56) inchangées. Cosmétique. LaunchWake N130 **inchangé**. |
+| Overlay DeliveryPulse `CFrame.Angles` événement (N132) | `Overlay.luau` (`stepInterpolation` fin de `delivery`), `tests/client.luau` (check pose/capture) | Leftover N131. `CFrame.new(route.to) * fromEulerAnglesYXZ(0, 0, math.rad(90))`. `route.to` déjà Vector3. `truckModel.Parent = nil` inchangé. Cosmétique. Splash N131 **inchangé**. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), Overlay LandingSplash (**N131**), Overlay DeliveryPulse (**N132**), Overlay Shockwave, flamme `Size = Vector3.new` (Size = API, leftover visual V74), tribus `humanTargetProtected`. UnitModels / BuildingModels / WorldRenderer / WorldCamera / HUD / Minimap / serveur **non édités**.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), Overlay Shockwave (**N133**), Effects `conquestPulse` ring (**N134**), WorldRenderer glints, BuildingModels `BuildRing`, flamme `Size = Vector3.new` (Size = API, leftover visual V74 fermée Option A), PlacementPreview Size rayon (visual V76, feel Size = API), tribus `humanTargetProtected`. UnitModels / BuildingModels / WorldRenderer / WorldCamera / HUD / Minimap / PlacementPreview / serveur **non édités**.
 
 ---
 
@@ -80,73 +80,73 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert). Wrap `launchAttack` gare via `parkedBuf` (**N87**).
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx / Diplomacy.viewFor 1 Hz. Playing 10 Hz ; lobby vide et ended → 1 Hz.
-- Overlay interpolation X/Z + yaw euler (**N117**) **et** camion `segRot` (**N115**) **et** roulis navire (**N125**) **et** roues camion (**N126**). Camera : lerp nombres (**N121**) + champ `focusX/Y/Z` (**N122**) + shake (**N119**) + offset (**N120**) + pose (**N118**). Minimap `setFocus(x,y,z)` (**N123**). Radar/Flag/Boom euler (**N124**). `UnitModels.place` radar euler (**N127**) **et** flag euler (**N128**). `PlacementPreview.update` footprint euler (**N129**). Overlay LaunchWake euler (**N130**). Overlay LandingSplash `CFrame.Angles` encore événement (**N131**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- Overlay interpolation X/Z + yaw euler (**N117**) **et** camion `segRot` (**N115**) **et** roulis navire (**N125**) **et** roues camion (**N126**). Camera : lerp nombres (**N121**) + champ `focusX/Y/Z` (**N122**) + shake (**N119**) + offset (**N120**) + pose (**N118**). Minimap `setFocus(x,y,z)` (**N123**). Radar/Flag/Boom euler (**N124**). `UnitModels.place` radar euler (**N127**) **et** flag euler (**N128**). `PlacementPreview.update` footprint euler (**N129**). Overlay LaunchWake euler (**N130**). Overlay LandingSplash euler (**N131**). Overlay DeliveryPulse euler (**N132**). Overlay Shockwave `CFrame.Angles` encore événement (**N133**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N131–N132)
+## 5. Issues worker-ready (nouveaux, N133–N134)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N130 = faits. N22 = **N67 fait**. N27 = doc only. **V73 / N127 / N128** fermés passe 49. **N129 / N130** fermés ici (portés, pas mergés ; visual V75 **fermée** sur `c0ec` via `footprintRot` + pulse — feel n’a ni pulse ni 0.42). Leftover feel Overlay LandingSplash = **N131**. Leftover feel Overlay DeliveryPulse = **N132**. Overlay Shockwave / Effects ring / WorldRenderer glints = leftover après N132. Flamme `Size = Vector3.new` = leftover visual V74 **fermée** Option A sur `c0ec` (Size = API, ne pas en faire N131).
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N132 = faits. N22 = **N67 fait**. N27 = doc only. **V73 / N127 / N128** fermés passe 49. **N129 / N130** fermés passe 50. **N131 / N132** fermés ici (portés, pas mergés ; visual V75 **fermée** sur `c0ec` via `footprintRot` + pulse — feel n’a ni pulse ni 0.42). Leftover feel Overlay Shockwave = **N133**. Leftover feel Effects `conquestPulse` ring = **N134**. WorldRenderer OceanGlint / BuildingModels `BuildRing` / décor trunks = leftover après N134. Flamme `Size = Vector3.new` = leftover visual V74 **fermée** Option A sur `c0ec` (Size = API, ne pas en faire N133). PlacementPreview Size rayon = visual V76 **fermée** sur `70a5` (feel Size = API, ne pas merger).
 
 ---
 
-### ISSUE-N131 — Overlay LandingSplash `CFrame.Angles` événement (feel)
+### ISSUE-N133 — Overlay Shockwave `CFrame.Angles` événement (feel)
 
-**Priorité :** P3 alloc client Overlay. Leftover explicite de N130 (LaunchWake insert déjà). Visual V75 **distingue** wake / splash / pulse Overlay (événement, pas hover). Distinct de N130 (LaunchWake spawn), de N129 (PlacementPreview 60 Hz), de N125 (roulis interpolation). Overlay `applyUnits` branche despawn navire **seulement**. Ne pas toucher `trackUnit` insert. Ne pas toucher `stepInterpolation`. Ne pas toucher PlacementPreview ni UnitModels.
+**Priorité :** P3 alloc client Overlay. Leftover explicite de N132 (DeliveryPulse insert déjà). Visual V75 **distingue** wake / splash / pulse Overlay (événement) ; shockwave est le dernier `CFrame.Angles` Overlay. Distinct de N132 (DeliveryPulse gare), de N131 (LandingSplash mer), de N130 (LaunchWake spawn). Overlay `explosion` **seulement**. Ne pas toucher `applyUnits`. Ne pas toucher `stepInterpolation`. Ne pas toucher Effects.
 
-**Problème :** N130 ferme le wake spawn. Reste, **une fois par navire despawn non-retraite** (pas 60 Hz interpolation, même `CFrame.Angles(0, 0, π/2)` cylindre à plat) :
+**Problème :** N132 ferme le pulse livraison. Reste, **une fois par frappe** (`Overlay.explosion`, pas 60 Hz interpolation, même `CFrame.Angles(0, 0, π/2)` cylindre à plat) :
 
 ```
-splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
+shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
 ```
 
-Branche `if not unit.isMissile` + `if not retreating` (N56 : retraite auto ne joue pas le splash d’arrivée). `fromEulerAnglesYXZ(0, 0, math.rad(90))` ≡ `Angles(0, 0, π/2)`. Distinct de N130 (même euler, autre insert, `origin` spawn vs `last` despawn, Y `+ 0.12` vs `+ 0.14`). Distinct de pulse livraison (`route.to`, leftover N132). Distinct de shockwave nuke (`TERRAIN_HEIGHT[PLAINS] + 0.5`, leftover après N132). Distinct de Tween `Size = Vector3.new` (API). Garde `retreatTinted` / `unit.extra.retreating` **inchangée**.
+`ground` vient de `WorldSpace.tileToWorld(x, y)`. `fromEulerAnglesYXZ(0, 0, math.rad(90))` ≡ `Angles(0, 0, π/2)`. Distinct de N132 (`route.to` gare, pas hauteur plains). Distinct de Effects `conquestPulse` ring (`Y = 3`, leftover N134). Distinct de sphère Blast (`CFrame.new(ground.X, 14, ground.Z)` **sans** rotation — ne pas y toucher). Distinct de fumée (`CFrame.new` translation). Distinct de Tween `Size = Vector3.new` (API). `worldRadius * 2.5` **inchangé**.
 
-**Pourquoi 20K CCU :** leftover N130. 8 clients × N despawns navire × `CFrame.Angles` + compose. Pas d’autorité (splash cosmétique). Un euler faux dresserait le disque d’arrivée. Retraite / missiles : la branche n’est pas atteinte. Interpolation 60 Hz **déjà** N125/N126 — ne pas y revenir. Insert wake **déjà** N130 — ne pas y revenir.
+**Pourquoi 20K CCU :** leftover N132. 8 clients × N frappes × `CFrame.Angles` + compose. Pas d’autorité (onde cosmétique). Un euler faux dresserait le disque de portée. Sphere / smoke / light : pas de `CFrame.Angles`. Interpolation 60 Hz **déjà** N125/N126 — ne pas y revenir. Insert pulse **déjà** N132 — ne pas y revenir.
 
 **Worker :**
 
-1. Dans `Overlay.applyUnits` seulement, despawn navire `LandingSplash` : poser `CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. Plus de `CFrame.Angles` sur ce despawn. Offset Y `OCEAN_LEVEL + 0.14` **inchangé**. Gardes `not isMissile` / `not retreating` **inchangées**. Tween Size/Transparency **inchangé**. `task.delay` Destroy **inchangé**. Teinte retraite N56 **inchangée**.
+1. Dans `Overlay.explosion` seulement, `Shockwave` : poser `CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. Plus de `CFrame.Angles` sur cette onde. Hauteur `PLAINS + 0.5` **inchangée**. Tween Size/Transparency **inchangé**. Sphère / fumée / PointLight **inchangés**. `task.delay` Destroy **inchangé**.
 
-2. **Garder la rotation.** Ne **pas** convertir en translation. Ne **pas** « fermer » pulse / shockwave dans le même commit (leftover N132 / après). Ne pas « fermer » N130 (déjà). Ne pas « fermer » flamme `Size`. Ne pas porter visual. Après N130. `stepInterpolation` **non**. `trackUnit` insert **non**.
+2. **Garder la rotation.** Ne **pas** convertir en translation. Ne **pas** « fermer » Effects ring / WorldRenderer glints / BuildingModels `BuildRing` dans le même commit (leftover N134 / après). Ne pas « fermer » N132. Ne pas « fermer » flamme `Size`. Ne pas porter visual. Après N132. `applyUnits` **non**. `stepInterpolation` **non**.
 
-3. Tests « navires, missiles et interpolation » leftover N130/N128/N127/N125 **et** leftover N129 apercu **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+3. Tests « navires, missiles et interpolation » leftover N131/N130/N128/N127/N125 **et** leftover N132 pose/capture **et** leftover N129 apercu **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-4. Test : banc client navires **doit rester vert** (despawn `applyUnits({}, {})` ne lève pas ; leftover N116 immobile ; leftover N125 yaw+roulis ; leftover N127/N128 euler pièces ; leftover N130 wake spawn). Check apercu leftover N129. Check pose/capture leftover N126. Check modeles leftover N124. Check camera leftover N122. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+4. Test : banc client navires **doit rester vert** (`overlay:explosion(50, 50, 9)` en fin de check ne lève pas ; leftover N131 splash despawn ; leftover N130 wake spawn ; leftover N116 immobile ; leftover N125 yaw+roulis). Check pose leftover N132 pulse. Check apercu leftover N129. Check modeles leftover N124. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-5. Fichiers : `Overlay.luau` (`applyUnits` despawn `LandingSplash` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore N131 (commentaire leftover, **garder** N130/N128/N56). `PlacementPreview.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur.
+5. Fichiers : `Overlay.luau` (`explosion` `Shockwave` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore N133 (commentaire leftover, **garder** N131/N130/N56). `Effects.luau` **non**. `PlacementPreview.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N131 feel ≠ N130 (LaunchWake spawn) ≠ N129 (footprint 60 Hz) ≠ N125 (roulis interpolation) ≠ N132 (DeliveryPulse) ≠ visual V75 (leftover `1b5c`, ne pas merger).** Non réentrant. Ne pas fusionner avec N132 dans le même worker. N56 retraite skip splash **inchangé**.
+**Contraintes :** pas de RemoteFunction. **N133 feel ≠ N132 (DeliveryPulse gare) ≠ N131 (LandingSplash mer) ≠ N130 (LaunchWake spawn) ≠ N134 (Effects ring Y=3) ≠ visual V75 (leftover `1b5c`, ne pas merger).** Non réentrant. Ne pas fusionner avec N134 dans le même worker. Sphere / smoke **sans** euler.
 
 ---
 
-### ISSUE-N132 — Overlay DeliveryPulse `CFrame.Angles` événement (feel)
+### ISSUE-N134 — Effects `conquestPulse` ring `CFrame.Angles` événement (feel)
 
-**Priorité :** P3 alloc client Overlay. Leftover explicite après N131 (splash despawn). Visual V75 **distingue** pulse livraison Overlay (événement fin de trajet camion, pas hover, pas navire). Distinct de N131 (splash mer), de N130 (wake spawn), de N126 (roues interpolation). Overlay `stepInterpolation` boucle `self.routes` delivery **seulement**. Ne pas toucher `applyUnits`. Ne pas toucher `applyRouteProgress`. Ne pas toucher PlacementPreview.
+**Priorité :** P3 alloc client Effects. Leftover explicite après N133 (shockwave Overlay). Distinct de N133 (Overlay nuke, `PLAINS + 0.5`), de N132 (DeliveryPulse gare Overlay), de N95 (`applyDelta` pools). Effects `conquestPulse` **seulement**. Ne pas toucher Overlay. Ne pas toucher WorldRenderer. Ne pas toucher `conquestWave` barycentre / caps.
 
-**Problème :** N131 ferme le splash despawn. Reste, **une fois par livraison arrivée** (`delivery.progress >= 1`, pas 60 Hz interpolation, même `CFrame.Angles(0, 0, π/2)` cylindre à plat) :
+**Problème :** N133 ferme le shockwave nuke. Reste, **une fois par vague de conquête / perte** (`Effects.conquestPulse`, appelé depuis `conquestWave` / `lossWave`, pas 60 Hz interpolation, même `CFrame.Angles(0, 0, π/2)` cylindre à plat) :
 
 ```
-pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
+ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
 ```
 
-`route.to` est déjà un `Vector3` monde (gare). `fromEulerAnglesYXZ(0, 0, math.rad(90))` ≡ `Angles(0, 0, π/2)`. Distinct de N131 (`last.X` / `OCEAN_LEVEL + 0.14`, mer). Distinct de shockwave nuke (`TERRAIN_HEIGHT[PLAINS] + 0.5`, leftover après N132). Distinct de Tween `Size = Vector3.new` (API). Camion `Parent = nil` **inchangé**. Construction voie `applyRouteProgress` **inchangée** (N113/N115). Roues N126 **inchangées**.
+`ground` vient de `WorldSpace.tileToWorld(x, y)`. `fromEulerAnglesYXZ(0, 0, math.rad(90))` ≡ `Angles(0, 0, π/2)`. Distinct de N133 (`PLAINS + 0.5`, Overlay). Distinct de WorldRenderer OceanGlint (`CFrame.Angles(0, angle, 0)` yaw variable, leftover après N134). Distinct de BuildingModels `BuildRing` (`CFrame.new(ground) * Angles(0, 0, π/2)`, leftover après). Distinct de Tween `Size = Vector3.new` (API). Caps `MAX_FLASHES_PER_WAVE` / `MAX_LIVE_FLASHES` **inchangés**. Hauteur `Y = 3` **inchangée**.
 
-**Pourquoi 20K CCU :** leftover N131. 8 clients × N livraisons × `CFrame.Angles` + compose. Pas d’autorité (pulse cosmétique). Un euler faux dresserait l’onde gare. Livraison en cours (`progress < 1`) : la ligne n’est pas atteinte. Interpolation camion 60 Hz **déjà** N126/N115 — ne pas y revenir.
+**Pourquoi 20K CCU :** leftover N133. 8 clients × N vagues × `CFrame.Angles` + compose. Pas d’autorité (anneau cosmétique). Un euler faux dresserait l’onde de conquête. Flashes de tuile : pas de `CFrame.Angles`. Interpolation Overlay 60 Hz **déjà** N125/N126 — ne pas y revenir. Shockwave Overlay **déjà** N133 — ne pas y revenir.
 
 **Worker :**
 
-1. Dans `Overlay.stepInterpolation` seulement, fin de `route.delivery` `DeliveryPulse` : poser `CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. Plus de `CFrame.Angles` sur ce pulse. `route.to` **inchangé** (déjà Vector3). Tween Size/Transparency **inchangé**. `task.delay` Destroy **inchangé**. `route.truckModel.Parent = nil` **inchangé**.
+1. Dans `Effects.conquestPulse` seulement, ring : poser `CFrame.new(ground.X, 3, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. Plus de `CFrame.Angles` sur cet anneau. Hauteur `Y = 3` **inchangée**. Tween Size/Transparency **inchangé**. `task.delay` Destroy **inchangé**. Caps flash **inchangés**. `conquestWave` / `lossWave` barycentre **inchangés**.
 
-2. **Garder la rotation.** Ne **pas** convertir en translation. Ne **pas** « fermer » shockwave / Effects ring / WorldRenderer glints dans le même commit (leftover après N132). Ne pas « fermer » N131. Ne pas « fermer » flamme `Size`. Ne pas porter visual. Après N131. `applyUnits` **non**. `applyRouteProgress` **non**.
+2. **Garder la rotation.** Ne **pas** convertir en translation. Ne **pas** « fermer » WorldRenderer glints / décor trunks / BuildingModels `BuildRing` dans le même commit (leftover après N134). Ne pas « fermer » N133. Ne pas « fermer » flamme `Size`. Ne pas porter visual. Après N133. Overlay **non**. WorldRenderer **non**.
 
-3. Tests « livraison : le gain s'affiche sur la gare » leftover N20 **et** leftover N131 navires **et** leftover N129 apercu **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+3. Tests « vagues de conquete » leftover N95 **et** leftover N133 navires (`explosion`) **et** leftover N132 pose **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-4. Test : banc client livraison **doit rester vert** (pulse spawn ne lève pas ; leftover N126 roues ; leftover N115 `segRot`). Check navires leftover N131 splash / N130 wake / N128 flag. Check apercu leftover N129. Check pose/capture leftover N126. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+4. Test : banc client vagues **doit rester vert** (`conquestWave` 200 tuiles + `lossWave` + vague 1 tuile ne lèvent pas). Check navires leftover N133 shockwave / N131 splash. Check pose leftover N132 pulse. Check apercu leftover N129. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-5. Fichiers : `Overlay.luau` (`stepInterpolation` `DeliveryPulse` **seulement**). `tests/client.luau` **seulement si** le check livraison ne mentionne pas encore N132 (commentaire leftover, **garder** N20). `PlacementPreview.luau` **non**. `UnitModels.luau` **non**. **Ne pas** éditer le serveur.
+5. Fichiers : `Effects.luau` (`conquestPulse` ring **seulement**). `tests/client.luau` **seulement si** le check vagues ne mentionne pas encore N134 (commentaire leftover). `Overlay.luau` **non**. `WorldRenderer.luau` **non**. `BuildingModels.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N132 feel ≠ N131 (LandingSplash mer) ≠ N130 (LaunchWake spawn) ≠ N126 (roues 60 Hz) ≠ shockwave (leftover après) ≠ visual V75 (leftover `1b5c`, ne pas merger).** Non réentrant. Ne pas fusionner avec N131 dans le même worker. `applyRouteProgress` N113/N111 **inchangé**.
+**Contraintes :** pas de RemoteFunction. **N134 feel ≠ N133 (Overlay Shockwave plains) ≠ N132 (DeliveryPulse Overlay) ≠ WorldRenderer glints (leftover après) ≠ visual V75 (ne pas merger).** Non réentrant. Ne pas fusionner avec N133 dans le même worker. Caps flash **inchangés**.
 
 ---
 
@@ -155,7 +155,7 @@ pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; Overlay LaunchWake → **N130 fait** ; PlacementPreview footprint → **N129 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; Overlay DeliveryPulse → **N132 fait** ; Overlay LandingSplash → **N131 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -163,7 +163,7 @@ pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; PlacementPreview footprint → **N129 fait** ; Overlay LaunchWake → **N130 fait**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; Overlay LandingSplash → **N131 fait** ; Overlay DeliveryPulse → **N132 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -179,13 +179,13 @@ pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert (serveur rate-limite ; client n’envoie jamais) |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34–N128 | (voir rapport #153) | — | **faits** |
-| N129 | `PlacementPreview.update` footprint `CFrame.Angles` 60 Hz | P3 | **fait** cette passe (leftover visual V75, porté euler pas mergé ; hauteur 0.4, pas de pulse) |
-| N130 | Overlay LaunchWake `CFrame.Angles` événement | P3 | **fait** cette passe (V75 distingue les événements Overlay) |
-| N131 | Overlay LandingSplash `CFrame.Angles` événement | P3 | **nouveau** (despawn navire, Y + 0.14, skip retraite N56) |
-| N132 | Overlay DeliveryPulse `CFrame.Angles` événement | P3 | **nouveau** (fin de trajet camion, `route.to`) |
+| N34–N130 | (voir rapport #155) | — | **faits** |
+| N131 | Overlay LandingSplash `CFrame.Angles` événement | P3 | **fait** cette passe (despawn navire, Y + 0.14, skip retraite N56) |
+| N132 | Overlay DeliveryPulse `CFrame.Angles` événement | P3 | **fait** cette passe (fin de trajet camion, `route.to`) |
+| N133 | Overlay Shockwave `CFrame.Angles` événement | P3 | **nouveau** (`explosion`, `PLAINS + 0.5`) |
+| N134 | Effects `conquestPulse` ring `CFrame.Angles` événement | P3 | **nouveau** (vague de conquête, `Y = 3`) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 / #136 / #140 / #144 / #147 / #150 / #153 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 / #136 / #140 / #144 / #147 / #150 / #153 / #155 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -217,7 +217,7 @@ Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / 
 | `COLLAPSE_MIN_TILES` | 100 | 100 | oui (N86 wrap, N88 scan) |
 | `SPAWN_RADIUS` | 3 | n/a | oui (N93 banc `keep=8`, N94 strip, N55 isolation) |
 | `CHUNK_REBUILDS_PER_FRAME` | 3 | n/a | oui (N102/N104/N106/N112/N114 compact seuil 32) |
-| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde, N103 X/Z, N105 TRUCK_LIFT monde, N115 segRot HV, N117 yaw tuile, N125/N126 Overlay, N127/N128 UnitModels, N129 footprint, N130 LaunchWake) |
+| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde, N103 X/Z, N105 TRUCK_LIFT monde, N115 segRot HV, N117 yaw tuile, N125/N126 Overlay, N127/N128 UnitModels, N129 footprint, N130 LaunchWake, N131 splash, N132 pulse) |
 
 ---
 
@@ -237,22 +237,22 @@ allyBuf : bot sans pacte, next nil (N91)
 validTiles : deux resolve CITY, tile identique (N90)
 destroyBuf : leftover A→B, CITY B survit (N89)
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.74
+metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.72
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N126 roues `fromEulerAnglesYXZ`, leftover N115 `segRot`, leftover N113 `rot` chantier) ; `modeles procéduraux` (N124 radar/flag/boom `fromEulerAnglesYXZ`, leftover N109 câble Y, Parts stables, rotation visible CFrame ≠ RestCFrame, Y inchangé = pas une translation) ; `apercu de placement pour chaque batiment` (N129 footprint `fromEulerAnglesYXZ`, leftover N92 ctx, ghost visible / snap / upgrade, hauteur 0.4) ; `navires, missiles et interpolation` (N130 LaunchWake `fromEulerAnglesYXZ` ; leftover N128 flag ; leftover N127 radar euler ; leftover N125 roulis ; leftover N117 second frame lerp sous yaw euler ; leftover N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` (N122 `focusX` lerp avance sans sauter ; N121 œil `fx + ox` ; N120 formule `ox/oy/oz` à pitch défaut 58° ; N119 punch + décroissance ; leftover N118 `CFrame.X` nombre, leftover tactile pincement/torsion) ; `minimap` (N123 `setFocus(0,0,0)` → u=0.5, v=0.5 ; marqueur suit `focusX`/`focusZ`). `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `WorldCamera.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `BuildingModels.luau` **non** touché. `Minimap.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
+Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N132 DeliveryPulse `fromEulerAnglesYXZ`, leftover N126 roues, leftover N115 `segRot`, leftover N113 `rot` chantier) ; `modeles procéduraux` (N124 radar/flag/boom `fromEulerAnglesYXZ`, leftover N109 câble Y, Parts stables, rotation visible CFrame ≠ RestCFrame, Y inchangé = pas une translation) ; `apercu de placement pour chaque batiment` (N129 footprint `fromEulerAnglesYXZ`, leftover N92 ctx, ghost visible / snap / upgrade, hauteur 0.4) ; `navires, missiles et interpolation` (N131 LandingSplash `fromEulerAnglesYXZ` ; leftover N130 LaunchWake ; leftover N128 flag ; leftover N127 radar euler ; leftover N125 roulis ; leftover N117 second frame lerp sous yaw euler ; leftover N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé ; `overlay:explosion` leftover N133) ; `livraison : le gain s'affiche sur la gare` leftover N20 ; `vagues de conquete` leftover N134. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `WorldCamera.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `Effects.luau` **non** touché. `Minimap.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass50.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass51.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N129/N130 sont un euler PlacementPreview / Overlay vérifié par le banc headless (compose `CFrame.new * euler` ; stubs `fromEulerAnglesYXZ` déjà présents).
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N131/N132 sont un euler Overlay vérifié par le banc headless (compose `CFrame.new * euler` ; stubs `fromEulerAnglesYXZ` déjà présents).
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N129 n’ajoute **pas** de require (`fromEulerAnglesYXZ` local PlacementPreview). N130 n’ajoute **pas** de require (local Overlay insert). N131 restera dans `Overlay.applyUnits` despawn. N132 restera dans `Overlay.stepInterpolation` delivery.
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N131 n’ajoute **pas** de require (`fromEulerAnglesYXZ` local Overlay despawn). N132 n’ajoute **pas** de require (local Overlay delivery). N133 restera dans `Overlay.explosion`. N134 restera dans `Effects.conquestPulse`.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -271,6 +271,10 @@ Piège N129 : cylindre à plat Z=90. Ne pas omettre l’euler (le cylindre se dr
 
 Piège N130 : insert navire seulement, pas `stepInterpolation`. Offset Y `+ 0.12` ≠ splash `+ 0.14`. Ne pas fusionner splash/pulse/shockwave.
 
-Piège N131 (à venir) : despawn non-retraite seulement. N56 skip retraite **conservé**. Distinct pulse N132 (`route.to` terre).
+Piège N131 : despawn non-retraite seulement. N56 skip retraite **conservé**. Distinct pulse N132 (`route.to` terre). Distinct wake N130 (`origin` spawn, Y `+ 0.12`).
 
-Piège N132 (à venir) : fin de `delivery` seulement, pas construction voie. `route.to` déjà Vector3 — ne pas `tileToWorld`. Distinct shockwave leftover.
+Piège N132 : fin de `delivery` seulement, pas construction voie. `route.to` déjà Vector3 — ne pas `tileToWorld`. Distinct shockwave leftover N133.
+
+Piège N133 (à venir) : `explosion` seulement. Sphère / fumée **sans** euler. Distinct Effects ring N134 (`Y = 3`).
+
+Piège N134 (à venir) : `conquestPulse` seulement, pas Overlay. Caps flash **conservés**. Distinct WorldRenderer glints leftover.
