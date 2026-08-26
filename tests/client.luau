@@ -1573,6 +1573,12 @@ end)
 	pouvait le voir : un popup trop discret s'affiche sans erreur.
 ]]
 check("livraison : le gain s'affiche sur la gare", function()
+	-- N159 : goldPopup Name GoldPopup / Board. Pas de
+	-- testFlushDelays ici — les popups restent parentés (le
+	-- flush + reuse rawequal est dans « vagues de conquete »).
+	-- Distinct leftover N158 textFree (Effects). Distinct
+	-- leftover N152 flame Size. Recette leftover N158, pas
+	-- merger visual V82.
 	overlay:setLocalSlot(1)
 
 	local function popups(): number
@@ -1782,11 +1788,12 @@ check("vagues de conquete", function()
 	-- Tween Create conserve. Leftover N157 conquestPulse reuse doit rester
 	-- vert. Leftover N156 tileFlash reuse doit rester vert. Leftover N155
 	-- selectTile reuse (check calques) doit rester vert. Recette leftover
-	-- N157, pas merger visual V82 pulseRot. HUD / UnitModels / Overlay /
+	-- N157, pas merger visual V82 pulseRot. HUD / UnitModels / Effects /
 	-- PlacementPreview / selectTile / previewTile / tileFlash /
-	-- conquestPulse non touches. Flame leftover N152 (check navires) et
-	-- leftover N159 Overlay goldPopup Destroy (check livraison, non
-	-- touche).
+	-- conquestPulse non touches. Flame leftover N152 (check navires).
+	-- N159 : goldPopup free-list. Le check livraison n'a pas flushé ;
+	-- ce flush pousse goldFree. goldPopup reparente la meme ancre
+	-- (rawequal Parent root, Name GoldPopup). Distinct textFree.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1821,6 +1828,20 @@ check("vagues de conquete", function()
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
 	assert(#free == liveBefore - 1, "plaque non reutilisee")
 	assert(rawequal(pooled.Parent, effects.root), "plaque non reparentee")
+	-- N159 : flush ci-dessus a poussé les GoldPopup de « livraison ».
+	local goldPool = overlay.goldFree
+	assert(goldPool ~= nil and #goldPool >= 1, "popups or non poolees")
+	local pooledGold = goldPool[#goldPool]
+	assert(pooledGold.Parent == nil, "popup or encore parente")
+	assert(pooledGold.Name == "GoldPopup", "Name GoldPopup perdu")
+	local goldN = #goldPool
+	overlay:goldPopup(3000, 500, true)
+	assert(#goldPool == goldN - 1, "popup or non reutilise")
+	assert(rawequal(pooledGold.Parent, overlay.root), "popup or non reparente")
+	local reusedBoard = pooledGold:FindFirstChild("Board")
+	local reusedLabel = reusedBoard and reusedBoard:FindFirstChildWhichIsA("TextLabel")
+	assert(reusedLabel ~= nil, "arbre Board perdu au reuse")
+	assert(reusedLabel.Text == "+500 or", `reuse affiche "{reusedLabel.Text}"`)
 end)
 
 check("deltas de terrain et conquetes classees", function()

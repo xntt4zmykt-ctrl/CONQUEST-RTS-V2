@@ -517,16 +517,62 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	local base = WorldSpace.indexToWorld(tileIndex)
 	local y = WorldSpace.surfaceHeight(self.terrain, tileIndex)
 
-	local anchor = Instance.new("Part")
-	anchor.Name = "GoldPopup"
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.one
-	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
-	anchor.Parent = self.root
+	-- N159 : free-list goldFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.5 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). floatingText
+	-- réutilise déjà (N158, textFree — ne pas partager).
+	-- conquestPulse réutilise déjà (N157). tileFlash réutilise
+	-- déjà (N156). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157.
+	-- Distinct floatingText N158 (textFree, ne pas partager).
+	-- Distinct visual V82 ConquestPulse pulseRot (ne pas merger
+	-- 490f — ce n'est pas un GoldPopup). Arbre Billboard
+	-- conservé au reuse (Part + Board + TextLabel). Reset
+	-- TextTransparency / TextStrokeTransparency ours vs rival
+	-- (le tween les avait mises à 1). Name GoldPopup conservé
+	-- (banc livraison compte sans flush). Tween Create conservé
+	-- (CFrame lift + TextTransparency restart). Recette leftover
+	-- N158, pas merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / onTradeEvent inchangés.
+	local free = self.goldFree
+	if not free then
+		free = {}
+		self.goldFree = free
+	end
+	local n = #free
+	local anchor
+	local board
+	local text
+	if n > 0 then
+		anchor = free[n]
+		free[n] = nil
+		board = anchor:FindFirstChild("Board") :: BillboardGui
+		text = board:FindFirstChildWhichIsA("TextLabel") :: TextLabel
+	else
+		anchor = Instance.new("Part")
+		anchor.Name = "GoldPopup"
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanQuery = false
+		anchor.CanTouch = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.one
+
+		board = Instance.new("BillboardGui")
+		board.Name = "Board"
+		board.StudsOffset = Vector3.new(0, 1.5, 0)
+		board.AlwaysOnTop = true
+		board.Parent = anchor
+
+		text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.FontFace = Theme.font.display
+		text.TextColor3 = Theme.color.gold
+		text.Parent = board
+	end
 
 	--[[
 		Notre livraison se lit, celle du voisin se devine.
@@ -539,25 +585,15 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 		l'attention.
 	]]
 	local ours = mine ~= false
-	local board = Instance.new("BillboardGui")
-	board.Name = "Board"
+	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
 	board.Size = UDim2.fromOffset(if ours then 120 else 80, if ours then 32 else 22)
-	board.StudsOffset = Vector3.new(0, 1.5, 0)
-	board.AlwaysOnTop = true
-	board.Parent = anchor
-
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.FontFace = Theme.font.display
 	text.TextSize = if ours then 22 else 15
-	text.TextColor3 = Theme.color.gold
 	text.TextStrokeTransparency = if ours then 0.35 else 0.7
 	text.TextTransparency = if ours then 0 else 0.35
 	-- "+1.24K or" plutot que "+1240" : meme format que le reste du jeu, et
 	-- l'unite dit de quelle ressource il s'agit.
 	text.Text = `+{Format.compact(gold)} or`
-	text.Parent = board
+	anchor.Parent = self.root
 
 	local lift = TweenService:Create(anchor, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = anchor.CFrame + Vector3.new(0, 5 * Config.WORLD_SCALE, 0),
@@ -569,7 +605,9 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	}):Play()
 	task.delay(1.5, function()
 		if anchor.Parent then
-			anchor:Destroy()
+			anchor.Parent = nil
+			local pool = self.goldFree
+			pool[#pool + 1] = anchor
 		end
 	end)
 end
