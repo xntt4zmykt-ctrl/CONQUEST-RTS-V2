@@ -18,6 +18,11 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+-- tryAnnex : pools module-level (ISSUE-N21). Meme pattern que findSeaPath N31.
+-- Cap poche 280 inchange ; ocean = abort (enclave terrestre only).
+local annexVisitBuf = buffer.create(Config.TILE_COUNT)
+local annexQueue: { number } = table.create(280)
+local annexPocket: { number } = table.create(280)
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -39,17 +44,48 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local mag, speed = terrainMagSpeed(terrain)
 	local posted = false
 	if defender then
+		-- Index par camp (ISSUE-N36) + grille spatiale (ISSUE-N41) : 9 cellules
+		-- de cote DEFENSE_RADIUS, pas le scan lineaire de bunkersBySlot.
+		-- Le buffer `defense` n'est plus ecrit (Option A) ni lu ici.
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local DEF = Config.BUILDING.DEFENSE
-		for index, building in state.buildings do
-			if building.kind == DEF and building.slot == defender.slot then
-				local bx, by = MapGen.fromIndex(index)
-				local dx, dy = bx - cx, by - cy
-				if dx * dx + dy * dy <= r2 then
-					posted = true
+		local cellR = math.max(1, r)
+		local cells = state.bunkerCells and state.bunkerCells[defender.slot]
+		if cells then
+			local gx = math.floor(cx / cellR)
+			local gy = math.floor(cy / cellR)
+			for dx = -1, 1 do
+				if posted then
 					break
+				end
+				for dy = -1, 1 do
+					local bucket = cells[(gy + dy) * 1024 + (gx + dx)]
+					if bucket then
+						for index in bucket do
+							local bx, by = MapGen.fromIndex(index)
+							local ddx, ddy = bx - cx, by - cy
+							if ddx * ddx + ddy * ddy <= r2 then
+								posted = true
+								break
+							end
+						end
+					end
+					if posted then
+						break
+					end
+				end
+			end
+		else
+			local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+			if bunkers then
+				for index in bunkers do
+					local bx, by = MapGen.fromIndex(index)
+					local dx, dy = bx - cx, by - cy
+					if dx * dx + dy * dy <= r2 then
+						posted = true
+						break
+					end
 				end
 			end
 		end
@@ -98,11 +134,34 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
-	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	buffer.fill(annexVisitBuf, 0, 0)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
+	local visited = annexVisitBuf
+	local queue = annexQueue
+	local pocket = annexPocket
+
+	-- Le combat vivant appelle tryAnnex APRES setOwner : `seed` appartient
+	-- deja a l'attaquant. L'ancienne file `{ seed }` marquait visited puis
+	-- `continue` (owner ~= defender) sans jamais etendre les voisins — BFS
+	-- mort, aucune enclave annexee. On part des voisins defenseur du seed
+	-- (seed = coupe). Si seed est encore defenseur (appel avant setOwner),
+	-- on l'enfile comme avant.
+	buffer.writeu8(visited, seed, 1)
+	if buffer.readu8(state.owner, seed) == defenderSlot then
+		table.insert(queue, seed)
+	else
+		local n0 = MapGen.neighbors(seed, annexScratch)
+		for i = 1, n0 do
+			local nb = annexScratch[i]
+			if buffer.readu8(state.owner, nb) == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
 	local head = 1
-	local pocket: { number } = {}
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -123,8 +182,8 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
+			if owner == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
 				table.insert(queue, nb)
 			end
 		end
@@ -265,7 +324,9 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
@@ -371,7 +432,12 @@ function ChantierB.install(GameState, Nukes)
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				self:returnCommittedTroops(atk)
 				table.remove(self.attacks, i)
 				continue
 			end
@@ -380,12 +446,21 @@ function ChantierB.install(GameState, Nukes)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par MAX_CAPTURES captures. Voir ISSUE-N1 / ISSUE-N11.
+			-- ISSUE-N38 : un pop dont owner ~= target ne compte plus comme
+			-- une capture. Cap brut MAX_POPS pour qu'un heap 100 % perime
+			-- ne boucle pas 10 000 fois.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
-			local guard = 0
-			while numTiles > 0 and guard < 80 do
-				guard += 1
+			local captures = 0
+			local pops = 0
+			local MAX_CAPTURES = 80
+			local MAX_POPS = 160
+			while numTiles > 0 and captures < MAX_CAPTURES and pops < MAX_POPS do
+				pops += 1
 				local index = Heap.pop(atk.frontier)
 				if not index then
 					break
@@ -394,6 +469,7 @@ function ChantierB.install(GameState, Nukes)
 				if buffer.readu8(self.owner, index) ~= atk.target then
 					continue
 				end
+				captures += 1
 				local attLoss, defLoss, used = ChantierB.attackLogic(self, atk.troops, attacker, defender, index)
 				if attLoss > atk.troops then
 					atk.troops = 0
@@ -469,6 +545,14 @@ function ChantierB.install(GameState, Nukes)
 		end
 		for slot, ps in self.players do
 			if slot == leaderSlot or ps.tiles >= required then
+				self.doomWarnedAt[slot] = nil
+				self.doomUnderSince[slot] = nil
+				continue
+			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une
+			-- armee fantome. On EFFACE les timers : sinon un AFK strip puis
+			-- claimSpawn herite d'un warn deja ecoule et saigne au premier tick.
+			if ps.awaitingSpawn or ps.tiles == 0 then
 				self.doomWarnedAt[slot] = nil
 				self.doomUnderSince[slot] = nil
 				continue
