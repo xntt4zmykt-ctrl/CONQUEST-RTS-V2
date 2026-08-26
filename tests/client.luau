@@ -1568,6 +1568,44 @@ check("apercu de placement pour chaque batiment", function()
 	-- N129 : footprint fromEulerAnglesYXZ (pas CFrame.Angles). Hauteur 0.4
 	-- (feel). Pas de pulse. Leftover N92 ctx. Recette visual V75 leftover
 	-- deja sur 1b5c — portee euler, pas mergee.
+	-- N183 : snapshot Ghost CITY avant hide. Parent nil + ghostFree.
+	-- Restore setKind(CITY) reuse Parent preview.root **ou** free-list.
+	-- Skip FactionLabels. Skip Overlay. Skip destroy(). Skip footprint.
+	-- Recette leftover N182, pas merger visual V76. Distinct leftover
+	-- N152 flame. Pas overlay:clear() ni labels:clear() ici. Check
+	-- etiquettes leftover N182 doit rester vert. Check accrochage
+	-- (setKind CITY deja) doit rester vert.
+	preview:setKind(Config.BUILDING.CITY)
+	local ghostSnap = preview.model
+	assert(ghostSnap ~= nil, "Ghost CITY N183 absent apres setKind")
+	preview:hide()
+	assert(ghostSnap.Parent == nil, "Ghost N183 encore parentee")
+	local ghostPool = preview.ghostFree
+	assert(ghostPool ~= nil and #ghostPool >= 1, "Ghosts non poolees")
+	local parkedGhost = false
+	for _, rec in ghostPool do
+		if rawequal(rec, ghostSnap) then
+			parkedGhost = true
+			break
+		end
+	end
+	assert(parkedGhost, "Ghost N183 absente de ghostFree")
+
+	preview:setKind(Config.BUILDING.CITY)
+	if ghostSnap.Parent == nil then
+		local inFree = false
+		for _, rec in ghostPool do
+			if rawequal(rec, ghostSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "Ghost N183 ni reparentee ni dans ghostFree")
+	else
+		assert(rawequal(ghostSnap.Parent, preview.root), "Ghost N183 recree")
+		assert(rawequal(preview.model, ghostSnap), "Ghost N183 pas au model")
+	end
+
 	for _, def in BuildingDefs.BUILDABLE do
 		preview:setKind(def.id)
 		preview:update(1000, "exact")

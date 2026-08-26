@@ -135,6 +135,56 @@ function PlacementPreview.resolve(
 	return resolution.tile, if resolution.tile == tile then "exact" else "snap"
 end
 
+-- N183 : parkGhost / takeGhost hoistes pour setKind sans Destroy.
+-- Skip Parent nil (deja parke par hide / setKind(nil) puis un
+-- second setKind). Push ghostFree (Model, pas FactionLabels /
+-- buildingFree / ringFree / previewFree). take Kind match,
+-- Name Ghost, Parent self.root. SetAttribute Kind apres create
+-- (create pose Name = Building{kind}, setKind ecrase Ghost).
+-- Recette leftover N182. Pas merger visual V76 Size rayon.
+-- Distinct leftover N152 flame. Distinct leftover N182
+-- labelFree. Overlay non touche. FactionLabels non touche.
+-- BuildingModels.create construction inchange. destroy()
+-- self.root:Destroy inchange. Footprint non poole. Ne pas
+-- vider ghostFree. Pas de delay.
+local function parkGhost(self: PlacementPreview, model: Model)
+	if not model.Parent then
+		return
+	end
+	model.Parent = nil
+	local pool = self.ghostFree
+	if not pool then
+		pool = {}
+		self.ghostFree = pool
+	end
+	pool[#pool + 1] = model
+end
+
+local function takeGhost(self: PlacementPreview, kind: number): Model?
+	local free = self.ghostFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last:GetAttribute("Kind") == kind then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand:GetAttribute("Kind") == kind then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
 --=============================================================================
 -- Affichage
 --=============================================================================
@@ -147,7 +197,7 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 	self.tile = nil
 
 	if self.model then
-		self.model:Destroy()
+		parkGhost(self, self.model)
 		self.model = nil
 	end
 
@@ -158,7 +208,13 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 
 	-- Le fantome est construit une fois puis simplement deplace : le recreer a
 	-- chaque mouvement de souris produirait des dizaines de modeles par seconde.
-	local model = BuildingModels.create(kind, Theme.color.text, Vector3.zero)
+	-- N183 : take Kind match avant create. ForceField / Transparency 0.55
+	-- / CanQuery / CanCollide reposes au reuse (update recolore).
+	local model = takeGhost(self, kind)
+	if not model then
+		model = BuildingModels.create(kind, Theme.color.text, Vector3.zero)
+		model:SetAttribute("Kind", kind)
+	end
 	model.Name = "Ghost"
 	for _, part in model:GetChildren() do
 		if part:IsA("BasePart") then
