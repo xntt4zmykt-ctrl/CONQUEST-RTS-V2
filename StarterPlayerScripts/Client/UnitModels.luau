@@ -377,7 +377,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (V105). Wake offset.X (V106, elseif plus bas). Flag
 			-- offset.X (V107, elseif suivant). CapitalFlag fermee
 			-- (V108, BuildingModels). PortCraneBoom fermee (V109).
-			-- PortCraneCable leftover V110.
+			-- PortCraneCable fermee (V110).
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
 			-- V107 : phase depuis offset.X. Plus de lockstep
@@ -391,7 +391,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (fromEulerAnglesYXZ deja, pas CFrame.Angles). Distinct
 			-- de V108 (CapitalFlag, BuildingModels, fermee). Distinct
 			-- de V109 (PortCraneBoom, fermee). Distinct
-			-- de leftover V110 (PortCraneCable). Un
+			-- de V110 (PortCraneCable, fermee). Un
 			-- elseif, role == "flag" inchange. Name Flag inchange.
 			-- Construction Flag inchangee. Pas de flagPhase.
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0, 0)
