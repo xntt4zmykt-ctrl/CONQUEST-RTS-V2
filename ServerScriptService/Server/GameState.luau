@@ -1585,11 +1585,17 @@ function GameState.removePlayer(self: GameState, slot: number)
 	-- BOAT_RETREAT_LOSS). kind 2 = convoi (ISSUE-N32) : couler, pas d'or
 	-- (le navire n'est pas arrive), pas de malus vendeur. GameState ne
 	-- require pas Navy (cycle Navy -> GameState).
-	for i = #self.boats, 1, -1 do
-		local boat = self.boats[i]
+	-- N106 : swap-pop sans free-list (cycle). Recette releaseAttack N102
+	-- sans freeAttack / boatFree. While reverse + decrement toujours.
+	-- removePlayer N'APPELLE PAS despawnBoat (N105) — pas de double-free.
+	local iBoat = #self.boats
+	while iBoat >= 1 do
+		local boat = self.boats[iBoat]
 		if boat.slot == slot then
 			-- L'attaquant / le marchand qui part : ses bateaux disparaissent.
-			table.remove(self.boats, i)
+			local last = #self.boats
+			self.boats[iBoat] = self.boats[last]
+			self.boats[last] = nil
 		elseif boat.kind == 1 and not boat.retreating then
 			local dest = boat.targetTile
 			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
@@ -1599,7 +1605,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 						attacker.troops += math.max(0, boat.troops)
 					end
 					boat.troops = 0
-					table.remove(self.boats, i)
+					local last = #self.boats
+					self.boats[iBoat] = self.boats[last]
+					self.boats[last] = nil
 				end
 			end
 		elseif boat.kind == 2 then
@@ -1608,10 +1616,13 @@ function GameState.removePlayer(self: GameState, slot: number)
 			local dest = boat.targetTile
 			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
 				if buffer.readu8(self.owner, dest) == slot then
-					table.remove(self.boats, i)
+					local last = #self.boats
+					self.boats[iBoat] = self.boats[last]
+					self.boats[last] = nil
 				end
 			end
 		end
+		iBoat -= 1
 	end
 
 	-- Missiles AVANT setOwner : la cible est toIndex(floor(tx), floor(ty)).
@@ -1621,20 +1632,27 @@ function GameState.removePlayer(self: GameState, slot: number)
 	-- appartenait au disparu. Pas de remboursement (ogive deja payee).
 	-- Une frappe visee sur un tiers reste en vol. Le tireur qui part perd
 	-- ses missiles (comme ses fronts). GameState ne require pas Nukes.
-	for i = #self.missiles, 1, -1 do
-		local missile = self.missiles[i]
+	-- N106 : swap-pop sans missileFree (cycle).
+	local iMissile = #self.missiles
+	while iMissile >= 1 do
+		local missile = self.missiles[iMissile]
 		if missile.slot == slot then
-			table.remove(self.missiles, i)
+			local last = #self.missiles
+			self.missiles[iMissile] = self.missiles[last]
+			self.missiles[last] = nil
 		else
 			local tx = math.floor(missile.tx)
 			local ty = math.floor(missile.ty)
 			if MapGen.inBounds(tx, ty) then
 				local index = MapGen.toIndex(tx, ty)
 				if buffer.readu8(self.owner, index) == slot then
-					table.remove(self.missiles, i)
+					local last = #self.missiles
+					self.missiles[iMissile] = self.missiles[last]
+					self.missiles[last] = nil
 				end
 			end
 		end
+		iMissile -= 1
 	end
 
 	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare

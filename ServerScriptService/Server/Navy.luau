@@ -45,11 +45,12 @@ local targetBuf = table.create(48)
 local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
 local candidateBuf: { number } = table.create(32)
 -- N96 : bateau live recycle (leftover N40/N51). Contrat A free-list.
--- spawn pop/cree, table.remove push. path unique (N64) a chaque spawn
--- — ne pas reutiliser l'ancien tableau. Couvre transport / trade /
--- carrier. Pool module survit a GameState.new. Ne pas require depuis
--- GameState (cycle). Ne pas porter retreating Overlay (feel N56).
--- table.clear du record interdit. Un leftover _sink = coule immediat.
+-- spawn pop/cree, swap-pop array puis push (N105). path unique (N64)
+-- a chaque spawn — ne pas reutiliser l'ancien tableau. Couvre
+-- transport / trade / carrier. Pool module survit a GameState.new.
+-- Ne pas require depuis GameState (cycle). Ne pas porter retreating
+-- Overlay (feel N56). table.clear du record interdit. Un leftover
+-- _sink = coule immediat.
 type BoatRec = {
 	id: number,
 	slot: number,
@@ -131,8 +132,15 @@ local function acquireBoat(
 end
 
 local function despawnBoat(state: GameState, i: number)
-	local boat = state.boats[i]
-	table.remove(state.boats, i)
+	-- N105 : swap-pop (recette despawnMissile N100). Callers reverse
+	-- while + decrement toujours : l'item swappe venait d'un indice
+	-- plus haut (deja visite). Overlay lit snapshot N51, pas l'ordre
+	-- live. Push boatFree APRES le swap (N96).
+	local boats = state.boats
+	local boat = boats[i]
+	local last = #boats
+	boats[i] = boats[last]
+	boats[last] = nil
 	table.insert(boatFree, boat :: BoatRec)
 end
 
@@ -543,14 +551,19 @@ local function syncCarriers(state: GameState)
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
 	table.clear(carrierSeen)
 	local seen = carrierSeen
-	for i = #state.boats, 1, -1 do
-		local boat = state.boats[i]
+	-- N105 : while reverse + swap-pop. Decrement toujours apres despawn
+	-- (et apres continue) : l'item swappe venait d'un indice plus haut.
+	local iSeen = #state.boats
+	while iSeen >= 1 do
+		local boat = state.boats[iSeen]
 		if boat.kind ~= KIND_CARRIER then
+			iSeen -= 1
 			continue
 		end
 		local base = state.buildings[boat.homeTile]
 		if not base or base.kind ~= Config.BUILDING.NAVAL_BASE then
-			despawnBoat(state, i)
+			despawnBoat(state, iSeen)
+			iSeen -= 1
 			continue
 		end
 		boat.slot = base.slot
@@ -562,6 +575,7 @@ local function syncCarriers(state: GameState)
 			boat.lastShellTick = 0
 		end
 		seen[boat.homeTile] = true
+		iSeen -= 1
 	end
 	-- N48 : spawn via navalBasesBySlot, pas le hash buildings. Garde
 	-- _carriersDirty (pas un scan 10 Hz). Fallback hash si l'index est nil.
@@ -792,8 +806,10 @@ local function stepCarriers(state: GameState)
 	end
 
 	-- 3. Remove sunk boats (not carriers tied to base unless health 0)
-	for i = #state.boats, 1, -1 do
-		local boat = state.boats[i]
+	-- N105 : while reverse + swap-pop. Decrement toujours.
+	local iSink = #state.boats
+	while iSink >= 1 do
+		local boat = state.boats[iSink]
 		if boat._sink then
 			if boat.kind == KIND_CARRIER then
 				-- Warship sunk: remove until base respawns next sync (delay via flag)
@@ -804,7 +820,7 @@ local function stepCarriers(state: GameState)
 				local hx, hy = MapGen.fromIndex(boat.homeTile)
 				boat.x, boat.y = hx, hy
 			else
-				despawnBoat(state, i)
+				despawnBoat(state, iSink)
 			end
 		elseif boat.kind == KIND_CARRIER and boat.health == 0 then
 			local untilTick = boat._sunkUntil or 0
@@ -814,6 +830,7 @@ local function stepCarriers(state: GameState)
 				boat.lastShellTick = state.tick
 			end
 		end
+		iSink -= 1
 	end
 end
 
@@ -824,9 +841,13 @@ function Navy.step(state: GameState, rng: Random)
 		spawnTradeShips(state, rng)
 	end
 
-	for i = #state.boats, 1, -1 do
+	-- N105 : while reverse + swap-pop. Decrement toujours apres despawn
+	-- (et apres continue) : l'item swappe venait d'un indice plus haut.
+	local i = #state.boats
+	while i >= 1 do
 		local boat = state.boats[i]
 		if boat.kind == KIND_CARRIER then
+			i -= 1
 			continue
 		end
 
@@ -840,6 +861,7 @@ function Navy.step(state: GameState, rng: Random)
 			local dest = state.buildings[boat.targetTile]
 			if not dest or dest.kind ~= Config.BUILDING.PORT then
 				despawnBoat(state, i)
+				i -= 1
 				continue
 			end
 		end
@@ -856,12 +878,14 @@ function Navy.step(state: GameState, rng: Random)
 				end
 				boat.troops = 0
 				despawnBoat(state, i)
+				i -= 1
 				continue
 			end
 			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
 					despawnBoat(state, i)
+					i -= 1
 					continue
 				end
 			end
@@ -893,6 +917,7 @@ function Navy.step(state: GameState, rng: Random)
 			end
 			despawnBoat(state, i)
 		end
+		i -= 1
 	end
 end
 
