@@ -240,28 +240,73 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.
--- Source = index `samsBySlot`. Slot sans SAM = {} (pas de rescan hash).
+-- Source = index `samsBySlot`. Slot sans SAM = buffer vide (pas de rescan hash).
+-- V25 : buffer recycle. Unique appelant synchrone (Bots.decideNuke).
+-- Pas reentrant — dupliquer le buffer si un second appelant concurrent apparait.
+local samBuf: { number } = table.create(8)
+
 function Buildings.samsOf(state: GameState, slot: number): { number }
-	local out = {}
+	local out = samBuf
+	local n = 0
 	local bySlot = state.samsBySlot
 	if bySlot then
 		local set = bySlot[slot]
 		if set then
 			for index in set do
-				table.insert(out, index)
+				n += 1
+				out[n] = index
 			end
 		end
-		return out
-	end
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == B.SAM then
-			table.insert(out, index)
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == B.SAM then
+				n += 1
+				out[n] = index
+			end
 		end
+	end
+	for i = #out, n + 1, -1 do
+		out[i] = nil
 	end
 	return out
 end
 
+--[[
+	Arme un cooldown et inscrit la tuile dans coolingBuildings (V19).
+	Unique point d'ecriture : intercept SAM et tir silo. Sans ce flag,
+	stepCooldowns (O(actifs)) n'aurait jamais connaissance du compteur.
+	SAM-only gelerait SILO_COOLDOWN : les deux kinds passent ici.
+]]
+function Buildings.armCooldown(state: GameState, index: number, duration: number)
+	local building = state.buildings[index]
+	if not building then
+		return
+	end
+	building.cooldown = duration
+	if duration > 0 and state.coolingBuildings then
+		state.coolingBuildings[index] = true
+	end
+end
+
 function Buildings.stepCooldowns(state: GameState)
+	local cooling = state.coolingBuildings
+	if cooling then
+		-- V19 contrat A : O(actifs), pas O(buildings). SAM et silos.
+		for index in cooling do
+			local building = state.buildings[index]
+			if not building then
+				cooling[index] = nil
+				continue
+			end
+			if building.cooldown > 0 then
+				building.cooldown -= 1
+			end
+			if building.cooldown <= 0 then
+				cooling[index] = nil
+			end
+		end
+		return
+	end
 	for _, building in state.buildings do
 		if building.cooldown > 0 then
 			building.cooldown -= 1

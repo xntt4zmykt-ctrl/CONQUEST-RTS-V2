@@ -180,6 +180,11 @@ export type GameState = typeof(setmetatable(
 		samsBySlot: { [number]: { [number]: true } },
 		-- Index SILO par camp (Nukes.launch, O(silos) pas O(hash)).
 		silosBySlot: { [number]: { [number]: true } },
+		-- Tous les batiments par camp. Bots upgrade + score nuke (V22).
+		buildingsBySlot: { [number]: { [number]: true } },
+		-- Batiments dont cooldown > 0 (V19). stepCooldowns n'itere plus
+		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
+		coolingBuildings: { [number]: true },
 		freeSlots: { number },
 		nextEntityId: number,
 		capitalEvents: number,
@@ -244,6 +249,8 @@ function GameState.new(seed: number): GameState
 	self.bunkersBySlot = {}
 	self.samsBySlot = {}
 	self.silosBySlot = {}
+	self.buildingsBySlot = {}
+	self.coolingBuildings = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
 	self.sounds = {}
@@ -534,19 +541,40 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 		return
 	end
 
-	-- 1. Collecte des gares.
+	-- 1. Collecte des gares. Index du camp (V22) : pas un scan hash.
+	-- Ne pas user IS_STATION ici : local trop bas, nil au runtime.
 	local stations: { number } = {}
-	for index, building in self.buildings do
-		if
-			building.slot == slot
-			and (
-				building.kind == B.CITY
-				or building.kind == B.CAPITAL
-				or building.kind == B.PORT
-				or building.kind == B.FACTORY
-			)
-		then
-			table.insert(stations, index)
+	if self.buildingsBySlot then
+		local set = self.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = self.buildings[index]
+				if
+					building
+					and (
+						building.kind == B.CITY
+						or building.kind == B.CAPITAL
+						or building.kind == B.PORT
+						or building.kind == B.FACTORY
+					)
+				then
+					table.insert(stations, index)
+				end
+			end
+		end
+	else
+		for index, building in self.buildings do
+			if
+				building.slot == slot
+				and (
+					building.kind == B.CITY
+					or building.kind == B.CAPITAL
+					or building.kind == B.PORT
+					or building.kind == B.FACTORY
+				)
+			then
+				table.insert(stations, index)
+			end
 		end
 	end
 	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
@@ -731,6 +759,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
+	setSlotIndex(self.buildingsBySlot, slot, index, true)
 
 	if kind == B.DEFENSE then
 		setSlotIndex(self.bunkersBySlot, slot, index, true)
@@ -791,6 +820,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	setSlotIndex(self.buildingsBySlot, previousSlot, index, false)
+	setSlotIndex(self.buildingsBySlot, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
@@ -819,6 +850,10 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	local previousSlot = building.slot
 	local previousKind = building.kind
+	setSlotIndex(self.buildingsBySlot, previousSlot, index, false)
+	if self.coolingBuildings then
+		self.coolingBuildings[index] = nil
+	end
 	if building.kind == B.DEFENSE then
 		setSlotIndex(self.bunkersBySlot, previousSlot, index, false)
 	end
@@ -1080,10 +1115,23 @@ function GameState.removePlayer(self: GameState, slot: number)
 		self.doomUnderSince[slot] = nil
 	end
 
-	for index, building in self.buildings do
-		if building.slot == slot then
-			self:destroyBuilding(index)
+	-- V22 : snapshot buildingsBySlot[slot] (destroy mute l'index). Iterer le
+	-- hash pendant destroyBuilding peut sauter des cles. Fallback hash si
+	-- l'index est nil (tests partiels).
+	local doomed: { number } = {}
+	if self.buildingsBySlot and self.buildingsBySlot[slot] then
+		for index in self.buildingsBySlot[slot] do
+			table.insert(doomed, index)
 		end
+	else
+		for index, building in self.buildings do
+			if building.slot == slot then
+				table.insert(doomed, index)
+			end
+		end
+	end
+	for _, index in doomed do
+		self:destroyBuilding(index)
 	end
 
 	for index = 0, Config.TILE_COUNT - 1 do
@@ -1138,6 +1186,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.silosBySlot then
 		self.silosBySlot[slot] = nil
+	end
+	if self.buildingsBySlot then
+		self.buildingsBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

@@ -132,7 +132,7 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 
 	local silo = state.buildings[bestSilo]
 	if silo then
-		silo.cooldown = Config.SILO_COOLDOWN
+		Buildings.armCooldown(state, bestSilo, Config.SILO_COOLDOWN)
 	end
 
 	ps.gold -= stats.cost
@@ -188,6 +188,7 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 	end
 
 	local best = nil
+	local bestIndex: number? = nil
 	local bestDist = math.huge
 	local bestRange = 0
 	local samKind = Config.BUILDING.SAM
@@ -213,6 +214,7 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 				end
 				if d2 < bestDist then
 					best = building
+					bestIndex = index
 					bestDist = d2
 					bestRange = range
 				end
@@ -243,18 +245,19 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 			end
 			if d2 < bestDist then
 				best = building
+				bestIndex = index
 				bestDist = d2
 				bestRange = range
 			end
 		end
 	end
 
-	if not best then
+	if not best or not bestIndex then
 		return false
 	end
 
 	missile.engaged = true
-	best.cooldown = Config.SAM_COOLDOWN or 90
+	Buildings.armCooldown(state, bestIndex, Config.SAM_COOLDOWN or 90)
 
 	local chance = if Config.SAM_INTERCEPT_CHANCE ~= nil then Config.SAM_INTERCEPT_CHANCE else 1
 	if rng:NextNumber() < chance then
