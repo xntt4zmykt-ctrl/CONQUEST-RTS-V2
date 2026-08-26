@@ -1680,7 +1680,9 @@ check("camera strategique", function()
 	-- N119 : shake nombres (punch + decroissance).
 	-- N120 : offset trig YXZ. Pas d'assert Z == focus.Z + distance
 	-- (pitch defaut 58°, pas l'identite stub VectorToWorldSpace).
-	-- N121 : lerp focus en nombres. Champ focusX/Y/Z leftover N122.
+	-- N121 : lerp focus en nombres.
+	-- N122 : champ focusX/Y/Z. Plus de Vector3.new idle. Minimap
+	-- reconstruit un Vector3 au lecteur (leftover N123).
 	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
 	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
 	local pose = camera.camera.CFrame
@@ -1688,27 +1690,30 @@ check("camera strategique", function()
 	local ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
 	local oy = d * math.sin(camera.pitch)
 	local oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
-	assert(pose.X == camera.focus.X + ox, "oeil X hors formule")
-	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors formule")
-	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors formule")
-	-- N121 : un frame rapproche sans sauter. Pose utilise fx/fy/fz.
-	local beforeX = camera.focus.X
-	local beforeY = camera.focus.Y
-	local beforeZ = camera.focus.Z
-	camera.targetFocus = camera.focus + Vector3.new(40, 0, 0)
+	assert(pose.X == camera.focusX + ox, "oeil X hors formule")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors formule")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors formule")
+	-- N121/N122 : un frame rapproche sans sauter. Pose utilise fx/fy/fz.
+	local beforeX = camera.focusX
+	local beforeY = camera.focusY
+	local beforeZ = camera.focusZ
+	camera.targetFocus = Vector3.new(camera.focusX + 40, camera.focusY, camera.focusZ)
 	camera:step(1 / 60)
-	assert(camera.focus.X > beforeX, "lerp focus n'avance pas")
-	assert(camera.focus.X < camera.targetFocus.X, "lerp focus saute la cible")
-	assert(camera.focus.Y == beforeY, "lerp focus mute Y")
-	assert(camera.focus.Z == beforeZ, "lerp focus mute Z")
+	assert(camera.focusX > beforeX, "lerp focus n'avance pas")
+	assert(camera.focusX < camera.targetFocus.X, "lerp focus saute la cible")
+	assert(camera.focusY == beforeY, "lerp focus mute Y")
+	assert(camera.focusZ == beforeZ, "lerp focus mute Z")
 	pose = camera.camera.CFrame
 	d = camera.distance
 	ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
 	oy = d * math.sin(camera.pitch)
 	oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
-	assert(pose.X == camera.focus.X + ox, "oeil X hors lerp")
-	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors lerp")
-	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors lerp")
+	assert(pose.X == camera.focusX + ox, "oeil X hors lerp")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors lerp")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors lerp")
+	camera.focusX = camera.targetFocus.X
+	camera.focusY = camera.targetFocus.Y
+	camera.focusZ = camera.targetFocus.Z
 	camera.focus = camera.targetFocus
 	camera:punch(1)
 	assert(camera.shake > 0, "punch n'arme pas le shake")

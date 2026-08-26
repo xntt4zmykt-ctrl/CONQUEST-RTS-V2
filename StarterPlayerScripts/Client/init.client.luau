@@ -1109,6 +1109,6 @@ RunService.RenderStepped:Connect(function(dt: number)
 	local m = minimap
 	if m then
 		m:flush()
-		m:setFocus(camera.focus)
+		m:setFocus(Vector3.new(camera.focusX, camera.focusY, camera.focusZ))
 	end
 end)

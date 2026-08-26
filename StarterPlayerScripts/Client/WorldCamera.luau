@@ -57,6 +57,9 @@ function WorldCamera.new(): WorldCamera
 
 	self.camera = Workspace.CurrentCamera
 	self.focus = Vector3.zero
+	self.focusX = 0
+	self.focusY = 0
+	self.focusZ = 0
 	self.targetFocus = Vector3.zero
 	self.distance = 320
 	self.targetDistance = 320
@@ -221,6 +224,9 @@ function WorldCamera.focusTile(self: WorldCamera, index: number, instant: boolea
 	self.targetFocus = Vector3.new(position.X, 0, position.Z)
 	if instant then
 		self.focus = self.targetFocus
+		self.focusX = self.targetFocus.X
+		self.focusY = self.targetFocus.Y
+		self.focusZ = self.targetFocus.Z
 	end
 end
 
@@ -510,15 +516,17 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	-- contrairement a un simple `dt * k` qui devient instable sous 30 FPS.
 	local alpha = 1 - math.exp(-12 * dt)
 	-- N121 : lerp focus en nombres. Plus de += / - / * Vector3 60 Hz.
-	-- Un Vector3.new a l'ecriture (pan / clamp / minimap lisent encore
-	-- self.focus). Offset ox/oy/oz inchange (N120). Shake sx/sy/sz
-	-- inchange (N119). Pose CFrame.new * rotation inchangee (N118).
-	-- Champ focusX/Y/Z leftover N122. Recette visual V68 deja sur `0231`,
-	-- portee pas mergee.
-	local fx = self.focus.X + (self.targetFocus.X - self.focus.X) * alpha
-	local fy = self.focus.Y + (self.targetFocus.Y - self.focus.Y) * alpha
-	local fz = self.focus.Z + (self.targetFocus.Z - self.focus.Z) * alpha
-	self.focus = Vector3.new(fx, fy, fz)
+	-- N122 : champs focusX/Y/Z. Plus de Vector3.new 60 Hz idle.
+	-- self.focus n'est plus reecrit ici (geste focusTile seulement).
+	-- Offset ox/oy/oz inchange (N120). Shake sx/sy/sz inchange (N119).
+	-- Pose CFrame.new * rotation inchangee (N118). Recette visual V69
+	-- ouverte — portee pas mergee.
+	local fx = self.focusX + (self.targetFocus.X - self.focusX) * alpha
+	local fy = self.focusY + (self.targetFocus.Y - self.focusY) * alpha
+	local fz = self.focusZ + (self.targetFocus.Z - self.focusZ) * alpha
+	self.focusX = fx
+	self.focusY = fy
+	self.focusZ = fz
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
@@ -540,6 +548,7 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	--   oz = d * cos(pitch) * cos(yaw)
 	-- Recette visual V67 deja sur `b2f1`, portee pas mergee.
 	-- N121 : oeil depuis fx/fy/fz (pas self.focus.X apres le write).
+	-- N122 : fx vient de focusX, plus de Vector3.new d'ecriture.
 	-- Overlay unites / camion inchanges (N117 / N116 / N115).
 	local d = self.distance
 	local pitch, yaw = self.pitch, self.yaw
