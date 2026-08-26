@@ -1109,6 +1109,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 	local m = minimap
 	if m then
 		m:flush()
-		m:setFocus(Vector3.new(camera.focusX, camera.focusY, camera.focusZ))
+		-- N123 : nombres. Plus de Vector3.new 60 Hz au lecteur.
+		-- Recette visual V69 leftover minimap, portee pas mergee.
+		m:setFocus(camera.focusX, camera.focusY, camera.focusZ)
 	end
 end)

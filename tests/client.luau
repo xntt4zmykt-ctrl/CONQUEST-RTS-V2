@@ -1681,8 +1681,8 @@ check("camera strategique", function()
 	-- N120 : offset trig YXZ. Pas d'assert Z == focus.Z + distance
 	-- (pitch defaut 58°, pas l'identite stub VectorToWorldSpace).
 	-- N121 : lerp focus en nombres.
-	-- N122 : champ focusX/Y/Z. Plus de Vector3.new idle. Minimap
-	-- reconstruit un Vector3 au lecteur (leftover N123).
+	-- N122 : champ focusX/Y/Z. Plus de Vector3.new idle.
+	-- N123 : Minimap.setFocus(x,y,z) nombres (check minimap).
 	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
 	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
 	local pose = camera.camera.CFrame
@@ -1822,7 +1822,21 @@ check("minimap", function()
 		buffer.writeu8(delta, 4, 3)
 		minimap:applyDelta(delta)
 		minimap:flush()
-		minimap:setFocus(Vector3.new(0, 0, 0))
+		-- N123 : (x, y, z) nombres. Origine monde → centre de la carte.
+		-- Recette visual V69 leftover minimap, portee pas mergee.
+		minimap:setFocus(0, 0, 0)
+		assert(minimap.marker.Position.X.Scale == 0.5, "marqueur X hors centre")
+		assert(minimap.marker.Position.Y.Scale == 0.5, "marqueur Y hors centre")
+		local camera = WorldCamera.new()
+		camera:setMode("overview")
+		camera:setDistance(300, true)
+		camera:focusTile(5000, true)
+		camera:step(1 / 60)
+		minimap:setFocus(camera.focusX, camera.focusY, camera.focusZ)
+		local u = math.clamp((camera.focusX + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
+		local v = math.clamp((camera.focusZ + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
+		assert(minimap.marker.Position.X.Scale == u, "marqueur ne suit pas focusX")
+		assert(minimap.marker.Position.Y.Scale == v, "marqueur ne suit pas focusZ")
 		minimap:destroy()
 	end
 end)
