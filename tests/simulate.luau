@@ -2442,7 +2442,38 @@ do
 		if not secondChat or secondChat.ok then
 			fail("intentions — QuickChat en cooldown rapporte un succes")
 		end
+
+		-- Ratio extreme borne a l'enqueue, pas seulement a l'apply.
+		IntentValidator.reset()
+		local okHuge = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 10, { ratio = 99 })
+		if not okHuge then
+			fail("intentions — ratio 99 refuse a l'enqueue")
+		end
+		IntentValidator.flush(ctx)
+		if ps.attackRatio ~= 1 then
+			fail(`intentions — ratio 99 non borne ({ps.attackRatio})`)
+		end
+		IntentValidator.reset()
+		IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 11, { ratio = -8 })
+		IntentValidator.flush(ctx)
+		if math.abs(ps.attackRatio - 0.05) > 1e-9 then
+			fail(`intentions — ratio -8 non borne ({ps.attackRatio})`)
+		end
+
+		-- needsTarget : (id, 99) ne vise pas le slot 99 (hors MAX_TOTAL_FACTIONS).
+		IntentValidator.reset()
+		local okAim, reasonAim = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"QuickChat",
+			12,
+			{ messageId = "attack_target", targetSlot = 99 }
+		)
+		if okAim or reasonAim ~= "InvalidTarget" then
+			fail(`intentions — QuickChat slot 99 accepte ({tostring(reasonAim)})`)
+		end
 		print("intentions : QuickChat cooldown honore")
+		print("intentions : ratio borne, QuickChat slot hors catalogue refuse")
 	end
 end
 
@@ -2510,6 +2541,67 @@ do
 				fail("removePlayer — frontiere du survivant non rafraichie (contact vs neutre)")
 			end
 		end
+	end
+end
+
+do
+	-- Troupes engagees rendues si le defenseur disparait (deco / elimination).
+	local Heap = __require("Heap")
+	local state = GameState.new(404)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Attaquant", Random.new(4), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(5), 0)
+	if not a or not b then
+		fail("refund defenseur — spawn impossible")
+	else
+		local committed = 800
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = committed,
+			frontier = Heap.new(),
+			queued = {},
+		})
+		local before = a.troops
+		state:removePlayer(b.slot)
+		if math.abs(a.troops - (before + committed)) > 1e-9 then
+			fail(`refund defenseur — troupes {a.troops} attendu {before + committed}`)
+		end
+		if #state.attacks ~= 0 then
+			fail(`refund defenseur — {#state.attacks} fronts restants`)
+		end
+		print("refund defenseur : removePlayer rend les troupes")
+	end
+end
+
+do
+	-- Attack orphelin (slot cible deja nil) rembourse au step vivant.
+	local Heap = __require("Heap")
+	local state = GameState.new(405)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Attaquant", Random.new(6), 0)
+	local b = state:addPlayer(nil, "Fantome", Random.new(7), 0)
+	if not a or not b then
+		fail("refund orphelin — spawn impossible")
+	else
+		local committed = 650
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = committed,
+			frontier = Heap.new(),
+			queued = {},
+		})
+		state.players[b.slot] = nil
+		local before = a.troops
+		state:stepAttacks()
+		if math.abs(a.troops - (before + committed)) > 1e-9 then
+			fail(`refund orphelin — troupes {a.troops} attendu {before + committed}`)
+		end
+		if #state.attacks ~= 0 then
+			fail("refund orphelin — front encore en file")
+		end
+		print("refund orphelin : stepAttacks rend les troupes")
 	end
 end
 
@@ -2830,6 +2922,36 @@ do
 			fail("accept expire — pacte cree hors delai")
 		end
 		print("accept expire : proposition perimee refusee")
+	end
+end
+
+do
+	-- HUD : une proposition expiree ne doit plus apparaitre incoming/outgoing.
+	local state = GameState.new(5154)
+	local a = state:addPlayer(nil, "Offrant", Random.new(81), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(82), 0)
+	if not a or not b then
+		fail("viewFor expiry — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		local liveIn = Diplomacy.viewFor(state, b.slot)
+		local liveOut = Diplomacy.viewFor(state, a.slot)
+		if not liveIn.incoming[a.slot] then
+			fail("viewFor expiry — proposition vive absente en incoming")
+		end
+		if not liveOut.outgoing[b.slot] then
+			fail("viewFor expiry — proposition vive absente en outgoing")
+		end
+		state.tick += Config.ALLIANCE_REQUEST_TIMEOUT + 1
+		local staleIn = Diplomacy.viewFor(state, b.slot)
+		local staleOut = Diplomacy.viewFor(state, a.slot)
+		if staleIn.incoming[a.slot] then
+			fail("viewFor expiry — proposition perimee encore en incoming")
+		end
+		if staleOut.outgoing[b.slot] then
+			fail("viewFor expiry — proposition perimee encore en outgoing")
+		end
+		print("viewFor expiry : proposition perimee masquee")
 	end
 end
 
