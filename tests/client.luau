@@ -1176,6 +1176,13 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- doivent rester verts. Recette leftover N148, pas merger
 	-- visual. Beacons leftover N150 non touches. UnitModels /
 	-- Overlay inchanges.
+	-- N150 : beacons rest.Z (pas child.Position.Z). CityBeacon /
+	-- PortBeacon / LabBeacon, un elseif. Amplitude / frequence
+	-- inchangees. Leftover N149 fenetres rest.X, leftover N142
+	-- Interceptor, leftover N141 portes, leftover N124 radar
+	-- doivent rester verts. Recette leftover N149, pas merger
+	-- visual. Trail UnitModels leftover non touche. CityWindows
+	-- N149 inchange. UnitModels / Overlay inchanges.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)

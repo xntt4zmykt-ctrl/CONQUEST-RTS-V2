@@ -617,7 +617,17 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- place inchanges.
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + rest.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
-			child.Transparency = 0.05 + (math.sin(time * 2.8 + child.Position.Z * 0.05) + 1) * 0.18
+			-- N150 : phase depuis rest.Z. Plus de child.Position.Z 60 Hz
+			-- (BasePart.Position alloue un Vector3). rest.Z ≡ Position.Z
+			-- (beacon non tourne dans cette branche). Trois noms, un
+			-- elseif — ne pas splitter. Amplitude 0.05 + (sin + 1) *
+			-- 0.18 / frequence time * 2.8 / coeff 0.05 inchanges.
+			-- Distinct fenetres N149 (rest.X). Distinct trail
+			-- UnitModels leftover (offset.Position.Z). Distinct
+			-- Radar N124. Distinct cable Y N109. Recette leftover
+			-- N149, pas merger visual. CityWindows N149 / mesh N148 /
+			-- Fin N147 / Overlay / UnitModels / place inchanges.
+			child.Transparency = 0.05 + (math.sin(time * 2.8 + rest.Z * 0.05) + 1) * 0.18
 		elseif child.Name == "FactoryOutput" then
 			child.Transparency = 0.12 + (math.sin(time * 3.2) + 1) * 0.12
 		elseif child.Name == "SiloWarning" then
