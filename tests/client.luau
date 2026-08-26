@@ -677,6 +677,37 @@ check("construction du monde 3D", function()
 		end
 	end
 	assert(world.partCount == visible, "partCount incoherent avec les Parts visibles")
+
+	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
+	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
+	-- (partCount) reste au-dessus. Recette visual V58/V59, pas merger.
+	local nRipple = #world.oceanRipples
+	assert(nRipple > 0, "aucun reflet ocean")
+	local first = world.oceanRipples[1]
+	local glintPart = first.part
+	local glintBase = first.base
+	local nFoliage = #world.animatedFoliage
+	assert(nFoliage > 0, "aucune couronne")
+	local firstLeaf = world.animatedFoliage[1]
+	local leafPart = firstLeaf.part
+	local leafBase = firstLeaf.base
+	world:step(1 / 60)
+	world:step(1 / 60)
+	assert(#world.oceanRipples == nRipple, "reflets recrees")
+	assert(rawequal(world.oceanRipples[1].part, glintPart), "Part glint recree")
+	assert(glintPart.CFrame.X ~= glintBase.X or glintPart.CFrame.Z ~= glintBase.Z, "houle n'a pas bouge")
+	assert(glintPart.Transparency >= 0.64 and glintPart.Transparency <= 0.82, "Transparency hors bande")
+	assert(#world.animatedFoliage == nFoliage, "couronnes recrees")
+	assert(rawequal(world.animatedFoliage[1].part, leafPart), "Part couronne recree")
+	assert(leafPart.CFrame.Y ~= leafBase.Y, "feuillage n'a pas bouge")
+	local savedRipples = world.oceanRipples
+	world.oceanRipples = {}
+	world:step(1 / 60)
+	world.oceanRipples = savedRipples
+	local savedFoliage = world.animatedFoliage
+	world.animatedFoliage = {}
+	world:step(1 / 60)
+	world.animatedFoliage = savedFoliage
 end)
 
 check("calques d'entites, effets et apercu", function()
