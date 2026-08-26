@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Interface de commandement, calee sur la disposition du jeu de reference
-	(OpenFront) :
+	Interface de commandement, calee sur la disposition CONQUEST
+	 :
 
 	  haut gauche     la carte d'identite : nation, doctrine, territoire
 	  haut droit      la session : chrono, recherche, reglages
@@ -55,7 +55,7 @@ local MAX_FEED_ENTRIES = 3
 local FEED_ENTRY_HEIGHT = 21
 
 --[[
-	Geometrie, disposition du jeu de reference.
+	Geometrie, disposition CONQUEST.
 
 	Les hauteurs sont derivees, jamais recopiees : le panneau de controle, les
 	feuilles et la barre tactile s'empilent depuis la meme reference, donc
@@ -178,7 +178,8 @@ local MODE_COLORS: { [string]: Color3 } = {
 
 export type Mode = "attack" | "build" | "boat" | "nuke"
 
-type Ranking = { { slot: number, tiles: number, troops: number, gold: number } }
+type RankRow = { slot: number, tiles: number, troops: number, gold: number }
+type Ranking = { RankRow }
 
 export type HUD = typeof(setmetatable({} :: any, HUD))
 
@@ -382,7 +383,7 @@ end
 	qu'on y gagne est ailleurs — la structure dit maintenant ce qu'elle fait, et
 	un calque entier peut etre masque, decale ou fondu d'un seul geste.
 
-	Il n'y a plus de calque bas : la disposition OpenFront ne laisse plus rien
+	Il n'y a plus de calque bas : la disposition CONQUEST ne laisse plus rien
 	de permanent en bas d'ecran, et un calque vide aurait juste laisse croire
 	que quelque chose y vit encore.
 
@@ -549,7 +550,7 @@ end
 	Ligne 2 : ce qui part — le curseur d'engagement et le chiffre envoye.
 	Ligne 3 : ce que j'ai — une pastille comptee par type de batiment.
 
-	C'est la forme du jeu de reference : le joueur y pose les yeux entre deux
+	C'est la forme CONQUEST : le joueur y pose les yeux entre deux
 	ordres, sans jamais quitter le bas de l'ecran ou sa main est deja. Les
 	puces sont des contours colores plutot que des fonds pleins : trois blocs
 	opaques cote a cote feraient un semafor, trois contours restent des puces.
@@ -1619,7 +1620,7 @@ end
 --=============================================================================
 
 --[[
-	Le catalogue predefini, modele OpenFront : pas de texte libre, donc pas
+	Le catalogue predefini, regle CONQUEST : pas de texte libre, donc pas
 	d'insulte ni de barriere de langue. Deux temps seulement — on choisit un
 	message, et s'il exige une cible, on la designe dans la liste des nations.
 ]]
@@ -2370,6 +2371,18 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	self.diploButtons.markTarget.Visible = not allied
 end
 
+-- N100 : HUD.update hoist rankByTiles (recette visual V54).
+-- Distinct de N97 (records ranked) et de N76 (playerStatsForReplicate).
+-- Non reentrant. Meme loi : tuiles desc, tie-break troupes desc.
+-- Ne PAS retoucher self.ranked / inner records (N97 deja).
+-- Pas de RemoteFunction. VictoryScreen / Overlay / init.client non touches.
+local function rankByTiles(a: RankRow, b: RankRow): boolean
+	if a.tiles == b.tiles then
+		return a.troops > b.troops
+	end
+	return a.tiles > b.tiles
+end
+
 --=============================================================================
 -- Rafraichissement par tick
 --=============================================================================
@@ -2495,21 +2508,33 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 	end
 
 	-- Classement trie par territoire : c'est la mesure qui decide la victoire.
-	local ranked: Ranking = {}
+	-- N97 : recycle self.ranked + inner records (recette visual V50 / boatSnapBuf).
+	-- Distinct de N96 (hash barycentre) et de N76 (playerStatsForReplicate).
+	-- Non reentrant. Truncate leftover AVANT table.sort (une ligne fantome
+	-- apparaitrait dans VictoryScreen.show / #hud.ranked).
+	-- Ne PAS table.insert. Ne PAS remplacer self.ranked.
+	local ranked: Ranking = self.ranked
+	local n = 0
 	local maxTiles = 1
 	for slot, s in stats do
-		table.insert(ranked, { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold })
+		n += 1
+		local rec = ranked[n]
+		if rec == nil then
+			ranked[n] = { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold }
+		else
+			rec.slot = slot
+			rec.tiles = s.tiles
+			rec.troops = s.troops
+			rec.gold = s.gold
+		end
 		if s.tiles > maxTiles then
 			maxTiles = s.tiles
 		end
 	end
-	table.sort(ranked, function(a, b)
-		if a.tiles == b.tiles then
-			return a.troops > b.troops
-		end
-		return a.tiles > b.tiles
-	end)
-	self.ranked = ranked
+	for i = #ranked, n + 1, -1 do
+		ranked[i] = nil
+	end
+	table.sort(ranked, rankByTiles)
 
 	--[[
 		Le classement maison a ete retire : la liste native de Roblox le donne
