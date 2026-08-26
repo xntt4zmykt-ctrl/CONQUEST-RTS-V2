@@ -115,11 +115,25 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	block(model, Vector3.new(8.8, hallHeight, 6.6), Vector3.new(-0.3, 0.7 + hallHeight / 2, 0), color, Enum.Material.Metal)
 
 	-- Toit industriel en dents de scie : une de plus a chaque palier.
+	-- V89 : translation * fromEulerAnglesYXZ (Z=-12° fixe). Plus de
+	-- CFrame.Angles a buildFactory toits. Recette feel N140 inline —
+	-- ne PAS cuire un roofRot (translations distinctes par `x`, comme
+	-- V88 cylinderRot / V86 trunkRot interdits). Distinct de V88
+	-- (cylinder helper, Z=90°, même fichier, même buildFactory — ne
+	-- PAS retoucher le helper). Distinct de V87 (Rock yaw `phase`
+	-- variable, WorldRenderer). Distinct de V86 (TreeTrunk, Z=90°,
+	-- WorldRenderer). Distinct de V85 (BuildRing, playConstruction).
+	-- Distinct de V84 (OceanGlint yaw `angle` variable). Construction
+	-- de modele, pas 60 Hz. block() pose d'abord CFrame.new(x, roofY, 0)
+	-- ; la ligne ecrase ensuite. teeth / x / roofY / Size / Color /
+	-- Material inchanges. Ne pas editer les cheminees / reservoir.
+	-- Ne pas toucher les portes silo (leftover V90). Ne pas merger
+	-- feel a8e1.
 	local teeth = 1 + tier
 	for i = 1, teeth do
 		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
 		local roof = block(model, Vector3.new(2.3, 0.35, 7), Vector3.new(x, roofY, 0), STEEL, Enum.Material.Metal)
-		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.Angles(0, 0, math.rad(-12))
+		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-12))
 	end
 
 	local chimneyA = cylinder(model, Vector3.new(9 + (tier - 1) * 2, 1.15, 1.15), Vector3.new(2.7, roofY + 3.3, -1.8), STEEL)
@@ -167,8 +181,9 @@ function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color
 	-- `angle` variable, buildOcean). Construction de modele, pas 60 Hz.
 	-- Shape = Cylinder pose AVANT le CFrame. block() pose d'abord
 	-- CFrame.new(offset) ; cylinder() ecrase ensuite. Call sites
-	-- buildFactory / buildSilo non edites. Ne pas toucher les toits
-	-- usine (leftover V89). Ne pas merger feel a8e1.
+	-- buildFactory / buildSilo non edites. Toits usine V89 (check
+	-- modeles). Ne pas toucher les portes silo (leftover V90).
+	-- Ne pas merger feel a8e1.
 	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
