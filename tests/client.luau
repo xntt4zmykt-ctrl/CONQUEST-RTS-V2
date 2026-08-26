@@ -335,7 +335,8 @@ check("fil de notifications sature", function()
 	-- dans le check construction — doit rester vert. Feux navire fermes
 	-- (V105). Wake Transparency fermee (V106). Flag pitch fermee
 	-- (V107). CapitalFlag fermee (V108). PortCraneBoom fermee
-	-- (V109). PortCraneCable fermee (V110).
+	-- (V109). PortCraneCable fermee (V110). Flame Size phase fermee
+	-- (V111).
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -741,7 +742,7 @@ check("construction du monde 3D", function()
 	-- (V105, check navires). HUD feed leftover V103. Wake Transparency
 	-- fermee (V106). Flag pitch fermee (V107). CapitalFlag fermee
 	-- (V108). PortCraneBoom fermee (V109). PortCraneCable fermee
-	-- (V110).
+	-- (V110). Flame Size phase fermee (V111).
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 	world:markChunkDirty(0)
@@ -1935,7 +1936,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2146,7 +2147,8 @@ check("navires, missiles et interpolation", function()
 	-- ci-dessous). Wake Transparency fermee (V106, ci-dessous). Flag
 	-- pitch fermee (V107, ci-dessous). CapitalFlag fermee (V108,
 	-- check modeles). PortCraneBoom fermee (V109, check modeles).
-	-- PortCraneCable fermee (V110, check modeles).
+	-- PortCraneCable fermee (V110, check modeles). Flame Size phase
+	-- fermee (V111, ci-dessous).
 	local exhaustN = 0
 	local aTrail
 	for _, piece in overlay.units[3].visual.pieces do
@@ -2256,7 +2258,8 @@ check("navires, missiles et interpolation", function()
 	-- Transparency). Distinct de V73 (fromEulerAnglesYXZ deja).
 	-- Distinct de V108 (CapitalFlag, check modeles, fermee).
 	-- Distinct de V109 (PortCraneBoom, fermee). Distinct de V110
-	-- (PortCraneCable, fermee).
+	-- (PortCraneCable, fermee). Distinct de V111 (flame Size,
+	-- ci-dessous).
 	-- Deux stepInterpolation → Part rawequal. Construction Flag
 	-- inchangee. Pas de flagPhase.
 	local aFlagPiece
@@ -2294,6 +2297,38 @@ check("navires, missiles et interpolation", function()
 		end
 	end
 	assert(missileFlagN == 0, "missile avec Flag")
+	-- V111 : id 3 (missile) a 1 Part Name == EngineFlame
+	-- (role == "flame"). Offset local X == 0 / Y == 0 / Z == 4.15
+	-- (construction ; Overlay place compose). Navires id 1/2/4 : 0.
+	-- Recette analogique V110 — ne PAS merger c450 / ee71. Distinct
+	-- de V74 (Size = Vector3.new API, pulse Z vivant). Distinct de
+	-- V100 (trail offset.Z). Distinct de V76 (Preview Size rayon).
+	-- Offset X == 0 pour toutes les flammes — ne PAS user offset.X
+	-- (resterait lockstep). Deux stepInterpolation → Part rawequal,
+	-- Size.X/Y == 0.62, Size.Z ∈ [1.35, 2.25]. Pas de flamePhase.
+	local flameN = 0
+	local aFlame
+	for _, piece in overlay.units[3].visual.pieces do
+		if piece.role == "flame" and piece.part.Name == "EngineFlame" then
+			flameN += 1
+			aFlame = piece
+		end
+	end
+	assert(flameN == 1, "missile sans 1 EngineFlame")
+	assert(aFlame ~= nil and aFlame.offset, "EngineFlame sans offset")
+	assert(math.abs(aFlame.offset.X) < 1e-6, "EngineFlame offset X")
+	assert(math.abs(aFlame.offset.Y) < 1e-6, "EngineFlame offset Y")
+	assert(math.abs(aFlame.offset.Z - 4.15) < 1e-6, "EngineFlame offset Z")
+	local flamePart = aFlame.part
+	for _, id in { 1, 2, 4 } do
+		local n = 0
+		for _, piece in overlay.units[id].visual.pieces do
+			if piece.role == "flame" or piece.part.Name == "EngineFlame" then
+				n += 1
+			end
+		end
+		assert(n == 0, "navire avec EngineFlame")
+	end
 	overlay:stepInterpolation(1 / 60)
 	-- V73 : radar/flag fromEulerAnglesYXZ. Premier stepInterpolation
 	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
@@ -2388,6 +2423,14 @@ check("navires, missiles et interpolation", function()
 	assert(rawequal(aCarrierFlag.offset, carrierFlagOff), "offset Flag carrier mute")
 	assert(math.abs(aCarrierFlag.offset.X - 3.05) < 1e-6, "Flag carrier offset X mute")
 	assert(math.abs(aFlagPiece.offset.X) < 1e-6, "Flag transport offset X mute")
+	assert(rawequal(aFlame.part, flamePart), "Part flame recreee")
+	assert(type(aFlame.part.Size.X) == "number", "EngineFlame Size absente")
+	assert(math.abs(aFlame.part.Size.X - 0.62) < 1e-6, "EngineFlame Size X")
+	assert(math.abs(aFlame.part.Size.Y - 0.62) < 1e-6, "EngineFlame Size Y")
+	assert(
+		aFlame.part.Size.Z >= 1.35 and aFlame.part.Size.Z <= 2.25,
+		"EngineFlame Size Z hors bande"
+	)
 	overlay:applyUnits({}, {})
 	-- V79 : 3 navires → 3 LandingSplash. Missile skip. Y = OCEAN + 0.14.
 	-- wakeRot rawequal (un seul champ, constante identique a V78).

@@ -1281,6 +1281,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- Feux navire fermes (V105). Wake Transparency fermee (V106).
 	-- Flag pitch fermee (V107). CapitalFlag fermee (V108).
 	-- PortCraneBoom fermee (V109). PortCraneCable fermee (V110).
+	-- Flame Size phase fermee (V111).
 	while #self.feedEntries > MAX_FEED_ENTRIES do
 		local entries = self.feedEntries
 		local n = #entries

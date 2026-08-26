@@ -372,11 +372,12 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- ≡ Angles(pitch, 0, 0) (ry=0, rz=0 → X seul). Amplitude
 			-- 0.06 / frequence 5 inchangees. Overlay roulis inchange
 			-- (V71). Roues camion inchangees (V72). BuildingModels
-			-- Radar/Flag/Boom inchanges (V70). Flame Size inchange
-			-- (V74). Trail offset.Z inchange (V100). Feux offset.X
-			-- (V105). Wake offset.X (V106, elseif plus bas). Flag
-			-- offset.X (V107, elseif suivant). CapitalFlag fermee
-			-- (V108, BuildingModels). PortCraneBoom fermee (V109).
+			-- Radar/Flag/Boom inchanges (V70). Flame Size API
+			-- (V74) + phase frame.X (V111, elseif flame). Trail
+			-- offset.Z inchange (V100). Feux offset.X (V105). Wake
+			-- offset.X (V106, elseif plus bas). Flag offset.X
+			-- (V107, elseif suivant). CapitalFlag fermee (V108,
+			-- BuildingModels). PortCraneBoom fermee (V109).
 			-- PortCraneCable fermee (V110).
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
@@ -391,7 +392,8 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (fromEulerAnglesYXZ deja, pas CFrame.Angles). Distinct
 			-- de V108 (CapitalFlag, BuildingModels, fermee). Distinct
 			-- de V109 (PortCraneBoom, fermee). Distinct
-			-- de V110 (PortCraneCable, fermee). Un
+			-- de V110 (PortCraneCable, fermee). Distinct
+			-- de V111 (flame Size, elseif plus bas). Un
 			-- elseif, role == "flag" inchange. Name Flag inchange.
 			-- Construction Flag inchangee. Pas de flagPhase.
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0, 0)
@@ -411,7 +413,27 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (V92).
 			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
-			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
+			-- V111 : phase depuis frame.X. Plus de lockstep
+			-- sin(time * 18) sans phase spatiale. frame est le
+			-- CFrame monde Overlay (translation * yaw). Offset
+			-- local EngineFlame Vector3.new(0, 0, 4.15) — X == 0
+			-- pour TOUTES les flammes : offset.X resterait
+			-- lockstep (comme V106 interdit offset.Z pour Wake).
+			-- Overlay passe deja now+unit.phase (id % 31) : deux
+			-- missiles id ≡ 0 mod 31 resteraient lockstep sans
+			-- frame.X. Amplitude 0.45, frequence 18, * 0.1
+			-- inchanges (famille V98). Size = Vector3.new API
+			-- (V74 Option A) inchange. Pulse Z vivant. Pas de
+			-- Position. Recette analogique V110 — ne PAS merger
+			-- c450 / ee71. Distinct de V74 (API Size). Distinct
+			-- de V100 (trail offset.Z, elseif suivant). Distinct
+			-- de V110 (PortCraneCable, BuildingModels.animate —
+			-- autre fichier). Distinct de V76 (Preview Size
+			-- rayon constant). Un elseif, role == "flame"
+			-- inchange. Name EngineFlame inchange. Construction
+			-- createMissile inchangee. Pas de flamePhase.
+			-- Ne pas inventer un pool Vector3.
+			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z
 			-- 60 Hz (Position reconstruit un Vector3). offset est deja
@@ -420,7 +442,9 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- ajoute au Transparency courant. Recette feel N151 —
 			-- ne PAS merger. Distinct de V99 (beacons rest.Z,
 			-- BuildingModels.animate — autre fichier). Distinct de
-			-- V74 (flame Size API). Distinct de V73 (radar/flag).
+			-- V74 (flame Size API). Distinct de V111 (flame
+			-- phase frame.X, elseif precedent). Distinct de V73
+			-- (radar/flag).
 			-- Distinct de V98 (CityWindows rest.X). Distinct de V104
 			-- (FactoryOutput rest.X / SiloWarning rest.Z,
 			-- BuildingModels.animate — autre fichier). Distinct de
