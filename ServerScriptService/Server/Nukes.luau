@@ -42,13 +42,16 @@ local hitTilesBuf: { [number]: number } = {}
 local mirvTxBuf: { number } = table.create(8)
 local mirvTyBuf: { number } = table.create(8)
 -- N97 : missile live recycle (leftover N52/N96). Contrat A free-list,
--- recette boatFree N96. launch / splitMirv pop, table.remove push.
+-- recette boatFree N96. launch / splitMirv pop, despawnMissile push.
 -- Overwrite id/slot/kind/x/y/sx/sy/tx/ty/progress/speed. engaged /
 -- warhead / radius / troopKill nil sauf ogive (warhead=true + radius
 -- + troopKill). Pool module survit a GameState.new. Ne pas require
 -- depuis GameState (cycle). GameState.removePlayer inchange. Overlay
 -- lit snapshot N52, pas le live. table.clear du record interdit.
 -- Un leftover engaged = SAM skip ; leftover warhead = pas de scission.
+-- N100 : despawnMissile swap-pop (ordre live indifferent). Reverse
+-- while + decrement — une ogive spawn au split n'avance pas le meme
+-- tick (N97). Un missile saute = ogive fantome.
 local missileFree: { GameState.Missile } = table.create(8)
 Nukes.missileFree = missileFree
 
@@ -113,8 +116,11 @@ local function acquireMissile(
 end
 
 local function despawnMissile(state: GameState, i: number)
-	local missile = state.missiles[i]
-	table.remove(state.missiles, i)
+	local missiles = state.missiles
+	local missile = missiles[i]
+	local last = #missiles
+	missiles[i] = missiles[last]
+	missiles[last] = nil
 	table.insert(missileFree, missile)
 end
 
@@ -533,7 +539,11 @@ end
 function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number, number) -> ())
 	Buildings.stepCooldowns(state)
 
-	for i = #state.missiles, 1, -1 do
+	-- N100 : while reverse + swap-pop. Decrement toujours apres despawn :
+	-- l'item swappe venait d'un indice plus haut (deja visite) ou d'un
+	-- append split (ogives : pas d'avance le meme tick, N97).
+	local i = #state.missiles
+	while i >= 1 do
 		local missile = state.missiles[i]
 
 		local dx = missile.tx - missile.sx
@@ -551,6 +561,7 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 
 		if tryIntercept(state, missile, rng) then
 			despawnMissile(state, i)
+			i -= 1
 			continue
 		end
 
@@ -563,6 +574,7 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 			local tx, ty = missile.tx, missile.ty
 			despawnMissile(state, i)
 			splitMirv(state, slot, mx, my, tx, ty, rng)
+			i -= 1
 			continue
 		end
 
@@ -572,6 +584,7 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 			onExplosion(missile.tx, missile.ty, missile.radius or (if stats then stats.radius else 8))
 			despawnMissile(state, i)
 		end
+		i -= 1
 	end
 end
 
