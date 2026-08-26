@@ -70,13 +70,14 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	root.Parent = parent
 	self.root = root
 
-	-- V78 + V79 : rotation cylindre plat cuite une fois (recette V75
-	-- footprintRot / feel N130 + N131). Plus de CFrame.Angles a chaque
-	-- spawn (LaunchWake) ni despawn (LandingSplash) navire.
-	-- fromEulerAnglesYXZ(0, 0, rad(90)) ≡ Angles(0, 0, 90°) (rx=0, ry=0 → Z seul).
-	-- Wake Y + 0.12 / splash Y + 0.14 inchanges. Tween Size/Transparency
-	-- inchange. Skip missiles inchange. DeliveryPulse inchange (leftover V80).
-	-- Distinct de V77 (Preview hover). Distinct de V75 (Preview, pas Overlay).
+	-- V78 + V79 + V80 : rotation cylindre plat cuite une fois (recette V75
+	-- footprintRot / feel N130 + N131 + N132). Plus de CFrame.Angles a chaque
+	-- spawn (LaunchWake), despawn (LandingSplash) navire, ni arrivee camion
+	-- (DeliveryPulse). fromEulerAnglesYXZ(0, 0, rad(90)) ≡ Angles(0, 0, 90°)
+	-- (rx=0, ry=0 → Z seul). Wake Y + 0.12 / splash Y + 0.14 inchanges.
+	-- Tween Size/Transparency inchange. Skip missiles inchange.
+	-- Shockwave inchange (leftover V81). Distinct de V77 (Preview hover).
+	-- Distinct de V75 (Preview, pas Overlay).
 	self.wakeRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	return self
@@ -808,7 +809,8 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				splash.Transparency = 0.18
 				-- V79 : translation * rot cuit. Plus de CFrame.Angles despawn.
 				-- Recette feel N131. Y + 0.14 inchange. Distinct de V78 (spawn,
-				-- Y + 0.12). Distinct de DeliveryPulse (leftover V80).
+				-- Y + 0.12). Distinct de DeliveryPulse (V80). Distinct de
+				-- Shockwave (leftover V81).
 				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * self.wakeRot
 				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 					Size = Vector3.new(0.18, 15, 15),
@@ -875,7 +877,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
 			pulse.Shape = Enum.PartType.Cylinder
 			pulse.Transparency = 0.28
-			pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
+			-- V80 : translation * rot cuit. Plus de CFrame.Angles arrivee.
+			-- Recette feel N132 — ne pas merger 5aa9. Distinct de V78
+			-- (spawn, Y + 0.12) / V79 (despawn, Y + 0.14). Distinct de
+			-- Shockwave (leftover V81). route.to deja un Vector3.
+			pulse.CFrame = CFrame.new(route.to) * self.wakeRot
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,
@@ -1014,6 +1020,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	local shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
 	shockwave.Shape = Enum.PartType.Cylinder
 	shockwave.Transparency = 0.12
+	-- Leftover V81 : CFrame.Angles cylindre plat (feel N133, PLAINS + 0.5).
+	-- Ne pas porter dans le meme commit que V80.
 	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),

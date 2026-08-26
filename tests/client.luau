@@ -909,14 +909,19 @@ check("pose et capture de chaque type de batiment", function()
 	-- V56 (unités) / V71 (roulis) / V73 (UnitModels radar/flag) restent
 	-- dans le check navires. V74 flame Size = API. V75 rot + V76 Size
 	-- rayon + V77 early-out hover dans le check apercu. V78 wakeRot
-	-- + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse). Voies encore vivantes ici ; la destruction
-	-- plus bas les vide (le check livraison n'en a plus).
+	-- + V79 LandingSplash (check navires). V80 DeliveryPulse (ci-dessous).
+	-- Leftover V81 (Shockwave, check navires explosion). Voies encore
+	-- vivantes ici ; la destruction plus bas les vide (le check
+	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
 	local firstSegRot = liveRoute.segRot[1]
 	assert(firstSegRot ~= nil and type(firstSegRot.X) == "number", "segRot[1] absent")
 	assert(firstSegRot.X == 0 and firstSegRot.Y == 0 and firstSegRot.Z == 0, "segRot n'est pas a l'origine")
+	-- V80 : capturer wakeRot avant le dispatch (overlay partage, deja pose a new).
+	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
+	local bakedWake = overlay.wakeRot
 	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
 	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
 	overlay:stepInterpolation(1 / 60)
@@ -931,14 +936,19 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	assert(liveRoute.delivery == nil, "livraison encore active")
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
+	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
+	-- l'arrivee. Recette feel N132. Leftover V81 (Shockwave).
 	local pulseFound = false
+	local aPulse
 	for _, node in overlay.root:GetChildren() do
 		if node.Name == "DeliveryPulse" then
 			pulseFound = true
-			break
+			aPulse = node
 		end
 	end
 	assert(pulseFound, "pas de pulse a l'arrivee")
+	assert(aPulse ~= nil and aPulse.CFrame, "pulse sans CFrame")
+	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree a l'arrivee camion")
 
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
@@ -1039,7 +1049,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V71 (check navires). Roues camion V72 (check pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
-	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse).
+	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). V80
+	-- DeliveryPulse (check pose/capture). Leftover V81 (Shockwave).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1088,7 +1099,8 @@ check("apercu de placement pour chaque batiment", function()
 	-- (rayon = kind). V77 : early-out tuile+statut. Leftover V51/V53
 	-- (resolve) dans le check accrochage. Leftover V73 (radar/flag)
 	-- dans le check navires. V78 wakeRot + V79 LandingSplash
-	-- (check navires). Hauteurs +0.42 / +0.38.
+	-- (check navires). V80 DeliveryPulse (check pose/capture).
+	-- Leftover V81 (Shockwave). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1537,8 +1549,9 @@ end)
 check("navires, missiles et interpolation", function()
 	-- V78 : wakeRot cuit a new (recette V75 footprintRot / feel N130).
 	-- Plus de CFrame.Angles a chaque spawn navire. V79 : LandingSplash
-	-- reutilise wakeRot au despawn (feel N131, Y + 0.14). Leftover V80
-	-- (DeliveryPulse). Leftover V77 (Preview hover) dans le check apercu.
+	-- reutilise wakeRot au despawn (feel N131, Y + 0.14). V80 : DeliveryPulse
+	-- reutilise wakeRot a l'arrivee camion (feel N132, check pose/capture).
+	-- Leftover V81 (Shockwave). Leftover V77 (Preview hover) dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
 	local bakedWake = overlay.wakeRot
@@ -1718,7 +1731,8 @@ check("camera strategique", function()
 	-- Roulis navire V71 (check navires). Roues camion V72 (pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
-	-- V78 wakeRot + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse).
+	-- V78 wakeRot + V79 LandingSplash (check navires). V80 DeliveryPulse
+	-- (check pose/capture). Leftover V81 (Shockwave).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
