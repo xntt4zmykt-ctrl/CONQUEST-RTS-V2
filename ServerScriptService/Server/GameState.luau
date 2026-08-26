@@ -167,6 +167,13 @@ export type GameState = typeof(setmetatable(
 		-- Index O(1) des silos par camp. Nukes.launch / stepCooldowns (N60)
 		-- n'iterent plus le hash buildings ; recette samsBySlot.
 		silosBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des usines par camp. Trade.step (N61) n'itere plus le hash.
+		factoriesBySlot: { [number]: { [number]: true } },
+		-- Tous les batiments par camp. Bots upgrade + score nuke (N62).
+		buildingsBySlot: { [number]: { [number]: true } },
+		-- PORT par tuile (slot + level). spawnTradeShips (N63), recette
+		-- hardening N40 / portsByTile. Distinct de _carriersDirty (NAVAL_BASE).
+		portsByTile: { [number]: { slot: number, level: number } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -241,6 +248,9 @@ function GameState.new(seed: number): GameState
 	self.bunkersBySlot = {}
 	self.samsBySlot = {}
 	self.silosBySlot = {}
+	self.factoriesBySlot = {}
+	self.buildingsBySlot = {}
+	self.portsByTile = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -542,19 +552,41 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 		return
 	end
 
-	-- 1. Collecte des gares.
+	-- 1. Collecte des gares. N64 : buildingsBySlot[slot], pas le hash global.
+	-- Fallback hash si l'index est nil (tests partiels).
+	-- IS_STATION est declare plus bas : on inline les kinds ici.
 	local stations: { number } = {}
-	for index, building in self.buildings do
-		if
-			building.slot == slot
-			and (
-				building.kind == B.CITY
-				or building.kind == B.CAPITAL
-				or building.kind == B.PORT
-				or building.kind == B.FACTORY
-			)
-		then
-			table.insert(stations, index)
+	if self.buildingsBySlot then
+		local set = self.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = self.buildings[index]
+				if
+					building
+					and (
+						building.kind == B.CITY
+						or building.kind == B.CAPITAL
+						or building.kind == B.PORT
+						or building.kind == B.FACTORY
+					)
+				then
+					table.insert(stations, index)
+				end
+			end
+		end
+	else
+		for index, building in self.buildings do
+			if
+				building.slot == slot
+				and (
+					building.kind == B.CITY
+					or building.kind == B.CAPITAL
+					or building.kind == B.PORT
+					or building.kind == B.FACTORY
+				)
+			then
+				table.insert(stations, index)
+			end
 		end
 	end
 	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
@@ -719,7 +751,8 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
--- Index bunker / SAM : pose / capture / destroy seulement, jamais dans le tick.
+-- Index bunker / SAM / silo / usine / tous : pose / capture / destroy
+-- seulement, jamais dans le tick.
 local function indexPosted(
 	_self: GameState,
 	bySlot: { [number]: { [number]: true } },
@@ -751,6 +784,24 @@ local function indexSilo(self: GameState, slot: number, index: number, present: 
 	indexPosted(self, self.silosBySlot, slot, index, present)
 end
 
+local function indexFactory(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.factoriesBySlot, slot, index, present)
+end
+
+local function indexBuilding(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.buildingsBySlot, slot, index, present)
+end
+
+-- N63 : PORT only. level vit ici pour ponderer spawnTradeShips sans relire
+-- le hash. Distinct de _carriersDirty (NAVAL_BASE).
+local function indexPort(self: GameState, index: number, slot: number, level: number, present: boolean)
+	if present then
+		self.portsByTile[index] = { slot = slot, level = level }
+	else
+		self.portsByTile[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -758,6 +809,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self.buildings[index] = { kind = kind, slot = slot, level = 1, links = {}, cooldown = 0 }
 	self.buildingDirty[index] = true
 	self:countBuilding(slot, kind, 1, 1)
+	indexBuilding(self, slot, index, true)
 
 	if kind == B.DEFENSE then
 		indexBunker(self, slot, index, true)
@@ -767,6 +819,12 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	end
 	if kind == B.SILO then
 		indexSilo(self, slot, index, true)
+	end
+	if kind == B.FACTORY then
+		indexFactory(self, slot, index, true)
+	end
+	if kind == B.PORT then
+		indexPort(self, index, slot, 1, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -797,6 +855,9 @@ function GameState.upgradeBuilding(self: GameState, index: number): number?
 	building.level += 1
 	self:countBuilding(building.slot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, true)
+	end
 
 	-- Le niveau d'une usine pese sur le rendement de sa grappe.
 	if building.kind == B.FACTORY then
@@ -818,6 +879,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	indexBuilding(self, previousSlot, index, false)
+	indexBuilding(self, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
@@ -833,6 +896,13 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexSilo(self, previousSlot, index, false)
 		indexSilo(self, newSlot, index, true)
 	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, previousSlot, index, false)
+		indexFactory(self, newSlot, index, true)
+	end
+	if building.kind == B.PORT then
+		indexPort(self, index, newSlot, building.level, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -846,6 +916,7 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	local previousSlot = building.slot
 	local previousKind = building.kind
+	indexBuilding(self, building.slot, index, false)
 	if building.kind == B.DEFENSE then
 		indexBunker(self, building.slot, index, false)
 	end
@@ -854,6 +925,12 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.SILO then
 		indexSilo(self, building.slot, index, false)
+	end
+	if building.kind == B.FACTORY then
+		indexFactory(self, building.slot, index, false)
+	end
+	if building.kind == B.PORT then
+		indexPort(self, index, building.slot, building.level, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1132,10 +1209,22 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
-	for index, building in self.buildings do
-		if building.slot == slot then
-			self:destroyBuilding(index)
+	-- N62 : snapshot buildingsBySlot[slot] (destroy mute l'index). Fallback
+	-- hash si l'index est nil (tests partiels).
+	local doomed: { number } = {}
+	if self.buildingsBySlot and self.buildingsBySlot[slot] then
+		for index in self.buildingsBySlot[slot] do
+			table.insert(doomed, index)
 		end
+	else
+		for index, building in self.buildings do
+			if building.slot == slot then
+				table.insert(doomed, index)
+			end
+		end
+	end
+	for _, index in doomed do
+		self:destroyBuilding(index)
 	end
 
 	-- Transports AVANT setOwner (ISSUE-N43, recette 915c). N49 pose
@@ -1266,6 +1355,8 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.bunkersBySlot[slot] = nil
 	self.samsBySlot[slot] = nil
 	self.silosBySlot[slot] = nil
+	self.factoriesBySlot[slot] = nil
+	self.buildingsBySlot[slot] = nil
 
 	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
 	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.

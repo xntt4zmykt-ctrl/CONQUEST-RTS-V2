@@ -292,6 +292,90 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5e. Index factoriesBySlot = usines (ISSUE-N61).
+	do
+		local FACTORY = Config.BUILDING.FACTORY
+		local indexed = 0
+		local factoriesBySlot = state.factoriesBySlot or {}
+		for slot, set in factoriesBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= FACTORY or building.slot ~= slot then
+					fail(`tick {tick} — factoriesBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realFactory = 0
+		for index, building in state.buildings do
+			if building.kind == FACTORY then
+				realFactory += 1
+				local set = factoriesBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — FACTORY {index} absent de factoriesBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realFactory then
+			fail(`tick {tick} — factoriesBySlot count {indexed} != FACTORY {realFactory}`)
+		end
+	end
+
+	-- 5f. Index buildingsBySlot = tous les batiments (ISSUE-N62).
+	do
+		local indexed = 0
+		local buildingsBySlot = state.buildingsBySlot or {}
+		for slot, set in buildingsBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.slot ~= slot then
+					fail(`tick {tick} — buildingsBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local real = 0
+		for index, building in state.buildings do
+			real += 1
+			local set = buildingsBySlot[building.slot]
+			if not (set and set[index]) then
+				fail(`tick {tick} — batiment {index} absent de buildingsBySlot[{building.slot}]`)
+			end
+		end
+		if indexed ~= real then
+			fail(`tick {tick} — buildingsBySlot count {indexed} != buildings {real}`)
+		end
+	end
+
+	-- 5g. Index portsByTile = PORT slot+level (ISSUE-N63).
+	do
+		local PORT = Config.BUILDING.PORT
+		local indexed = 0
+		local portsByTile = state.portsByTile or {}
+		for index, info in portsByTile do
+			indexed += 1
+			local building = state.buildings[index]
+			if not building or building.kind ~= PORT then
+				fail(`tick {tick} — portsByTile[{index}] orphelin`)
+			elseif building.slot ~= info.slot or building.level ~= info.level then
+				fail(`tick {tick} — portsByTile[{index}] slot/level derivent`)
+			end
+		end
+		local realPort = 0
+		for index, building in state.buildings do
+			if building.kind == PORT then
+				realPort += 1
+				local info = portsByTile[index]
+				if not info then
+					fail(`tick {tick} — PORT {index} absent de portsByTile`)
+				end
+			end
+		end
+		if indexed ~= realPort then
+			fail(`tick {tick} — portsByTile count {indexed} != PORT {realPort}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5386,6 +5470,306 @@ do
 				fail("silosBySlot — pose non indexee")
 			else
 				print("stepCooldowns : SAM+SILO tickent, ville intacte (N60)")
+			end
+		end
+	end
+end
+
+do
+	-- N61 : factoriesBySlot. Trade.step ne visite que les usines (pas la ville).
+	local state = GameState.new(1060)
+	local owner = state:addPlayer(nil, "Industrie", Random.new(70), 0)
+	local heir = state:addPlayer(nil, "Repreneur", Random.new(71), 0)
+	if not owner or not heir then
+		fail("factoriesBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("factoriesBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.CITY, owner.slot)
+			local function noop() end
+			Trade.step(state, Random.new(72), noop)
+			local visits = Trade.lastFactoryVisits or 0
+			local set = state.factoriesBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 2 then
+				fail(`factoriesBySlot — {count} usines indexees, attendu 2`)
+			elseif set and set[sites[3]] then
+				fail("factoriesBySlot — ville indexee comme usine")
+			elseif visits ~= 2 then
+				fail(`Trade.step — {visits} visites, attendu 2 (N61)`)
+			else
+				print("Trade.step : 2 usines visites, pas la ville (N61)")
+				state:transferBuilding(sites[1], heir.slot)
+				local oldSet = state.factoriesBySlot[owner.slot]
+				local newSet = state.factoriesBySlot[heir.slot]
+				if oldSet and oldSet[sites[1]] then
+					fail("factoriesBySlot — transfer laisse l'ancien camp")
+				elseif not (newSet and newSet[sites[1]]) then
+					fail("factoriesBySlot — transfer n'indexe pas le nouvel camp")
+				else
+					state:destroyBuilding(sites[2])
+					if oldSet and oldSet[sites[2]] then
+						fail("factoriesBySlot — destroy laisse un orphelin")
+					else
+						print("factoriesBySlot : pose / transfer / destroy OK")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N62 option A : buildingsBySlot. Upgrade = plus bas palier, bunker ignore.
+	-- Score nuke : 2 villes dans le rayon battent une tuile vide.
+	local state = GameState.new(1061)
+	local owner = state:addPlayer(nil, "Contremaitre", Random.new(73), 0)
+	if not owner then
+		fail("buildingsBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 5 then
+					break
+				end
+			end
+		end
+		if #sites < 5 then
+			fail("buildingsBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[4], Config.BUILDING.DEFENSE, owner.slot)
+			state.buildings[sites[2]].level = 2
+			state.buildings[sites[3]].level = 3
+			local picked = Bots.lowestUpgradable(state, owner.slot)
+			local allSet = state.buildingsBySlot[owner.slot]
+			if not (allSet and allSet[sites[1]] and allSet[sites[4]] and allSet[owner.capitalTile]) then
+				fail("buildingsBySlot — pose incomplete")
+			elseif picked ~= sites[1] then
+				fail(`lowestUpgradable — tuile {picked}, attendu ville niveau 1`)
+			else
+				print("lowestUpgradable : ville niveau 1, bunker ignore (N62)")
+			end
+			local empty = sites[5]
+			local blast2 = 8
+			local rich = Bots.blastValue(state, owner.slot, sites[1], blast2)
+			local poor = Bots.blastValue(state, owner.slot, empty, 0)
+			-- Exact tile : ville >= 1, vide = 0. Rayon 8 autour d'une ville
+			-- doit aussi battre le vide (capitale hors blast2=0).
+			local selfHit = Bots.blastValue(state, owner.slot, sites[1], 0)
+			if selfHit < 1 then
+				fail(`blastValue — ville score {selfHit}, attendu >= 1`)
+			elseif poor ~= 0 then
+				fail(`blastValue — tuile vide score {poor}, attendu 0`)
+			elseif rich <= poor then
+				fail(`blastValue — cluster {rich} <= vide {poor}`)
+			else
+				print("blastValue : 2 villes battent une frontiere vide (N62)")
+			end
+		end
+	end
+end
+
+do
+	-- N63 : portsByTile. Early-out < 2 / cap avant flatten. < 4 ports ne crash pas.
+	local state = GameState.new(1062)
+	local a = state:addPlayer(nil, "QuaiA", Random.new(74), 0)
+	local b = state:addPlayer(nil, "QuaiB", Random.new(75), 0)
+	if not a or not b then
+		fail("portsByTile — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		local portC: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if portA and portB then
+			for _, third in coastal do
+				if third ~= portA and third ~= portB and Navy.findSeaPath(state, portA :: number, third) then
+					portC = third
+					break
+				end
+			end
+		end
+		if not portA or not portB or not portC then
+			fail("portsByTile — pas assez de cotes reliees")
+		else
+			state:setOwner(portA, a.slot)
+			state:setOwner(portB, b.slot)
+			state:setOwner(portC, a.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, a.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, b.slot)
+			state:placeBuilding(portC, Config.BUILDING.PORT, a.slot)
+			state:upgradeBuilding(portA :: number)
+			local infoA = state.portsByTile[portA :: number]
+			local nPorts = 0
+			for _ in state.portsByTile do
+				nPorts += 1
+			end
+			if nPorts ~= 3 then
+				fail(`portsByTile — {nPorts} ports, attendu 3`)
+			elseif not infoA or infoA.slot ~= a.slot or infoA.level ~= 2 then
+				fail("portsByTile — upgrade n'a pas mis a jour le niveau")
+			else
+				state.tick = 0
+				local spawned = false
+				for seed = 1, 80 do
+					Navy.step(state, Random.new(8000 + seed))
+					for _, boat in state.boats do
+						if boat.kind == Navy.KIND_TRADE then
+							spawned = true
+							break
+						end
+					end
+					if spawned then
+						break
+					end
+				end
+				state:destroyBuilding(portC :: number)
+				local left = 0
+				for _ in state.portsByTile do
+					left += 1
+				end
+				if state.portsByTile[portC :: number] then
+					fail("portsByTile — destroy laisse un orphelin")
+				elseif left ~= 2 then
+					fail(`portsByTile — destroy laisse {left} ports, attendu 2`)
+				elseif not spawned then
+					fail("portsByTile — aucun convoi en 80 vagues")
+				else
+					print("portsByTile : 3 ports, spawn, destroy OK (N63)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N64 : refreshRailNetwork lit buildingsBySlot. Le bunker n'est pas une gare.
+	local state = GameState.new(1063)
+	local owner = state:addPlayer(nil, "Reseau", Random.new(76), 0)
+	if not owner then
+		fail("refreshRail — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("refreshRail — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.DEFENSE, owner.slot)
+			state:refreshRailNetwork(owner.slot)
+			local factory = state.buildings[sites[1]]
+			local linkedBunker = false
+			local linkedCity = false
+			if factory then
+				for _, dest in factory.links do
+					if dest == sites[3] then
+						linkedBunker = true
+					elseif dest == sites[2] or dest == owner.capitalTile then
+						linkedCity = true
+					end
+				end
+			end
+			if linkedBunker then
+				fail("refreshRail — bunker relie comme gare")
+			elseif not linkedCity then
+				fail("refreshRail — ville/capitale absente des liens usine")
+			else
+				print("refreshRail : gares du slot, bunker ignore (N64)")
+			end
+		end
+	end
+end
+
+do
+	-- removePlayer snapshot buildingsBySlot (N62), pas le hash global.
+	local state = GameState.new(1064)
+	local owner = state:addPlayer(nil, "Sortant", Random.new(77), 0)
+	if not owner then
+		fail("removePlayer index — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 2 then
+					break
+				end
+			end
+		end
+		if #sites < 2 then
+			fail("removePlayer index — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			local gone = owner.slot
+			state:removePlayer(gone)
+			if state.buildingsBySlot[gone] then
+				fail("removePlayer index — buildingsBySlot[slot] encore pose")
+			elseif state.factoriesBySlot[gone] then
+				fail("removePlayer index — factoriesBySlot[slot] encore pose")
+			elseif state.samsBySlot[gone] then
+				fail("removePlayer index — samsBySlot[slot] encore pose")
+			else
+				local leftover = 0
+				for _, building in state.buildings do
+					if building.slot == gone then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`removePlayer index — {leftover} batiment(s) du disparu`)
+				else
+					print("removePlayer index : snapshot buildingsBySlot, rien ne reste")
+				end
 			end
 		end
 	end
