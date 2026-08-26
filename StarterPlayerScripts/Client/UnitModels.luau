@@ -253,7 +253,16 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 	for _, piece in visual.pieces do
 		local localFrame = piece.offset
 		if piece.role == "radar" then
-			localFrame = localFrame * CFrame.Angles(0, time * 2.2, 0)
+			-- N127 : offset * yaw. Plus de CFrame.Angles 60 Hz.
+			-- fromEulerAnglesYXZ(0, time * 2.2, 0) ≡ Angles(0, yaw, 0)
+			-- (rx=0, rz=0 → Y seul). Facteur 2.2 inchange. Garde
+			-- role == "radar" inchangee. piece.offset * euler — pas
+			-- CFrame.new(offset.X,Y,Z) * euler (recette N124 batiments,
+			-- RestCFrame identite). Distinct SAM Radar N124 (time * 1.45).
+			-- Distinct roulis Overlay N125. Distinct flag N128. Distinct
+			-- roues N126. Recette visual V73 leftover deja sur 9793,
+			-- portee pas mergee. Overlay / BuildingModels inchanges.
+			localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
 			localFrame = localFrame * CFrame.Angles(math.sin(time * 5) * 0.06, 0, 0)
 		elseif piece.role == "wake" then
