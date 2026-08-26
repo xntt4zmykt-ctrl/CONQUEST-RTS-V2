@@ -53,9 +53,10 @@ local otherBuf: { number } = table.create(16)
 
 -- V102 : compact du prefixe consomme. Seuil 32 = ~10 frames de budget 3.
 -- Pas de table.remove(1). Drain complet (V101) inchange. Recycle
--- Ground/Border (feel N106) non porte. Recette feel N114 inline —
--- ne PAS merger 846c. Distinct de V101 (curseur + truncate). Distinct
--- de V100 (trail offset.Z, UnitModels.place). HUD feed leftover V103.
+-- Ground/Border fermee (V112, recette feel N106 inline — ne PAS
+-- merger de1a). Recette feel N114 inline — ne PAS merger 846c.
+-- Distinct de V101 (curseur + truncate). Distinct de V100 (trail
+-- offset.Z, UnitModels.place). HUD feed leftover V103.
 -- FactoryOutput / SiloWarning fermees (V104). Feux navire fermes
 -- (V105). Wake Transparency fermee (V106). Flag pitch fermee (V107).
 -- CapitalFlag fermee (V108). PortCraneBoom fermee (V109).
@@ -78,13 +79,21 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	self.terrain = MapGen.generate(seed)
 	self.owner = buffer.create(W * H)
 	self.chunkFolders = {} :: { [number]: Folder }
+	-- V112 : pools Ground/Border PAR chunk (pas global). Recette feel
+	-- N106 inline — ne PAS merger de1a. Leftover Parent = nil, pas
+	-- Destroy. partCount = visibles (chunkVisible). Distinct de V101
+	-- (dirtyHead) / V102 (compact). BORDER_PASSES / meshKeyAt non
+	-- portes. Flame Size (V111) inchangee.
+	self.chunkGround = {} :: { [number]: { Part } }
+	self.chunkBorder = {} :: { [number]: { Part } }
+	self.chunkVisible = {} :: { [number]: number }
 	self.dirty = {} :: { [number]: boolean }
 	self.dirtyQueue = {} :: { number }
 	-- V101 : curseur de consommation. table.remove(1) decalait tout le
 	-- tableau a chaque rebuild (budget 3 / frame). Recette feel N112
 	-- inline — ne PAS merger 04e7. Truncate seulement quand la file
 	-- est consommee. V102 : compact prefix (feel N114, seuil 32)
-	-- apres la boucle. Recycle Ground/Border (feel N106) non porte.
+	-- apres la boucle. Recycle Ground/Border fermee (V112).
 	-- Trail offset.Z (V100) inchange. FactoryOutput / SiloWarning
 	-- fermees (V104). Feux navire fermes (V105). HUD feed leftover
 	-- V103. Wake Transparency fermee (V106). Flag pitch fermee
@@ -452,7 +461,8 @@ function WorldRenderer.buildChunkBorders(
 	cx: number,
 	cy: number,
 	x1: number,
-	y1: number
+	y1: number,
+	borderParts: { Part }
 ): number
 	local drawn = 0
 	local surface = Config.LAND_HEIGHT + BORDER_LIFT
@@ -479,16 +489,27 @@ function WorldRenderer.buildChunkBorders(
 		local horizontal = dy ~= 0
 		local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
 
-		local part = Instance.new("Part")
-		part.Name = "Border"
-		part.Anchored = true
-		part.CanCollide = false
-		part.CanTouch = false
-		part.CanQuery = false
-		part.CastShadow = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
+		-- V112 : recycler le Part Border DU chunk. Reecrire Size /
+		-- CFrame / Color / Name. Un leftover Color du voisin peindrait
+		-- deux nations. Recette feel N106 inline — ne PAS merger de1a
+		-- (ownerOf/emit restent locaux, BORDER_PASSES non porte).
+		drawn += 1
+		local part = borderParts[drawn]
+		if not part then
+			part = Instance.new("Part")
+			part.Name = "Border"
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.CastShadow = false
+			part.Material = Enum.Material.SmoothPlastic
+			part.TopSurface = Enum.SurfaceType.Smooth
+			part.BottomSurface = Enum.SurfaceType.Smooth
+			borderParts[drawn] = part
+		else
+			part.Name = "Border"
+		end
 		part.Color = borderColor(slot)
 		part.Size = if horizontal
 			then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
@@ -499,7 +520,6 @@ function WorldRenderer.buildChunkBorders(
 			(a.Z + b.Z) / 2 + dy * inset
 		)
 		part.Parent = folder
-		drawn += 1
 	end
 
 	--[[
@@ -561,15 +581,30 @@ function WorldRenderer.buildChunkBorders(
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
-	local existing = self.chunkFolders[chunk]
-	if existing then
-		self.partCount -= #existing:GetChildren()
-		existing:Destroy()
+	-- V112 : recycler Ground/Border DU folder de chunk. Ne plus Destroy()
+	-- le folder entier. Pool par chunk (pas global — un second rebuild
+	-- sequentiel du chunk suivant casserait un pool partage). Recette
+	-- feel N106 inline — ne PAS merger de1a. chunkKeyAt inchange
+	-- (pas meshKeyAt N104). Loi greedy inchangee. Overlay non touche.
+	-- dirtyHead (V101) / compact (V102) inchanges. Flame Size (V111)
+	-- inchangee.
+	local folder = self.chunkFolders[chunk]
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = `Chunk{chunk}`
+		self.chunkFolders[chunk] = folder
 	end
 
-	local folder = Instance.new("Folder")
-	folder.Name = `Chunk{chunk}`
-	self.chunkFolders[chunk] = folder
+	local groundParts = self.chunkGround[chunk]
+	if not groundParts then
+		groundParts = {}
+		self.chunkGround[chunk] = groundParts
+	end
+	local chunkBorderParts = self.chunkBorder[chunk]
+	if not chunkBorderParts then
+		chunkBorderParts = {}
+		self.chunkBorder[chunk] = chunkBorderParts
+	end
 
 	if not self.everBuilt[chunk] then
 		self.everBuilt[chunk] = true
@@ -585,24 +620,32 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 		return self:chunkKeyAt(x, y)
 	end, cx, cy, x1, y1, self.meshScratch)
 
+	local usedG = 0
 	for _, rect in rects do
 		local terrain = rect.key % KEY_STRIDE
 		local slot = (rect.key - terrain) // KEY_STRIDE
 		local height = Config.TERRAIN_HEIGHT[terrain]
 		local origin = WorldSpace.tileToWorld(rect.x, rect.y)
 
-		local part = Instance.new("Part")
-		part.Name = "Ground"
-		part.Anchored = true
-		-- La collision est assuree par la geometrie du serveur : celle-ci n'est
-		-- que visuelle, et la rendre solide dupliquerait le travail du moteur
-		-- physique.
-		part.CanCollide = false
-		part.CanTouch = false
-		part.CastShadow = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
+		usedG += 1
+		local part = groundParts[usedG]
+		if not part then
+			part = Instance.new("Part")
+			part.Name = "Ground"
+			part.Anchored = true
+			-- La collision est assuree par la geometrie du serveur : celle-ci n'est
+			-- que visuelle, et la rendre solide dupliquerait le travail du moteur
+			-- physique.
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CastShadow = false
+			part.Material = Enum.Material.SmoothPlastic
+			part.TopSurface = Enum.SurfaceType.Smooth
+			part.BottomSurface = Enum.SurfaceType.Smooth
+			groundParts[usedG] = part
+		else
+			part.Name = "Ground"
+		end
 		part.Size = Vector3.new(rect.width * TILE, height, rect.depth * TILE)
 		part.CFrame = CFrame.new(
 			origin.X + (rect.width - 1) * TILE / 2,
@@ -612,10 +655,34 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 		part.Color = blockColor(slot, terrain)
 		part.Parent = folder
 	end
+	-- Leftover Ground : Parent = nil AVANT return. Un leftover Color du
+	-- voisin colorerait le biome. Ne pas Destroy — le prochain rebuild du
+	-- MEME chunk reutilise. Ne pas nil les slots du pool.
+	for i = usedG + 1, #groundParts do
+		local leftover = groundParts[i]
+		if leftover then
+			leftover.Parent = nil
+		end
+	end
 
-	self.partCount += #rects
-	self.partCount += self:buildChunkBorders(folder, cx, cy, x1, y1)
-	folder.Parent = self.root
+	local usedB = self:buildChunkBorders(folder, cx, cy, x1, y1, chunkBorderParts)
+	for i = usedB + 1, #chunkBorderParts do
+		local leftover = chunkBorderParts[i]
+		if leftover then
+			leftover.Parent = nil
+		end
+	end
+
+	-- partCount = Parts visibles seulement, pas #GetChildren() d'un folder
+	-- qui garderait des orphelins Parent=nil hors liste.
+	local visible = usedG + usedB
+	local prevVisible = self.chunkVisible[chunk] or 0
+	self.partCount += visible - prevVisible
+	self.chunkVisible[chunk] = visible
+
+	if folder.Parent ~= self.root then
+		folder.Parent = self.root
+	end
 end
 
 -- Animation ambiante a tres faible amplitude : elle se lit en vue avatar sans
@@ -665,8 +732,8 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 	-- le budget, comme avant. Recette feel N112 inline — ne PAS merger
 	-- 04e7. Distinct de V100 (trail offset.Z, UnitModels.place).
 	-- Distinct de V48 (applyDelta pools). V102 compact prefix apres
-	-- la boucle (feel N114). Recycle Ground/Border (feel N106) non
-	-- porte. Houle / feuillage inchanges (V58/V59). Pas de RemoteFunction.
+	-- la boucle (feel N114). Recycle Ground/Border fermee (V112).
+	-- Houle / feuillage inchanges (V58/V59). Pas de RemoteFunction.
 	while done < budget and head <= #queue do
 		local chunk = queue[head]
 		head += 1
@@ -686,7 +753,7 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 		-- tete a 1. Pas a chaque frame (seuil 32). Pas de table.remove.
 		-- Drain V101 inchange. Recette feel N114 inline — ne PAS
 		-- merger 846c. Distinct de V101 (curseur). Distinct de V48
-		-- (applyDelta). Recycle Ground/Border (feel N106) non porte.
+		-- (applyDelta). Recycle Ground/Border fermee (V112).
 		local n = #queue
 		local remaining = n - head + 1
 		for i = 1, remaining do

@@ -723,7 +723,8 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- Un elseif, Name PortCraneCable inchange.
 			-- Construction buildPort inchangee. Pas de cablePhase.
 			-- Distinct de V111 (flame Size, UnitModels.place —
-			-- autre fichier, fermee ici).
+			-- autre fichier, fermee ici). Distinct de V112
+			-- (recycle Ground/Border, WorldRenderer — autre fichier).
 			child.CFrame = CFrame.new(
 				rest.X,
 				rest.Y + math.sin(time * 0.8 + rest.X * 0.1) * 0.35,
