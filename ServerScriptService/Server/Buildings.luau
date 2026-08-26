@@ -28,6 +28,11 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+-- N49 : samsOf recycle (recette factoriesBuf / N45, feel N68). Unique
+-- appelant synchrone (Bots.decideNuke). Pas reentrant — dupliquer le
+-- buffer si un second appelant concurrent apparait.
+local samBuf: { number } = table.create(8)
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -240,21 +245,32 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 	return ps ~= nil and ps.era >= Eras.requiredForNuke(Config.NUKE.ATOM)
 end
 
--- Batteries SAM du joueur. Bots (couverture avant tir) et HUD.
--- N42 : index samsBySlot, plus le hash buildings. Fallback lineaire si absent.
+-- Batteries SAM du joueur. Bots (couverture avant tir).
+-- N42 : index samsBySlot, plus le hash buildings. Fallback lineaire
+-- seulement si l'index est absent (nil). N49 : samBuf recycle ;
+-- truncate apres remplissage. Index present et set nil = zero SAM
+-- (pas de fallback hash — contrat N42).
 function Buildings.samsOf(state: GameState, slot: number): { number }
-	local out = {}
-	local set = state.samsBySlot and state.samsBySlot[slot]
-	if set then
-		for index in set do
-			table.insert(out, index)
+	local out = samBuf
+	local n = 0
+	if state.samsBySlot then
+		local set = state.samsBySlot[slot]
+		if set then
+			for index in set do
+				n += 1
+				out[n] = index
+			end
 		end
-		return out
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == B.SAM then
+				n += 1
+				out[n] = index
+			end
+		end
 	end
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == B.SAM then
-			table.insert(out, index)
-		end
+	for i = #out, n + 1, -1 do
+		out[i] = nil
 	end
 	return out
 end
