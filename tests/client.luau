@@ -710,8 +710,8 @@ check("construction du monde 3D", function()
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
 
 	-- V58 : houle sans Vector3, Parts stables, CFrame distinct du base.
-	-- V59 : couronnes Y depuis base, plus de CFrame.Angles. Leftover V57
-	-- (camion) reste dans le check pose/capture.
+	-- V59 : couronnes Y depuis base, plus de CFrame.Angles. Leftover V60
+	-- (câble PORT) reste dans le check modeles procéduraux.
 	local nRipple = #world.oceanRipples
 	assert(nRipple > 0, "aucun reflet ocean")
 	local first = world.oceanRipples[1]
@@ -992,6 +992,21 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local chimney = factory:FindFirstChild("Chimney", true)
 	assert(chimney, "usine : cheminee absente")
+
+	-- V60 : câble Y depuis rest, plus de Vector3.new. Leftover V59 (feuillage)
+	-- reste dans construction du monde. Radar / flag / boom inchangés.
+	-- Factory sans câble : animate ne lève pas (0 câble = zéro alloc Vector3).
+	Building.animate(factory, 1, 1 / 60)
+	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local cable = port:FindFirstChild("PortCraneCable")
+	assert(cable and cable.CFrame, "PORT sans câble")
+	local rest = cable:GetAttribute("RestCFrame")
+	assert(rest, "câble sans RestCFrame")
+	local restY = rest.Y
+	Building.animate(port, 1, 1 / 60)
+	Building.animate(port, 2, 1 / 60)
+	assert(rawequal(port:FindFirstChild("PortCraneCable"), cable), "Part câble recreee")
+	assert(cable.CFrame.Y ~= restY, "câble n'a pas bouge")
 end)
 
 check("apercu de placement pour chaque batiment", function()
