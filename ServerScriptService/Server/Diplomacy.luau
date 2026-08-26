@@ -22,6 +22,43 @@ type GameState = GameState.GameState
 
 local Diplomacy = {}
 
+-- N78 : vue diplomatique recyclee par slot. Un buffer global unique
+-- casserait le FireClient precedent (boucle humains sequentielle :
+-- clear trop tot). HUD / tests lisent les champs tout de suite.
+type ViewRec = {
+	allies: { [number]: boolean },
+	incoming: { [number]: boolean },
+	outgoing: { [number]: boolean },
+	embargoes: { [number]: boolean },
+	traitors: { [number]: boolean },
+	marks: { [number]: number },
+}
+
+local viewBuf: { [number]: ViewRec } = {}
+
+local function viewRecFor(slot: number): ViewRec
+	local rec = viewBuf[slot]
+	if rec == nil then
+		rec = {
+			allies = {},
+			incoming = {},
+			outgoing = {},
+			embargoes = {},
+			traitors = {},
+			marks = {},
+		}
+		viewBuf[slot] = rec
+	else
+		table.clear(rec.allies)
+		table.clear(rec.incoming)
+		table.clear(rec.outgoing)
+		table.clear(rec.embargoes)
+		table.clear(rec.traitors)
+		table.clear(rec.marks)
+	end
+	return rec
+end
+
 local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	if not map[slot] then
 		map[slot] = {}
@@ -503,11 +540,20 @@ end
 	structure interne des relations, le reseau n'en voit qu'une projection.
 ]]
 function Diplomacy.viewFor(state: GameState, slot: number)
-	local allies: { [number]: boolean } = {}
-	local incoming: { [number]: boolean } = {}
-	local outgoing: { [number]: boolean } = {}
-	local embargoes: { [number]: boolean } = {}
-	local traitors: { [number]: boolean } = {}
+	local rec = viewRecFor(slot)
+	-- Slot sans joueur : maps vides, pas d'erreur. Ne pas scanner
+	-- requests/traitors d'un disparu — le HUD n'appelle viewFor que
+	-- pour un humain encore dans slotByPlayer.
+	if not state.players[slot] then
+		return rec
+	end
+
+	local allies = rec.allies
+	local incoming = rec.incoming
+	local outgoing = rec.outgoing
+	local embargoes = rec.embargoes
+	local traitors = rec.traitors
+	local marks = rec.marks
 
 	local allySet = state.alliances[slot]
 	if allySet then
@@ -549,7 +595,6 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	-- Marquages de cible : les miens et ceux de mes allies. La marque d'un
 	-- ennemi est un renseignement qu'on ne livre pas gratuitement.
-	local marks: { [number]: number } = {}
 	local mine = state.targetMarks[slot]
 	if mine and state.players[mine] then
 		marks[slot] = mine
@@ -561,14 +606,7 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 		end
 	end
 
-	return {
-		allies = allies,
-		incoming = incoming,
-		outgoing = outgoing,
-		embargoes = embargoes,
-		traitors = traitors,
-		marks = marks,
-	}
+	return rec
 end
 
 return Diplomacy
