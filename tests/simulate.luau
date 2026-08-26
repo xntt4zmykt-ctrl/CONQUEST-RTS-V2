@@ -3652,6 +3652,336 @@ do
 end
 
 do
+	-- N32 : convoi inbound vers le port d'un disparu. removePlayer coule
+	-- le navire AVANT setOwner. Recycle + PORT sur la meme tuile ne verse
+	-- plus l'or a l'heritier. Pas de malus vendeur.
+	local state = GameState.new(9900)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(121), 0)
+	local dest = state:addPlayer(nil, "Quai", Random.new(122), 0)
+	if not seller or not dest then
+		fail("trade inbound — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade inbound — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portB, dest.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, dest.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portB :: number)
+			if not path then
+				fail("trade inbound — route maritime introuvable")
+			else
+				local goldSeller = seller.gold
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				local gone = dest.slot
+				state:removePlayer(gone)
+				local leftover = 0
+				for _, boat in state.boats do
+					if boat.kind == Navy.KIND_TRADE then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`trade inbound — {leftover} convoi(s) encore en mer`)
+				elseif math.abs(seller.gold - goldSeller) > 0.01 then
+					fail(`trade inbound — or vendeur {seller.gold} (paiement / malus ?)`)
+				else
+					local heir = state:addPlayer(nil, "Heritier", Random.new(123), 0)
+					if not heir then
+						fail("trade inbound — recycle impossible")
+					else
+						state:setOwner(portB :: number, heir.slot)
+						state:placeBuilding(portB :: number, Config.BUILDING.PORT, heir.slot)
+						local goldHeir = heir.gold
+						goldSeller = seller.gold
+						-- Evite spawnTradeShips (tick % 45 == 0) qui recrerait
+						-- un convoi A→heritier le meme pas.
+						state.tick = 1
+						Navy.step(state, Random.new(11))
+						if math.abs(seller.gold - goldSeller) > 0.01 then
+							fail(`trade inbound — or vendeur apres recycle {seller.gold}`)
+						elseif math.abs(heir.gold - goldHeir) > 0.01 then
+							fail(`trade inbound — or heritier {heir.gold} (paiement fantome)`)
+						else
+							print("trade inbound : convoi coule, pas d'or a l'heritier")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Un convoi A→C survit au recycle d'un autre slot (B).
+	local state = GameState.new(9901)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(124), 0)
+	local bystander = state:addPlayer(nil, "Temoin", Random.new(125), 0)
+	local buyer = state:addPlayer(nil, "Acheteur", Random.new(126), 0)
+	if not seller or not bystander or not buyer then
+		fail("trade third-party — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portC: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portC = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portC then
+			fail("trade third-party — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portC, buyer.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portC, Config.BUILDING.PORT, buyer.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portC :: number)
+			if not path then
+				fail("trade third-party — route maritime introuvable")
+			else
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = #path + 1,
+					targetTile = portC,
+					homeTile = portA,
+				})
+				state:removePlayer(bystander.slot)
+				if #state.boats ~= 1 or state.boats[1].kind ~= Navy.KIND_TRADE then
+					fail(`trade third-party — convoi tiers retire ({#state.boats} restant)`)
+				else
+					local goldA, goldC = seller.gold, buyer.gold
+					state.tick = 1
+					Navy.step(state, Random.new(12))
+					if seller.gold <= goldA or buyer.gold <= goldC then
+						fail("trade third-party — or non verse apres recycle d'un temoin")
+					else
+						print("trade third-party : convoi A→C conserve, or verse")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N21 : poche terrestre close annexee ; poche touchant l'ocean refusee.
+	-- Le seed est la tuile deja capturee (owner = attaquant), comme le combat vivant.
+	local ChantierB = __require("ChantierB")
+	local annexState = GameState.new(7777)
+	local att = annexState:addPlayer(nil, "Enclaveur", Random.new(1), 0)
+	local def = annexState:addPlayer(nil, "Enclave", Random.new(2), 0)
+	if not att or not def then
+		fail("tryAnnex — spawn impossible")
+	else
+		local originX: number? = nil
+		local originY: number? = nil
+		for y = 1, Config.MAP_HEIGHT - 7 do
+			for x = 1, Config.MAP_WIDTH - 7 do
+				local ok = true
+				for dy = 0, 4 do
+					for dx = 0, 4 do
+						local idx = MapGen.toIndex(x + dx, y + dy)
+						if not annexState:isLand(idx) or buffer.readu8(annexState.owner, idx) ~= Config.NEUTRAL_SLOT then
+							ok = false
+							break
+						end
+					end
+					if not ok then
+						break
+					end
+				end
+				if ok then
+					originX, originY = x, y
+					break
+				end
+			end
+			if originX then
+				break
+			end
+		end
+		if not originX or not originY then
+			fail("tryAnnex — bloc 5x5 terrestre neutre introuvable")
+		else
+			for dy = 0, 4 do
+				for dx = 0, 4 do
+					annexState:setOwner(MapGen.toIndex(originX + dx, originY + dy), att.slot)
+				end
+			end
+			local inner = {}
+			for dy = 1, 3 do
+				for dx = 1, 3 do
+					local idx = MapGen.toIndex(originX + dx, originY + dy)
+					annexState:setOwner(idx, def.slot)
+					table.insert(inner, idx)
+				end
+			end
+			local seed = MapGen.toIndex(originX + 2, originY + 2)
+			annexState:setOwner(seed, att.slot)
+			ChantierB.tryAnnex(annexState, att.slot, def.slot, seed)
+			local leftover = 0
+			for _, idx in inner do
+				if idx ~= seed and buffer.readu8(annexState.owner, idx) ~= att.slot then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`tryAnnex — poche terrestre non annexee ({leftover} tuiles restantes)`)
+			else
+				local origin2X: number? = nil
+				local origin2Y: number? = nil
+				for y = 1, Config.MAP_HEIGHT - 7 do
+					for x = 1, Config.MAP_WIDTH - 7 do
+						local ok = true
+						for dy = 0, 4 do
+							for dx = 0, 4 do
+								local idx = MapGen.toIndex(x + dx, y + dy)
+								if not annexState:isLand(idx)
+									or buffer.readu8(annexState.owner, idx) ~= Config.NEUTRAL_SLOT
+								then
+									ok = false
+									break
+								end
+							end
+							if not ok then
+								break
+							end
+						end
+						if ok then
+							origin2X, origin2Y = x, y
+							break
+						end
+					end
+					if origin2X then
+						break
+					end
+				end
+				if not origin2X or not origin2Y then
+					fail("tryAnnex — second bloc 5x5 introuvable (pool)")
+				else
+					for dy = 0, 4 do
+						for dx = 0, 4 do
+							annexState:setOwner(MapGen.toIndex(origin2X + dx, origin2Y + dy), att.slot)
+						end
+					end
+					for dy = 1, 3 do
+						for dx = 1, 3 do
+							annexState:setOwner(MapGen.toIndex(origin2X + dx, origin2Y + dy), def.slot)
+						end
+					end
+					local seed2 = MapGen.toIndex(origin2X + 2, origin2Y + 2)
+					annexState:setOwner(seed2, att.slot)
+					ChantierB.tryAnnex(annexState, att.slot, def.slot, seed2)
+					local leftover2 = 0
+					for dy = 1, 3 do
+						for dx = 1, 3 do
+							local idx = MapGen.toIndex(origin2X + dx, origin2Y + dy)
+							if idx ~= seed2 and buffer.readu8(annexState.owner, idx) ~= att.slot then
+								leftover2 += 1
+							end
+						end
+					end
+					if leftover2 ~= 0 then
+						fail(`tryAnnex — pool pollue, seconde poche ratee ({leftover2})`)
+					else
+						print("tryAnnex poche terrestre : 8 tuiles annexees, pool reutilise")
+					end
+				end
+			end
+		end
+
+		local coastal: number? = nil
+		local landSeed: number? = nil
+		local nbScratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if annexState:isLand(index)
+				and MapGen.isCoastal(annexState.terrain, index)
+				and buffer.readu8(annexState.owner, index) == Config.NEUTRAL_SLOT
+			then
+				local n = MapGen.neighbors(index, nbScratch)
+				for i = 1, n do
+					local nb = nbScratch[i]
+					if annexState:isLand(nb) then
+						coastal = index
+						landSeed = nb
+						break
+					end
+				end
+				if coastal then
+					break
+				end
+			end
+		end
+		if not coastal or not landSeed then
+			fail("tryAnnex — tuile cotiere neutre introuvable")
+		else
+			annexState:setOwner(landSeed, att.slot)
+			annexState:setOwner(coastal, def.slot)
+			ChantierB.tryAnnex(annexState, att.slot, def.slot, landSeed)
+			if buffer.readu8(annexState.owner, coastal) ~= def.slot then
+				fail("tryAnnex — poche cotiere annexee (ocean devrait abort)")
+			else
+				print("tryAnnex ocean : poche cotiere refusee")
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
