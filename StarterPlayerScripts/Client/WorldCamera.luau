@@ -517,19 +517,27 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	self.fovKick += (0 - self.fovKick) * (1 - math.exp(-7 * dt))
 
 	local rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)
-	local offset = rotation:VectorToWorldSpace(Vector3.new(0, 0, self.distance))
-	-- V66 : shake + oeil en nombres. Plus de lookAt(deux Vector3) 60 Hz.
-	-- Shake 0 : CFrame.new(eye) * rotation ≡ lookAt(focus+offset, focus)
-	-- (offset = rotation:+Z * distance, look = rotation:-Z).
-	-- Shake > 0 : translation seulement, plus de tilt 18 %.
-	-- Vector3.new(0, 0, distance) leftover V67. Lerp focus leftover V68.
+	-- V67 : offset local (0,0,distance) en nombres. Plus de Vector3.new
+	-- ni VectorToWorldSpace 60 Hz. YXZ, rz=0 :
+	--   ox = d * cos(pitch) * sin(yaw)
+	--   oy = d * sin(pitch)
+	--   oz = d * cos(pitch) * cos(yaw)
+	-- Shake 0 : identique a V66 (oeil = focus + offset). Shake > 0 :
+	-- translation seulement (V66). Lerp focus leftover V68.
 	-- Unites yaw inchangees (V65). Camion segRot inchange (V64).
+	local d = self.distance
+	local pitch, yaw = self.pitch, self.yaw
+	local cosPitch, sinPitch = math.cos(pitch), math.sin(pitch)
+	local cosYaw, sinYaw = math.cos(yaw), math.sin(yaw)
+	local ox = d * cosPitch * sinYaw
+	local oy = d * sinPitch
+	local oz = d * cosPitch * cosYaw
 	local sx = math.sin(self.clock * 31) * self.shake * 0.65
 	local sy = math.cos(self.clock * 37) * self.shake * 0.42
 	local sz = math.sin(self.clock * 23) * self.shake * 0.5
-	local ex = self.focus.X + offset.X + sx
-	local ey = self.focus.Y + offset.Y + sy
-	local ez = self.focus.Z + offset.Z + sz
+	local ex = self.focus.X + ox + sx
+	local ey = self.focus.Y + oy + sy
+	local ez = self.focus.Z + oz + sz
 	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
