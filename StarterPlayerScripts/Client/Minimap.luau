@@ -187,9 +187,12 @@ function Minimap.flush(self: Minimap)
 end
 
 -- Repositionne le marqueur sur le point de mire courant de la camera.
-function Minimap.setFocus(self: Minimap, worldPosition: Vector3)
-	local u = math.clamp((worldPosition.X + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
-	local v = math.clamp((worldPosition.Z + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
+-- N123 : (x, y, z) nombres. y ignore pour u/v (comme .Y avant).
+-- Plus de Vector3 60 Hz au lecteur. Axes : X→u, Z→v.
+-- Recette visual V69 leftover minimap, portee pas mergee.
+function Minimap.setFocus(self: Minimap, x: number, _y: number, z: number)
+	local u = math.clamp((x + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
+	local v = math.clamp((z + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
 	self.marker.Position = UDim2.fromScale(u, v)
 end
 
