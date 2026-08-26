@@ -1,11 +1,11 @@
-# Nightly report — passe 29 (revue PR #81)
+# Nightly report — passe 30 (revue PR #84)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-d685` (PR #81, `109ff75`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-107e`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-107e` (PR #84, `0c369ee`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-c695`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #81 (`gatherSites` siteBuf / `stepElimination` elimBuf — HEAD visuel). Correctifs sûrs, sans merger feel `69f4`/`b62d` ni hardening `bef6`.
+Revue de PR #84 (`findSeaPath` pathWalkBuf / `refreshRailNetwork` stationBuf — HEAD visuel). Correctifs sûrs, sans merger feel `69f4`/`b62d` ni hardening `bef6`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,14 +15,14 @@ Revue de PR #81 (`gatherSites` siteBuf / `stepElimination` elimBuf — HEAD visu
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `Navy.findSeaPath` walk scratch `pathWalkBuf` | `Navy.luau` | V38 N83 |
-| `GameState.refreshRailNetwork` pool `stationBuf` | `GameState.luau` | V39 N84 |
+| `Buildings.contextFor` record + closures module | `Buildings.luau` | V40 N85 |
+| `ChantierB.cancelOpposingFronts` / wrap `stepAttacks` | `ChantierB.luau` | V41 N86 |
 
-`visitBuf` / `parentPool` / `queuePool` **conservés**. Retour **unique** (`boat.path` ne reçoit jamais `pathWalkBuf`). `buildingsBySlot[slot]` + skip `IS_STATION` **conservés**. Inners `neighborsOf` **alloués** (deviennent `building.links`). Formule HUD `railIncome` **visuelle** (pas de `TRAIN_STOP_BONUS` — il vit dans `Trade`). Skip `awaitingSpawn` et `settledHumans` **conservés**. `siteBuf` / `elimBuf` **non retouchés**. Schéma filaire client **inchangé**. GameState ne require toujours pas Buildings / Research.
+`pricesFor` / `priceBuf` **conservés**. `Placement.luau` et `PlacementPreview` **non touchés** (le client construit ses closures). Slot inconnu → `nil` **sans** muter `ctxBuf`. `CAPTURE_GUARD=80` visuel **inchangé**. `stripTerritory` visuel (`awaitingSpawn = true`) **inchangé**. `elimBuf` / `pathWalkBuf` / `stationBuf` **non retouchés**. Schéma filaire client **inchangé**. GameState ne require toujours pas Buildings / Research.
 
 ---
 
-## Constatations PR #81 (à ne pas casser)
+## Constatations PR #84 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -50,6 +50,8 @@ Revue de PR #81 (`gatherSites` siteBuf / `stepElimination` elimBuf — HEAD visu
 - **Élimination 10 Hz :** `stepElimination` (V37). `elimBuf` (`table.create(8)`). **Pas** nommé `doomed`. Skip `awaitingSpawn`. Truncate leftover **avant** `removePlayer`. Ne pas truncate à 0 après return. Buffer **partagé inter-instances**. `settledHumans` inchangé.
 - **Path maritime :** `Navy.findSeaPath` (V38). `pathWalkBuf` walk scratch. Copie inverse dans un tableau **neuf**. `return out`, jamais `return pathWalkBuf`. Origine terrestre **exclue**. `visitBuf` / `parentPool` / `queuePool` inchangés. **Pas réentrant.** Unique appelant synchrone (invasion / retraite / convoi).
 - **Réseau ferroviaire :** `refreshRailNetwork` (V39). `stationBuf` + `railParentBuf` / `railXsBuf` / `railYsBuf` + maps de grappe. Truncate leftover **puis** `table.sort`. Itérer `1..count`, pas `#`. Inners `neighborsOf` uniques. Formule HUD visuelle **sans** `TRAIN_STOP_BONUS`. **Pas réentrant.**
+- **Placement serveur :** `Buildings.contextFor` (V40). `ctxBuf` + `ownerAt`/`buildingAt` module. Deux appels → `rawequal`. Slot inconnu → `nil` sans muter. **Pas réentrant** : un `ownerAt` conservé lit le `ctxState` vivant. `resolve` synchrone unique. Ne pas `table.clone`.
+- **Clash / collapse 10 Hz :** `doomedBuf` hash + `collapsingBuf` pool (V41). `table.clear(doomedBuf)` en tête de `cancelOpposingFronts`. Ne **pas** itérer `#doomedBuf`. Truncate leftover collapsing **avant** `collapseFaction`. `ChantierB.doomedBuf` exposé pour le banc (`next` après clear). **Pas réentrant.** Distinct de `elimBuf` (redistribution, pas `removePlayer`).
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
@@ -99,7 +101,7 @@ Ne pas merger feel `69f4`/`b62d` ni hardening `bef6` sur cette branche sans reba
 
 **20K CCU.** 10 Hz × 40 960 lectures buffer quand le cadran tourne = pic en fin de partie.
 
-**Faire.** Liste incrémentale des tuiles par slot (même structure que `border`) **ou** reservoir sampling sur un index compact. Ne pas changer la formule `Doomsday.rotQuota`.
+**Faire.** Liste incrémentale des tuiles par slot (même structure que `border`) **ou** reservoir sampling sur un index compact. Ne pas changer la formule `Doomsday.rotQuota`. Distinct de V43 (`stripBuf` recycle la liste temporaire, **pas** le scan).
 
 **Tester.** Cadran existant + 1 humain sous quota. Invariants `tiles` vs buffer.
 
@@ -115,46 +117,45 @@ Ne pas merger feel `69f4`/`b62d` ni hardening `bef6` sur cette branche sans reba
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V40 — `Buildings.contextFor` table + 2 closures par resolve
+### ISSUE-V42 — `Bots.decideDiplomacy` alloue `allies` à chaque décision
 
-**Problème.** Chaque `Buildings.resolve` (intent `BuildOrder` + `Bots.decideBuild`) fait `return { slot, era, gold, terrain, ownerAt = function…, buildingAt = function… }`. Trois allocations (record + 2 closures) par clic / décision bot. Les closures capturent `state`. `Placement.resolve` lit `ctx` de façon synchrone et abandonne — le record n’a pas besoin d’être unique. Feel N85. Distinct de V30 (`pricesFor`) et de V39 (`stationBuf`).
+**Problème.** Chaque `decideDiplomacy` (Bots.step, 1 tick sur `DECISION_INTERVAL=14` par bot, décalage `slot * 3`) fait `local allies = {}` puis remplit via `areAllied`. Hash jetable, lu tout de suite pour la coalition anti-leader. Distinct de V35 (`contactBuf` / `neighborFactions`, perception de frontière) et de V40 (`ctxBuf` pose).
 
-**20K CCU.** Un shard 8 humains + 16 bots pose/upgrade plusieurs fois par seconde en mid-game. Recycle du record + fonctions module (lisent `ctxState`) élimine l’alloc courte. Pas d’autorité (même `buffer.readu8(state.owner)` / `state.buildings[index]`). Ne pas fusionner avec le ctx client : `PlacementPreview` / `init.client` construisent **leurs** closures sur Overlay / WorldRenderer.
+**20K CCU.** 16 bots × ~0.7 Hz. Recycle d’un `allyBuf` (`table.clear`) élimine l’alloc courte du hot path diplomatie IA. Pas d’autorité (`areAllied` inchangé, mêmes `accept`/`decline`/`setEmbargo`). Ne pas fusionner avec `contactBuf` : `allies` est un set de pactes, `contactBuf` est un set de voisins de tuiles.
 
-**Faire.** Recette feel N85 (`69f4`) :
+**Faire.**
 
-1. Ajouter `ctxState: GameState?` et `ctxBuf: Placement.Context` module-level dans `Buildings.luau`. `ownerAt` / `buildingAt` = fonctions **module** (pas de `function` inline) : `ownerAt` lit `buffer.readu8(ctxState.owner, index)` ; `buildingAt` lit `ctxState.buildings[index]` (kind/slot/level ou nil,nil,nil — **même contrat**). `contextFor` : slot inconnu → `return nil` **sans** muter `ctxBuf`. Slot vivant : poser `ctxState = state`, `ctxBuf.slot/era/gold/terrain`, `ctxBuf.ownerAt` / `ctxBuf.buildingAt` = les fonctions module (identité stable), `return ctxBuf`.
-2. Ne pas require de module nouveau. Ne pas toucher `pricesFor` / `siteBuf` / `stationBuf`. Ne pas toucher `Placement.luau` (le type `Context` reste). Ne pas toucher `PlacementPreview.resolve` (le client passe ses propres closures — un `ctxBuf` serveur n’existe pas côté client). `resolve` reste le seul appelant serveur. Pas de RemoteFunction.
-3. Après V39. Ne pas porter `ChantierB` doomed/collapsing (V41) en même temps.
+1. Ajouter `allyBuf: { [number]: boolean } = {}` module-level dans `Bots.luau`. Au début de `decideDiplomacy` : `table.clear(allyBuf)`. Remplacer `allies` par `allyBuf`. Ne **pas** itérer `#allyBuf` (hash). Ne pas toucher `neighborFactions` / `contactBuf` / `siteBuf`. Pas de RemoteFunction.
+2. Ne pas changer les seuils `acceptChance` 0.75/0.35, `COALITION_ALLY_CHANCE`, `COALITION_EMBARGO_CHANCE`. Ne pas require de module nouveau. Après V41. Ne pas porter `stripBuf` (V43) en même temps.
 
-**Contraintes.** Server-only. Recette `viewBuf` (record réécrit, pas une nouvelle table) + closures stables. **V40 visual ≠ V30 (`pricesFor`, déjà fait) ≠ V36 (`siteBuf`, déjà fait) ≠ V39 (`stationBuf`, déjà fait).** `ctxBuf` n’est pas réentrant. `resolve` est synchrone et unique. Ne pas `table.clone(ctxBuf)`. Ne pas stocker le ctx au-delà de `Placement.resolve`. `terrain` est le buffer live (pas une copie) — Overlay client a le sien. Ne pas require Placement côté GameState (cycle).
+**Contraintes.** Server-only. Recette `contactBuf` (V35) : `table.clear` hash, pas de truncate array. **V42 visual ≠ V35 (`contactBuf`, déjà fait) ≠ V40 (`ctxBuf`, déjà fait).** `allyBuf` n’est pas réentrant. `decideDiplomacy` est synchrone et unique par bot (la boucle `Bots.step` est séquentielle — un second `clear` au bot suivant est voulu). Ne pas stocker `allyBuf` au-delà de la fonction. Ne pas exposer le buffer (pas de filaire).
 
-**Tester.** `Buildings.contextFor(state, slot)` deux fois → `rawequal`. Slot 99 → `nil`. `Buildings.resolve` pose encore une CITY (snap / exact inchangé — banc placement existant). Après `contextFor(A)` puis `contextFor(B)`, un `ownerAt` **conservé** du premier ctx lit B (non réentrant — documenter, ne pas « corriger » en clonant). `./tests/run.sh`. Client 34/34. 6000 ticks.
+**Tester.** Banc diplomatie bots existant (accept/decline, embargo leader) **doit rester vert**. Ajouter : 2 humains alliés + 1 bot, `decideDiplomacy` deux fois → pas d’erreur ; après `breakAlliance` le bot ne traite plus l’ex-allié comme allié (le leftover d’un `clear` oublié ferait une coalition fantôme). `./tests/run.sh`. Client 34/34. 6000 ticks.
 
-**Fichiers.** `Buildings.luau` (`contextFor` + helpers module, `resolve` inchangé à l’appel), `tests/simulate.luau` (bloc court à côté du banc V30 / `pricesFor`).
+**Fichiers.** `Bots.luau` (`decideDiplomacy` seulement), `tests/simulate.luau` (bloc court à côté du banc V35 / `neighborFactions`).
 
-### ISSUE-V41 — `ChantierB.cancelOpposingFronts` / `collapsing` allouent 10 Hz
+### ISSUE-V43 — `ChantierB.stepDoomsday` alloue `toStrip` 10 Hz
 
-**Problème.** Chaque tick avec fronts, `cancelOpposingFronts` fait `local doomed: { boolean } = {}` (hash sparse indexé par i d’attaque) et le wrap `stepAttacks` fait `local collapsing = {}` puis `table.insert(collapsing, { victim, captor })` par front sous le seuil. Deux allocations porteuses + N records par tick de combat. La loi (clash `min(troops)`, refund si troops>0 au remove, collapse si `tiles < collapseThreshold()` encore vrai **après** la passe) ne change pas. Feel N86. Distinct de V37 (`elimBuf` élimination) et de `retreatAttack` (couple).
+**Problème.** Quand le cadran est armé et qu’un slot est sous quota, `stepDoomsday` fait `local ripped, toStrip = 0, {}` puis `table.insert` jusqu’à `quota * 4` (early-out du scan `TILE_COUNT`). Deux allocations porteuses par slot marqué par tick. La loi (`Doomsday.rotQuota`, drain troupes, `WARN_SECONDS`) ne change pas. Distinct de V13 (réécrire le scan O(carte) en liste incrémentale) et de V41 (`collapsingBuf` combat, pas rot).
 
-**20K CCU.** Leftover combat vivant. 10 Hz × 18 slots × quelques fronts. Recycle des porteuses (et pool des records collapse) élimine l’alloc courte du hot path. Pas d’autorité (mêmes soustractions, même `table.remove` arrière, même notify). Ne pas fusionner avec `elimBuf` : collapse n’est pas une élimination (territoire redistribué, pas `removePlayer`).
+**20K CCU.** Pic de fin de partie : 10 Hz × slots sous le seuil × alloc courte + scan 40 960. Recycle de `stripBuf` (`table.create(64)`) + truncate leftover ferme l’alloc **sans** toucher à la formule ni au scan. V13 reste le vrai fix O(carte).
 
-**Faire.** Recette feel N86 (`69f4`) :
+**Faire.**
 
-1. Ajouter `doomedBuf: { [number]: boolean } = {}` module-level dans `ChantierB.luau`. Au début de `cancelOpposingFronts` : `table.clear(doomedBuf)`. Remplacer `doomed` par `doomedBuf`. Ne **pas** itérer `#doomedBuf` (c’est un hash sparse — la boucle `for i = #state.attacks, 1, -1` reste). Ajouter `collapsingBuf` (`table.create(8)`) + `collapseRecPool` (`table.create(8)`, records `{ victim, captor }`). Au début du wrap `stepAttacks` : n = 0. À chaque insert : n += 1 ; réécrire un rec du pool (créer si `collapseRecPool[n] == nil`) ; `collapsingBuf[n] = rec`. Truncate leftover n+1..# **avant** la boucle `for _, entry in collapsing`. Traiter `1..n` (pas `#` sans truncate). Pas de RemoteFunction.
-2. Ne pas toucher `BoatFront` (`parked` par `launchAttack`). Ne pas toucher `GameState.stepAttacks` mort (`local _ = origStepAttacks`). `CAPTURE_GUARD=80` visuel **inchangé**. `stripTerritory` visuel (`awaitingSpawn = true`) **inchangé**. Après V40. Ne pas porter `contextFor` en même temps.
+1. Ajouter `stripBuf: { number } = table.create(64)` module-level dans `ChantierB.luau`. Dans le bloc quota : `n = 0` ; à chaque tuile du camp : `n += 1 ; stripBuf[n] = index` ; break si `n >= quota * 4`. Truncate leftover `n+1..#` **avant** la boucle d’arrachage. Itérer `1..n`, pas `#` sans truncate. Remettre `n = 0` (ou truncate à 0) après traitement pour qu’un second slot du même tick ne ré-arrache pas les tuiles du premier. Pas de RemoteFunction.
+2. Ne pas changer `Doomsday.rotQuota` / `drain` / `troopFloor`. Ne pas construire d’index tuiles-par-slot (ça c’est V13). Ne pas toucher `elimBuf` / `doomedBuf` / `collapsingBuf`. Ne pas require de module nouveau. Après V42. Ne pas porter `allyBuf` en même temps.
 
-**Contraintes.** Pas de RemoteFunction. Recette V34 (`expiredBuf` + pool records) pour collapsing ; recette `table.clear` hash pour doomed (comme `contactBuf` V35). **V41 visual ≠ V37 (`elimBuf`, déjà fait) ≠ V38 (`pathWalkBuf`, déjà fait).** `doomedBuf` / `collapsingBuf` ne sont pas réentrants. `stepAttacks` est unique par tick. Ne pas `table.remove` dans `collapsingBuf` pendant l’itération — la collecte est close avant le traitement. Un leftover d’état A dans l’état B sans truncate ferait collapse d’un slot fantôme — truncate obligatoire (recette V37). Les records ne sont pas répliqués.
+**Contraintes.** Pas de RemoteFunction. Recette V37 (`elimBuf` truncate avant traitement). **V43 visual ≠ V13 (scan O(carte), ouvert) ≠ V41 (`collapsingBuf`, déjà fait) ≠ V37 (`elimBuf`, déjà fait).** `stripBuf` n’est pas réentrant. `stepDoomsday` est unique par tick mais **boucle les slots** — truncate/reset **entre** slots (sinon slot B arrache les tuiles de A). Un leftover sans truncate ferait `setOwner(NEUTRAL)` sur une tuile d’un autre camp. Les indices ne sont pas répliqués.
 
-**Tester.** Banc combat vivant existant (guard=80) **doit rester vert**. Ajouter : deux joueurs, fronts opposés A→B et B→A avec troupes égales → les deux fronts disparaissent, troupes restituées (clash). Un défenseur sous le seuil → `collapseFaction` toujours appelé (territoire du captor augmente). Deux appels `cancelOpposingFronts` sans fronts → pas d’erreur, `next(doomedBuf) == nil` après clear. `./tests/run.sh`. Client 34/34. 6000 ticks.
+**Tester.** Banc cadran existant **doit rester vert**. Ajouter : 1 humain sous quota, `rotQuota >= 1` → tuiles diminuent, `tiles` vs buffer `owner`. Deux slots marqués le même tick → chacun perd son propre territoire, pas celui de l’autre. `./tests/run.sh`. Client 34/34. 6000 ticks.
 
-**Fichiers.** `ChantierB.luau` (`cancelOpposingFronts` + wrap `stepAttacks` seulement), `tests/simulate.luau` (bloc court).
+**Fichiers.** `ChantierB.luau` (`stepDoomsday` seulement, bloc `toStrip`), `tests/simulate.luau` (bloc court à côté du banc cadran).
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `69f4`/`b62d` / hardening `bef6` sur #39/#81.
+- Merger feel `69f4`/`b62d` / hardening `bef6` sur #39/#84.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -162,12 +163,14 @@ Ne pas merger feel `69f4`/`b62d` ni hardening `bef6` sur cette branche sans reba
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
-- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` / `viewFor` / `expiredBuf` / `contactBuf` / `siteBuf` / `elimBuf` / `pathWalkBuf` / `stationBuf` réentrants : un seul appelant chacun (sauf `viewFor` **par slot** — c’est voulu). Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
+- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` / `viewFor` / `expiredBuf` / `contactBuf` / `siteBuf` / `elimBuf` / `pathWalkBuf` / `stationBuf` / `ctxBuf` / `doomedBuf` réentrants : un seul appelant chacun (sauf `viewFor` **par slot** — c’est voulu). Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
 - Feel N70 `retreating` sur le snapshot — Overlay visuel ne teinte pas la retraite.
 - Feel N20 `TRAIN_STOP_BONUS` dans `refreshRailNetwork` — HUD visuel lit l’espérance **sans** ce multiplicateur ; `Trade.deliveryValue` l’applique déjà. Ne pas porter.
 - `delivery.level` snapshot à l’arrivée (feel) : le header Trade dit « niveau à l’arrivée » ; dispatch stocke déjà `level` mais `resolve` lit `factory.level`. Produit, pas un bug d’index.
-- Feel N85 (`contextFor`) / N86 (`doomedBuf`/`collapsingBuf`) — V40 / V41.
 - `dirtyIndexBuf` (feel N72 / hardening N53) — ne ferme pas l’alloc `buffer.create` (voir V14b).
+- `buildRoster` (`init.server`, hors bundle) — 10 Hz playing, leftover N2 skip-si-inchangé.
+- `GameState.collapseFaction` `remaining`/`leftovers` — une fois par vie de faction, pas 10 Hz.
+- `Nukes.splitMirv` `targets` — par MIRV, pas le hot path.
 
 ---
 
@@ -178,6 +181,6 @@ Ne pas merger feel `69f4`/`b62d` ni hardening `bef6` sur cette branche sans reba
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–28 + **passe 29** (`findSeaPath` pathWalk identite unique + p1 intact, trajet inverse sans pollution ; `stationBuf` liens usine + income + identite `factory.links`, slot 99 sans erreur).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–29 + **passe 30** (`contextFor` rawequal + slot 99 sans mute + CITY + ownerAt conserve lit B ; `doomedBuf` next nil après clear ; clash égal → 0 front ; collapse sous seuil → captor grandit).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
