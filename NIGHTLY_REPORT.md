@@ -1,9 +1,9 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 7)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 8)
 
-Déclencheur : ouverture de la **PR #26** (`cursor/analyse-nocturne-du-codebase-ec34`) — beachhead merge, viewFor expiry, SAM 1.0, specs N33–N35.
+Déclencheur : ouverture de la **PR #28** (`cursor/analyse-nocturne-du-codebase-4fe1`) — areAllied expiry, boat own-tile, specs N36–N37.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-4fe1`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#26.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-6be5`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#28.
 
 ---
 
@@ -15,44 +15,40 @@ Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle 
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #26 (passe 6) : claims vérifiés.** Beachhead merge (`isBeachhead`), stub `seedBeachhead` = error, `viewFor` expiry, inbound GC requests/embargos/marks, HUD `railIncome` × `TRAIN_STOP_BONUS`, `SAM_INTERCEPT_CHANCE=1.0`. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #28 (passe 7) : claims vérifiés.** `areAllied` honore `tick < expiry` (`true` legacy vivant), restitution bateau 100 % sur côte déjà prise, `removePlayer` purge `allianceExtensions` inbound, diplomatie self / `inf` refusées à l’enqueue. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **porté ce que #26 a documenté (N34) et ce que le hardening 5233 avait déjà livré** : paix fantôme 1 tick, malus 25 % sur une côte déjà prise, extension inbound, diplomatie self / `inf`.
+Cette passe a **livré ce que #28 a documenté (N36, N37)** plus un garde JoinRequest `nan`/`inf` hors bundle.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #26
+## 2. Revue PR #28
 
-| Claim #26 | Réalité à l’ouverture |
+| Claim #28 | Réalité à l’ouverture |
 |---|---|
-| `launchAttack` ne fusionne plus dans une tête de pont | Oui. `not atk.isBeachhead` + park BoatFront. |
-| Stub `seedBeachhead` = `error(...)` | Oui. |
-| `viewFor` masque propositions périmées | Oui. **`areAllied` fuyait encore sur l’expiry du pacte** — corrigé ici (N34). |
-| `removePlayer` purge requests / embargos / marques inbound | Oui. **Manquait `allianceExtensions` inbound** (slot recyclé) — corrigé ici. |
-| HUD `railIncome` × `TRAIN_STOP_BONUS` | Oui. |
-| `SAM_INTERCEPT_CHANCE` Config = 1.0 | Oui. |
-| Specs N33–N35 | N34 **corrigé ici**. N33 / N35 restent design. |
+| `areAllied` = deux sens **et** `tick < expiry` | Oui. `pactStillLive` : nombre = `tick < expiry`, `true` legacy vivant. |
+| Bots / notify ignorent un pacte périmé | Oui. `Bots.step` tourne **avant** `Diplomacy.step` ; les décisions passent par `areAllied`. |
+| Transport côte déjà prise : restitution 100 % | Oui. `Navy.step` + `resolveLanding`. Retraite vraie (`retreating`) garde `BOAT_RETREAT_LOSS`. |
+| `removePlayer` purge `allianceExtensions` inbound | Oui. |
+| Diplomatie `targetSlot == self` et séquence `inf` | Oui, à l’enqueue (`IntentValidator`). |
+| Specs N36–N37 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25 hardening, #19/#21/#22/#24/#26 feel. **#26 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27 hardening, #19/#21/#22/#24/#26/#28 feel. **#28 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Port depuis hardening `5233` / PR #25 — **pas de réinvention**. Feel #19 inchangé.
+Feel #19 inchangé. Pas de réinvention : N36 option A du rapport #28, N37 pooling tel que spécifié.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `areAllied` ignorait l’expiry numérique (N34) | `GameState.luau` (`pactStillLive`, `true` legacy vivant) | 1 tick de paix fantôme : Attack/Boat/Nuke/dons refusés après échéance. `Bots.step` tourne **avant** `Diplomacy.step`. |
-| Bots / notify alliés sur pacte mort | `Bots.luau`, `Diplomacy.luau` | `alliances[a][b]` = tick truthy. Coalition, trahison, `help_defend`, QuickChat alliésOnly. |
-| Transport dont la côte a déjà été prise : malus 25 % | `Navy.luau` (`step` + `resolveLanding`) | Armes combinées (terre puis bateau) : restitution 100 %. Une vraie retraite (`retreating`) garde `BOAT_RETREAT_LOSS`. |
-| `removePlayer` laissait `allianceExtensions` inbound | `GameState.luau` | `addPlayer` recycle le slot : une prolongation héritée. |
-| Diplomatie `targetSlot == self` à l’enqueue | `IntentValidator.luau` | Occupait la séquence (N29) pour un no-op métier. |
-| `isInteger` acceptait `inf` | `IntentValidator.luau`, `init.server.luau` | `math.floor(inf)==inf`. Hors bundle pour `init.server` ; le banc couvre IntentValidator. |
+| AimFront figé après le premier lancer (N36) | `SystemsBootstrap.luau` | `sourceTile == nil` n’est pas « front terre ». Re-visée du couple (`not isBeachhead`), y compris si `sourceTile` est déjà posé. Ticket « le front n’écoute plus le clic ». |
+| `findSeaPath` allouait 40 960 octets + `parent` + `queue` par appel (N37) | `Navy.luau` | Invasions + retraites + vague commerciale (tous les 45 ticks). Pool `visitBuf` / `parentScratch` / `queueScratch`, `buffer.fill(buf, 0, 0)`, `table.clear`. `MAX_BFS_NODES` inchangé. |
+| `JoinRequest` acceptait `nan` / `inf` | `init.server.luau` | `typeof(inf)=="number"` ; `nan` traverse `math.clamp` vers `Nations.get`. Hors bundle ; même garde que `isInteger`. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), scan bunkers (N31), RequestSnapshot client (N28), seq avant apply (N29), landing bonus mort (N33), buffer defense mort (N35), bateau allié = retraite 25 % (N10.8 design).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18 — **plus visible après N36**, ne pas mixer), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), scan bunkers combat (N31), RequestSnapshot client (N28), seq avant apply (N29), landing bonus mort (N33), buffer defense mort (N35), bateau allié = retraite 25 % (N10.8 design).
 
 ---
 
@@ -68,61 +64,65 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **Vérité d’équilibrage** = `ChantierB.apply(Config)` après `install()`, pas `Config.luau` seul.
 - **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`.
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
+- **AimFront wrap** = re-visée du front terre du couple ; jamais `isBeachhead`.
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N36–N37)
+## 5. Issues worker-ready (nouveaux, N38–N39)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N16, N17–N19, N22, N25, N28, N29, N31, N33, N35 restent ouverts.** N20/N21/N23/N24/N26/N30/N32/N34 = faits. N27 = doc only.
-
----
-
-### ISSUE-N36 — AimFront figé après le premier lancer
-
-**Priorité :** P2 feel / fronts visés.
-
-**Problème :** `SystemsBootstrap.install` enveloppe `launchAttack` ainsi :
-
-1. `already` = un front du couple avec `sourceTile == nil`
-2. `origLaunch` (merge terre, pas `isBeachhead`)
-3. `AimFront.focus` seulement si `aim` est posé **et** `not already`, en cherchant un front `sourceTile == nil`
-
-Conséquences :
-
-- Premier clic **sans** visée : front `sourceTile = nil`. Second clic **avec** visée : `already = true` → l’aim est jeté.
-- Premier clic **avec** visée : `AimFront.focus` pose `sourceTile`. Second clic avec une **nouvelle** visée : `already = false` (plus de `sourceTile == nil`) mais la boucle de focus ne trouve plus le front → l’aim n’est jamais mis à jour.
-
-`BoatFront` pose `sourceTile` **et** `isBeachhead` ; le wrap bootstrap n’a pas basculé sur `not atk.isBeachhead` (le critère de `GameState.launchAttack` depuis la passe 6).
-
-**Pourquoi 20K CCU :** tickets « le front n’écoute plus le clic ». Pas un exploit ; c’est du feel mort après le premier ordre, exactement le levier OF `sourceTile`. Sous 8 humains ça se voit tout de suite.
-
-**Worker :**
-
-1. Décision : (A) re-viser un front terre existant (`AimFront.focus` même si `sourceTile` est déjà posé, jamais sur `isBeachhead`), (B) documenter « visée = premier lancer seulement » et court-circuiter `ps.aimTile` si un front terre du couple existe déjà, (C) aligner le wrap sur `not atk.isBeachhead` **sans** changer le re-aim (min diff, bug de re-visée reste).
-2. Tests : (1) premier lancer sans aim, second avec `aimTile` — (A) le front a `sourceTile`, (B) toujours nil. (2) deux visées successives — (A) la seconde gagne. (3) une tête de pont du même couple n’est pas re-visée. Réutiliser le banc `aim reinforce : un seul front`.
-3. Fichiers : `SystemsBootstrap.luau`, éventuellement `AimFront.luau`, `tests/simulate.luau`.
-
-**Contraintes :** ne pas mixer avec N18 (heap AimFront ≠ ChantierB). Ne pas fusionner terre et `isBeachhead`. Feel apply immédiat inchangé. Ne pas casser `aim reinforce` (un seul front après deux lancers).
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N29, N31, N33, N35 restent ouverts.** N20/N21/N23/N24/N26/N30/N32/N34/N36/N37 = faits. N27 = doc only.
 
 ---
 
-### ISSUE-N37 — `findSeaPath` alloue 40 960 octets + table `parent` à chaque trajet
+### ISSUE-N38 — `syncCarriers` scan O(B) + table `seen` chaque tick
 
-**Priorité :** P2 perf marine (détache le volet mer de N16).
+**Priorité :** P2 perf marine (détache le spawn warship de N22).
 
-**Problème :** `Navy.findSeaPath` fait `buffer.create(Config.TILE_COUNT)` (40 960) et une table `parent` jusqu’à `MAX_BFS_NODES = 24 000` **par appel**. Appelé à `launchInvasion`, `beginRetreat`, et potentiellement plusieurs fois par tick (bots + humains + retraites). Le visited n’est pas pooled. N16 mélangeait ça avec le buffer `defense` ; N35 traite l’aura. Ici c’est uniquement le BFS mer.
+**Problème :** `Navy.step` appelle `syncCarriers` **avant** `stepCarriers`, **chaque tick** (10 Hz) :
 
-**Pourquoi 20K CCU :** 8 humains + 10 bots peuvent lancer / reculer des transports le même tick. 5 BFS = ~200 Ko + tables hash. Le p95 headless (0.45 ms, 0 humain) **sous-estime** : les bots n’envahissent pas en rafale comme un lobby humain. Allocator Luau + GC sur shard chargé = hitch 10 Hz.
+1. Parcourt `state.boats` à l’envers, alloue `seen: { [number]: boolean } = {}`.
+2. Parcourt **tous** `state.buildings` pour spawner un porte-avions sur chaque `NAVAL_BASE` absent de `seen`.
+
+N22 = boucle imbriquée shells O(carriers × boats). Ici c’est uniquement le **maintien** des warships. Un salon Classique en milieu de partie a ~20 bases navales + ~90+ bâtiments : 10 scans complets/s pour recréer une table hash jetable.
+
+**Pourquoi 20K CCU :** 1 700 shards. Sur un shard chargé (18 factions, 200+ bâtiments), c’est du travail dupliqué avec N31 (scan bunkers **par tuile capturée**). Allocator Luau + itération du dictionnaire `buildings` (hash, pas array) au tick. Le p95 headless (0.45 ms, 0 humain) **sous-estime** : pas de 8 clients + IntentValidator dans la mesure.
 
 **Worker :**
 
-1. Pool : un `visited` buffer réutilisé (memset 0 via `buffer.fill` si dispo, sinon writeu8 par nœud visité en unwind), table `parent` recycled (`table.clear`).
-2. Ne pas baisser `MAX_BFS_NODES` dans le même PR (changement de reachability = ticket design).
-3. Test : même seed, même origine/destination → même path avant/après. Banc existant `beachhead` / `boat own-tile` reste vert. Optionnel : 100 `findSeaPath` d’affilée, pas de croissance de mémoire mesurable si le runner le permet.
-4. Fichiers : `Navy.luau`, `tests/simulate.luau`.
+1. Spawn/despawn **événementiel** : à `placeBuilding` / `destroyBuilding` / capture de `NAVAL_BASE` seulement. Ou dirty flag `state._carriersDirty` levé par ces chemins, `syncCarriers` no-op si false.
+2. Réutiliser un `seen` module-level (`table.clear`), ne pas allouer chaque tick si le scan reste.
+3. Test : poser une base → un carrier ; détruire la base → carrier retiré ; capture de base → `boat.slot` suit le nouveau proprio. Banc warships / commerce mer reste vert. Ne pas changer portée, cadence, priorité de cibles (N22).
+4. Fichiers : `Navy.luau`, éventuellement `GameState.placeBuilding` / `destroyBuilding`, `tests/simulate.luau`.
 
-**Contraintes :** déterminisme du path. Ne pas mixer avec N22 (warships O(carriers × boats)) ni N25 (`MAX_BOATS`). Server-only. `MAX_BFS_NODES` inchangé.
+**Contraintes :** déterminisme du slot carrier = slot de la base. Ne pas mixer avec N22 (shells) ni N25 (`MAX_BOATS`). Server-only. Pas de RemoteEvent. Feel apply immédiat inchangé.
+
+---
+
+### ISSUE-N39 — `ChantierB.tryAnnex` alloue `visited` + `queue` + `pocket` par tuile annexée
+
+**Priorité :** P2 perf combat (feel n’a pas reçu le N21 GC du hardening 0751 — **N21 feel = QuickChat**, collision d’IDs).
+
+**Problème :** `tryAnnex` (appelé depuis le combat vivant quand une enclave est coupée) fait à chaque invocation :
+
+```
+visited: { [number]: boolean } = {}
+queue = { seed }
+pocket: { number } = {}
+```
+
+BFS jusqu’à 280 tuiles ou océan (enclave terrestre ; océan = abort, **pas un bug**). Une offensive qui casse une côte peut annexer plusieurs poches le même tick. Tables hash jetables × N captures.
+
+**Pourquoi 20K CCU :** le hitch n’est pas le BFS 280, c’est l’allocator pendant `stepAttacks` (déjà `guard < 80` tuiles/front). 8 humains qui percent le même tick = rafale `tryAnnex`. GC Luau sur shard 10 Hz.
+
+**Worker :**
+
+1. Pool module-level : `visited` (buffer u8 TILE_COUNT **ou** table recyclée `table.clear`), `queue` / `pocket` arrays recyclés. Si buffer : `buffer.fill(buf, 0, 0)` en unwind ou generation-stamp (même pattern que N37).
+2. Ne pas changer la règle océan = abort (enclave terrestre only). Ne pas baisser le plafond 280 dans le même PR.
+3. Test : poche terrestre close annexée ; poche touchant l’océan **non** annexée. Réutiliser un banc d’enclave si présent, sinon construire une poche 3×3 entourée d’attaquant.
+4. Fichiers : `ChantierB.luau`, `tests/simulate.luau`.
+
+**Contraintes :** déterminisme du set annexé. Ne pas mixer avec N31 (scan bunkers) ni N35 (buffer `defense`). Combat vivant = `ChantierB.tryAnnex`, pas un nouveau chemin dans le stub `GameState`. Server-authoritative.
 
 ---
 
@@ -134,7 +134,7 @@ Conséquences :
 | N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
-| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert |
+| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap) |
 | N6 | DataStore debounce / retry / merge additif | P2 | ouvert |
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert |
@@ -145,13 +145,13 @@ Conséquences :
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
 | N14 | Apply immédiat vs lockstep (feel #19) | P1 | ouvert (produit) |
 | N15 | `PREPARATION_DURATION=0` vs gardes `combatUnlocked` | P2 | ouvert |
-| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 | aura → N35 ; mer → **N37** |
+| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 | aura → N35 ; mer → **N37 fait** |
 | N17 | Humains éliminés occupent le cap | P2 | ouvert |
-| N18 | Heap AimFront ≠ ChantierB / BoatFront | P2 | ouvert |
+| N18 | Heap AimFront ≠ ChantierB / BoatFront | P2 | ouvert (**plus visible après N36** : frontier mixte mag vs TERRAIN_COST) |
 | N19 | Embargo allié + tribus auto-accept | P2 | ouvert |
 | N20 | `railIncome` vs `deliveryValue` | P2 | **fait** `stopBonus` ; reste niveau live vs snapshot colis |
 | N21 | QuickChat 2-args | P3 | **fait** passe 5 |
-| N22 | Warships O(carriers × boats) | P2 | ouvert |
+| N22 | Warships O(carriers × boats) | P2 | ouvert (shells ; spawn → **N38**) |
 | N23 | `retreatAttack` premier front | P2 | **fait** passe 5 |
 | N24 | notify/sfx `FireAllClients` | P2 | **fait** passe 5 |
 | N25 | `MAX_BOATS_PER_PLAYER` 6 vs 3 | P3 | ouvert |
@@ -163,10 +163,12 @@ Conséquences :
 | N31 | Scan bunkers O(B) | P1 | ouvert |
 | N32 | `viewFor` requests expirées | P3 | **fait** |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34 | `areAllied` ignore expiry pacte | P2 | **fait** cette passe |
+| N34 | `areAllied` ignore expiry pacte | P2 | **fait** passe 7 |
 | N35 | `applyDefenseAura` buffer mort | P2 | ouvert |
-| N36 | AimFront figé après premier lancer | P2 | **nouveau** |
-| N37 | `findSeaPath` alloc 40k / appel | P2 | **nouveau** (détaché de N16) |
+| N36 | AimFront figé après premier lancer | P2 | **fait** cette passe |
+| N37 | `findSeaPath` alloc 40k / appel | P2 | **fait** cette passe |
+| N38 | `syncCarriers` O(B) / tick | P2 | **nouveau** (détaché de N22) |
+| N39 | `tryAnnex` alloc visited/queue | P2 | **nouveau** (feel ; N21 feel ≠ N21 hardening) |
 
 Textes worker-ready N1–N25, N28, N29, N31, N33, N35 : PR #21 / #22 / #24 / #26 `NIGHTLY_REPORT.md` historique.
 
@@ -210,6 +212,9 @@ intentions : QuickChat 2-args refuse, 3-args marque
 intentions : diplomatie self et sequence inf refusees
 beachhead : frontier voisins, pas de remboursement
 aim reinforce : un seul front apres deux lancers
+aim re-vise : second lancer ancre sourceTile
+aim re-vise : seconde visée remplace la premiere
+aim beachhead : tete de pont intacte, front terre vise
 colis snapshot : niveau au depart honore
 railIncome bonus : TRAIN_STOP_BONUS dans l'estime HUD
 accept expire : proposition perimee refusee
@@ -220,15 +225,16 @@ removePlayer GC : propositions / embargos / extensions vers disparu nettoyees
 beachhead merge : front terre separe, troupes de pont intactes
 areAllied expiry : pacte perime refuse avant step
 boat own-tile : restitution integrale, pas de malus
+findSeaPath pool : 5 tuiles, 4 appels identiques
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=8.0 p95Changed=8 maxChanged=479 avgTickMs=0.30 p95TickMs=0.45
+metrics : ticks=6000 avgChanged=8.0 p95Changed=8 maxChanged=479 avgTickMs=0.27 p95TickMs=0.45
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
 Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass7.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass8.log`
 
 Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live).
 
@@ -237,3 +243,5 @@ Studio / client Roblox réel : non exercé dans cet environnement (pas de DataMo
 ## 8. Require DAG (re-vérifié)
 
 Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes.
+
+Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
