@@ -347,6 +347,15 @@ local clusterFactoryCount: { [number]: number } = {}
 local collapseRemainBuf: { number } = table.create(64)
 local collapseLeftBuf: { number } = table.create(64)
 local collapseScratch = table.create(4, 0)
+-- N70 : snapshot batiments de removePlayer (recette elimBuf N63,
+-- feel 2b37 N89). Truncate leftover AVANT destroyBuilding — un leftover
+-- d'etat A detruirait un batiment fantome d'etat B au meme index.
+-- Iterer 1..n, pas # sans truncate. Non reentrant — removePlayer
+-- synchrone ; stepElimination peut enchainer plusieurs slots (n recomptes).
+-- Distinct de elimBuf (N63, slots), doomedBuf (N67, Attack) et
+-- collapseRemainBuf (N69, tuiles). Ne pas nommer `doomed`.
+local destroyBuf: { number } = table.create(16)
+GameState.destroyBuf = destroyBuf
 
 --=============================================================================
 -- Construction
@@ -1321,20 +1330,27 @@ function GameState.removePlayer(self: GameState, slot: number)
 	-- N46 : snapshot buildingsBySlot[slot] (destroy mute l'index). Fallback
 	-- hash si l'index est nil (tests partiels). Iterer le hash pendant
 	-- destroyBuilding peut sauter des cles.
-	local doomed: { number } = {}
+	-- N70 : destroyBuf recycle (feel 2b37 N89). Truncate leftover AVANT
+	-- la boucle destroy. Pas de table.clone de buildingsBySlot[slot].
+	local nDestroy = 0
 	if self.buildingsBySlot and self.buildingsBySlot[slot] then
 		for index in self.buildingsBySlot[slot] do
-			table.insert(doomed, index)
+			nDestroy += 1
+			destroyBuf[nDestroy] = index
 		end
 	else
 		for index, building in self.buildings do
 			if building.slot == slot then
-				table.insert(doomed, index)
+				nDestroy += 1
+				destroyBuf[nDestroy] = index
 			end
 		end
 	end
-	for _, index in doomed do
-		self:destroyBuilding(index)
+	for i = nDestroy + 1, #destroyBuf do
+		destroyBuf[i] = nil
+	end
+	for i = 1, nDestroy do
+		self:destroyBuilding(destroyBuf[i])
 	end
 
 	-- Bateaux AVANT setOwner : un bateau n'a pas de targetSlot, on lit
