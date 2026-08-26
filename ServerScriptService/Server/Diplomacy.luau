@@ -37,6 +37,16 @@ type ViewRec = {
 
 local viewBuf: { [number]: ViewRec } = {}
 
+-- V34 : paires expirees recyclees. Collecter avant de muter alliances[]
+-- (parcours + ecriture = comportement indefini). Un record par paire
+-- (a < b), pas { a, b } anonyme. Non reentrant — step unique par tick.
+-- Recette feel N79. Garder le type-guard visuel : `true` legacy continue ;
+-- non-number ou numericExpired → expire. Feel N79 ne purge que
+-- typeof == "number" — ne pas copier ca (banc « oops » passe 17).
+type ExpiredRec = { a: number, b: number }
+local expiredBuf: { ExpiredRec } = table.create(8)
+local expiredRecPool: { ExpiredRec } = table.create(8)
+
 local function viewRecFor(slot: number): ViewRec
 	local rec = viewBuf[slot]
 	if rec == nil then
@@ -439,9 +449,9 @@ function Diplomacy.step(state: GameState)
 		personne n'a de cible legale.
 
 		On collecte avant de retirer : muter les deux tables pendant qu'on les
-		parcourt est un comportement indefini.
+		parcourt est un comportement indefini. V34 recycle expiredBuf.
 	]]
-	local expired: { { a: number, b: number } } = {}
+	local n = 0
 	for a, set in state.alliances do
 		for b, expiry in set do
 			-- Une seule fois par paire.
@@ -452,13 +462,25 @@ function Diplomacy.step(state: GameState)
 					continue
 				end
 				if typeof(expiry) ~= "number" or numericExpired(expiry, state.tick) then
-					table.insert(expired, { a = a, b = b })
+					n += 1
+					local rec = expiredRecPool[n]
+					if rec == nil then
+						rec = { a = 0, b = 0 }
+						expiredRecPool[n] = rec
+					end
+					rec.a = a
+					rec.b = b
+					expiredBuf[n] = rec
 				end
 			end
 		end
 	end
 
-	for _, pair in expired do
+	for i = 1, n do
+		local pair = expiredBuf[i]
+		if pair == nil then
+			continue
+		end
 		local setA, setB = state.alliances[pair.a], state.alliances[pair.b]
 		if setA then
 			setA[pair.b] = nil
@@ -484,6 +506,10 @@ function Diplomacy.step(state: GameState)
 				pair.b
 			)
 		end
+	end
+	-- Truncate leftover : un second step sans expiry ne rejoue pas le tour.
+	for i = #expiredBuf, 1, -1 do
+		expiredBuf[i] = nil
 	end
 
 	-- Une marque qui vise un disparu, ou posee par un disparu, ne doit pas
