@@ -1520,6 +1520,20 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
+	-- V66 : pose = translation * rotation, plus de lookAt deux Vector3.
+	-- Stub VectorToWorldSpace = identite, shake 0 → oeil = focus + (0,0,distance).
+	-- Leftover V65 (yaw unites) reste dans le check navires. Leftover V64
+	-- (segRot camion) reste dans le check pose/capture.
+	local pose = camera.camera.CFrame
+	assert(type(pose.X) == "number", "camera CFrame absent")
+	assert(pose.X == camera.focus.X, "oeil X hors focus")
+	assert(pose.Y == camera.focus.Y, "oeil Y hors focus")
+	assert(pose.Z == camera.focus.Z + camera.distance, "oeil Z hors offset")
+	camera:punch(1)
+	assert(camera.shake > 0, "punch n'arme pas le shake")
+	camera:step(1 / 60)
+	assert(camera.shake < 1, "shake ne decroit pas")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame apres shake")
 
 	--[[
 		Panoramique libre au clic du milieu, le geste CONQUEST.
