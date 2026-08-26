@@ -1009,6 +1009,11 @@ check("pose et capture de chaque type de batiment", function()
 	-- segRot, leftover N20 popup or doivent rester verts. Recette visual
 	-- V75 leftover evenements Overlay. applyUnits / applyRouteProgress
 	-- inchanges.
+	-- N136 : BuildRing fromEulerAnglesYXZ (pas CFrame.Angles). Cylindre
+	-- Z=90. playConstruction via applyBuildingDelta plus haut. Leftover
+	-- N132 pulse, leftover N113 rot chantier, leftover N135 OceanGlint
+	-- (check construction) doivent rester verts. Recette leftover N135,
+	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")

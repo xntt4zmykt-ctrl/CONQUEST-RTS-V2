@@ -492,7 +492,15 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.Color = Color3.fromRGB(255, 214, 130)
 	ring.Transparency = 0.4
 	ring.Size = Vector3.new(0.4, 3, 3)
-	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	-- N136 : playConstruction BuildRing. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- ground Vector3 inchange. Tween Size/Transparency + task.delay
+	-- Destroy inchanges. Drop / sort Y des parts inchanges.
+	-- Distinct OceanGlint N135 (yaw `angle`, OCEAN_LEVEL + 0.08).
+	-- Distinct Effects ring N134 (Y = 3). Distinct Overlay Shockwave
+	-- N133 (PLAINS + 0.5). Distinct trunks leftover (buildDecorations).
+	-- animate / Overlay / WorldRenderer / Effects inchanges.
+	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
 	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
