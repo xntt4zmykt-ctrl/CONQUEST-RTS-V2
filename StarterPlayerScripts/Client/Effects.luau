@@ -234,25 +234,50 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	local ground = WorldSpace.tileToWorld(x, y)
 	local worldRadius = math.clamp(radius, 3, 40) * Config.TILE_SIZE
 
-	local ring = Instance.new("Part")
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
+	-- N157 : free-list pulseFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1 s : Parent = nil + push. tileFlash reutilise
+	-- deja (N156). selectTile reutilise deja (N155). previewTile
+	-- reutilise deja (N96 + N154 skip). Distinct flame leftover
+	-- N152 (Size = Vector3.new, ≠ visual V74 freeze). Distinct
+	-- HUD N153. Distinct previewTile N154. Distinct selectTile
+	-- N155. Distinct tileFlash N156 (flashFree, ne pas partager).
+	-- Distinct floatingText leftover N158. Distinct visual V82
+	-- ConquestPulse pulseRot (ne pas merger 490f). Euler N134
+	-- inline conserve (Y = 3, pas de Name). Tween Create conserve
+	-- (pulse Size/Transparency restart). Recette leftover N156,
+	-- pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview / tileFlash inchanges.
+	local free = self.pulseFree
+	if not free then
+		free = {}
+		self.pulseFree = free
+	end
+	local n = #free
+	local ring
+	if n > 0 then
+		ring = free[n]
+		free[n] = nil
+	else
+		ring = Instance.new("Part")
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+	end
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
 	-- N134 : conquestPulse ring. Plus de CFrame.Angles.
 	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
-	-- Hauteur Y = 3 inchangee. Tween Size/Transparency + task.delay Destroy
-	-- inchanges. Caps MAX_FLASHES_PER_WAVE / MAX_LIVE_FLASHES inchanges.
-	-- conquestWave / lossWave barycentre inchanges. Flashes tuile sans euler.
-	-- Distinct Overlay Shockwave N133 (PLAINS + 0.5). Distinct pulse N132
-	-- (Overlay gare). Distinct WorldRenderer OceanGlint leftover.
-	-- Overlay / WorldRenderer / BuildingModels inchanges.
+	-- Hauteur Y = 3 inchangee. Caps MAX_FLASHES_PER_WAVE /
+	-- MAX_LIVE_FLASHES inchanges. conquestWave / lossWave
+	-- barycentre inchanges. Flashes tuile sans euler.
+	-- Distinct Overlay Shockwave N133 (PLAINS + 0.5). Distinct
+	-- pulse N132 (Overlay gare). Distinct visual V82 Name
+	-- ConquestPulse / hauteur surface+0.8 (ne pas merger).
 	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = self.root
 
@@ -262,7 +287,9 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	}):Play()
 
 	task.delay(1, function()
-		ring:Destroy()
+		ring.Parent = nil
+		local pool = self.pulseFree
+		pool[#pool + 1] = ring
 	end)
 end
 

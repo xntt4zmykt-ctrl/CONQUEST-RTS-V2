@@ -1776,16 +1776,15 @@ check("navires, missiles et interpolation", function()
 end)
 
 check("vagues de conquete", function()
-	-- N156 : tileFlash free-list. conquestWave(200) pose jusqu'a 28+
-	-- plaques (step = count // 28). Flush → Parent nil + push flashFree,
-	-- live == 0. Deuxieme vague (1 tuile) reutilise la derniere plaque
-	-- (rawequal Parent root). Caps 90/28 inchanges. Tween Create conserve.
-	-- Leftover N134 conquestPulse euler (Y = 3, pas de pool) doit rester
+	-- N157 : conquestPulse free-list. Flush → Parent nil + push pulseFree.
+	-- lossWave reparente le meme anneau (rawequal Parent root). Euler N134
+	-- inline Y=3 conserve. Pas de Name ConquestPulse. Caps 90/28 inchanges.
+	-- Tween Create conserve. Leftover N156 tileFlash reuse doit rester
 	-- vert. Leftover N155 selectTile reuse (check calques) doit rester
-	-- vert. Recette leftover N155, pas merger visual V83 SelectionRing
-	-- pulseRot. HUD / UnitModels / Overlay / PlacementPreview /
-	-- selectTile / previewTile / conquestPulse non touches. Flame leftover
-	-- N152 (check navires) et leftover N157 conquestPulse Destroy (non
+	-- vert. Recette leftover N156, pas merger visual V82 pulseRot.
+	-- HUD / UnitModels / Overlay / PlacementPreview / selectTile /
+	-- previewTile / tileFlash / floatingText non touches. Flame leftover
+	-- N152 (check navires) et leftover N158 floatingText Destroy (non
 	-- touche).
 	local wave = {}
 	for i = 1, 200 do
@@ -1795,13 +1794,21 @@ check("vagues de conquete", function()
 	local liveBefore = effects.live
 	assert(liveBefore > 0, "aucune plaque live")
 	assert(effects.flashFree == nil or #effects.flashFree == 0, "free-list trop tot")
+	assert(effects.pulseFree == nil or #effects.pulseFree == 0, "pulseFree trop tot")
 	testFlushDelays()
 	assert(effects.live == 0, "live pas decremente")
 	local free = effects.flashFree
 	assert(free ~= nil and #free == liveBefore, "plaques non poolees")
 	local pooled = free[#free]
 	assert(pooled.Parent == nil, "plaque encore parentee")
+	local pulsePool = effects.pulseFree
+	assert(pulsePool ~= nil and #pulsePool >= 1, "anneaux non poolees")
+	local pooledRing = pulsePool[#pulsePool]
+	assert(pooledRing.Parent == nil, "anneau encore parente")
+	assert(pooledRing.Name ~= "ConquestPulse", "Name visual V82 porte")
 	effects:lossWave(wave, #wave)
+	assert(#pulsePool == 0, "anneau non reutilise")
+	assert(rawequal(pooledRing.Parent, effects.root), "anneau non reparente")
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
 	assert(#free == liveBefore - 1, "plaque non reutilisee")
 	assert(rawequal(pooled.Parent, effects.root), "plaque non reparentee")
