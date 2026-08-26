@@ -224,6 +224,7 @@ local function applyRouteProgress(construction: any, progress: number)
 
 	for _, segment in construction.segments do
 		local visible = math.clamp(covered - segment.startsAt, 0, segment.length)
+		local dx, dy, dz = segment.dx, segment.dy, segment.dz
 		for _, layer in segment.layers do
 			local part = layer.part
 			--[[
@@ -238,13 +239,16 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			-- V61 : centre depuis layer.origin (lift cuit a la construction).
-			-- Plus de + Vector3.new(0, layer.lift, 0) 60 Hz. LookAt conserve
-			-- (sinon la chaussee perd son orientation). Size inchange (API).
-			-- Cable / feuillage / houle / camion / unites inchanges
-			-- (V60/V59/V58/V57/V56).
-			local centre = layer.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction)
+			-- V62 : interpolation en nombres depuis ox/oy/oz + dx/dy/dz
+			-- (cuits a la construction). Plus de layer.origin + direction * t
+			-- 60 Hz. LookAt conserve (deux Vector3 = API). Size inchange (API).
+			-- Lift cuit inchange (V61). Cable / feuillage / houle / camion /
+			-- unites inchanges (V60/V59/V58/V57/V56).
+			local t = visible - shown / 2
+			local cx = layer.ox + dx * t
+			local cy = layer.oy + dy * t
+			local cz = layer.oz + dz * t
+			part.CFrame = CFrame.lookAt(Vector3.new(cx, cy, cz), Vector3.new(cx + dx, cy + dy, cz + dz))
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -318,31 +322,39 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local frame = CFrame.lookAt(a + span * 0.5, b)
 		local direction = span.Unit
 		local origin = a - direction * (tileSize / 2)
+		local dx, dy, dz = direction.X, direction.Y, direction.Z
+		local ox, oy, oz = origin.X, origin.Y, origin.Z
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
 		local k = Config.WORLD_SCALE
+		local liftAsphalt = 0.08 * k
+		local liftStripe = 0.18 * k
 		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
 		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
-		asphalt.CFrame = frame + Vector3.new(0, 0.08 * k, 0)
+		asphalt.CFrame = frame + Vector3.new(0, liftAsphalt, 0)
 		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
-		stripe.CFrame = frame + Vector3.new(0, 0.18 * k, 0)
+		stripe.CFrame = frame + Vector3.new(0, liftStripe, 0)
 
 		table.insert(segments, {
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
 			-- la chaussee qui la porte.
-			-- V61 : lift cuit dans origin par calque (une fois). applyRouteProgress
-			-- n'ajoute plus Vector3.new(0, lift, 0) a 60 Hz.
+			-- V61 : lift cuit dans origin par calque (une fois).
+			-- V62 : ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
+			-- plus origin + direction * t a 60 Hz.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin, ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, 0.08 * k, 0), ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, 0.18 * k, 0), ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin, ox = ox, oy = oy, oz = oz, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, liftAsphalt, 0), ox = ox, oy = oy + liftAsphalt, oz = oz, ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, liftStripe, 0), ox = ox, oy = oy + liftStripe, oz = oz, ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,
+			dx = dx,
+			dy = dy,
+			dz = dz,
 			length = length,
 			startsAt = totalLength,
 		})
