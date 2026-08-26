@@ -107,10 +107,7 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	for i = #state.attacks, 1, -1 do
 		local atk = state.attacks[i]
 		if (atk.attacker == from and atk.target == to) or (atk.attacker == to and atk.target == from) then
-			local attacker = state.players[atk.attacker]
-			if attacker then
-				attacker.troops += math.max(0, atk.troops)
-			end
+			state:returnCommittedTroops(atk)
 			table.remove(state.attacks, i)
 		end
 	end
@@ -335,7 +332,9 @@ function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: stri
 		local allySet = state.alliances[slot]
 		if allySet then
 			for other in allySet do
-				state:notify(message, "info", other)
+				if state:areAllied(slot, other) then
+					state:notify(message, "info", other)
+				end
 			end
 		end
 	else
@@ -478,7 +477,9 @@ function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: num
 	local allySet = state.alliances[from]
 	if allySet then
 		for other in allySet do
-			state:notify(message, "info", other)
+			if state:areAllied(from, other) then
+				state:notify(message, "info", other)
+			end
 		end
 	end
 	return true, `{t.name} designee comme cible pour ton alliance.`
