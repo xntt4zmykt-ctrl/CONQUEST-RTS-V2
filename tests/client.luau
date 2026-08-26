@@ -1162,6 +1162,9 @@ check("modeles procéduraux : le palier change la silhouette", function()
 end)
 
 check("apercu de placement pour chaque batiment", function()
+	-- N129 : footprint fromEulerAnglesYXZ (pas CFrame.Angles). Hauteur 0.4
+	-- (feel). Pas de pulse. Leftover N92 ctx. Recette visual V75 leftover
+	-- deja sur 1b5c — portee euler, pas mergee.
 	for _, def in BuildingDefs.BUILDABLE do
 		preview:setKind(def.id)
 		preview:update(1000, "exact")

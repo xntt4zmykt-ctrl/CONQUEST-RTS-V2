@@ -226,7 +226,14 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 	self.footprint.Transparency = 0.6
 	self.footprint.Color = color
 	self.footprint.Size = Vector3.new(0.3, radius, radius)
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N129 : translation * euler Z=90. Plus de CFrame.Angles 60 Hz.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2)
+	-- (rx=0, ry=0 → Z seul). Angle 90° inchange. Hauteur ground + 0.4
+	-- inchangee (feel ≠ visual 0.42). Size Vector3.new inchange (API).
+	-- Pas de pulse (feel n'en a pas). Distinct LaunchWake N130 (evenement).
+	-- Distinct N127/N128 pieces navire. Distinct N124 Radar rest identite.
+	-- Recette visual V75 leftover deja sur 1b5c — portee euler, pas mergee.
+	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 end
 
 function PlacementPreview.hide(self: PlacementPreview)
