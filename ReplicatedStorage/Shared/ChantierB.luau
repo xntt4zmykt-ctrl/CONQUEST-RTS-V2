@@ -419,13 +419,19 @@ function ChantierB.install(GameState, Nukes)
 			end
 			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
 			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
-			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
+			-- par MAX_CAPTURES captures. Voir ISSUE-N1 / ISSUE-N11.
+			-- ISSUE-N38 : un pop dont owner ~= target ne compte plus comme
+			-- une capture. Cap brut MAX_POPS pour qu'un heap 100 % perime
+			-- ne boucle pas 10 000 fois.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
-			local guard = 0
-			while numTiles > 0 and guard < 80 do
-				guard += 1
+			local captures = 0
+			local pops = 0
+			local MAX_CAPTURES = 80
+			local MAX_POPS = 160
+			while numTiles > 0 and captures < MAX_CAPTURES and pops < MAX_POPS do
+				pops += 1
 				local index = Heap.pop(atk.frontier)
 				if not index then
 					break
@@ -434,6 +440,7 @@ function ChantierB.install(GameState, Nukes)
 				if buffer.readu8(self.owner, index) ~= atk.target then
 					continue
 				end
+				captures += 1
 				local attLoss, defLoss, used = ChantierB.attackLogic(self, atk.troops, attacker, defender, index)
 				if attLoss > atk.troops then
 					atk.troops = 0
