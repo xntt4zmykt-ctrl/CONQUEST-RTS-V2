@@ -59,7 +59,8 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- (rx=0, ry=0 → Z seul). Height = surface + 0.8 (fallback 3 hors carte)
 	-- inchange — ne pas porter Y = 3 feel. Tween Size/Transparency inchange.
 	-- MAX_LIVE_PULSES=8 inchange. Distinct de Overlay Shockwave (V81,
-	-- PLAINS + 0.5). Distinct de SelectionRing (leftover V83).
+	-- PLAINS + 0.5). V83 : SelectionRing reutilise le meme pulseRot
+	-- (geste selectTile, height = surface + 0.48, pas +0.8).
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	return self
@@ -103,7 +104,15 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 	ring.Color = color
 	ring.Transparency = 0.55
 	ring.Size = Vector3.new(0.2, Config.TILE_SIZE * 1.5, Config.TILE_SIZE * 1.5)
-	ring.CFrame = CFrame.new(base.X, height + 0.48, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- V83 : translation * pulseRot (V82). Plus de CFrame.Angles a la
+	-- selection. Height = surfaceHeight sans +0.8, puis + 0.48 inchange.
+	-- Name SelectionRing inchange. Tweens Transparency/Size inchanges.
+	-- Marker SelectedTerritory inchange (translation seule). Distinct de
+	-- V82 (onde, surface+0.8, Name=ConquestPulse). Distinct de V81
+	-- (explosion Overlay, PLAINS + 0.5). Distinct de ActionPreview
+	-- (pas de cylindre). Geste joueur, pas 60 Hz. Recette V82 pulseRot
+	-- — ne pas merger feel bfcc, ne pas inventer selectionRot.
+	ring.CFrame = CFrame.new(base.X, height + 0.48, base.Z) * self.pulseRot
 	ring.Parent = self.root
 	self.selectionRing = ring
 
@@ -234,7 +243,7 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	-- Recette feel N134 — ne pas merger bfcc. Ne pas porter Y = 3
 	-- (visuel = surface + 0.8 / fallback 3). Distinct de V81 (explosion
 	-- Overlay, PLAINS + 0.5). Distinct de V80 (arrivee camion). Distinct
-	-- de SelectionRing (leftover V83). lossWave passe par ce site.
+	-- de SelectionRing (V83, surface + 0.48). lossWave passe par ce site.
 	ring.CFrame = CFrame.new(ground.X, height, ground.Z) * self.pulseRot
 	ring.Parent = self.root
 
