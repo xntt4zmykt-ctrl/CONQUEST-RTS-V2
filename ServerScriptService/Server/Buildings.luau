@@ -28,6 +28,11 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+-- N49 : samsOf recycle (recette factoriesBuf / N45, feel N68). Unique
+-- appelant synchrone (Bots.decideNuke). Pas reentrant — dupliquer le
+-- buffer si un second appelant concurrent apparait.
+local samBuf: { number } = table.create(8)
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -101,7 +106,8 @@ local function describeBuild(state: GameState, slot: number, index: number, kind
 	local suffix = if snapped then " (reporte sur la case libre la plus proche)" else ""
 
 	if kind == B.CITY then
-		return `Ville construite : +900 capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
+		local cityPop = Config.CITY_LEVELS[1].popCapBonus
+		return `Ville construite : +{cityPop} capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
 	elseif kind == B.FACTORY then
 		local routes, income = state:logisticsFor(slot)
 		return `Usine raccordee : reseau de {routes} liaison(s) · +{string.format("%.1f", income * Config.TICK_RATE)} or/s.{suffix}`
@@ -239,18 +245,71 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 	return ps ~= nil and ps.era >= Eras.requiredForNuke(Config.NUKE.ATOM)
 end
 
--- Batteries SAM du joueur, utilisees par le systeme d'interception.
+-- Batteries SAM du joueur. Bots (couverture avant tir).
+-- N42 : index samsBySlot, plus le hash buildings. Fallback lineaire
+-- seulement si l'index est absent (nil). N49 : samBuf recycle ;
+-- truncate apres remplissage. Index present et set nil = zero SAM
+-- (pas de fallback hash — contrat N42).
 function Buildings.samsOf(state: GameState, slot: number): { number }
-	local out = {}
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == B.SAM then
-			table.insert(out, index)
+	local out = samBuf
+	local n = 0
+	if state.samsBySlot then
+		local set = state.samsBySlot[slot]
+		if set then
+			for index in set do
+				n += 1
+				out[n] = index
+			end
 		end
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == B.SAM then
+				n += 1
+				out[n] = index
+			end
+		end
+	end
+	for i = #out, n + 1, -1 do
+		out[i] = nil
 	end
 	return out
 end
 
+--[[
+	Arme un cooldown et inscrit la tuile dans coolingBuildings (ISSUE-N43).
+	Unique point d'ecriture : intercept SAM et tir silo. Sans ce flag,
+	stepCooldowns (O(actifs)) n'aurait jamais connaissance du compteur.
+]]
+function Buildings.armCooldown(state: GameState, index: number, duration: number)
+	local building = state.buildings[index]
+	if not building then
+		return
+	end
+	building.cooldown = duration
+	if duration > 0 and state.coolingBuildings then
+		state.coolingBuildings[index] = true
+	end
+end
+
 function Buildings.stepCooldowns(state: GameState)
+	local cooling = state.coolingBuildings
+	if cooling then
+		-- N43 contrat A : O(actifs), pas O(buildings). SAM et silos.
+		for index in cooling do
+			local building = state.buildings[index]
+			if not building then
+				cooling[index] = nil
+				continue
+			end
+			if building.cooldown > 0 then
+				building.cooldown -= 1
+			end
+			if building.cooldown <= 0 then
+				cooling[index] = nil
+			end
+		end
+		return
+	end
 	for _, building in state.buildings do
 		if building.cooldown > 0 then
 			building.cooldown -= 1
