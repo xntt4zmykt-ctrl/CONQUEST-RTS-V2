@@ -45,8 +45,7 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local posted = false
 	if defender then
 		-- Index par camp (ISSUE-N42) : O(bunkers_défenseur), pas O(buildings).
-		-- Le buffer `defense` encode un falloff sans slot — il pilote tileCost
-		-- mort, pas le flag posted (capture d'un bunker sans ré-aura).
+		-- Le buffer `defense` n'est plus ecrit (N45 Option A) ni lu ici.
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r

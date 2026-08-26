@@ -105,6 +105,8 @@ export type Boat = {
 	-- Porte-avions uniquement : base d'attache et angle d'orbite.
 	homeTile: number?,
 	angle: number?,
+	-- Transport en retraite : targetTile = cote d'origine, pas l'invasion.
+	retreating: boolean?,
 }
 
 export type Missile = {
@@ -418,7 +420,9 @@ end
 -- Batiments
 --=============================================================================
 
--- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+-- Aura falloff du buffer `defense`. Morte apres ChantierB.install() :
+-- attackLogic lit bunkersBySlot (N42), plus ce buffer. Les appels pose/destroy
+-- ont ete retires (ISSUE-N45 Option A). Conservee pour tileCost hors install.
 function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
 	local cx, cy = MapGen.fromIndex(index)
 	local radius = Config.DEFENSE_RADIUS
@@ -727,7 +731,6 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self:countBuilding(slot, kind, 1, 1)
 
 	if kind == B.DEFENSE then
-		self:applyDefenseAura(index, 1)
 		indexBunker(self, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
@@ -801,7 +804,6 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousSlot = building.slot
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
-		self:applyDefenseAura(index, -1)
 		indexBunker(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
@@ -968,6 +970,50 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
+	-- Transports AVANT setOwner (ISSUE-N43, recette 915c) : un bateau n'a pas
+	-- de targetSlot, on lit owner[targetTile]. Apres neutralisation,
+	-- destOwner==NEUTRAL et Navy.step ne retraite pas — resolveLanding pose
+	-- une tete de pont vs cote vide. Restitution 100 %, pas BOAT_RETREAT_LOSS.
+	-- kind 1 = transport. Pas de require Navy (cycle Navy -> GameState).
+	for i = #self.boats, 1, -1 do
+		local boat = self.boats[i]
+		if boat.slot == slot then
+			table.remove(self.boats, i)
+		elseif boat.kind == 1 and not boat.retreating then
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
+					local attacker = self.players[boat.slot]
+					if attacker then
+						attacker.troops += math.max(0, boat.troops)
+					end
+					boat.troops = 0
+					table.remove(self.boats, i)
+				end
+			end
+		end
+	end
+
+	-- Missiles AVANT setOwner (ISSUE-N44, recette c68a contrat B).
+	-- Cible = toIndex(floor(tx), floor(ty)). Pas de remboursement.
+	-- Frappe deja visee sur un tiers : conservee. Tireur qui part : detruit.
+	-- Pas de require Nukes (cycle).
+	for i = #self.missiles, 1, -1 do
+		local missile = self.missiles[i]
+		if missile.slot == slot then
+			table.remove(self.missiles, i)
+		else
+			local tx = math.floor(missile.tx)
+			local ty = math.floor(missile.ty)
+			if MapGen.inBounds(tx, ty) then
+				local index = MapGen.toIndex(tx, ty)
+				if buffer.readu8(self.owner, index) == slot then
+					table.remove(self.missiles, i)
+				end
+			end
+		end
+	end
+
 	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
 	-- (deconnexion), jamais dans la boucle de tick.
 	for index = 0, Config.TILE_COUNT - 1 do
@@ -990,16 +1036,6 @@ function GameState.removePlayer(self: GameState, slot: number)
 				attackerPs.troops += math.max(0, atk.troops)
 			end
 			table.remove(self.attacks, i)
-		end
-	end
-	for i = #self.boats, 1, -1 do
-		if self.boats[i].slot == slot then
-			table.remove(self.boats, i)
-		end
-	end
-	for i = #self.missiles, 1, -1 do
-		if self.missiles[i].slot == slot then
-			table.remove(self.missiles, i)
 		end
 	end
 

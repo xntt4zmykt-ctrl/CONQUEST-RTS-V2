@@ -3910,6 +3910,272 @@ do
 end
 
 do
+	-- N43 : transports inbound restitues 100 % avant setOwner. Pas de beachhead.
+	local state = GameState.new(9596)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Envahisseur", Random.new(103), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(104), 0)
+	if not invader or not defender then
+		fail("boat inbound — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and buffer.readu8(state.owner, index) == defender.slot then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat inbound — cote defenseur introuvable")
+		else
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			local gone = defender.slot
+			state:removePlayer(gone)
+			if math.abs(invader.troops - (1000 + committed)) > 0.01 then
+				fail(`boat inbound — troupes {invader.troops} attendu {1000 + committed} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat inbound — {leftover} transport(s) encore en mer`)
+			end
+			local attacksBefore = #state.attacks
+			Navy.step(state, Random.new(5))
+			if #state.attacks ~= attacksBefore then
+				fail("boat inbound — seedBeachhead apres removePlayer")
+			end
+			print("boat inbound : transports restitues, pas de tete de pont vs disparu")
+		end
+	end
+end
+
+do
+	-- L'attaquant qui part perd ses transports (comme ses fronts terre).
+	local state = GameState.new(9597)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Part", Random.new(105), 0)
+	local defender = state:addPlayer(nil, "Reste", Random.new(106), 0)
+	if not invader or not defender then
+		fail("boat attacker leave — spawn impossible")
+	else
+		local landing = defender.capitalTile or 0
+		invader.troops = 1000
+		table.insert(state.boats, {
+			id = 2,
+			slot = invader.slot,
+			kind = Navy.KIND_TRANSPORT,
+			troops = 400,
+			x = 0,
+			y = 0,
+			path = { landing },
+			step = 1,
+			targetTile = landing,
+			homeTile = landing,
+			retreating = false,
+		})
+		local gone = invader.slot
+		state:removePlayer(gone)
+		for _, boat in state.boats do
+			if boat.slot == gone then
+				fail("boat attacker leave — transport du disparu encore en mer")
+				break
+			end
+		end
+		print("boat attacker leave : transports de l'attaquant detruits")
+	end
+end
+
+do
+	-- N44 : missiles inbound annules (contrat B). Pas de remboursement.
+	local state = GameState.new(9800)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(111), 0)
+	local victim = state:addPlayer(nil, "Cible", Random.new(112), 0)
+	if not bomber or not victim then
+		fail("nuke inbound — spawn impossible")
+	else
+		local target = victim.capitalTile
+		if not target then
+			fail("nuke inbound — capitale victime introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			bomber.gold = 5000
+			bomber.troops = 8000
+			table.insert(state.missiles, {
+				id = 1,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.5,
+				speed = Config.MISSILE_SPEED,
+			})
+			local goldBefore = bomber.gold
+			local gone = victim.slot
+			state:removePlayer(gone)
+			if #state.missiles ~= 0 then
+				fail(`nuke inbound — {#state.missiles} missile(s) encore en vol`)
+			elseif bomber.gold ~= goldBefore then
+				fail(`nuke inbound — or du tireur {bomber.gold} (remboursement ?)`)
+			else
+				local heir = state:addPlayer(nil, "Heritier", Random.new(113), 0)
+				if not heir then
+					fail("nuke inbound — recycle impossible")
+				else
+					local troopsBefore = heir.troops
+					for _ = 1, 40 do
+						Nukes.step(state, Random.new(9), function() end)
+					end
+					if heir.troops < troopsBefore then
+						fail(`nuke inbound — heritier frappe ({troopsBefore} -> {heir.troops})`)
+					else
+						print("nuke inbound : ogive annulee, pas de remboursement, heritier intact")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Une frappe deja visee sur un tiers survit au recycle d'un autre slot.
+	local state = GameState.new(9801)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(114), 0)
+	local bystander = state:addPlayer(nil, "Temoin", Random.new(115), 0)
+	local marked = state:addPlayer(nil, "Marque", Random.new(116), 0)
+	if not bomber or not bystander or not marked then
+		fail("nuke third-party — spawn impossible")
+	else
+		local target = marked.capitalTile
+		if not target then
+			fail("nuke third-party — capitale introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			table.insert(state.missiles, {
+				id = 2,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.2,
+				speed = Config.MISSILE_SPEED,
+			})
+			state:removePlayer(bystander.slot)
+			if #state.missiles ~= 1 then
+				fail(`nuke third-party — missile tiers retire ({#state.missiles} restant)`)
+			elseif state.missiles[1].slot ~= bomber.slot then
+				fail("nuke third-party — mauvais missile conserve")
+			else
+				print("nuke third-party : frappe visee sur un tiers conservee")
+			end
+		end
+	end
+end
+
+do
+	-- Le tireur qui part perd ses missiles (comme ses fronts terre).
+	local state = GameState.new(9802)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Part", Random.new(117), 0)
+	local victim = state:addPlayer(nil, "Reste", Random.new(118), 0)
+	if not bomber or not victim then
+		fail("nuke attacker leave — spawn impossible")
+	else
+		local target = victim.capitalTile or 0
+		local tx, ty = MapGen.fromIndex(target)
+		table.insert(state.missiles, {
+			id = 3,
+			slot = bomber.slot,
+			kind = Config.NUKE.ATOM,
+			x = tx,
+			y = ty,
+			sx = tx,
+			sy = ty,
+			tx = tx,
+			ty = ty,
+			progress = 0.3,
+			speed = Config.MISSILE_SPEED,
+		})
+		local gone = bomber.slot
+		state:removePlayer(gone)
+		for _, missile in state.missiles do
+			if missile.slot == gone then
+				fail("nuke attacker leave — missile du disparu encore en vol")
+				break
+			end
+		end
+		print("nuke attacker leave : missiles du tireur detruits")
+	end
+end
+
+do
+	-- N45 Option A : pose/destroy bunker n'ecrit plus le buffer defense.
+	local auraState = GameState.new(4545)
+	local owner = auraState:addPlayer(nil, "Bunkers", Random.new(45), 0)
+	if not owner then
+		fail("defense aura — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(auraState.owner, index) == owner.slot and not auraState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("defense aura — tuile libre introuvable")
+		else
+			auraState:placeBuilding(site, Config.BUILDING.DEFENSE, owner.slot)
+			local written = 0
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(auraState.defense, index) ~= 0 then
+					written += 1
+				end
+			end
+			if written ~= 0 then
+				fail(`defense aura — buffer defense encore ecrit ({written} tuiles)`)
+			elseif not (auraState.bunkersBySlot[owner.slot] and auraState.bunkersBySlot[owner.slot][site]) then
+				fail("defense aura — bunkersBySlot non indexe")
+			else
+				auraState:destroyBuilding(site)
+				if auraState.bunkersBySlot[owner.slot] and auraState.bunkersBySlot[owner.slot][site] then
+					fail("defense aura — destroy laisse l'index")
+				else
+					print("defense aura : buffer non ecrit, index pose/destroy OK")
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
