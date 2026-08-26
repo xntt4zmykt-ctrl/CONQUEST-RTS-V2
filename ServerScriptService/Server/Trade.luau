@@ -105,7 +105,10 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 		return
 	end
 
-	local gold = deliveryValue(delivery.distance, factory.level, delivery.links)
+	-- Niveau snapshot au depart : upgrader l'usine en transit ne doit pas
+	-- augmenter un colis deja expedie. Fallback si un vieux payload n'a pas le champ.
+	local level = delivery.level or factory.level
+	local gold = deliveryValue(delivery.distance, level, delivery.links)
 	ps.gold += gold
 	onEvent("arrival", delivery.to, 0, delivery.slot, math.floor(gold))
 end

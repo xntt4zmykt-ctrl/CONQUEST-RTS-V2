@@ -300,6 +300,10 @@ Config.ATTACK_SPEND_RATE = 0.035 -- part du corps expeditionnaire depensee par t
 -- Delai avant qu'une retraite soit honoree, en ticks : le front continue de
 -- se battre pendant ce temps. Aligne sur notre boucle territoriale (20 ticks).
 Config.RETREAT_DELAY = 20
+-- Malus OF : 25 % des troupes du front contre un joueur, 0 % contre le neutre.
+-- ChantierB.apply reecrit les memes valeurs ; les garder ici pour le tuning.
+Config.RETREAT_LOSS = 0.25
+Config.RETREAT_LOSS_NEUTRAL = 0
 Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
@@ -453,6 +457,7 @@ Config.CARRIER_INTERCEPT_DAMAGE = 0.075 -- part des troupes du transport, par ti
 Config.BOAT_SPEED = 0.85 -- tuiles par tick
 -- Charge 1/5 (port OF). La valeur 0.4 n'etait jamais lue : Navy embarquait `troops / 5`.
 Config.BOAT_TROOP_RATIO = 0.2 -- part max de la reserve embarquee
+Config.BOAT_RETREAT_LOSS = 0.25 -- part perdue si le transport rentre au port
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
