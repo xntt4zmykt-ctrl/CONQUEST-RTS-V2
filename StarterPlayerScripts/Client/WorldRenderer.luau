@@ -56,7 +56,8 @@ local otherBuf: { number } = table.create(16)
 -- Ground/Border (feel N106) non porte. Recette feel N114 inline —
 -- ne PAS merger 846c. Distinct de V101 (curseur + truncate). Distinct
 -- de V100 (trail offset.Z, UnitModels.place). HUD feed leftover V103.
--- FactoryOutput / SiloWarning fermees (V104).
+-- FactoryOutput / SiloWarning fermees (V104). Feux navire fermes
+-- (V105). Wake Transparency leftover V106.
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}
@@ -83,7 +84,8 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	-- est consommee. V102 : compact prefix (feel N114, seuil 32)
 	-- apres la boucle. Recycle Ground/Border (feel N106) non porte.
 	-- Trail offset.Z (V100) inchange. FactoryOutput / SiloWarning
-	-- fermees (V104). HUD feed leftover V103.
+	-- fermees (V104). Feux navire fermes (V105). HUD feed leftover
+	-- V103. Wake Transparency leftover V106.
 	self.dirtyHead = 1
 	self.partCount = 0
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une

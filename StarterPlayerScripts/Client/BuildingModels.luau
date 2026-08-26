@@ -725,9 +725,10 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- V98/V99 — ne PAS merger c450 / ee71. Distinct de V98
 			-- (CityWindows, elseif precedent). Distinct de V99
 			-- (beacons rest.Z). Distinct de V103 (feedEntries, HUD).
-			-- Distinct de leftover V105 (UnitModels role==light,
-			-- autre fichier). Un elseif, Name inchange. Radar /
-			-- Flag / Boom (V70) et cable (V60) inchanges.
+			-- Distinct de V105 (feux navire offset.X, UnitModels
+			-- — autre fichier, fermee ici). Distinct de leftover
+			-- V106 (wake Transparency). Un elseif, Name inchange.
+			-- Radar / Flag / Boom (V70) et cable (V60) inchanges.
 			-- RestCFrame a la construction inchange.
 			child.Transparency = 0.12 + (math.sin(time * 3.2 + rest.X * 0.1) + 1) * 0.12
 		elseif child.Name == "SiloWarning" then
@@ -735,8 +736,8 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- et frequence 4.5 inchanges. Coefficient * 0.05 =
 			-- meme famille V99. Pas de Position. Distinct de
 			-- FactoryOutput (elseif precedent, rest.X). Distinct
-			-- de leftover V105 (feux navire). Un elseif, Name
-			-- inchange.
+			-- de V105 (feux navire, fermee ici). Distinct de leftover
+			-- V106 (wake Transparency). Un elseif, Name inchange.
 			child.Transparency = if math.sin(time * 4.5 + rest.Z * 0.05) > -0.25 then 0.05 else 0.6
 		end
 	end
