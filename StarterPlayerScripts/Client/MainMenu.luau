@@ -77,26 +77,70 @@ export type MainMenu = typeof(setmetatable({} :: any, MainMenu))
 -- Drapeaux
 --=============================================================================
 
---[[
-	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
-	vocabulaire vexillologique reel avec quatre Frames au maximum.
-]]
-function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+-- N171 : recycle les Frame bandes. Distinct chatFree (N170, catalogue HUD).
+-- Distinct feedFree (N167, fil notify). Distinct drawTerrainPreview leftover
+-- N172 (Destroy miniature conserve). Pas de Theme.corner sur les bandes —
+-- le UICorner vit sur le parent (pastille / cellule). Parent = argument
+-- parent (playerFlag, identityFlag, flagCell, Intro.flagFrame). Pas
+-- chatFree. Pas visual V107 (ne pas merger ee95).
+local flagFree: { Frame } = {}
+MainMenu.flagFree = flagFree
+
+local function parkFlagBands(parent: GuiObject)
 	for _, child in parent:GetChildren() do
 		if child:IsA("Frame") then
-			child:Destroy()
+			if child.Parent then
+				child.Parent = nil
+			end
+			flagFree[#flagFree + 1] = child :: Frame
 		end
 	end
+end
 
-	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
-		local f = Instance.new("Frame")
+local function takeFlagBand(
+	parent: GuiObject,
+	position: UDim2,
+	size: UDim2,
+	color: Color3,
+	rotation: number?
+): Frame
+	local n = #flagFree
+	local f: Frame
+	if n > 0 then
+		f = flagFree[n]
+		flagFree[n] = nil
 		f.BackgroundColor3 = color
 		f.BorderSizePixel = 0
 		f.Position = position
 		f.Size = size
 		f.Rotation = rotation or 0
 		f.Parent = parent
-		return f
+	else
+		f = Instance.new("Frame")
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.Position = position
+		f.Size = size
+		f.Rotation = rotation or 0
+		f.Parent = parent
+	end
+	return f
+end
+
+--[[
+	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
+	vocabulaire vexillologique reel avec quatre Frames au maximum.
+]]
+function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+	-- N171 : Parent = nil + push flagFree. Pas Destroy. Filtre IsA("Frame")
+	-- conserve (UICorner / UIStroke / TextLabel du parent intacts). Reset
+	-- Rotation obligatoire (diagonal -30 vs vertical 0). Distinct N170
+	-- chatFree. Distinct leftover N152 flame. Distinct leftover N172
+	-- drawTerrainPreview. Pas Theme.corner au reuse. Pas de Name.
+	parkFlagBands(parent)
+
+	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
+		return takeFlagBand(parent, position, size, color, rotation)
 	end
 
 	local colors = flag.colors

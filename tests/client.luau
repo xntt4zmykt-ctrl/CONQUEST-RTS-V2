@@ -78,9 +78,65 @@ check("construction du menu principal", function()
 end)
 
 check("selection de chaque nation et de chaque mode", function()
+	-- N171 : drawFlag Parent=nil + flagFree, garder UICorner parent,
+	-- Reset Rotation. Pas de testFlushDelays. Leftover N170 chatFree
+	-- (check messages rapides) et leftover N152 flame (check navires)
+	-- et leftover N169 preview (check calques) doivent rester verts.
+	-- Recette leftover N170, pas merger visual V107. HUD / Effects /
+	-- Overlay / UnitModels / drawTerrainPreview non touches. Pas
+	-- d'assert Name. Parent = playerFlag (argument), pas chatBody.
+	local snapshot = nil
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("Frame") then
+			snapshot = child
+			break
+		end
+	end
+	assert(snapshot, "snapshot bande drapeau manquant")
+	local cornersBefore = 0
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("UICorner") then
+			cornersBefore += 1
+		end
+	end
+	assert(cornersBefore == 1, "UICorner parent manquant avant")
+
 	for _, nation in Nations.LIST do
 		menu:selectNation(nation.id)
 	end
+
+	local reused = rawequal(snapshot.Parent, menu.playerFlag)
+		or rawequal(snapshot.Parent, menu.identityFlag)
+	if snapshot.Parent == nil then
+		local inFree = false
+		for _, band in MainMenu.flagFree do
+			if rawequal(band, snapshot) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "bande ni reparentee ni dans flagFree")
+	else
+		assert(reused, "bande recree")
+	end
+
+	local cornersAfter = 0
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("UICorner") then
+			cornersAfter += 1
+		end
+	end
+	assert(cornersAfter == 1, "UICorner parent detruit")
+
+	-- Rotation leftover diagonal → vertical. Oubli = bandes de travers.
+	menu:selectNation(4)
+	menu:selectNation(1)
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("Frame") then
+			assert(child.Rotation == 0, "Rotation leftover diagonal")
+		end
+	end
+
 	for _, mode in GameModes.LIST do
 		menu:selectMode(mode.id)
 	end
