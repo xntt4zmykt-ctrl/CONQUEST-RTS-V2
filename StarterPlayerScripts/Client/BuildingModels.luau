@@ -696,13 +696,26 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- — ne PAS merger c450. Distinct de V70 (Radar CFrame yaw).
 			-- Distinct de V60 (cable Y nombres). Distinct de V97
 			-- (mesh carrier, UnitModels — autre fichier). Distinct de
-			-- leftover V99 (beacons child.Position.Z, elseif suivant).
+			-- V99 (beacons rest.Z, elseif suivant). Distinct de
+			-- leftover V100 (trail offset.Z, UnitModels.place).
 			-- FactoryOutput / SiloWarning n'ont PAS de Position — ne
 			-- pas les toucher. Radar / Flag / Boom (V70) et cable (V60)
 			-- inchanges. RestCFrame a la construction inchange.
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + rest.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
-			child.Transparency = 0.05 + (math.sin(time * 2.8 + child.Position.Z * 0.05) + 1) * 0.18
+			-- V99 : phase depuis rest.Z. Plus de child.Position.Z 60 Hz
+			-- (Position reconstruit un Vector3 monde apres create).
+			-- rest est deja lu plus haut. Amplitude 0.05 / 0.18,
+			-- frequence 2.8, * 0.05 inchanges. Recette feel N150
+			-- — ne PAS merger c450. Distinct de V98 (CityWindows
+			-- rest.X, elseif precedent). Distinct de V70 (Radar
+			-- CFrame yaw). Distinct de V60 (cable Y nombres). Distinct
+			-- de leftover V100 (trail offset.Z, UnitModels.place —
+			-- autre fichier). FactoryOutput / SiloWarning n'ont PAS
+			-- de Position — ne pas les toucher. Un elseif, trois
+			-- noms. Radar / Flag / Boom (V70) et cable (V60)
+			-- inchanges. RestCFrame a la construction inchange.
+			child.Transparency = 0.05 + (math.sin(time * 2.8 + rest.Z * 0.05) + 1) * 0.18
 		elseif child.Name == "FactoryOutput" then
 			child.Transparency = 0.12 + (math.sin(time * 3.2) + 1) * 0.12
 		elseif child.Name == "SiloWarning" then
