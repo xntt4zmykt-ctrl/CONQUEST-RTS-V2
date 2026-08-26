@@ -400,6 +400,12 @@ check("un seul sous-menu ouvert a la fois", function()
 end)
 
 check("messages rapides : catalogue, designation de cible et envoi", function()
+	-- N170 : refreshChatSheet Parent=nil + chatFree, garder UIGridLayout,
+	-- Disconnect Activated. Pas de testFlushDelays. Leftover N152 flame
+	-- (check navires) et leftover N169 preview (check calques) doivent
+	-- rester verts. Recette leftover N169, pas merger visual V103.
+	-- Effects / Overlay / UnitModels / BuildingModels / notify feedFree
+	-- non touches. Dismiss delay Destroy conserve. Pas d'assert Name.
 	local sent = {}
 	hud.onQuickChat = function(id, targetSlot)
 		table.insert(sent, { id = id, target = targetSlot })
@@ -416,6 +422,28 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 
 	hud:openSheet("chat")
 	assert(hud.sheets.chat.Visible, "la feuille de messages ne s'ouvre pas")
+
+	-- N170 : snapshot avant changement d'onglet, autre onglet, retour
+	-- social, rawequal Parent chatBody (pas feed, pas overlay.root).
+	hud.chatCategory = "social"
+	hud.chatPending = nil
+	hud:refreshChatSheet()
+	local snapshot = buttonWithText("Bien joue !")
+	assert(snapshot, "snapshot catalogue social manquant")
+	hud.chatCategory = "attaque"
+	hud:refreshChatSheet()
+	hud.chatCategory = "social"
+	hud.chatPending = nil
+	hud:refreshChatSheet()
+	assert(rawequal(snapshot.Parent, hud.chatBody), "chat bouton recree")
+	assert(not rawequal(snapshot.Parent, hud.feed), "chat bouton reparente au fil")
+	local grids = 0
+	for _, child in hud.chatBody:GetChildren() do
+		if child:IsA("UIGridLayout") then
+			grids += 1
+		end
+	end
+	assert(grids == 1, "UIGridLayout duplique")
 
 	-- Un message sans cible part immediatement.
 	hud.chatCategory = "social"
