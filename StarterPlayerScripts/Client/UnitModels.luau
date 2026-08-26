@@ -253,9 +253,18 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 	for _, piece in visual.pieces do
 		local localFrame = piece.offset
 		if piece.role == "radar" then
-			localFrame = localFrame * CFrame.Angles(0, time * 2.2, 0)
+			-- V73 : offset * yaw. Plus de CFrame.Angles 60 Hz.
+			-- fromEulerAnglesYXZ(0, time*2.2, 0) ≡ Angles(0, yaw, 0)
+			-- (rx=0, rz=0 → Y seul). Frequence 2.2 inchangee.
+			-- Flag : fromEulerAnglesYXZ(sin(time*5)*0.06, 0, 0) ≡
+			-- Angles(pitch, 0, 0) (ry=0, rz=0 → X seul). Amplitude
+			-- 0.06 / frequence 5 inchangees. Overlay roulis inchange
+			-- (V71). Roues camion inchangees (V72). BuildingModels
+			-- Radar/Flag/Boom inchanges (V70). Flame Size inchange
+			-- (leftover V74). Wake / trail / light inchanges.
+			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
-			localFrame = localFrame * CFrame.Angles(math.sin(time * 5) * 0.06, 0, 0)
+			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5) * 0.06, 0, 0)
 		elseif piece.role == "wake" then
 			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
