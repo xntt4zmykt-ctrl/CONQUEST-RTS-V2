@@ -75,6 +75,16 @@ local function baseVisual(kind: number, isMissile: boolean): Visual
 end
 
 local function addWake(visual: Visual)
+	-- N143 : houle addWake. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.rad(side * 11), 0) ≡ Angles(0, ±11°, 0).
+	-- Yaw Y=side*11° (side = ±1, ne pas figer). Offset
+	-- (side * 2.15, -0.68, 5.5), taille Vector3.new(1.15, 0.08, 6.5),
+	-- FOAM, Neon, Transparency = 0.62, Name = "Wake", role "wake"
+	-- inchanges. Deux sides ensemble. Distinct LaunchWake Overlay
+	-- N130 (Z=90, Y + 0.12). Distinct rampes SAM N142 (pitch -31°).
+	-- Distinct proue leftover N144 (Y=π). Distinct radar/flag place
+	-- N127/N128. Overlay / BuildingModels / WorldRenderer /
+	-- createMissile / Bow inchanges.
 	for side = -1, 1, 2 do
 		local wake = addPart(
 			visual,
@@ -82,7 +92,7 @@ local function addWake(visual: Visual)
 			"Wake",
 			Vector3.new(1.15, 0.08, 6.5),
 			FOAM,
-			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.Angles(0, math.rad(side * 11), 0),
+			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.fromEulerAnglesYXZ(0, math.rad(side * 11), 0),
 			Enum.Material.Neon,
 			"wake"
 		)
@@ -128,7 +138,16 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- Coque longue et pont d'envol : deux volumes portent l'essentiel de la
 	-- lecture, le reste n'est que detail.
 	addPart(visual, "Part", "Hull", Vector3.new(5.6, 1.6, 18), NAVY_DARK, CFrame.new(0, -0.2, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- N144 : proue Bow. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.pi, 0) ≡ Angles(0, π, 0).
+	-- Yaw Y=π fixe. Offset (0, -0.2, -10.8) carrier /
+	-- (0, 0.05, -5.9) transport, tailles Vector3.new(5.6, 1.6, 3.6) /
+	-- Vector3.new(4.8, 1.65, 3.3), NAVY, Name = "Bow" inchanges.
+	-- Deux sites ensemble (ici + createBoat). Distinct houle N143
+	-- (±11°). Distinct rampe leftover (pitch -8°). Distinct missile
+	-- leftover (Y=90). addWake N143 / Overlay / BuildingModels /
+	-- place / createMissile inchanges.
+	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "FlightDeck", Vector3.new(8.4, 0.35, 19.5), DECK, CFrame.new(0, 0.78, 0), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "DeckLine", Vector3.new(0.35, 0.06, 15), WHITE, CFrame.new(-1.1, 0.98, 0), Enum.Material.SmoothPlastic)
 
@@ -163,7 +182,11 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- Coque basse, proue inclinee et pont superieur : trois volumes suffisent a
 	-- casser instantanement la silhouette de cube du placeholder historique.
 	addPart(visual, "Part", "Keel", Vector3.new(4.8, 1.15, 9.2), NAVY_DARK, CFrame.new(0, -0.15, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- N144 : proue Bow transport/cargo. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.pi, 0) ≡ Angles(0, π, 0). Couple
+	-- avec buildCarrier (yaw π fixe, ne pas splitter). Offset
+	-- (0, 0.05, -5.9) inchange. Distinct rampe leftover (pitch -8°).
+	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
 
@@ -253,9 +276,29 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 	for _, piece in visual.pieces do
 		local localFrame = piece.offset
 		if piece.role == "radar" then
-			localFrame = localFrame * CFrame.Angles(0, time * 2.2, 0)
+			-- N127 : offset * yaw. Plus de CFrame.Angles 60 Hz.
+			-- fromEulerAnglesYXZ(0, time * 2.2, 0) ≡ Angles(0, yaw, 0)
+			-- (rx=0, rz=0 → Y seul). Facteur 2.2 inchange. Garde
+			-- role == "radar" inchangee. piece.offset * euler — pas
+			-- CFrame.new(offset.X,Y,Z) * euler (recette N124 batiments,
+			-- RestCFrame identite). Distinct SAM Radar N124 (time * 1.45).
+			-- Distinct roulis Overlay N125. Distinct flag N128. Distinct
+			-- roues N126. Recette visual V73 leftover deja sur 9793,
+			-- portee pas mergee. Overlay / BuildingModels inchanges.
+			localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
-			localFrame = localFrame * CFrame.Angles(math.sin(time * 5) * 0.06, 0, 0)
+			-- N128 : offset * pitch. Plus de CFrame.Angles 60 Hz.
+			-- fromEulerAnglesYXZ(rx, 0, 0) ≡ Angles(rx, 0, 0) (ry=0,
+			-- rz=0 → X seul). Amplitude 0.06, frequence 5 inchangees.
+			-- Garde role == "flag" inchangee. piece.offset * euler —
+			-- pas CFrame.new(offset.X,Y,Z) * euler (recette N124).
+			-- Distinct radar N127 (Y, time * 2.2). Distinct CapitalFlag
+			-- N124 (deux sin, rest identite). Distinct roulis Overlay
+			-- N125. Distinct flamme Size (leftover). Recette visual V73
+			-- leftover deja sur 9793, portee pas mergee. Radar N127
+			-- inchange. Overlay / BuildingModels inchanges.
+			local rx = math.sin(time * 5) * 0.06
+			localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(rx, 0, 0)
 		elseif piece.role == "wake" then
 			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
