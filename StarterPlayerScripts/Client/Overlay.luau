@@ -33,7 +33,9 @@ Overlay.__index = Overlay
 export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
 -- V130 : Overlay.clear reutilise parkBuilding (defini plus bas).
+-- V132 : Overlay.clear reutilise parkRoute (defini plus bas).
 local parkBuilding: (any, Model) -> ()
+local parkRoute: (any, any) -> ()
 
 local colorFor = Theme.factionColor
 local DARK = Color3.fromRGB(29, 35, 43)
@@ -152,8 +154,9 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Leftover Parent = nil, pas Destroy. Kind+Level match au
 	-- take. Recolor meme kind+level inchange. Destroy modele
 	-- navire conserve. Overlay.clear Parent=nil (V130).
-	-- V131 : syncFactoryRoutes routeFree deja. Leftover
-	-- suivant = Overlay.clear Destroy routes (V132). Pas
+	-- V131 : syncFactoryRoutes routeFree deja. V132 :
+	-- Overlay.clear parkRoute deja. Leftover suivant =
+	-- FactionLabels refresh/clear Destroy (V133). Pas
 	-- reentrant.
 	self.buildingFree = {} :: { [number]: { Model } }
 
@@ -162,8 +165,9 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- V116 / feel N180 inline — ne PAS merger feel. Leftover
 	-- Parent = nil, pas Destroy. Take cle usine+ville, sinon
 	-- n'importe quel record. Camion Parent = nil (V116)
-	-- conserve. Overlay.clear Destroy routes conserve
-	-- (leftover V132). Pas reentrant.
+	-- conserve. Overlay.clear parkRoute (V132) deja. Leftover
+	-- suivant = FactionLabels refresh/clear Destroy (V133).
+	-- Pas reentrant.
 	self.routeFree = {} :: { any }
 
 	return self
@@ -174,9 +178,14 @@ function Overlay.clear(self: Overlay)
 	-- V130 : park Parent=nil buildingFree[kind]. Recette
 	-- analogique V129 / feel N179 inline — ne PAS merger
 	-- feel. Skip Parent == nil (deja parque). Destroy
-	-- modele navire conserve. Destroy routes conserve
-	-- (leftover V132). V131 routeFree deja. Ne pas
-	-- partager ringFree / shipFree / routeFree.
+	-- modele navire conserve. V132 : park routes via
+	-- parkRoute (Parent = nil, push routeFree). Recette
+	-- analogique V131 / V130 / feel N181 inline — ne PAS
+	-- merger feel. Skip Parent == nil. City depuis la
+	-- cle. Camion Parent = nil (V116) conserve. V131
+	-- syncFactoryRoutes deja. Ne pas partager ringFree /
+	-- shipFree / buildingFree. Leftover suivant =
+	-- FactionLabels refresh/clear Destroy (V133).
 	for _, model in self.buildings do
 		if model.Parent ~= nil then
 			parkBuilding(self, model)
@@ -185,8 +194,11 @@ function Overlay.clear(self: Overlay)
 	for _, unit in self.units do
 		unit.visual.model:Destroy()
 	end
-	for _, route in self.routes do
-		route.model:Destroy()
+	for key, route in self.routes do
+		if type(route.city) ~= "number" then
+			route.city = key % 100000
+		end
+		parkRoute(self, route)
 	end
 	table.clear(self.buildings)
 	table.clear(self.units)
@@ -303,8 +315,9 @@ end
 -- PAS merger feel. Pas Destroy. Camion Parent = nil (V116)
 -- obligatoire. Skip Parent == nil (deja parque). Ne pas
 -- partager buildingFree / deliveryFree. Overlay.clear
--- Destroy routes conserve (leftover V132). Pas de delay.
-local function parkRoute(self: Overlay, route: any)
+-- reutilise parkRoute (V132). Leftover suivant =
+-- FactionLabels refresh/clear Destroy (V133). Pas de delay.
+parkRoute = function(self: Overlay, route: any)
 	local truckModel = route.truckModel
 	if truckModel and truckModel.Parent ~= nil then
 		truckModel.Parent = nil
@@ -453,7 +466,9 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	-- Recette analogique V130 / V116 / feel N180 inline — ne
 	-- PAS merger feel. Match → poseRoute (geometry deja
 	-- valide). Mismatch → reset Name / CFrame / segments dans
-	-- le Model recycle. Overlay.clear Destroy conserve (V132).
+	-- le Model recycle. Overlay.clear parkRoute (V132) deja.
+	-- Leftover suivant = FactionLabels refresh/clear Destroy
+	-- (V133).
 	local reused = takeRoute(self, factoryIndex, cityIndex)
 	if reused and reused.factory == factoryIndex and reused.city == cityIndex then
 		poseRoute(self, reused, factoryIndex, cityIndex, slot)
@@ -897,8 +912,8 @@ end
 -- Recette analogique V128 chatFree / V123 ringFree / feel N178
 -- inline — ne PAS merger feel. Pas Destroy. Ne pas partager
 -- ringFree. Overlay.clear Parent=nil (V130). V131 routeFree
--- deja. Leftover suivant = Overlay.clear Destroy routes
--- (V132).
+-- deja. Overlay.clear parkRoute (V132) deja. Leftover
+-- suivant = FactionLabels refresh/clear Destroy (V133).
 parkBuilding = function(self: Overlay, model: Model)
 	local kind = model:GetAttribute("Kind") :: number?
 	if not kind or kind == 0 then
@@ -1083,8 +1098,9 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		-- playConstruction seulement si le modele est NEUF (pas
 		-- reuse, pas recolor). Destroy modele navire conserve.
 		-- Ne pas partager ringFree. Overlay.clear Parent=nil
-		-- (V130). V131 routeFree deja. Leftover suivant =
-		-- Overlay.clear Destroy routes (V132).
+		-- (V130). V131 routeFree deja. Overlay.clear
+		-- parkRoute (V132) deja. Leftover suivant =
+		-- FactionLabels refresh/clear Destroy (V133).
 		if existing then
 			parkBuilding(self, existing)
 		end

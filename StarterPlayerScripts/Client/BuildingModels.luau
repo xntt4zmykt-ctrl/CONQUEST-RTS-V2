@@ -41,8 +41,9 @@ local BuildingModels = {}
 -- (clearActionPreview Parent=nil, Effects). Distinct de V128
 -- (refreshChatSheet chatFree, HUD). Dust / scaffold Destroy
 -- conserves. Overlay.clear Parent=nil (V130). V131
--- syncFactoryRoutes routeFree deja. Leftover
--- suivant = Overlay.clear Destroy routes (V132).
+-- syncFactoryRoutes routeFree deja. Overlay.clear
+-- parkRoute (V132) deja. Leftover suivant =
+-- FactionLabels refresh/clear Destroy (V133).
 -- V129 applyBuildingDelta buildingFree deja.
 -- Pas reentrant. Evenement
 -- chantier, pas 60 Hz.

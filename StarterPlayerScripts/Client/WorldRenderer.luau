@@ -71,8 +71,9 @@ local otherBuf: { number } = table.create(16)
 -- recyclee (V125). Effects clearSelection parque (V126).
 -- Effects clearActionPreview parque (V127). HUD refreshChatSheet
 -- recyclee (V128). Overlay.clear Parent=nil (V130).
--- V131 syncFactoryRoutes routeFree deja. Leftover suivant
--- = Overlay.clear Destroy routes (V132). V129
+-- V131 syncFactoryRoutes routeFree deja. Overlay.clear
+-- parkRoute (V132) deja. Leftover suivant =
+-- FactionLabels refresh/clear Destroy (V133). V129
 -- applyBuildingDelta buildingFree deja.
 local DIRTY_COMPACT_HEAD = 32
 

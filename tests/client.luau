@@ -1278,11 +1278,12 @@ check("pose et capture de chaque type de batiment", function()
 	-- Recette analogique V130 / V116 / feel N180 inline — ne PAS
 	-- merger feel. Take cle usine+ville. 2e apply memes links →
 	-- rawequal route.model, #routeFree pop. Camion Parent = nil
-	-- (V116) conserve. Destroy Overlay.clear conserve (leftover
-	-- V132). Ne pas partager buildingFree. Leftover V130
-	-- Overlay.clear (plus bas) doit rester vert. Leftover V129
-	-- buildingFree (plus bas) doit rester vert. Leftover V116
-	-- DeliveryPulse (plus bas) doit rester vert.
+	-- (V116) conserve. Overlay.clear parkRoute (V132, plus bas).
+	-- Ne pas partager buildingFree. Leftover V130 Overlay.clear
+	-- (plus bas) doit rester vert. Leftover V129 buildingFree
+	-- (plus bas) doit rester vert. Leftover V116 DeliveryPulse
+	-- (plus bas) doit rester vert. Leftover V133 FactionLabels
+	-- Destroy conserve.
 	assert(type(overlay.routeFree) == "table", "routeFree absent")
 	assert(#overlay.routeFree == 0, "routeFree non vide a la pose")
 	assert(overlay.routeFree[1] == nil, "routeFree leftover slot pose")
@@ -1523,9 +1524,9 @@ check("pose et capture de chaque type de batiment", function()
 	-- Parent=nil (V130, ci-dessous). Leftover V128 chatFree (check
 	-- messages) doit rester vert. Leftover V123 ringFree (check
 	-- modeles) doit rester vert. Leftover V80 DeliveryPulse
-	-- (ci-dessus) doit rester vert. Leftover V132
-	-- Overlay.clear Destroy routes conserve. V131 routeFree
-	-- deja (ci-dessus, pose 3 voies).
+	-- (ci-dessus) doit rester vert. Overlay.clear parkRoute
+	-- (V132, plus bas). V131 routeFree deja (ci-dessus, pose
+	-- 3 voies). Leftover V133 FactionLabels Destroy conserve.
 	assert(type(overlay.buildingFree) == "table", "buildingFree absent")
 	local cityKind = Config.BUILDING.CITY
 	local cityPool = overlay.buildingFree[cityKind]
@@ -1554,12 +1555,13 @@ check("pose et capture de chaque type de batiment", function()
 	-- V130 : Overlay.clear Parent=nil push buildingFree existant.
 	-- Recette analogique V129 / feel N179 inline — ne PAS merger
 	-- feel. Skip Parent == nil. Destroy modele navire conserve.
-	-- Destroy routes conserve (leftover V132). V131 routeFree
+	-- Overlay.clear parkRoute (V132, plus bas). V131 routeFree
 	-- deja. Ne pas partager ringFree (V123) / routeFree.
 	-- Leftover V129 buildingFree (ci-dessus) doit rester vert.
 	-- Leftover V128 chatFree doit rester vert. Leftover V123
 	-- ringFree doit rester vert. Leftover V131 routeFree
-	-- (ci-dessus) doit rester vert.
+	-- (ci-dessus) doit rester vert. Leftover V133 FactionLabels
+	-- Destroy conserve.
 	local liveCity = overlay.buildings[cityIndex]
 	assert(liveCity ~= nil, "CITY live absente avant clear")
 	assert(rawequal(liveCity, parkedCity), "CITY live n'est pas le reuse V129")
@@ -1585,6 +1587,54 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveCity.Parent == overlay.root, "CITY recycle hors root apres clear")
 	assert(#cityPool == nSkip - 1, "buildingFree[CITY] non pop apres clear")
 	assert(overlay:buildingAt(cityIndex) == cityKind, "CITY inspecteur perdu apres clear")
+
+	-- V132 : Overlay.clear Parent=nil push routeFree existant
+	-- via parkRoute. Recette analogique V131 / V130 / feel
+	-- N181 inline — ne PAS merger feel. Skip Parent == nil.
+	-- City depuis la cle. Camion Parent = nil (V116) conserve.
+	-- Ne pas changer V131 syncFactoryRoutes. Ne pas partager
+	-- buildingFree. Leftover V131 recycle (ci-dessus) doit
+	-- rester vert. Leftover V130 buildingFree (ci-dessus) doit
+	-- rester vert. Leftover V116 DeliveryPulse (ci-dessus)
+	-- doit rester vert. Leftover V133 FactionLabels Destroy
+	-- conserve.
+	factoryEntry.kind = Config.BUILDING.FACTORY
+	factoryEntry.slot = 1
+	factoryEntry.level = 1
+	factoryEntry.links = { cityIndex }
+	overlay:applyBuildingDelta({ factoryEntry })
+	local nRoutesClear, liveRouteClear = routesOf(factoryEntry.index)
+	assert(nRoutesClear == 1, "usine 1 route live V132 absente")
+	assert(liveRouteClear ~= nil, "voie live V132 absente")
+	assert(liveRouteClear.model.Parent == overlay.root, "voie live V132 hors root")
+	assert(type(liveRouteClear.city) == "number", "city voie V132 absente")
+	local parkedRoute = liveRouteClear
+	local routeKey = factoryEntry.index * 100000 + cityIndex
+	local nRouteFreeBefore = #overlay.routeFree
+	overlay:clear()
+	assert(next(overlay.routes) == nil, "routes non vide apres clear V132")
+	assert(parkedRoute.model.Parent == nil, "voie clear pas parque Parent=nil")
+	assert(#overlay.routeFree == nRouteFreeBefore + 1, "routeFree non push au clear")
+	assert(rawequal(overlay.routeFree[#overlay.routeFree], parkedRoute), "voie clear non push")
+	assert(overlay.routeFree[#overlay.routeFree + 1] == nil, "routeFree leftover slot clear")
+	assert(parkedRoute.truckModel.Parent == nil, "camion V132 reaparent au clear")
+	overlay.routes[routeKey] = parkedRoute
+	local nSkipRoute = #overlay.routeFree
+	overlay:clear()
+	assert(#overlay.routeFree == nSkipRoute, "clear skip Parent==nil re-parque voie")
+	assert(parkedRoute.model.Parent == nil, "skip Parent==nil unparque voie")
+	assert(next(overlay.routes) == nil, "routes non vide apres skip V132")
+	factoryEntry.kind = Config.BUILDING.FACTORY
+	factoryEntry.slot = 1
+	factoryEntry.level = 1
+	factoryEntry.links = { cityIndex }
+	overlay:applyBuildingDelta({ factoryEntry })
+	local _, reusedRoute = routesOf(factoryEntry.index)
+	assert(reusedRoute ~= nil, "voie non recyclee apres clear V132")
+	assert(rawequal(reusedRoute.model, parkedRoute.model), "voie non recyclee V132")
+	assert(reusedRoute.model.Parent == overlay.root, "voie recycle hors root apres clear V132")
+	assert(#overlay.routeFree == nSkipRoute - 1, "routeFree non pop apres clear V132")
+	assert(overlay.routeFree[nSkipRoute] == nil, "routeFree leftover slot pop V132")
 end)
 
 --[[
