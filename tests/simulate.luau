@@ -8197,6 +8197,162 @@ do
 	end
 end
 
+do
+	-- N85 : collapseFaction recycle plunderPool. Deux collapses qui
+	-- lootent + drain + deux collapses → rawequal [1]. #plunders == 0
+	-- apres drain. gold / slot a jour (pas un stale de A). Bancs
+	-- collapse existants (butin + captor, slot vide, leftover A→B)
+	-- inchanges. Pas N83 / N69 / N67 / N86.
+	local state = GameState.new(1085)
+	local a = state:addPlayer(nil, "PlunderA", Random.new(81), 0)
+	local b = state:addPlayer(nil, "PlunderB", Random.new(82), 0)
+	local h = state:addPlayer(nil, "PlunderH", Random.new(83), 0)
+	if not a or not b or not h then
+		fail("plunder pool — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local function glue(victimSlot: number, heirSlot: number): boolean
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == victimSlot and state:isLand(index) then
+					local nn = MapGen.neighbors(index, scratch)
+					for i = 1, nn do
+						local nb = scratch[i]
+						if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+							state:setOwner(nb, heirSlot)
+							return true
+						end
+					end
+				end
+			end
+			return false
+		end
+		if not glue(a.slot, h.slot) or not glue(b.slot, h.slot) then
+			fail("plunder pool — pas de contact captor")
+		else
+			a.gold = 3000
+			h.gold = 100
+			state:collapseFaction(a.slot, h.slot)
+			local p1 = state.plunders[1]
+			local expectedA = math.floor(3000 * Config.CONQUEST_PLUNDER_BOT)
+			if p1 == nil or not rawequal(p1, GameState.plunderPool[1]) then
+				fail("plunder pool — enqueue")
+			elseif p1.slot ~= h.slot or p1.gold ~= expectedA then
+				fail(`plunder pool — champs A ({p1.gold} vs {expectedA})`)
+			else
+				state:drainPlunders()
+				if #state.plunders ~= 0 or state.plunders[1] ~= nil then
+					fail(`plunder pool — leftover file (#={#state.plunders})`)
+				else
+					b.gold = 2000
+					state:collapseFaction(b.slot, h.slot)
+					local expectedB = math.floor(2000 * Config.CONQUEST_PLUNDER_BOT)
+					if not rawequal(p1, state.plunders[1]) then
+						fail("plunder pool — record [1] non recycle")
+					elseif not rawequal(p1, GameState.plunderPool[1]) then
+						fail("plunder pool — plunderPool[1] distinct")
+					elseif state.plunders[1].gold ~= expectedB or state.plunders[1].slot ~= h.slot then
+						fail("plunder pool — gold/slot stale")
+					else
+						state:drainPlunders()
+						if #state.plunders ~= 0 then
+							fail("plunder pool — leftover apres 2e drain")
+						else
+							print("plunder pool : rawequal [1], #=0 (N85)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N86 : MatchLifecycle.buildMatchUpdate recycle matchUpdateBuf.
+	-- Deux build → rawequal packet. phase change → champ a jour.
+	-- ended → summary non nil ; playing → summary == nil. Args nil /
+	-- {} → zéros. Bancs N37 / N84 inchanges. Pas N85 / N57 / N26.
+	-- N86 hardening ≠ feel historique.
+	local live = { gold = 42 }
+	local p1 = MatchLifecycle.buildMatchUpdate({
+		phase = "playing",
+		stage = "combat",
+		combatIn = 0,
+		timeLeft = 90,
+		mode = "classic",
+		players = 3,
+		maxPlayers = 12,
+		maxHumans = 8,
+		maxBots = 10,
+		maxFactions = 18,
+		renderMode = "smooth",
+		winner = nil,
+		winnerName = nil,
+		restartIn = 0,
+		summary = nil,
+	})
+	local p2 = MatchLifecycle.buildMatchUpdate({
+		phase = "ended",
+		stage = "ended",
+		combatIn = 0,
+		timeLeft = 0,
+		mode = "classic",
+		players = 3,
+		maxPlayers = 12,
+		maxHumans = 8,
+		maxBots = 10,
+		maxFactions = 18,
+		renderMode = "smooth",
+		winner = 2,
+		winnerName = "Victoire",
+		restartIn = 8,
+		summary = live,
+	})
+	if not rawequal(p1, p2) or not rawequal(p1, MatchLifecycle.matchUpdateBuf) then
+		fail("matchUpdate pool — rawequal packet")
+	elseif p2.phase ~= "ended" or p2.stage ~= "ended" or p2.winner ~= 2 then
+		fail("matchUpdate pool — phase/winner stale")
+	elseif p2.summary == nil or not rawequal(p2.summary, live) then
+		fail("matchUpdate pool — summary ended clone ou nil")
+	elseif p2.winnerName ~= "Victoire" or p2.restartIn ~= 8 then
+		fail("matchUpdate pool — champs ended")
+	else
+		local p3 = MatchLifecycle.buildMatchUpdate({
+			phase = "playing",
+			stage = "combat",
+			combatIn = 12,
+			timeLeft = 70,
+			mode = "classic",
+			players = 2,
+			maxPlayers = 12,
+			maxHumans = 8,
+			maxBots = 10,
+			maxFactions = 18,
+			renderMode = "smooth",
+			winner = nil,
+			winnerName = nil,
+			restartIn = 0,
+			summary = nil,
+		})
+		if not rawequal(p3, p1) then
+			fail("matchUpdate pool — packet perdu au playing")
+		elseif p3.summary ~= nil then
+			fail("matchUpdate pool — summary fantome en playing")
+		elseif p3.phase ~= "playing" or p3.combatIn ~= 12 or p3.winner ~= nil then
+			fail("matchUpdate pool — champs playing stale")
+		else
+			local empty1 = MatchLifecycle.buildMatchUpdate(nil)
+			local empty2 = MatchLifecycle.buildMatchUpdate({})
+			if empty1.phase ~= nil or empty1.summary ~= nil or empty1.combatIn ~= 0 then
+				fail("matchUpdate pool — args vides non reset")
+			elseif not rawequal(empty1, empty2) or not rawequal(empty1, MatchLifecycle.matchUpdateBuf) then
+				fail("matchUpdate pool — args vides non recycle")
+			else
+				print("matchUpdate pool : rawequal, summary, reset (N86)")
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
