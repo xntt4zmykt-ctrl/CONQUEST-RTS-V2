@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Cadran de la fin du monde, modele OpenFront : l'anti-impasse.
+	Cadran de la fin du monde, regle CONQUEST : l'anti-impasse.
 
 	Chaque faction doit tenir une part de la carte qui monte par vagues, comme
 	la zone d'un battle-royale : une grace initiale a 0 % (le combat decide le
