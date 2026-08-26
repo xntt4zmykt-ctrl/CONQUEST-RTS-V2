@@ -10361,6 +10361,311 @@ do
 	end
 end
 
+do
+	-- N105 : Navy.despawnBoat swap-pop (leftover N96/N100). 3 transports,
+	-- own-tile du milieu → #boats == 2, pas de trou, rawequal boatFree,
+	-- les 2 restants identiques. Banc N48 / N51 / N64 / N96 / inbound /
+	-- port-detruit verts. Overlay lit N51. GameState.removePlayer → N106.
+	local sea = GameState.new(1109)
+	sea.combatUnlocked = true
+	local sa = sea:addPlayer(nil, "BoatSwapA", Random.new(122), 0)
+	local sb = sea:addPlayer(nil, "BoatSwapB", Random.new(123), 0)
+	if not sa or not sb then
+		fail("boat order — spawn impossible")
+	else
+		local ownTile: number? = nil
+		local destA: number? = nil
+		local destC: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if sea:isLand(index) then
+				local owner = buffer.readu8(sea.owner, index)
+				if owner == sa.slot and not ownTile then
+					ownTile = index
+				elseif owner == sb.slot then
+					if not destA then
+						destA = index
+					elseif not destC and index ~= destA then
+						destC = index
+					end
+				end
+			end
+			if ownTile and destA and destC then
+				break
+			end
+		end
+		if not ownTile or not destA or not destC then
+			fail("boat order — tuiles terrestres introuvables")
+		else
+			-- Path long + bateau loin : un tick (BOAT_SPEED 0.85) ne termine
+			-- pas les gardiens. Le milieu despawn via own-tile AVANT move.
+			local dummyPath = { destA, destA, destA, destA, destA, destA, destA, destA }
+			local boatA = {
+				id = 1,
+				slot = sa.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 100,
+				x = 0,
+				y = 0,
+				path = dummyPath,
+				step = 1,
+				targetTile = destA,
+				homeTile = destA,
+				retreating = false,
+			}
+			local boatB = {
+				id = 2,
+				slot = sa.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 200,
+				x = 0,
+				y = 0,
+				path = dummyPath,
+				step = 1,
+				targetTile = ownTile,
+				homeTile = ownTile,
+				retreating = false,
+			}
+			local boatC = {
+				id = 3,
+				slot = sa.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 300,
+				x = 0,
+				y = 0,
+				path = dummyPath,
+				step = 1,
+				targetTile = destC,
+				homeTile = destC,
+				retreating = false,
+			}
+			table.insert(sea.boats, boatA)
+			table.insert(sea.boats, boatB)
+			table.insert(sea.boats, boatC)
+			sea.tick = 1
+			Navy.step(sea, Random.new(11))
+			local hole = false
+			for i = 1, #sea.boats do
+				if sea.boats[i] == nil then
+					hole = true
+					break
+				end
+			end
+			local leftover = 0
+			for _, boat in sea.boats do
+				if boat.kind == Navy.KIND_TRANSPORT then
+					leftover += 1
+				end
+			end
+			local recycled = false
+			for _, rec in Navy.boatFree do
+				if rawequal(rec, boatB) then
+					recycled = true
+					break
+				end
+			end
+			if hole then
+				fail("boat order — trou array apres swap-pop")
+			elseif leftover ~= 2 then
+				fail(`boat order — leftover {leftover} (attendu 2)`)
+			elseif not rawequal(sea.boats[1], boatA) or not rawequal(sea.boats[2], boatC) then
+				fail("boat order — restants non rawequal A/C")
+			elseif not recycled then
+				fail("boat order — milieu absent de boatFree")
+			else
+				print("boat order : swap-pop milieu, rawequal A/C + boatFree (N105)")
+			end
+		end
+	end
+end
+
+do
+	-- N106 : removePlayer bateaux/missiles swap-pop (leftover N102).
+	-- 2 inbound + 1 own + 1 third-party. Pas de trou. Third-party reste.
+	-- Inbound refund 100 %. Own disparu. Meme schema missiles.
+	-- Sans boatFree / missileFree (cycle). Banc inbound / third-party verts.
+	local state = GameState.new(1110)
+	state.combatUnlocked = true
+	local victim = state:addPlayer(nil, "SwapVictim", Random.new(124), 0)
+	local invader = state:addPlayer(nil, "SwapInvader", Random.new(125), 0)
+	local bystander = state:addPlayer(nil, "SwapWitness", Random.new(126), 0)
+	if not victim or not invader or not bystander then
+		fail("remove order — spawn impossible")
+	elseif not victim.capitalTile or not bystander.capitalTile then
+		fail("remove order — capitale introuvable")
+	else
+		local victimLand: number? = nil
+		local witnessLand: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local owner = buffer.readu8(state.owner, index)
+				if owner == victim.slot and not victimLand then
+					victimLand = index
+				elseif owner == bystander.slot and not witnessLand then
+					witnessLand = index
+				end
+			end
+			if victimLand and witnessLand then
+				break
+			end
+		end
+		if not victimLand or not witnessLand then
+			fail("remove order — tuiles terrestres introuvables")
+		else
+			local ownBoat = {
+				id = 11,
+				slot = victim.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 50,
+				x = 0,
+				y = 0,
+				path = { victimLand },
+				step = 1,
+				targetTile = victimLand,
+				homeTile = victimLand,
+				retreating = false,
+			}
+			local inbound1 = {
+				id = 12,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 111,
+				x = 0,
+				y = 0,
+				path = { victimLand },
+				step = 1,
+				targetTile = victimLand,
+				homeTile = victimLand,
+				retreating = false,
+			}
+			local inbound2 = {
+				id = 13,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 222,
+				x = 0,
+				y = 0,
+				path = { victimLand },
+				step = 1,
+				targetTile = victimLand,
+				homeTile = victimLand,
+				retreating = false,
+			}
+			local thirdBoat = {
+				id = 14,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 333,
+				x = 0,
+				y = 0,
+				path = { witnessLand },
+				step = 1,
+				targetTile = witnessLand,
+				homeTile = witnessLand,
+				retreating = false,
+			}
+			table.insert(state.boats, ownBoat)
+			table.insert(state.boats, inbound1)
+			table.insert(state.boats, inbound2)
+			table.insert(state.boats, thirdBoat)
+
+			local vtx, vty = MapGen.fromIndex(victim.capitalTile)
+			local wtx, wty = MapGen.fromIndex(bystander.capitalTile)
+			local ownMissile = {
+				id = 21,
+				slot = victim.slot,
+				kind = Config.NUKE.ATOM,
+				x = vtx,
+				y = vty,
+				sx = vtx,
+				sy = vty,
+				tx = vtx,
+				ty = vty,
+				progress = 0.4,
+				speed = Config.MISSILE_SPEED,
+			}
+			local inboundMissile = {
+				id = 22,
+				slot = invader.slot,
+				kind = Config.NUKE.ATOM,
+				x = vtx,
+				y = vty,
+				sx = vtx,
+				sy = vty,
+				tx = vtx,
+				ty = vty,
+				progress = 0.4,
+				speed = Config.MISSILE_SPEED,
+			}
+			local thirdMissile = {
+				id = 23,
+				slot = invader.slot,
+				kind = Config.NUKE.ATOM,
+				x = wtx,
+				y = wty,
+				sx = wtx,
+				sy = wty,
+				tx = wtx,
+				ty = wty,
+				progress = 0.4,
+				speed = Config.MISSILE_SPEED,
+			}
+			table.insert(state.missiles, ownMissile)
+			table.insert(state.missiles, inboundMissile)
+			table.insert(state.missiles, thirdMissile)
+
+			local troopsBefore = invader.troops
+			local gone = victim.slot
+			state:removePlayer(gone)
+
+			local boatHole = false
+			for i = 1, #state.boats do
+				if state.boats[i] == nil then
+					boatHole = true
+					break
+				end
+			end
+			local missileHole = false
+			for i = 1, #state.missiles do
+				if state.missiles[i] == nil then
+					missileHole = true
+					break
+				end
+			end
+			local leakedBoat = false
+			for _, rec in Navy.boatFree do
+				if rawequal(rec, ownBoat) or rawequal(rec, inbound1) or rawequal(rec, inbound2) then
+					leakedBoat = true
+					break
+				end
+			end
+			local leakedMissile = false
+			for _, rec in Nukes.missileFree do
+				if rawequal(rec, ownMissile) or rawequal(rec, inboundMissile) then
+					leakedMissile = true
+					break
+				end
+			end
+			if boatHole then
+				fail("remove order — trou bateaux")
+			elseif missileHole then
+				fail("remove order — trou missiles")
+			elseif #state.boats ~= 1 or not rawequal(state.boats[1], thirdBoat) then
+				fail(`remove order — bateaux restants (#{#state.boats})`)
+			elseif #state.missiles ~= 1 or not rawequal(state.missiles[1], thirdMissile) then
+				fail(`remove order — missiles restants (#{#state.missiles})`)
+			elseif math.abs(invader.troops - (troopsBefore + 111 + 222)) > 0.01 then
+				fail(`remove order — refund {invader.troops} attendu {troopsBefore + 333}`)
+			elseif leakedBoat then
+				fail("remove order — bateaux pousses dans boatFree (cycle)")
+			elseif leakedMissile then
+				fail("remove order — missiles pousses dans missileFree (cycle)")
+			else
+				print("remove order : swap-pop inbound/own, tiers reste, pas de free-list (N106)")
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
