@@ -399,6 +399,7 @@ check("fil de notifications sature", function()
 	-- groupement / N153 prefixe inchanges. Recette leftover N166,
 	-- pas merger visual V103. Overlay / BuildingModels / Effects
 	-- non touches. Reuse rawequal est dans « vagues de conquete ».
+	-- N174 : Dismiss delay parque (vagues). Ne pas flush ici.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -1249,7 +1250,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- N167 : HUD notify feedFree. Pas de testFlushDelays dans le
 	-- check notifications (Dismiss stubbe delay). Reuse rawequal
 	-- est dans « vagues de conquete ». Leftover N152 flame Size
-	-- (check navires) doit rester vert.
+	-- (check navires) doit rester vert. Leftover N174 Dismiss
+	-- delay (vagues, après n167) doit rester vert.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
@@ -2079,7 +2081,8 @@ check("vagues de conquete", function()
 	-- poolees par le cap N153. Snapshot avant applyUnits N160 **et**
 	-- avant applyBuildingDelta N166. Réparente (rawequal Parent
 	-- hud.feed, pas overlay.root). Distinct ringFree / blastFree /
-	-- textFree. Recréer Dismiss si Destroy par le delay.
+	-- textFree. N174 : Dismiss delay parque (dismissFree), plus
+	-- Destroy. Snapshot + reuse dans ce check après notify n167.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -2228,6 +2231,34 @@ check("vagues de conquete", function()
 	assert(not rawequal(pooledFeed.Parent, overlay.root), "entree fil reparentee a overlay.root")
 	assert(pooledFeed.Text == "n167 reuse", `reuse affiche "{pooledFeed.Text}"`)
 	assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse")
+	-- N174 : snapshot Dismiss après n167 reuse, avant un second
+	-- flush. Le delay parque (Parent = nil + dismissFree), plus
+	-- Destroy. notify "n174 reuse" pop O(1). rawequal Parent
+	-- pooledFeed (même TextLabel) ou présence dans dismissFree.
+	-- Name Dismiss conservé. Distinct feedFree. Pas #dismissFree
+	-- == 3. Pas d'assert autre Name. Recette leftover N173.
+	local pooledDismiss = pooledFeed:FindFirstChild("Dismiss")
+	assert(pooledDismiss ~= nil and pooledDismiss:IsA("TextButton"), "snapshot Dismiss manquant")
+	testFlushDelays()
+	hud:notify("n174 reuse", "good")
+	if pooledDismiss.Parent == nil then
+		local inFree = false
+		local dismissPool = hud.dismissFree
+		if dismissPool then
+			for _, cross in dismissPool do
+				if rawequal(cross, pooledDismiss) then
+					inFree = true
+					break
+				end
+			end
+		end
+		assert(inFree, "Dismiss ni reparentee ni dans dismissFree")
+	else
+		assert(rawequal(pooledDismiss.Parent, pooledFeed), "Dismiss recree")
+		assert(pooledDismiss.Name == "Dismiss", "Name Dismiss perdu au reuse")
+		assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse N174")
+	end
+	assert(pooledDismiss ~= pooledFeed, "dismissFree partage feedFree")
 	local ringN = #ringPool
 	local wakeN = #wakePool
 	overlay:applyUnits({

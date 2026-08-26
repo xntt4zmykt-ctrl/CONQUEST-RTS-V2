@@ -291,6 +291,85 @@ local function bindChatActivated(self: HUD, b: TextButton, fn: () -> ())
 	chatActivated[b] = b.Activated:Connect(fn)
 end
 
+-- N174 : recycle les TextButton Dismiss du fil. Distinct feedFree (N167,
+-- TextLabel fil). Distinct chatFree (N170, catalogue). Distinct valueFree
+-- (N173, podium). Distinct previewFree (N172). Distinct flagFree (N171).
+-- Name = "Dismiss" obligatoire (FindFirstChild contrat). Parent = entry
+-- (le TextLabel), pas self.feed / victory.rows / hud.chatBody. Pas de
+-- Theme.corner / Theme.stroke (Dismiss n'en a pas). Disconnect Activated
+-- avant rebranchement (oubli = double-rejet). Delay vs clic distincts :
+-- le clic laisse Dismiss enfant ; le delay parque. Pas visual V103
+-- (ne pas merger 7188). Distinct leftover N152 flame.
+local function parkDismiss(self: HUD, entry: TextLabel)
+	local cross = entry:FindFirstChild("Dismiss")
+	if not (cross and cross:IsA("TextButton")) then
+		return
+	end
+	if cross.Parent then
+		cross.Parent = nil
+	end
+	local dismissFree = self.dismissFree
+	if not dismissFree then
+		dismissFree = {}
+		self.dismissFree = dismissFree
+	end
+	dismissFree[#dismissFree + 1] = cross
+end
+
+local function takeDismiss(self: HUD, entry: TextLabel, removeEntry: (TextLabel) -> ())
+	-- Chemin clic / plafond : Dismiss encore enfant. Ne pas pop, ne
+	-- pas empiler un second bouton.
+	if entry:FindFirstChild("Dismiss") then
+		return
+	end
+	local dismissFree = self.dismissFree
+	if not dismissFree then
+		dismissFree = {}
+		self.dismissFree = dismissFree
+	end
+	local dismissActivated = self.dismissActivated
+	if not dismissActivated then
+		dismissActivated = {}
+		self.dismissActivated = dismissActivated
+	end
+	local n = #dismissFree
+	local dismiss: TextButton
+	if n > 0 then
+		dismiss = dismissFree[n] :: TextButton
+		dismissFree[n] = nil
+		dismiss.Name = "Dismiss"
+		dismiss.AnchorPoint = Vector2.new(1, 0.5)
+		dismiss.Position = UDim2.new(1, -3, 0.5, 0)
+		dismiss.Size = UDim2.fromOffset(14, 14)
+		dismiss.BackgroundTransparency = 1
+		dismiss.FontFace = F.bold
+		dismiss.TextSize = T.small
+		dismiss.TextColor3 = C.textFaint
+		dismiss.Text = "\u{00D7}"
+		dismiss.ZIndex = 2
+	else
+		dismiss = Instance.new("TextButton")
+		dismiss.Name = "Dismiss"
+		dismiss.AnchorPoint = Vector2.new(1, 0.5)
+		dismiss.Position = UDim2.new(1, -3, 0.5, 0)
+		dismiss.Size = UDim2.fromOffset(14, 14)
+		dismiss.BackgroundTransparency = 1
+		dismiss.FontFace = F.bold
+		dismiss.TextSize = T.small
+		dismiss.TextColor3 = C.textFaint
+		dismiss.Text = "\u{00D7}"
+		dismiss.ZIndex = 2
+	end
+	local prev = dismissActivated[dismiss]
+	if prev then
+		prev:Disconnect()
+	end
+	dismissActivated[dismiss] = dismiss.Activated:Connect(function()
+		removeEntry(entry)
+	end)
+	dismiss.Parent = entry
+end
+
 local function setSelected(b: TextButton, selected: boolean, accent: Color3?)
 	b:SetAttribute("Selected", selected)
 	local selectedColor = accent or C.accentSoft
@@ -1295,10 +1374,10 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- (comme textFree). Parent = self.feed (pas overlay.root).
 	-- Reset Text + couleurs + transparences + LayoutOrder avant
 	-- Parent. Pas Theme.corner / Theme.stroke au reuse (2e
-	-- UICorner). Recolor UIStroke existant. Recreer Dismiss si
-	-- le delay l'a Destroy. Lazy-init feedFree ici (pas HUD.new).
-	-- Recette leftover N166, pas merger visual. Overlay /
-	-- BuildingModels / UnitModels / Effects inchanges.
+	-- UICorner). Recolor UIStroke existant. N174 : Dismiss delay
+	-- Parent=nil + dismissFree (plus Destroy). Lazy-init feedFree
+	-- ici (pas HUD.new). Recette leftover N166, pas merger visual.
+	-- Overlay / BuildingModels / UnitModels / Effects inchanges.
 	local feedFree = self.feedFree
 	if not feedFree then
 		feedFree = {}
@@ -1350,25 +1429,11 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		permanent : le joueur le degage, le minuteur le degage, mais l'un des
 		deux doit toujours pouvoir le faire tout de suite.
 
-		Le delay Destroy la croix : au reuse, la recreer si absente.
+		N174 : le delay parque la croix (Parent = nil + dismissFree).
+		Au reuse delay, takeDismiss pop. Au reuse clic, Dismiss est
+		encore enfant : ne pas recréer.
 	]]
-	if not entry:FindFirstChild("Dismiss") then
-		local dismiss = Instance.new("TextButton")
-		dismiss.Name = "Dismiss"
-		dismiss.AnchorPoint = Vector2.new(1, 0.5)
-		dismiss.Position = UDim2.new(1, -3, 0.5, 0)
-		dismiss.Size = UDim2.fromOffset(14, 14)
-		dismiss.BackgroundTransparency = 1
-		dismiss.FontFace = F.bold
-		dismiss.TextSize = T.small
-		dismiss.TextColor3 = C.textFaint
-		dismiss.Text = "\u{00D7}"
-		dismiss.ZIndex = 2
-		dismiss.Parent = entry
-		dismiss.Activated:Connect(function()
-			removeEntry(entry)
-		end)
-	end
+	takeDismiss(self, entry, removeEntry)
 
 	local sound = FEED_SOUNDS[kind]
 	if sound then
@@ -1413,12 +1478,12 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		if entry.LayoutOrder ~= born then
 			return
 		end
-		-- Le fondu ne touche que l'etiquette : la croix part d'elle-meme,
-		-- sinon elle resterait visible sur un message deja efface.
-		local cross = entry:FindFirstChild("Dismiss")
-		if cross then
-			cross:Destroy()
-		end
+		-- N174 : le fondu ne touche que l'etiquette. La croix parque
+		-- (Parent = nil + dismissFree), sinon elle resterait visible
+		-- sur un message deja efface. Pas Destroy. Garde Parent /
+		-- LayoutOrder plus haut : un delay fantôme ne parque pas la
+		-- croix d'un message reparenté (plafond N153).
+		parkDismiss(self, entry)
 		local tween = TweenService:Create(
 			entry,
 			Theme.motion.smooth,
@@ -1821,7 +1886,7 @@ function HUD.refreshChatSheet(self: HUD)
 	-- UIGridLayout. Disconnect Activated avant rebranchement (oubli =
 	-- double-fire). MouseEnter/Leave conserves. Distinct feedFree N167.
 	-- Distinct actionPreview N169. Distinct flame leftover N152. Distinct
-	-- visual V103 (ne pas merger 7188). Dismiss delay Destroy conserve.
+	-- visual V103 (ne pas merger 7188). Dismiss delay parque (N174).
 	-- Parent = self.chatBody. Pas Theme.corner / stroke au reuse.
 	parkChatButtons(self)
 	for id, tab in self.chatTabs do
