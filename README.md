@@ -2,9 +2,9 @@
 
 Jeu de conquête territoriale temps réel sur Roblox, par **Blackline Studio**.
 
-Inspiré du genre `.io` de conquête de territoire (OpenFront, Territorial.io), poussé
-plus loin : économie maritime, diplomatie mécanique, réputation persistante et
-phase nucléaire.
+Inspire du genre .io de conquete territoriale, pousse
+plus loin : economie maritime, diplomatie mecanique, reputation persistante et
+phase nucleaire.
 
 ---
 
@@ -16,10 +16,11 @@ phase nucléaire.
 > des routes logistiques, construis des ports et des silos nucléaires. Négocie des traités — puis
 > brise-les au pire moment.
 >
-> 🌍 48 joueurs par carte · ⚔️ Parties de 25 minutes · 🤝 Alliances réelles
-> ☢️ Fin de partie nucléaire · 🏆 Réputation persistante
+> 🌍 Jusqu'a 12 joueurs par salon public · ⚔️ Parties de 10 a 25 minutes · 🤝 Alliances reelles
+> ☢️ Fin de partie nucleaire · 🏆 Reputation persistante
 >
-> Ta réputation te suit d'une partie à l'autre. Choisis bien.
+> Capacite theorique : 48 slots faction. Lancement public : 1 humain + bots (Classique),
+> alpha multi plafonne a 8 humains. Ta reputation te suit d'une partie a l'autre.
 
 ---
 
@@ -119,6 +120,7 @@ ReplicatedStorage/Shared/
   BuildingDefs.luau Définitions et coûts des bâtiments
   Remotes.luau      Création/récupération des RemoteEvents
   Types.luau        Types partagés serveur ↔ client
+  SpawnHint.luau    Hint hover spawn (isolation N58, pas une source de vérité)
 
 ServerScriptService/Server/
   init.server.luau  Orchestration : ordres, boucle de tick, réplication, match
