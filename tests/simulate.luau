@@ -2901,6 +2901,227 @@ do
 	end
 end
 
+--[[
+	Nightly passe 17 — revue PR #47 : bunkersBySlot, recycle, diplomatie, schema.
+]]
+do
+	local pack = GameState.new(1701)
+	local bot = pack:addPlayer(nil, "BotSpawn", Random.new(11), 0)
+	if not bot then
+		fail("spawnCenter — bot impossible")
+	elseif bot.spawnCenter == nil then
+		fail("spawnCenter — bot sans ancre de packing")
+	else
+		ChantierB.stripTerritory(pack, bot)
+		if not bot.awaitingSpawn then
+			fail("spawnCenter — stripTerritory n'a pas arme awaitingSpawn")
+		elseif bot.spawnCenter ~= nil then
+			fail("spawnCenter — ancre fantome apres stripTerritory")
+		end
+	end
+end
+
+do
+	local diplo = GameState.new(1702)
+	local a = diplo:addPlayer(nil, "A", Random.new(21), 0)
+	local b = diplo:addPlayer(nil, "B", Random.new(22), 0)
+	if not a or not b then
+		fail("diplo expiry — factions impossibles")
+	else
+		diplo.alliances[a.slot][b.slot] = "oops"
+		diplo.alliances[b.slot][a.slot] = "oops"
+		local okStep = pcall(Diplomacy.step, diplo)
+		if not okStep then
+			fail("diplo expiry — step crash sur expiry corrompue")
+		elseif diplo:areAllied(a.slot, b.slot) then
+			fail("diplo expiry — pacte corrompu encore vivant apres step")
+		end
+		diplo.alliances[a.slot][b.slot] = true
+		diplo.alliances[b.slot][a.slot] = true
+		okStep = pcall(Diplomacy.step, diplo)
+		if not okStep then
+			fail("diplo expiry — step crash sur true legacy")
+		elseif not diplo:areAllied(a.slot, b.slot) then
+			fail("diplo expiry — true legacy purge")
+		end
+		diplo.requests[a.slot] = diplo.requests[a.slot] or {}
+		diplo.requests[a.slot][b.slot] = diplo.tick - 1
+		local view = Diplomacy.viewFor(diplo, b.slot)
+		if view.incoming[a.slot] then
+			fail("diplo expiry — viewFor montre une demande perimee")
+		end
+	end
+end
+
+do
+	IntentValidator.reset()
+	local state = GameState.new(1703)
+	state.mode = GameModes.get("classic")
+	local fakePlayer = __newInstance("Player")
+	fakePlayer.Name = "NukeKind"
+	fakePlayer.UserId = 1703
+	local ps = state:addPlayer(fakePlayer, "NukeKind", Random.new(3), 0)
+	if not ps then
+		fail("nuke kind — spawn impossible")
+	else
+		local ctx = {
+			state = state,
+			matchPhase = "playing",
+			matchId = "nuke",
+			slotOf = function(p)
+				return if p == fakePlayer then ps.slot else nil
+			end,
+			doctrineLockAt = os.clock() + 999,
+			now = os.clock,
+			buildings = Buildings,
+			navy = Navy,
+			nukes = Nukes,
+			diplomacy = Diplomacy,
+			research = Research,
+			reply = function() end,
+			refuse = function() end,
+			broadcastRoster = function() end,
+		}
+		local okBad, reasonBad = IntentValidator.enqueue(ctx, fakePlayer, "Nuke", 1, {
+			index = ps.capitalTile or 0,
+			kind = 99,
+		})
+		if okBad or reasonBad ~= "InvalidSchema" then
+			fail(`nuke kind — kind 99 encore accepte ({tostring(reasonBad)})`)
+		end
+	end
+end
+
+do
+	local bunkerState = GameState.new(1704)
+	local a = bunkerState:addPlayer(nil, "Attaquant", Random.new(41), 0)
+	local b = bunkerState:addPlayer(nil, "Defenseur", Random.new(42), 0)
+	if not a or not b then
+		fail("bunkersBySlot — factions impossibles")
+	else
+		local tile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(bunkerState.owner, index) == b.slot and not bunkerState.buildings[index] then
+				tile = index
+				break
+			end
+		end
+		if not tile then
+			fail("bunkersBySlot — aucune tuile libre chez le defenseur")
+		else
+			bunkerState:placeBuilding(tile, Config.BUILDING.DEFENSE, b.slot)
+			local indexed = bunkerState.bunkersBySlot[b.slot] and bunkerState.bunkersBySlot[b.slot][tile]
+			if not indexed then
+				fail("bunkersBySlot — pose DEFENSE non indexee")
+			end
+			a.troops = 20000
+			b.troops = 20000
+			local postedLoss = select(1, ChantierB.attackLogic(bunkerState, 10000, a, b, tile))
+			bunkerState:destroyBuilding(tile)
+			if bunkerState.bunkersBySlot[b.slot] and bunkerState.bunkersBySlot[b.slot][tile] then
+				fail("bunkersBySlot — destroy laisse l'index")
+			end
+			local bareLoss = select(1, ChantierB.attackLogic(bunkerState, 10000, a, b, tile))
+			if postedLoss < bareLoss * 4 then
+				fail(`bunkersBySlot — posted {postedLoss} vs bare {bareLoss} (attendu x5)`)
+			end
+		end
+	end
+end
+
+do
+	local chatState = GameState.new(1705)
+	local a = chatState:addPlayer(nil, "Parleur", Random.new(51), 0)
+	if not a then
+		fail("quickChat recycle — faction impossible")
+	else
+		chatState.quickChatSent[a.slot] = 12
+		chatState.quickChatLast[a.slot] = "hello"
+		local slot = a.slot
+		chatState:removePlayer(slot)
+		if chatState.quickChatSent[slot] ~= nil or chatState.quickChatLast[slot] ~= nil then
+			fail("quickChat recycle — anti-spam herite par le prochain occupant")
+		end
+	end
+end
+
+do
+	local frontState = GameState.new(1706)
+	frontState.combatUnlocked = true
+	local a = frontState:addPlayer(nil, "Terre", Random.new(61), 0)
+	local b = frontState:addPlayer(nil, "Plage", Random.new(62), 0)
+	if not a or not b then
+		fail("reinforce beachhead — factions impossibles")
+	else
+		local beach: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(frontState.owner, index) == b.slot then
+				beach = index
+				break
+			end
+		end
+		if not beach then
+			fail("reinforce beachhead — aucune tuile cible")
+		else
+			frontState:seedBeachhead(a.slot, b.slot, 400, beach)
+			a.troops = 20000
+			a.attackRatio = 0.5
+			frontState:launchAttack(a.slot, b.slot)
+			local beachTroops = nil
+			for _, atk in frontState.attacks do
+				if atk.attacker == a.slot and atk.target == b.slot and atk.isBeachhead then
+					beachTroops = atk.troops
+				end
+			end
+			if beachTroops ~= 400 then
+				fail(`reinforce beachhead — tete de pont {tostring(beachTroops)} (attendu 400)`)
+			end
+		end
+	end
+end
+
+do
+	local deltaState = GameState.new(1707)
+	local a = deltaState:addPlayer(nil, "Delta", Random.new(71), 0)
+	if not a then
+		fail("flushOwnerDelta — faction impossible")
+	else
+		local first = deltaState:flushOwnerDelta()
+		if first and buffer.len(first) % 5 ~= 0 then
+			fail("flushOwnerDelta — taille non multiple de 5")
+		end
+		local second = deltaState:flushOwnerDelta()
+		if second ~= nil then
+			fail("flushOwnerDelta — dirty pas consomme")
+		end
+		if a.capitalTile then
+			local scratch = table.create(4, 0)
+			local n = MapGen.neighbors(a.capitalTile, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if deltaState:isLand(nb) and buffer.readu8(deltaState.owner, nb) == 0 then
+					deltaState:setOwner(nb, a.slot)
+					break
+				end
+			end
+		end
+		local third = deltaState:flushOwnerDelta()
+		if third and buffer.len(third) % 5 ~= 0 then
+			fail("flushOwnerDelta — format casse apres recycle")
+		end
+	end
+end
+
+do
+	if typeof(Nukes.samRange) ~= "function" then
+		fail("samRange — helper non exporte")
+	elseif math.abs(Nukes.samRange(1) - (150 - 480 / 6)) > 0.001 then
+		fail("samRange — formule OF cassee")
+	end
+end
+
+print("passe 17 : bunkersBySlot, spawnCenter, diplo expiry, nuke kind, beachhead, delta, samRange OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
@@ -2919,4 +3140,5 @@ if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
 else
 	print(`\27[31m{failures} invariant(s) violes.\27[0m`)
+	error(`banc serveur : {failures} invariant(s) violes`)
 end
