@@ -1677,10 +1677,20 @@ check("camera strategique", function()
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
 	-- N118 : compose CFrame.new * rotation. Plus de lookAt.
-	-- N119 : shake nombres (punch + decroissance). Leftover offset
-	-- Vector3 (N120) reste.
+	-- N119 : shake nombres (punch + decroissance).
+	-- N120 : offset trig YXZ. Pas d'assert Z == focus.Z + distance
+	-- (pitch defaut 58°, pas l'identite stub VectorToWorldSpace).
+	-- Lerp focus leftover N121.
 	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
 	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
+	local pose = camera.camera.CFrame
+	local d = camera.distance
+	local ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
+	local oy = d * math.sin(camera.pitch)
+	local oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
+	assert(pose.X == camera.focus.X + ox, "oeil X hors formule")
+	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors formule")
+	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors formule")
 	camera:punch(1)
 	assert(camera.shake > 0, "punch n'arme pas le shake")
 	camera:step(1 / 60)
