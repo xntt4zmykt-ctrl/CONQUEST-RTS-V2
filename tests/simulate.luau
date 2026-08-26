@@ -2421,6 +2421,45 @@ do
 			fail("intentions — QuickChat en cooldown rapporte un succes")
 		end
 		print("intentions : QuickChat cooldown honore")
+
+		-- needsTarget sans sequence = client 2-args (id, N) : N n'est pas une cible.
+		IntentValidator.reset()
+		table.clear(replies)
+		state.quickChatSent[ps.slot] = nil
+		state.quickChatLast[ps.slot] = nil
+		state.tick = 80
+		local chatTarget = state:addPlayer(nil, "CibleChat", Random.new(2), 0)
+		if not chatTarget then
+			fail("intentions — cible QuickChat introuvable")
+		else
+			local okHijack, reasonHijack = IntentValidator.enqueue(
+				ctx,
+				fakePlayer,
+				"QuickChat",
+				nil,
+				{ messageId = "attack_target", targetSlot = chatTarget.slot }
+			)
+			if okHijack or reasonHijack ~= "InvalidSchema" then
+				fail(`intentions — QuickChat 2-args accepte ({tostring(reasonHijack)})`)
+			end
+			if state.targetMarks[ps.slot] == chatTarget.slot then
+				fail("intentions — QuickChat 2-args a marque la cible")
+			end
+			local okMark = IntentValidator.enqueue(
+				ctx,
+				fakePlayer,
+				"QuickChat",
+				10,
+				{ messageId = "attack_target", targetSlot = chatTarget.slot }
+			)
+			if not okMark then
+				fail("intentions — QuickChat 3-args refuse a l'enqueue")
+			end
+			if state.targetMarks[ps.slot] ~= chatTarget.slot then
+				fail("intentions — QuickChat 3-args n'a pas marque")
+			end
+			print("intentions : QuickChat 2-args refuse, 3-args marque")
+		end
 	end
 end
 
@@ -2807,6 +2846,121 @@ do
 			fail("accept expire — pacte cree hors delai")
 		end
 		print("accept expire : proposition perimee refusee")
+	end
+end
+
+do
+	-- Terre + tete de pont contre le meme slot : un clic retraite marque les deux.
+	local state = GameState.new(7070)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "TerreMer", Random.new(17), 0)
+	local b = state:addPlayer(nil, "DoubleFront", Random.new(18), 0)
+	if not a or not b then
+		fail("retraite couple — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contact: number? = nil
+		local inland: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) and buffer.readu8(state.owner, nb) ~= a.slot then
+					contact = index
+					inland = nb
+					break
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact or not inland then
+			fail("retraite couple — pas de contact")
+		else
+			state:setOwner(inland, b.slot)
+			a.troops = 12000
+			a.attackRatio = 0.4
+			local launched = state:launchAttack(a.slot, b.slot)
+			state:seedBeachhead(a.slot, b.slot, 800, contact)
+			if not launched or #state.attacks < 2 then
+				fail(`retraite couple — {#state.attacks} fronts (attendu 2)`)
+			else
+				local ok = state:retreatAttack(a.slot, b.slot)
+				if not ok then
+					fail("retraite couple — ordre refuse")
+				end
+				local marked = 0
+				for _, atk in state.attacks do
+					if atk.attacker == a.slot and atk.target == b.slot and atk.retreatAt then
+						marked += 1
+					end
+				end
+				if marked < 2 then
+					fail(`retraite couple — {marked} fronts marques (attendu 2)`)
+				end
+				if state:retreatAttack(a.slot, b.slot) then
+					fail("retraite couple — second clic accepte")
+				end
+				print("retraite couple : terre + tete de pont marques")
+			end
+		end
+	end
+end
+
+do
+	-- removePlayer du defenseur restitue les troupes engagees a l'attaquant.
+	local state = GameState.new(6060)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Restitue", Random.new(21), 0)
+	local b = state:addPlayer(nil, "Deconnecte", Random.new(22), 0)
+	if not a or not b then
+		fail("refund disconnect — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local found = false
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) and buffer.readu8(state.owner, nb) ~= a.slot then
+					state:setOwner(nb, b.slot)
+					found = true
+					break
+				end
+			end
+			if found then
+				break
+			end
+		end
+		if not found then
+			fail("refund disconnect — pas de contact")
+		else
+			a.troops = 9000
+			a.attackRatio = 1
+			local launched = state:launchAttack(a.slot, b.slot)
+			local committed = 0
+			for _, atk in state.attacks do
+				if atk.attacker == a.slot and atk.target == b.slot then
+					committed += atk.troops
+				end
+			end
+			if not launched or committed <= 0 then
+				fail("refund disconnect — offensive absente")
+			else
+				local reserve = a.troops
+				state:removePlayer(b.slot)
+				if #state.attacks ~= 0 then
+					fail(`refund disconnect — {#state.attacks} fronts survivants`)
+				end
+				if math.abs(a.troops - (reserve + committed)) > 0.001 then
+					fail(
+						`refund disconnect — troupes {a.troops} attendu {reserve + committed}`
+					)
+				end
+				print("refund disconnect : troupes restituees a l'attaquant")
+			end
+		end
 	end
 end
 

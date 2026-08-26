@@ -664,6 +664,7 @@ Config.FACTORY_MAX_LEVEL = 3
 Config.MISSILE_SPEED = 1.6 -- tuiles par tick
 Config.SAM_RANGE = 34
 Config.SAM_INTERCEPT_CHANCE = 0.55
+-- ChantierB.apply ecrase a 1.0 (interception certaine dans le rayon). ISSUE-N26.
 Config.SAM_COOLDOWN = 90 -- ticks
 --[[
 	Rechargement d'un silo.

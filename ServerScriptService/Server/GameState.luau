@@ -910,9 +910,19 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
+	-- Les troupes engagees contre ce slot doivent revenir a l'attaquant :
+	-- les jeter avec le front ferait disparaitre de la population sans
+	-- conquete (deconnexion / admin). L'attaquant qui part abandonne les
+	-- siennes : plus de PlayerState pour les recevoir.
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
+		if atk.attacker == slot then
+			table.remove(self.attacks, i)
+		elseif atk.target == slot then
+			local attackerPs = self.players[atk.attacker]
+			if attackerPs then
+				attackerPs.troops += math.max(0, atk.troops)
+			end
 			table.remove(self.attacks, i)
 		end
 	end
@@ -1227,14 +1237,25 @@ end
 	couteuse a prendre, et les survivants rentrent ensuite au pays.
 ]]
 function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	-- Terre + tete de pont contre le meme slot sont deux Attack. Un clic
+	-- retraite doit les marquer tous (delai et malus inchanges).
+	local marked = 0
+	local already = 0
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			if atk.retreatAt then
-				return false, "La retraite est deja ordonnee."
+				already += 1
+			else
+				atk.retreatAt = self.tick + Config.RETREAT_DELAY
+				marked += 1
 			end
-			atk.retreatAt = self.tick + Config.RETREAT_DELAY
-			return true, "Retraite ordonnee : le front se degage."
 		end
+	end
+	if marked > 0 then
+		return true, "Retraite ordonnee : le front se degage."
+	end
+	if already > 0 then
+		return false, "La retraite est deja ordonnee."
 	end
 	return false, "Aucune offensive sur ce front."
 end
@@ -1242,6 +1263,10 @@ end
 --[[
 	Cree une tete de pont apres un debarquement : l'offensive demarre depuis une
 	tuile isolee, sans contact terrestre prealable.
+
+	Stub mort : `BoatFront.install()` remplace cette fonction. Ne pas enfiler
+	`tile` (deja a l'attaquant apres `Navy.resolveLanding`) — le vivant
+	enfile les voisins encore a la cible. Voir ISSUE-N30.
 ]]
 function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSlot: number, troops: number, tile: number)
 	for _, atk in self.attacks do

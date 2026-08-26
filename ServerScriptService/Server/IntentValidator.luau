@@ -273,9 +273,25 @@ function IntentValidator.enqueue(
 			return false, "InvalidTarget"
 		end
 	elseif actionType == "QuickChat" then
-		if typeof(payload.messageId) ~= "string" or not QuickChat.get(payload.messageId) then
+		local entry = QuickChat.get(payload.messageId)
+		if typeof(payload.messageId) ~= "string" or not entry then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
+		end
+		-- Client officiel : (id, target?, sequence). Un 2-args (id, N) sans
+		-- sequence ferait lire N comme targetSlot — mark hijack sur 1..18.
+		if entry.needsTarget then
+			if sequence == nil then
+				bumpRefuse("InvalidSchema")
+				return false, "InvalidSchema"
+			end
+			if not isInteger(payload.targetSlot)
+				or payload.targetSlot < 1
+				or payload.targetSlot > Config.MAX_TOTAL_FACTIONS
+			then
+				bumpRefuse("InvalidTarget")
+				return false, "InvalidTarget"
+			end
 		end
 	end
 

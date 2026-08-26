@@ -241,7 +241,9 @@ local function flushEvents()
 				notify:FireClient(target, event.text, event.kind)
 			end
 		else
-			notify:FireAllClients(event.text, event.kind)
+			-- Menu / Place MaxPlayers > 8 : pas de sfx/notify combat.
+			-- MatchUpdate + Roster restent FireAllClients (compte a rebours).
+			fireDeployed(notify, event.text, event.kind)
 		end
 	end
 	table.clear(state.events)
@@ -253,7 +255,7 @@ local function flushEvents()
 				sfx:FireClient(target, event.name)
 			end
 		else
-			sfx:FireAllClients(event.name)
+			fireDeployed(sfx, event.name)
 		end
 	end
 	table.clear(state.sounds)
@@ -651,8 +653,8 @@ end)
 local quickChatEvent = Remotes.get("QuickChat")
 
 quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any, sequence: any)
-	-- Compat : ancien client envoie (id, target) ; nouveau (id, target, seq).
-	-- Si targetSlot est un nombre et sequence nil, c'est l'ancien format.
+	-- Client officiel : fireOrder append sequence. needsTarget sans 3e arg
+	-- est refuse dans IntentValidator (pas de mark hijack 2-args).
 	enqueueOrReject(player, "QuickChat", sequence, { messageId = messageId, targetSlot = targetSlot })
 end)
 
