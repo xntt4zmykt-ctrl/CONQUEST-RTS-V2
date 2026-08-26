@@ -218,6 +218,33 @@ local borderScratch = table.create(4, 0)
 local priorityScratch = table.create(4, 0)
 -- Recycle du packing owner-delta : le buffer reste exact (format [u32][u8]).
 local deltaIndices: { number } = {}
+-- V26 : UnitSnapshot navires recycle (recette hardening N51 / feel N70
+-- sans retreating). Champs uniquement Types.BoatSnapshot.
+local boatSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+	}
+} =
+	table.create(48)
+-- V26 : UnitSnapshot missiles recycle (recette hardening N52 / feel N71).
+-- Champs uniquement Types.MissileSnapshot — pas sx/sy/progress/speed.
+local missileSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+} =
+	table.create(16)
 
 --=============================================================================
 -- Construction
@@ -1874,6 +1901,97 @@ end
 --=============================================================================
 -- Replication
 --=============================================================================
+
+--[[
+	Payload UnitSnapshot navires (10 Hz). Pas de path / homeTile / retreating
+	(Types.BoatSnapshot). Overlay visuel interpolé via x/y/kind seulement.
+	init.server est hors bundle : ce helper est le contrat testable.
+	V26 : recycle boatSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotBoats(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+	}
+}
+	local n = 0
+	for _, boat in self.boats do
+		n += 1
+		local rec = boatSnapBuf[n]
+		if rec == nil then
+			boatSnapBuf[n] = {
+				id = boat.id,
+				slot = boat.slot,
+				x = boat.x,
+				y = boat.y,
+				troops = math.floor(boat.troops),
+				kind = boat.kind,
+			}
+		else
+			rec.id = boat.id
+			rec.slot = boat.slot
+			rec.x = boat.x
+			rec.y = boat.y
+			rec.troops = math.floor(boat.troops)
+			rec.kind = boat.kind
+		end
+	end
+	for i = #boatSnapBuf, n + 1, -1 do
+		boatSnapBuf[i] = nil
+	end
+	return boatSnapBuf
+end
+
+--[[
+	Payload UnitSnapshot missiles (10 Hz). Pas de sx/sy/progress/speed
+	(Types.MissileSnapshot). Overlay interpolé via tx/ty seulement.
+	init.server est hors bundle : ce helper est le contrat testable.
+	V26 : recycle missileSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotMissiles(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+}
+	local n = 0
+	for _, missile in self.missiles do
+		n += 1
+		local rec = missileSnapBuf[n]
+		if rec == nil then
+			missileSnapBuf[n] = {
+				id = missile.id,
+				slot = missile.slot,
+				x = missile.x,
+				y = missile.y,
+				tx = missile.tx,
+				ty = missile.ty,
+				kind = missile.kind,
+			}
+		else
+			rec.id = missile.id
+			rec.slot = missile.slot
+			rec.x = missile.x
+			rec.y = missile.y
+			rec.tx = missile.tx
+			rec.ty = missile.ty
+			rec.kind = missile.kind
+		end
+	end
+	for i = #missileSnapBuf, n + 1, -1 do
+		missileSnapBuf[i] = nil
+	end
+	return missileSnapBuf
+end
 
 --[[
 	Serialise les changements de proprietaire depuis le dernier appel, au format
