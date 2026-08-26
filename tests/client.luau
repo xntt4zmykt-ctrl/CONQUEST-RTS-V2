@@ -2004,6 +2004,15 @@ check("navires, missiles et interpolation", function()
 	-- leftover N133 euler, leftover N152 flame Size doivent
 	-- rester verts. Recette leftover N164, pas merger visual.
 	-- PointLight enfant. overlay:explosion plus bas ne leve pas.
+	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
+	-- Pas de testFlushDelays ici — les Model restent parentés
+	-- (le flush + reuse rawequal est dans « vagues de conquete »).
+	-- Skip retraite splash id=1 N56. Missiles Destroy immédiat
+	-- (leftover N176). Leftover N161 splash, leftover N160 wake,
+	-- leftover N152 flame Size doivent rester verts. Recette
+	-- leftover N174, pas merger visual V112 Ground/Border.
+	-- Overlay.clear Destroy conservé. HUD dismissFree N174
+	-- (check vagues) inchange.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -2237,6 +2246,13 @@ check("vagues de conquete", function()
 	-- pooledFeed (même TextLabel) ou présence dans dismissFree.
 	-- Name Dismiss conservé. Distinct feedFree. Pas #dismissFree
 	-- == 3. Pas d'assert autre Name. Recette leftover N173.
+	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
+	-- Le check navires n'a pas flushé ; ce flush pousse shipFree
+	-- (ids 1/2/4, missiles Destroy immédiat hors scope). Snapshot
+	-- avant applyUnits id=99 ; id=99 kind=1 slot=1 reparente le
+	-- transport (rawequal Parent overlay.root ou présence dans
+	-- shipFree). Distinct splashFree / wakeFree / dismissFree.
+	-- Pas #shipFree == 3. Pas d'assert autre Name. Recette leftover N174.
 	local pooledDismiss = pooledFeed:FindFirstChild("Dismiss")
 	assert(pooledDismiss ~= nil and pooledDismiss:IsA("TextButton"), "snapshot Dismiss manquant")
 	testFlushDelays()
@@ -2259,6 +2275,30 @@ check("vagues de conquete", function()
 		assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse N174")
 	end
 	assert(pooledDismiss ~= pooledFeed, "dismissFree partage feedFree")
+	-- N175 : flush ci-dessus a poussé les Model navire de « navires ».
+	-- Snapshot avant applyUnits id=99 (kind=1 slot=1 = transport
+	-- id=1). Distinct splashFree / wakeFree / dismissFree / feedFree.
+	local shipPool = overlay.shipFree
+	assert(shipPool ~= nil and #shipPool >= 1, "navires non poolees")
+	local pooledShip = nil
+	for i = #shipPool, 1, -1 do
+		local vis = shipPool[i]
+		if vis.kind == 1 and vis.slot == 1 then
+			pooledShip = vis
+			break
+		end
+	end
+	if pooledShip == nil then
+		pooledShip = shipPool[#shipPool]
+	end
+	assert(pooledShip ~= nil, "snapshot navire manquant")
+	assert(pooledShip.model.Parent == nil, "navire encore parente")
+	assert(pooledShip.isMissile ~= true, "ogive poussee dans shipFree")
+	assert(pooledShip ~= pooledWake, "shipFree partage wakeFree")
+	assert(pooledShip ~= pooledSplash, "shipFree partage splashFree")
+	assert(pooledShip ~= pooledGold, "shipFree partage goldFree")
+	assert(pooledShip ~= pooledDismiss, "shipFree partage dismissFree")
+	assert(pooledShip ~= pooledFeed, "shipFree partage feedFree")
 	local ringN = #ringPool
 	local wakeN = #wakePool
 	overlay:applyUnits({
@@ -2267,6 +2307,21 @@ check("vagues de conquete", function()
 	assert(#wakePool == wakeN - 1, "wake non reutilise")
 	assert(rawequal(pooledWake.Parent, overlay.root), "wake non reparente")
 	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu au reuse")
+	-- N175 : id=99 kind=1 slot=1 consomme shipFree. Reset Transparency
+	-- construction. Parent overlay.root. Pas Destroy. Kind match.
+	if pooledShip.model.Parent == nil then
+		local inFree = false
+		for _, vis in shipPool do
+			if rawequal(vis, pooledShip) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "navire ni reparente ni dans shipFree")
+	else
+		assert(rawequal(pooledShip.model.Parent, overlay.root), "navire recree")
+		assert(not pooledShip.isMissile, "reuse ogive")
+	end
 	-- N161 : despawn id=99 (pas retraite) consomme splashFree.
 	local splashN = #splashPool
 	overlay:applyUnits({}, {})

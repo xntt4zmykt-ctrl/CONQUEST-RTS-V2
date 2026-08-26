@@ -763,6 +763,66 @@ end
 	V72, portee pas mergee). Camera N118 deja. Pas de RemoteFunction.
 	HUD / UnitModels / serveur non touches.
 ]]
+
+-- N175 : recycle les Model navire au despawn delay 0.95 s. Distinct
+-- splashFree (N161, cylindre despawn). Distinct wakeFree (N160, cylindre
+-- spawn). Distinct dismissFree (N174). Distinct valueFree (N173).
+-- Kind match obligatoire (transport / cargo / carrier). Slot match
+-- obligatoire (recolor non sûr + teinte retraite N56). Missiles hors
+-- scope (Destroy immédiat, leftover N176). Overlay.clear Destroy
+-- conservé (teardown). createBoat construction inchangée. Pas visual
+-- V112 (ne pas merger 3ba1). Distinct leftover N152 flame.
+local function rememberShipRest(visual: any)
+	if visual.restTransparency then
+		return
+	end
+	local restT = {}
+	local restC = {}
+	for i, piece in visual.pieces do
+		restT[i] = piece.part.Transparency
+		restC[i] = piece.part.Color
+	end
+	visual.restTransparency = restT
+	visual.restColor = restC
+end
+
+local function restoreShip(visual: any, parent: Instance)
+	local restT = visual.restTransparency
+	local restC = visual.restColor
+	for i, piece in visual.pieces do
+		piece.part.Transparency = if restT then restT[i] else 0
+		if restC and restC[i] then
+			piece.part.Color = restC[i]
+		end
+	end
+	visual.model.Parent = parent
+end
+
+local function takeShip(self: Overlay, kind: number, slot: number): any
+	local free = (self :: any).shipFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.kind == kind and last.slot == slot then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.kind == kind and cand.slot == slot then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
 local function trackUnit(
 	self: Overlay,
 	id: number,
@@ -775,9 +835,26 @@ local function trackUnit(
 )
 	local unit = self.units[id]
 	if not unit then
-		local visual = if isMissile
-			then UnitModels.createMissile(self.root, slot, kind)
-			else UnitModels.createBoat(self.root, slot, kind)
+		local visual
+		if isMissile then
+			visual = UnitModels.createMissile(self.root, slot, kind)
+		else
+			-- N175 : pop shipFree O(1) depuis la fin si kind+slot
+			-- match. Sinon scan court (n petit). Mismatch / vide =
+			-- createBoat une fois. Ne pas pop un carrier pour un
+			-- transport. Ne pas pop une ogive (missiles jamais
+			-- poussés). Reset Transparency / Color construction
+			-- (tween despawn pose Transparency=1 ; retraite teinte
+			-- les Color). Parent = self.root. visual.pieces conservé.
+			visual = takeShip(self, kind, slot)
+			if visual then
+				restoreShip(visual, self.root)
+			else
+				visual = UnitModels.createBoat(self.root, slot, kind)
+				rememberShipRest(visual)
+			end
+			visual.slot = slot
+		end
 		unit = {
 			visual = visual,
 			currentX = x,
@@ -787,6 +864,7 @@ local function trackUnit(
 			isMissile = isMissile,
 			phase = (id % 31) / 31 * math.pi * 2,
 			extra = extra,
+			slot = slot,
 		}
 		self.units[id] = unit
 		if not isMissile then
@@ -929,10 +1007,11 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 					-- Euler N131 inline conservé. Tween Create conservé
 					-- (Size + Transparency restart). routePart non modifié
 					-- (LaunchWake / DeliveryPulse / Shockwave / BlastSmoke).
-					-- Destroy du modèle navire inchangé (0.95 s, pas le splash).
-					-- Recette leftover N160, pas merger visual. HUD /
-					-- UnitModels / Effects / PlacementPreview / goldPopup /
-					-- trackUnit insert / stepInterpolation inchangés.
+					-- N175 : Destroy du modèle navire → Parent = nil +
+					-- shipFree (0.95 s, pas le splash). Recette leftover
+					-- N174, pas merger visual V112. HUD / UnitModels /
+					-- Effects / PlacementPreview / goldPopup /
+					-- stepInterpolation inchangés. trackUnit insert pop.
 					local free = self.splashFree
 					if not free then
 						free = {}
@@ -976,9 +1055,24 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				for _, piece in unit.visual.pieces do
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
+				-- N175 : free-list shipFree, push si encore parenté
+				-- (un delay fantôme ne double-push pas). Pas Destroy.
+				-- Stocker le Visual entier (model + pieces + kind +
+				-- isMissile + rest Transparency/Color). Slot pour le
+				-- match takeShip. Skip missiles (branche else).
+				-- Overlay.clear Destroy conservé. splashFree / wakeFree
+				-- non partagés. Recette leftover N174.
 				task.delay(0.95, function()
 					if unit.visual.model.Parent then
-						unit.visual.model:Destroy()
+						unit.visual.model.Parent = nil
+						rememberShipRest(unit.visual)
+						unit.visual.slot = unit.slot
+						local pool = self.shipFree
+						if not pool then
+							pool = {}
+							self.shipFree = pool
+						end
+						pool[#pool + 1] = unit.visual
 					end
 				end)
 			else
