@@ -8849,6 +8849,335 @@ do
 	end
 end
 
+do
+	-- N95 : GameState.placeBuilding recycle buildingRecPool[index].
+	-- Pose CITY → rawequal record + GameState.buildingRecPool[index].
+	-- Destroy → buildings[index] == nil, pool survit. 2e pose autre
+	-- kind (FACTORY) → rawequal record, kind/slot/level/cooldown a jour,
+	-- links distinct (N65 unique). Pools separes de portRecPool /
+	-- factoryRecPool. Banc N40 / N45 / N46 / N70 / N93 / N94 inchanges.
+	if rawequal(GameState.buildingRecPool, GameState.portRecPool) then
+		fail("building pool — buildingRecPool alias portRecPool")
+	elseif rawequal(GameState.buildingRecPool, GameState.factoryRecPool) then
+		fail("building pool — buildingRecPool alias factoryRecPool")
+	else
+		local state = GameState.new(1095)
+		local owner = state:addPlayer(nil, "ChantierPool", Random.new(95), 0)
+		if not owner then
+			fail("building pool — spawn impossible")
+		else
+			local site: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) and not state.buildings[index] then
+					site = index
+					break
+				end
+			end
+			if not site then
+				fail("building pool — tuile terrestre introuvable")
+			else
+				state:placeBuilding(site, Config.BUILDING.CITY, owner.slot)
+				local rec = state.buildings[site]
+				local links1 = if rec then rec.links else nil
+				if not rec or rec.kind ~= Config.BUILDING.CITY or rec.slot ~= owner.slot or rec.level ~= 1 then
+					fail("building pool — pose n'a pas cree le record")
+				elseif not rawequal(rec, GameState.buildingRecPool[site]) then
+					fail("building pool — recPool[index] distinct")
+				elseif rawequal(rec, GameState.portRecPool[site]) then
+					fail("building pool — rec partage portRecPool")
+				elseif rawequal(rec, GameState.factoryRecPool[site]) then
+					fail("building pool — rec partage factoryRecPool")
+				else
+					state:destroyBuilding(site)
+					if state.buildings[site] ~= nil then
+						fail("building pool — destroy laisse le record")
+					elseif GameState.buildingRecPool[site] == nil then
+						fail("building pool — pool perdu au destroy")
+					else
+						state:placeBuilding(site, Config.BUILDING.FACTORY, owner.slot)
+						local again = state.buildings[site]
+						if not again or not rawequal(rec, again) then
+							fail("building pool — 2e pose non recycle")
+						elseif again.kind ~= Config.BUILDING.FACTORY or again.slot ~= owner.slot or again.level ~= 1 or again.cooldown ~= 0 then
+							fail("building pool — 2e pose champs stale")
+						elseif rawequal(links1, again.links) then
+							fail("building pool — links aliases (N65)")
+						elseif not rawequal(state.factoriesByTile[site], GameState.factoryRecPool[site]) then
+							fail("building pool — sidecar FACTORY perdu")
+						elseif rawequal(again, state.factoriesByTile[site]) then
+							fail("building pool — Building alias sidecar")
+						else
+							print("building pool : rawequal index, links distinct (N95)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N96 : Navy recycle boatFree (contrat A). Spawn convoi → couler
+	-- (PORT detruit, N35) → 2e spawn → rawequal record, slot/kind/
+	-- targetTile a jour, path distinct (N64). launchInvasion recycle
+	-- aussi. Carrier spawn/destroy NAVAL_BASE recycle. Banc N40 / N48 /
+	-- inbound / N51 inchanges. Pas de retreating Overlay.
+	local savedChance = Config.TRADE_SHIP_CHANCE
+	local savedMax = Config.MAX_TRADE_SHIPS
+	Config.TRADE_SHIP_CHANCE = 1
+	Config.MAX_TRADE_SHIPS = 1
+
+	local waveState = GameState.new(1096)
+	local seller = waveState:addPlayer(nil, "CalePool", Random.new(96), 0)
+	local buyer = waveState:addPlayer(nil, "CaleDest", Random.new(97), 0)
+	local tradeOk = false
+	if not seller or not buyer then
+		fail("boat pool — spawn factions impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if waveState:isLand(index) and MapGen.isCoastal(waveState.terrain, index) and not waveState.buildings[index] then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second then
+					local path = Navy.findSeaPath(waveState, first, second)
+					if path and #path <= Config.BOAT_MAX_RANGE then
+						portA, portB = first, second
+						break
+					end
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("boat pool — aucune paire cotiere reliee")
+		else
+			waveState:setOwner(portA, seller.slot)
+			waveState:setOwner(portB, buyer.slot)
+			waveState:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			waveState:placeBuilding(portB, Config.BUILDING.PORT, buyer.slot)
+			waveState.tick = 0
+			Navy.step(waveState, Random.new(7))
+			local rec = nil
+			for _, boat in waveState.boats do
+				if boat.kind == Navy.KIND_TRADE then
+					rec = boat
+					break
+				end
+			end
+			if not rec then
+				fail("boat pool — 0 convoi avec chance=1")
+			else
+				local path1 = rec.path
+				local dest = rec.targetTile
+				waveState:destroyBuilding(dest)
+				waveState.tick = 1
+				Navy.step(waveState, Random.new(8))
+				local leftover = 0
+				for _, boat in waveState.boats do
+					if boat.kind == Navy.KIND_TRADE then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`boat pool — {leftover} convoi(s) apres coule`)
+				elseif Navy.boatFree[1] == nil then
+					fail("boat pool — free-list vide apres coule")
+				else
+					waveState:placeBuilding(dest, Config.BUILDING.PORT, buyer.slot)
+					waveState.tick = Config.TRADE_SHIP_INTERVAL
+					Navy.step(waveState, Random.new(9))
+					local again = nil
+					for _, boat in waveState.boats do
+						if boat.kind == Navy.KIND_TRADE then
+							again = boat
+							break
+						end
+					end
+					if not again or not rawequal(rec, again) then
+						fail("boat pool — 2e convoi non recycle")
+					elseif again.slot ~= seller.slot and again.slot ~= buyer.slot then
+						fail("boat pool — slot stale")
+					elseif again.kind ~= Navy.KIND_TRADE then
+						fail("boat pool — kind stale")
+					elseif rawequal(path1, again.path) then
+						fail("boat pool — path aliases (N64)")
+					else
+						tradeOk = true
+					end
+				end
+			end
+		end
+	end
+
+	Config.TRADE_SHIP_CHANCE = savedChance
+	Config.MAX_TRADE_SHIPS = savedMax
+
+	local invState = GameState.new(1097)
+	invState.combatUnlocked = true
+	local invader = invState:addPlayer(nil, "CaleInv", Random.new(98), 0)
+	local defender = invState:addPlayer(nil, "CaleDef", Random.new(99), 0)
+	local invasionOk = false
+	if not invader or not defender then
+		fail("boat pool invasion — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if invState:isLand(index) and MapGen.isCoastal(invState.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local origin: number? = nil
+		local landing: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second then
+					local path = Navy.findSeaPath(invState, first, second)
+					if path and #path <= Config.BOAT_MAX_RANGE then
+						origin, landing = first, second
+						break
+					end
+				end
+			end
+			if origin then
+				break
+			end
+		end
+		if not origin or not landing then
+			fail("boat pool invasion — aucune paire cotiere reliee")
+		else
+			invState:setOwner(origin, invader.slot)
+			invState:setOwner(landing, defender.slot)
+			invader.troops = math.max(invader.troops, 2000)
+			local ok, _ = Navy.launchInvasion(invState, invader.slot, landing)
+			local rec = nil
+			for _, boat in invState.boats do
+				if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+					rec = boat
+					break
+				end
+			end
+			if not ok or not rec then
+				fail("boat pool invasion — launch refuse")
+			else
+				local path1 = rec.path
+				invState:setOwner(landing, invader.slot)
+				Navy.step(invState, Random.new(10))
+				local leftover = 0
+				for _, boat in invState.boats do
+					if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`boat pool invasion — {leftover} transport(s) apres restitution`)
+				else
+					invState:setOwner(landing, defender.slot)
+					invader.troops = math.max(invader.troops, 2000)
+					local ok2, _ = Navy.launchInvasion(invState, invader.slot, landing)
+					local again = nil
+					for _, boat in invState.boats do
+						if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+							again = boat
+							break
+						end
+					end
+					if not ok2 or not again or not rawequal(rec, again) then
+						fail("boat pool invasion — 2e launch non recycle")
+					elseif again.targetTile ~= landing or again.kind ~= Navy.KIND_TRANSPORT then
+						fail("boat pool invasion — champs stale")
+					elseif rawequal(path1, again.path) then
+						fail("boat pool invasion — path aliases (N64)")
+					else
+						invasionOk = true
+					end
+				end
+			end
+		end
+	end
+
+	local carState = GameState.new(1098)
+	local admiral = carState:addPlayer(nil, "CaleAmiral", Random.new(100), 0)
+	local carrierOk = false
+	if not admiral then
+		fail("boat pool carrier — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if carState:isLand(index) and not carState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("boat pool carrier — tuile terrestre introuvable")
+		else
+			carState:setOwner(site, admiral.slot)
+			carState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, admiral.slot)
+			Navy.step(carState, Random.new(11))
+			local rec = nil
+			for _, boat in carState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					rec = boat
+					break
+				end
+			end
+			if not rec then
+				fail("boat pool carrier — spawn NAVAL_BASE n'a pas cree")
+			else
+				local path1 = rec.path
+				carState:destroyBuilding(site)
+				Navy.step(carState, Random.new(12))
+				local leftover = 0
+				for _, boat in carState.boats do
+					if boat.kind == Navy.KIND_CARRIER then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`boat pool carrier — {leftover} carrier(s) apres destroy`)
+				else
+					carState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, admiral.slot)
+					Navy.step(carState, Random.new(13))
+					local again = nil
+					for _, boat in carState.boats do
+						if boat.kind == Navy.KIND_CARRIER then
+							again = boat
+							break
+						end
+					end
+					if not again or not rawequal(rec, again) then
+						fail("boat pool carrier — 2e spawn non recycle")
+					elseif again.slot ~= admiral.slot or again.kind ~= Navy.KIND_CARRIER or again.homeTile ~= site then
+						fail("boat pool carrier — champs stale")
+					elseif rawequal(path1, again.path) then
+						fail("boat pool carrier — path aliases (N64)")
+					else
+						carrierOk = true
+					end
+				end
+			end
+		end
+	end
+
+	if tradeOk and invasionOk and carrierOk then
+		print("boat pool : rawequal convoi / transport / carrier (N96)")
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
