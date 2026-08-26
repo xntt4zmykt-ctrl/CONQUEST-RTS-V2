@@ -349,6 +349,30 @@ function WorldRenderer.chunkKeyAt(self: WorldRenderer, x: number, y: number): nu
 	return buffer.readu8(self.owner, index) * KEY_STRIDE + terrain
 end
 
+-- N104 : rebuildChunk hisse meshKeyAt (recette N85/N102). Upvalues DEDIEES —
+-- ne PAS reutiliser borderTerrain : rebuildChunk appelle buildChunkBorders
+-- APRES le greedy, et celui-ci ecrase ses propres upvalues. Non reentrant
+-- (synchrone, budget 3 sequentiels). Poser meshTerrain / meshOwner AU DEBUT
+-- de rebuildChunk. Meme loi que chunkKeyAt (ocean = nil, sinon
+-- owner * KEY_STRIDE + terrain). Overlay n'appelle pas rebuildChunk.
+-- Pas de RemoteFunction. chunkKeyAt reste (simulate.luau le commente).
+local meshTerrain: buffer? = nil
+local meshOwner: buffer? = nil
+
+local function meshKeyAt(x: number, y: number): number?
+	local terrain = meshTerrain
+	local owner = meshOwner
+	if not terrain or not owner then
+		return nil
+	end
+	local index = MapGen.toIndex(x, y)
+	local kind = buffer.readu8(terrain, index)
+	if kind == OCEAN then
+		return nil
+	end
+	return buffer.readu8(owner, index) * KEY_STRIDE + kind
+end
+
 --=============================================================================
 -- Frontieres
 --=============================================================================
@@ -376,7 +400,7 @@ local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 -- borderTerrain / borderOwner / borderFolder / borderSurface AU DEBUT
 -- de buildChunkBorders. Un leftover `self` d'un chunk precedent colorerait
 -- le voisin. Overlay n'appelle pas buildChunkBorders. Pas de RemoteFunction.
--- Ne pas table.clone de BORDER_PASSES. Ne pas recycler les Parts (N104).
+-- Ne pas table.clone de BORDER_PASSES. Ne pas recycler les Parts (N106).
 local borderTerrain: buffer? = nil
 local borderOwner: buffer? = nil
 local borderFolder: Folder? = nil
@@ -548,9 +572,11 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	local x1 = math.min(cx + CHUNK - 1, W - 1)
 	local y1 = math.min(cy + CHUNK - 1, H - 1)
 
-	local rects = GreedyMesh.rectangles(function(x, y)
-		return self:chunkKeyAt(x, y)
-	end, cx, cy, x1, y1, self.meshScratch)
+	-- N104 : poser AVANT rectangles. Ne pas partager borderTerrain (N102) :
+	-- buildChunkBorders mute ses upvalues apres le greedy.
+	meshTerrain = self.terrain
+	meshOwner = self.owner
+	local rects = GreedyMesh.rectangles(meshKeyAt, cx, cy, x1, y1, self.meshScratch)
 
 	for _, rect in rects do
 		local terrain = rect.key % KEY_STRIDE
