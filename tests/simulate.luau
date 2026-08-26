@@ -7070,6 +7070,75 @@ do
 end
 
 do
+	-- N76 : detonate recycle tilesBeforeBuf / hitTilesBuf. Deux
+	-- detonations → rawequal. Boom sur A → hitTilesBuf[A] >= 1,
+	-- tilesBeforeBuf[A] == snapshot avant crater. Boom ocean / hors
+	-- carte → next(hitTilesBuf) == nil (un leftover taxerait A).
+	-- Leftover splitMirv targets = N77. Pas N33 / N30 / N50 / N75.
+	local state = GameState.new(3104)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "BoomA", Random.new(121), 0)
+	local b = state:addPlayer(nil, "BoomB", Random.new(122), 0)
+	if not a or not b then
+		fail("detonate hashes — spawn impossible")
+	else
+		local target = a.capitalTile
+		if not target then
+			fail("detonate hashes — capitale A introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			local snapTiles = a.tiles
+			local tb0, ht0 = Nukes.tilesBeforeBuf, Nukes.hitTilesBuf
+			Nukes.detonate(state, {
+				id = 40,
+				slot = b.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 1,
+				speed = Config.MISSILE_SPEED,
+			})
+			if not rawequal(tb0, Nukes.tilesBeforeBuf) or not rawequal(ht0, Nukes.hitTilesBuf) then
+				fail("detonate hashes — rawequal premier boom")
+			elseif Nukes.tilesBeforeBuf[a.slot] ~= snapTiles then
+				fail(`detonate hashes — tilesBefore {Nukes.tilesBeforeBuf[a.slot]} != {snapTiles}`)
+			elseif (Nukes.hitTilesBuf[a.slot] or 0) < 1 then
+				fail("detonate hashes — A non touche")
+			else
+				print("detonate hashes : boom A, snapshot avant crater (N76)")
+				local troopsAfter = a.troops
+				Nukes.detonate(state, {
+					id = 41,
+					slot = b.slot,
+					kind = Config.NUKE.ATOM,
+					x = -1000,
+					y = -1000,
+					sx = -1000,
+					sy = -1000,
+					tx = -1000,
+					ty = -1000,
+					progress = 1,
+					speed = Config.MISSILE_SPEED,
+				})
+				if not rawequal(tb0, Nukes.tilesBeforeBuf) or not rawequal(ht0, Nukes.hitTilesBuf) then
+					fail("detonate hashes — rawequal ocean")
+				elseif next(Nukes.hitTilesBuf) ~= nil then
+					fail("detonate hashes — leftover hitTiles ocean")
+				elseif a.troops ~= troopsAfter then
+					fail(`detonate hashes — leftover tax {a.troops} vs {troopsAfter}`)
+				else
+					print("detonate hashes : ocean leftover 0, rawequal (N76)")
+				end
+			end
+		end
+	end
+end
+
+do
 	-- N57 : playerStatsForReplicate recycle. 1 joueur 0 front → champs
 	-- honores, attackTargets nil, next(stats) = ce slot. launchAttack →
 	-- activeAttacks==1. removePlayer → slot absent. Second appel →
