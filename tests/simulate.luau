@@ -3869,6 +3869,32 @@ do
 				fail("findSeaPath pool — trajet inverse introuvable")
 			else
 				print(`findSeaPath pool : {#p1} tuiles, 4 appels identiques`)
+				-- N64 : retour unique (pas pathWalkBuf). p1 ne doit pas
+				-- etre mute par un appel suivant — boat.path prend possession.
+				-- Recette feel 69f4 N83.
+				if rawequal(p1, p2) or rawequal(p1, p3) or rawequal(p1, again) then
+					fail("findSeaPath pathWalk — rawequal (N64)")
+				else
+					local snapshot = table.create(#p1)
+					for i = 1, #p1 do
+						snapshot[i] = p1[i]
+					end
+					local p4 = Navy.findSeaPath(seaState, fromTile, toTile)
+					local mutated = false
+					for i = 1, #p1 do
+						if p1[i] ~= snapshot[i] then
+							mutated = true
+							break
+						end
+					end
+					if mutated then
+						fail("findSeaPath pathWalk — p1 mute par un second appel (N64)")
+					elseif not p4 or rawequal(p1, p4) then
+						fail("findSeaPath pathWalk — identite partagee (N64)")
+					else
+						print("findSeaPath pathWalk : identite unique, p1 intact (N64)")
+					end
+				end
 			end
 		end
 	end
@@ -5726,6 +5752,74 @@ do
 				fail("refreshRail — ville/capitale absente des liens usine")
 			else
 				print("refreshRail : gares du slot, bunker ignore (N47)")
+			end
+		end
+	end
+end
+
+do
+	-- N65 : stationBuf recycle. Spawn (capitale = gare) → railRoutes 0.
+	-- FACTORY + CITY a portee → factory.links contient la ville, railIncome > 0.
+	-- Second refresh → memes liens, identite factory.links conservee
+	-- (pas table.clear in-place / option B). factory.links n'est pas
+	-- stationBuf (ne contient pas l'index usine). Recette feel 69f4 N84.
+	local state = GameState.new(1085)
+	local owner = state:addPlayer(nil, "RailBuf", Random.new(85), 0)
+	if not owner then
+		fail("stationBuf — spawn impossible")
+	else
+		state:refreshRailNetwork(owner.slot)
+		if owner.railRoutes ~= 0 then
+			fail(`stationBuf — railRoutes={owner.railRoutes} sans usine`)
+		else
+			local sites: { number } = {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+					table.insert(sites, index)
+					if #sites >= 2 then
+						break
+					end
+				end
+			end
+			if #sites < 2 then
+				fail("stationBuf — tuiles libres insuffisantes")
+			else
+				state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+				state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+				state:refreshRailNetwork(owner.slot)
+				local factory = state.buildings[sites[1]]
+				local sawCity = false
+				local sawSelf = false
+				if factory then
+					for _, dest in factory.links do
+						if dest == sites[2] or dest == owner.capitalTile then
+							sawCity = true
+						end
+						if dest == sites[1] then
+							sawSelf = true
+						end
+					end
+				end
+				if not factory or not sawCity then
+					fail("stationBuf — ville/capitale absente des liens")
+				elseif sawSelf then
+					fail("stationBuf — factory.links == stationBuf (index usine)")
+				elseif owner.railIncome <= 0 then
+					fail(`stationBuf — railIncome={owner.railIncome}`)
+				else
+					local firstLinks = factory.links
+					local nLinks = #firstLinks
+					state:refreshRailNetwork(owner.slot)
+					if not rawequal(factory.links, firstLinks) then
+						fail("stationBuf — identite links perdue (option B?)")
+					elseif #factory.links ~= nLinks then
+						fail("stationBuf — liens mutes au second refresh")
+					else
+						print("stationBuf : liens usine, income, identite (N65)")
+						state:refreshRailNetwork(99)
+						print("stationBuf : slot sans joueur, pas d'erreur (N65)")
+					end
+				end
 			end
 		end
 	end
