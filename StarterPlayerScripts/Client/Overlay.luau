@@ -713,10 +713,13 @@ end
 	(10 Hz) plus un userdata par lerp (60 Hz). Insert : poser les quatre
 	nombres. Update : muter `targetX`/`targetY`. Lerp numerique dans
 	`stepInterpolation`. Extra missile inchange (N98).
-	N103 : pose 60 Hz = X/Z monde en nombres + un `CFrame.lookAt` (recette
-	visual V56). Distinct de N101 (nombres cible) / N98 (extra).
-	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Mouvement =
-	lookAt conserve. Distinct de N115 (camion HV cuisable).
+	N103 : pose 60 Hz = X/Z monde en nombres (recette visual V56). Distinct
+	de N101 (nombres cible) / N98 (extra).
+	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Distinct de
+	N115 (camion HV cuisable).
+	N117 : mouvement = `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`
+	(recette visual V65). Plus de lookAt deux Vector3 60 Hz. Roulis navire
+	Angles inchange (apres la compose yaw). Camera inchangee (leftover N118).
 	Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
 ]]
 local function trackUnit(
@@ -905,7 +908,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
 		-- N115 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
-		-- 60 Hz. Roues : Angles conserve. Unites inchangees (N103 / leftover N116).
+		-- 60 Hz. Roues : Angles conserve. Unites inchangees (N117 / N116).
 		-- Chantier segment.rot inchange (N113). Recette visual V64, portee pas
 		-- mergee. Extra missile inchange (N98). targetX inchange (N101).
 		-- Une voie sans delivery ne rentre pas ici.
@@ -971,16 +974,20 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local dx = unit.targetX - unit.currentX
 		local dy = unit.targetY - unit.currentY
 		local mag = math.sqrt(dx * dx + dy * dy)
-		-- N116 : immobile = translation seule (regard -Z identique a lookAt
-		-- vers (0, -1)). Plus de deux Vector3 60 Hz hors deplacement. Mouvement
-		-- : lookAt conserve (look change chaque frame, pas cuisable). Roulis
-		-- Angles inchange. Recette : leftover N103. Extra missile inchange (N98).
-		-- Camion / chantier inchanges (N115 / N113). UnitModels.place inchange.
+		-- N116 : immobile = translation seule (regard -Z). Plus de deux
+		-- Vector3 60 Hz hors deplacement.
+		-- N117 : mouvement = translation * yaw euler (regard -Z vers la
+		-- cible). `dy` tuile = monde Z. Plus de lookAt deux Vector3.
+		-- Recette visual V65, portee pas mergee. Roulis Angles inchange
+		-- (apres la compose yaw). Extra missile inchange (N98). Camion /
+		-- chantier inchanges (N115 / N113). UnitModels.place inchange.
+		-- Camera inchangee (leftover N118).
 		local frame
 		if mag <= 0.01 then
 			frame = CFrame.new(worldX, py, worldZ)
 		else
-			frame = CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX + dx, py, worldZ + dy))
+			frame = CFrame.new(worldX, py, worldZ)
+				* CFrame.fromEulerAnglesYXZ(0, math.atan2(dx, -dy), 0)
 			if not unit.isMissile then
 				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
 			end
