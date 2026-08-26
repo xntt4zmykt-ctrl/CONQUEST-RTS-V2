@@ -29,9 +29,9 @@ Banc headless (`./tests/run.sh`) : voir §7.
 |---|---|
 | Minimap.setFocus nombres (N123) | Oui. `(x,y,z)`, y ignoré, origine → u=0.5/v=0.5. Recette visual V69 leftover minimap, pas merger `c5c9`. |
 | BuildingModels Radar/Flag/Boom euler (N124) | Oui. `CFrame.new(rest.X,Y,Z) * fromEulerAnglesYXZ`. Recette visual V70, pas merger `06ee`. Overlay `CFrame.Angles` restait (leftover N125/N126). |
-| Specs N125–N126 | **Corrigés ici.** N125 = Overlay navire roulis `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71 déjà fermée sur `9ab9` / PR #143 — **porté, pas mergé**). N126 = Overlay camion roues `fromEulerAnglesYXZ(spin, 0, 0)` (leftover visual V72 déjà sur `9ab9` — **porté, pas mergé**). |
+| Specs N125–N126 | **Corrigés ici.** N125 = Overlay navire roulis `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71 déjà fermée sur `9ab9` / PR #143 — **porté, pas mergé**). N126 = Overlay camion roues `fromEulerAnglesYXZ(spin, 0, 0)` (recette visual V72 déjà fermée sur `9793` / PR #146 — **porté, pas mergé**). |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #141/`24a7` (N97–N98), feel jusqu’à #147, visuelles #39/…/`9ab9` V71 **fermé** + leftover V72 roues (porté ici, pas mergé). **#147 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `9ab9` / `06ee` / `c5c9` ni hardening `4c70` / `24a7` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #141/`24a7` (N97–N98), feel jusqu’à #147, visuelles #39/…/`9ab9` V71 **fermé** ; `9793` V72 roues **fermé** (porté ici, pas mergé) + leftover V73 UnitModels. **#147 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `9793` / `9ab9` / `06ee` ni hardening `4c70` / `24a7` sans rebase.
 
 **Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. N125/N126 sont cosmétique client. Risques documentés, non corrigés ici (hors N125/N126) : `JoinRequest` hors IntentValidator ; Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
 
@@ -46,7 +46,7 @@ Feel #19 inchangé. Pas de réinvention : N125–N126 du rapport #147. Commits s
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
 | Overlay navire `CFrame.Angles` roulis 60 Hz (N125) | `Overlay.luau` (`stepInterpolation` branche `mag > 0.01 and not isMissile`), `tests/client.luau` (check navires) | Leftover N124. Locaux `rx`/`rz`, `frame * fromEulerAnglesYXZ`. Amplitude 0.018/0.035, fréquences 1.7/2.1 inchangées. Immobile / missile : zéro compose. Recette visual V71 déjà sur `9ab9`, **pas** merger. Cosmétique. Yaw N117 **inchangé**. |
-| Overlay camion roues `CFrame.Angles` 60 Hz (N126) | `Overlay.luau` (`stepInterpolation` branche `Wheel`), `tests/client.luau` (check pose/capture) | Leftover N125. Local `spin = progress * π * 20`, `frame * offset * fromEulerAnglesYXZ`. Pièces non-Wheel inchangées. Recette visual V72 leftover déjà sur `9ab9`, **pas** merger. Cosmétique. `segRot` N115 **inchangé**. |
+| Overlay camion roues `CFrame.Angles` 60 Hz (N126) | `Overlay.luau` (`stepInterpolation` branche `Wheel`), `tests/client.luau` (check pose/capture) | Leftover N125. Local `spin = progress * π * 20`, `frame * offset * fromEulerAnglesYXZ`. Pièces non-Wheel inchangées. Recette visual V72 déjà sur `9793`, **pas** merger. Cosmétique. `segRot` N115 **inchangé**. |
 
 **Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), `UnitModels.place` radar (**N127**), `UnitModels.place` flag (**N128**), tribus `humanTargetProtected`. BuildingModels / WorldRenderer / WorldCamera / HUD / UnitModels / Minimap / serveur **non édités**.
 
@@ -86,13 +86,13 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 
 ## 5. Issues worker-ready (nouveaux, N127–N128)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N126 = faits. N22 = **N67 fait**. N27 = doc only. **V71 / N125** fermés ici (portés, pas mergés ; V71 déjà livré visuel `9ab9`). **V72 leftover / N126** fermés ici (portés, pas mergés ; leftover visual V72 déjà documenté sur `9ab9`). Leftover feel `UnitModels.place` radar = **N127** (pas encore de recette visual — visual `9ab9` l’a listé leftover, ne pas merger). Leftover feel `UnitModels.place` flag = **N128**.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N126 = faits. N22 = **N67 fait**. N27 = doc only. **V71 / N125** fermés ici (portés, pas mergés ; V71 déjà livré visuel `9ab9`). **V72 / N126** fermés ici (portés, pas mergés ; V72 déjà livré visuel `9793`). Leftover feel `UnitModels.place` radar = **N127** (leftover visual V73 déjà sur `9793`, ne pas merger). Leftover feel `UnitModels.place` flag = **N128**.
 
 ---
 
 ### ISSUE-N127 — `UnitModels.place` radar `CFrame.Angles` 60 Hz (feel)
 
-**Priorité :** P3 alloc client UnitModels. Leftover explicite de N126 (roues Overlay déjà). Distinct de N124 (BuildingModels Radar, `RestCFrame` identité, `time * 1.45`), de N125 (roulis Overlay sur le `frame` unité), de N128 (flag pièce). Visual `9ab9` a listé radar/flag leftover après V72 — **porter euler nombres, ne pas merger** `9ab9`. `UnitModels.place` branche `piece.role == "radar"` **seulement**. Ne pas toucher Overlay ni BuildingModels.
+**Priorité :** P3 alloc client UnitModels. Leftover explicite de N126 (roues Overlay déjà). Distinct de N124 (BuildingModels Radar, `RestCFrame` identité, `time * 1.45`), de N125 (roulis Overlay sur le `frame` unité), de N128 (flag pièce). Leftover visual V73 **déjà documenté** sur `9793` (passe 55 visual) — **porter euler nombres, ne pas merger** `9793`. `UnitModels.place` branche `piece.role == "radar"` **seulement**. Ne pas toucher Overlay ni BuildingModels.
 
 **Problème :** N126 ferme les roues camion Overlay. Reste, **une fois par frame par pièce radar de navire** dans `UnitModels.place` (appelé depuis `Overlay.stepInterpolation`) :
 
@@ -108,7 +108,7 @@ Branche `piece.role == "radar"` seulement. `piece.offset` est posé à la constr
 
 1. Dans `UnitModels.place` seulement, branche `piece.role == "radar"` : poser `localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)`. Plus de `CFrame.Angles` 60 Hz sur le hot path radar. Facteur `time * 2.2` **inchangé**. Garde `role == "radar"` **inchangée**. `piece.part.CFrame = frame * localFrame` **inchangé**.
 
-2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire le yaw dans `piece.offset` (le `time` change chaque frame). Ne **pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124 bâtiments — offset pièce, pas RestCFrame). Ne pas « fermer » N125/N126 Overlay (déjà). Ne pas « fermer » flag (leftover N128). Ne pas « fermer » flamme `Size`. Ne pas porter BuildingModels. Après N126. Visual `9ab9` leftover radar/flag — porter euler, pas merger visual.
+2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire le yaw dans `piece.offset` (le `time` change chaque frame). Ne **pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124 bâtiments — offset pièce, pas RestCFrame). Ne pas « fermer » N125/N126 Overlay (déjà). Ne pas « fermer » flag (leftover N128). Ne pas « fermer » flamme `Size`. Ne pas porter BuildingModels. Après N126. Leftover visual V73 déjà sur `9793` — porter euler, pas merger visual.
 
 3. Tests « navires, missiles et interpolation » leftover N125/N117/N116 **et** leftover N126 pose/capture `segRot` **et** leftover N124 modeles radar/flag/boom **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
@@ -116,13 +116,13 @@ Branche `piece.role == "radar"` seulement. `piece.offset` est posé à la constr
 
 5. Fichiers : `UnitModels.luau` (`place` branche `role == "radar"` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore N127 (commentaire leftover, **garder** N125/N117/N116/N101/N98). `Overlay.luau` **non**. `BuildingModels.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N127 feel ≠ N124 (SAM Radar rest identité, `time * 1.45`) ≠ N125 (roulis Overlay `frame`) ≠ N126 (roues camion) ≠ N128 (flag pièce) ≠ visual leftover `9ab9` (ne pas merger).** Non réentrant. Ne pas fusionner avec N128 dans le même worker. Autres `role` : zéro compose Angles. Construction `addPart` `CFrame.Angles` **inchangée**.
+**Contraintes :** pas de RemoteFunction. **N127 feel ≠ N124 (SAM Radar rest identité, `time * 1.45`) ≠ N125 (roulis Overlay `frame`) ≠ N126 (roues camion) ≠ N128 (flag pièce) ≠ visual V73 (leftover `9793`, ne pas merger).** Non réentrant. Ne pas fusionner avec N128 dans le même worker. Autres `role` : zéro compose Angles. Construction `addPart` `CFrame.Angles` **inchangée**.
 
 ---
 
 ### ISSUE-N128 — `UnitModels.place` flag `CFrame.Angles` 60 Hz (feel)
 
-**Priorité :** P3 alloc client UnitModels. Leftover explicite après N127 (radar pièce). Distinct de N127 (radar Y), de N124 (CapitalFlag bâtiments, deux `sin`, rest identité), de N125 (roulis Overlay). Visual `9ab9` leftover flag — **porter euler nombres, ne pas merger** `9ab9`. `UnitModels.place` branche `piece.role == "flag"` **seulement**. Ne pas toucher Overlay ni BuildingModels.
+**Priorité :** P3 alloc client UnitModels. Leftover explicite après N127 (radar pièce). Distinct de N127 (radar Y), de N124 (CapitalFlag bâtiments, deux `sin`, rest identité), de N125 (roulis Overlay). Leftover visual V73 **déjà documenté** sur `9793` — **porter euler nombres, ne pas merger** `9793`. `UnitModels.place` branche `piece.role == "flag"` **seulement**. Ne pas toucher Overlay ni BuildingModels.
 
 **Problème :** N127 ferme le radar pièce. Reste, **une fois par frame par pièce flag de navire** dans `UnitModels.place` :
 
@@ -138,7 +138,7 @@ Branche `piece.role == "flag"` seulement. `piece.offset` = `CFrame.new` translat
 
 1. Dans `UnitModels.place` seulement, branche `piece.role == "flag"` : lire `math.sin(time * 5) * 0.06` dans un local `rx`, poser `localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(rx, 0, 0)`. Plus de `CFrame.Angles` 60 Hz sur le hot path flag. Amplitude 0.06 et fréquence 5 **inchangées**. Garde `role == "flag"` **inchangée**. `piece.part.CFrame = frame * localFrame` **inchangé**. Radar N127 **inchangé**.
 
-2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire le `sin` dans `piece.offset`. Ne **pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124). Ne pas « fermer » N127 dans le même commit. Ne pas « fermer » flamme `Size`. Ne pas porter BuildingModels ni Overlay. Après N127. Visual `9ab9` leftover flag — porter, pas merger visual.
+2. **Garder la rotation.** Ne **pas** convertir en translation (N108 feuillage). Ne **pas** cuire le `sin` dans `piece.offset`. Ne **pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124). Ne pas « fermer » N127 dans le même commit. Ne pas « fermer » flamme `Size`. Ne pas porter BuildingModels ni Overlay. Après N127. Leftover visual V73 déjà sur `9793` — porter, pas merger visual.
 
 3. Tests « navires, missiles et interpolation » leftover N127/N125 **et** leftover N126 pose/capture **et** leftover N124 modeles **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
@@ -146,7 +146,7 @@ Branche `piece.role == "flag"` seulement. `piece.offset` = `CFrame.new` translat
 
 5. Fichiers : `UnitModels.luau` (`place` branche `role == "flag"` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore N128 (commentaire leftover, **garder** N127/N125/N117). `Overlay.luau` **non**. `BuildingModels.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. **N128 feel ≠ N127 (radar Y) ≠ N124 (CapitalFlag rest identité, deux sin) ≠ N125 (roulis Overlay) ≠ visual leftover `9ab9` (ne pas merger).** Non réentrant. Ne pas fusionner avec N127 dans le même worker. Autres `role` : zéro compose Angles. Sans pièce flag (missile) : la branche n’est pas atteinte.
+**Contraintes :** pas de RemoteFunction. **N128 feel ≠ N127 (radar Y) ≠ N124 (CapitalFlag rest identité, deux sin) ≠ N125 (roulis Overlay) ≠ visual V73 (leftover `9793`, ne pas merger).** Non réentrant. Ne pas fusionner avec N127 dans le même worker. Autres `role` : zéro compose Angles. Sans pièce flag (missile) : la branche n’est pas atteinte.
 
 ---
 
@@ -181,9 +181,9 @@ Branche `piece.role == "flag"` seulement. `piece.offset` = `CFrame.new` translat
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
 | N34–N124 | (voir rapport #147) | — | **faits** |
 | N125 | Overlay navire `CFrame.Angles` roulis 60 Hz | P3 | **fait** cette passe (recette visual V71) |
-| N126 | Overlay camion roues `CFrame.Angles` 60 Hz | P3 | **fait** cette passe (leftover visual V72) |
-| N127 | `UnitModels.place` radar `CFrame.Angles` 60 Hz | P3 | **nouveau** (visual `9ab9` leftover, ne pas merger) |
-| N128 | `UnitModels.place` flag `CFrame.Angles` 60 Hz | P3 | **nouveau** (visual `9ab9` leftover, ne pas merger) |
+| N126 | Overlay camion roues `CFrame.Angles` 60 Hz | P3 | **fait** cette passe (recette visual V72 déjà sur `9793`) |
+| N127 | `UnitModels.place` radar `CFrame.Angles` 60 Hz | P3 | **nouveau** (leftover visual V73 déjà sur `9793`, ne pas merger) |
+| N128 | `UnitModels.place` flag `CFrame.Angles` 60 Hz | P3 | **nouveau** (leftover visual V73 déjà sur `9793`, ne pas merger) |
 
 Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 / #136 / #140 / #144 / #147 `NIGHTLY_REPORT.md` historique.
 
@@ -261,8 +261,8 @@ Piège N64 (toujours vrai) : ne **pas** référencer `IS_STATION` depuis `refres
 
 Piège N125 : `frame` a déjà translation × yaw — **ne pas** réduire à `CFrame.new * euler`. Immobile = zéro compose. Missile = pas de roulis. Recette visual V71 déjà sur `9ab9` — porter, ne pas merger.
 
-Piège N126 : spin réel `progress * π * 20` dans un local `spin`. `frame` a déjà `segRot`. Ne pas cuire le spin dans `piece.offset`. Recette visual V72 leftover déjà sur `9ab9` — porter, ne pas merger.
+Piège N126 : spin réel `progress * π * 20` dans un local `spin`. `frame` a déjà `segRot`. Ne pas cuire le spin dans `piece.offset`. Recette visual V72 déjà sur `9793` — porter, ne pas merger.
 
-Piège N127 (à venir) : garder `piece.offset * euler`, **ne pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124 bâtiments). Distinct SAM Radar N124 (`time * 1.45`). Visual `9ab9` leftover — porter, ne pas merger.
+Piège N127 (à venir) : garder `piece.offset * euler`, **ne pas** réduire à `CFrame.new(offset.X,Y,Z) * euler` (recette N124 bâtiments). Distinct SAM Radar N124 (`time * 1.45`). Leftover visual V73 déjà sur `9793` — porter, ne pas merger.
 
-Piège N128 (à venir) : amplitude 0.06 / fréquence 5. Distinct CapitalFlag N124 (deux sin, rest identité). Ne pas fusionner avec N127.
+Piège N128 (à venir) : amplitude 0.06 / fréquence 5. Distinct CapitalFlag N124 (deux sin, rest identité). Ne pas fusionner avec N127. Leftover visual V73 déjà sur `9793` — porter, ne pas merger.

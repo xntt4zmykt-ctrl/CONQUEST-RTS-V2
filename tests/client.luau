@@ -995,8 +995,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- (unités) reste dans le check navires. Voies encore vivantes ici ; la
 	-- destruction plus bas les vide (le check livraison n'en a plus).
 	-- N126 : roues fromEulerAnglesYXZ (spin = progress * π * 20). Leftover
-	-- N115 segRot rawequal doit rester vert. Recette visual V72 leftover,
-	-- portee pas mergee. Recette visual V57 leftover N105. Recette visual
+	-- N115 segRot rawequal doit rester vert. Recette visual V72, portee
+	-- pas mergee. Recette visual V57 leftover N105. Recette visual
 	-- V64 leftover N115.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
