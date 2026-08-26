@@ -240,13 +240,16 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.
--- Source = index `samsBySlot` (dirty a la pose/capture/destruction).
+-- Source = index `samsBySlot`. Slot sans SAM = {} (pas de rescan hash).
 function Buildings.samsOf(state: GameState, slot: number): { number }
 	local out = {}
-	local set = state.samsBySlot and state.samsBySlot[slot]
-	if set then
-		for index in set do
-			table.insert(out, index)
+	local bySlot = state.samsBySlot
+	if bySlot then
+		local set = bySlot[slot]
+		if set then
+			for index in set do
+				table.insert(out, index)
+			end
 		end
 		return out
 	end
