@@ -2,7 +2,7 @@
 --[[
 	Nom et armee de chaque faction, poses sur son territoire.
 
-	C'est l'information que le jeu de reference affiche en permanence sur la
+	C'est l'information que CONQUEST affiche en permanence sur la
 	carte, et elle change completement la lecture d'une partie : sans elle, il
 	faut cliquer chaque voisin pour savoir lequel est dangereux. Avec, on voit
 	d'un coup d'oeil ou est la grosse armee — et la reponse n'est presque jamais
@@ -55,6 +55,16 @@ local MIN_TILES = 12
 
 local MAX_DISTANCE = 4000
 
+-- N96 : surveyTerritories recycle (recette visual V49, hash table.clear).
+-- Distinct de N95 (gainBuf arrays) et de N80 (contactBuf serveur).
+-- Non reentrant — refresh synchrone unique. table.clear AVANT le scan
+-- (leftover slot A = etiquette fantome apres removePlayer). Hash
+-- slot→nombre : pas de truncate d'array. Retourner les pools. Overlay /
+-- WorldRenderer n'appellent pas surveyTerritories.
+local sumXBuf: { [number]: number } = {}
+local sumYBuf: { [number]: number } = {}
+local countBuf: { [number]: number } = {}
+
 --=============================================================================
 -- Construction
 --=============================================================================
@@ -74,6 +84,27 @@ function FactionLabels.new(parent: Instance, terrain: buffer): FactionLabels
 	return self
 end
 
+-- N182 : parkLabel hoisté pour refresh / clear sans cycle.
+-- Skip Parent nil (déjà parké par refresh puis clear). Push
+-- labelFree (record entry { anchor, billboard, name, troops },
+-- pas Overlay). ensureLabel take n'importe quel entry, Name
+-- FactionAnchor{slot}, Parent self.root. Recette leftover N181.
+-- Pas merger visual 3437. Distinct leftover N152 flame.
+-- Distinct leftover N096 surveyTerritories. Overlay non touché.
+-- Ne pas vider labelFree. Pas de delay.
+local function parkLabel(self: FactionLabels, entry: any)
+	if not entry.anchor.Parent then
+		return
+	end
+	entry.anchor.Parent = nil
+	local pool = self.labelFree
+	if not pool then
+		pool = {}
+		self.labelFree = pool
+	end
+	pool[#pool + 1] = entry
+end
+
 --[[
 	Cree (ou retrouve) l'etiquette d'une faction.
 
@@ -85,6 +116,21 @@ local function ensureLabel(self: FactionLabels, slot: number)
 	local existing = self.labels[slot]
 	if existing then
 		return existing
+	end
+
+	-- N182 : take n'importe quel entry. Arbre Billboard conservé
+	-- (Label / FactionName / Troops). Reset CFrame / Size / Text
+	-- déjà faits par refresh après ensureLabel. Oubli de Name =
+	-- take visuel faux au debug, pas un leak.
+	local pool = self.labelFree
+	local n = if pool then #pool else 0
+	if n > 0 then
+		local entry = pool[n]
+		pool[n] = nil
+		entry.anchor.Name = `FactionAnchor{slot}`
+		entry.anchor.Parent = self.root
+		self.labels[slot] = entry
+		return entry
 	end
 
 	local anchor = Instance.new("Part")
@@ -144,23 +190,23 @@ end
 	sur la meme grille que le centre qu'il accompagne.
 ]]
 local function surveyTerritories(owner: buffer)
-	local sumX: { [number]: number } = {}
-	local sumY: { [number]: number } = {}
-	local counts: { [number]: number } = {}
+	table.clear(sumXBuf)
+	table.clear(sumYBuf)
+	table.clear(countBuf)
 
 	for y = 0, H - 1, SAMPLE_STRIDE do
 		local rowBase = y * W
 		for x = 0, W - 1, SAMPLE_STRIDE do
 			local slot = buffer.readu8(owner, rowBase + x)
 			if slot ~= Config.NEUTRAL_SLOT then
-				sumX[slot] = (sumX[slot] or 0) + x
-				sumY[slot] = (sumY[slot] or 0) + y
-				counts[slot] = (counts[slot] or 0) + 1
+				sumXBuf[slot] = (sumXBuf[slot] or 0) + x
+				sumYBuf[slot] = (sumYBuf[slot] or 0) + y
+				countBuf[slot] = (countBuf[slot] or 0) + 1
 			end
 		end
 	end
 
-	return sumX, sumY, counts
+	return sumXBuf, sumYBuf, countBuf
 end
 
 --[[
@@ -174,7 +220,7 @@ function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, r
 
 	for slot, entry in self.labels do
 		if not counts[slot] then
-			entry.anchor:Destroy()
+			parkLabel(self, entry)
 			self.labels[slot] = nil
 		end
 	end
@@ -184,7 +230,7 @@ function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, r
 		if not info or count * SAMPLE_STRIDE * SAMPLE_STRIDE < MIN_TILES then
 			local stale = self.labels[slot]
 			if stale then
-				stale.anchor:Destroy()
+				parkLabel(self, stale)
 				self.labels[slot] = nil
 			end
 			continue
@@ -244,8 +290,12 @@ function FactionLabels.setVisible(self: FactionLabels, visible: boolean)
 end
 
 function FactionLabels.clear(self: FactionLabels)
+	-- N182 : recycle les Part ancres. Plus de Destroy. Push
+	-- labelFree via parkLabel. Skip Parent nil. Skip Overlay.
+	-- Skip surveyTerritories N96. Ne pas vider labelFree.
+	-- Recette leftover N181. Pas merger visual 3437.
 	for slot, entry in self.labels do
-		entry.anchor:Destroy()
+		parkLabel(self, entry)
 		self.labels[slot] = nil
 	end
 end
