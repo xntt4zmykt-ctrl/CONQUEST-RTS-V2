@@ -59,26 +59,36 @@ end
 --=============================================================================
 
 function Effects.selectTile(self: Effects, index: number, color: Color3)
-	if self.selection then
-		self.selection:Destroy()
-	end
-
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
-	local marker = Instance.new("Part")
-	marker.Name = "SelectedTerritory"
-	marker.Anchored = true
-	marker.CanCollide = false
-	marker.CanTouch = false
-	marker.CanQuery = false
-	marker.CastShadow = false
-	marker.Material = Enum.Material.Neon
+	local marker = self.selection
+	-- N155 : reuse Part si deja creee. previewTile reutilise deja
+	-- (N96 + N154 skip). selectTile Destroy+recreate chaque clic.
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
+	-- V74 freeze). Distinct HUD N153. Distinct previewTile N154
+	-- skip. Distinct visual V83 SelectionRing pulseRot (ne pas
+	-- merger 0b3d). Name SelectedTerritory inchange. Tween Create
+	-- conserve (pulse Transparency/Size restart). Recette leftover
+	-- N154, pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview inchanges.
+	if not marker then
+		marker = Instance.new("Part")
+		marker.Name = "SelectedTerritory"
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.CastShadow = false
+		marker.Material = Enum.Material.Neon
+		marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
+		marker.Parent = self.root
+		self.selection = marker
+	end
+
 	marker.Color = color
 	marker.Transparency = 0.38
 	marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
 	marker.CFrame = CFrame.new(base.X, height + 0.55, base.Z)
-	marker.Parent = self.root
-	self.selection = marker
 
 	TweenService:Create(marker, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		Transparency = 0.68,
@@ -106,9 +116,9 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual V74
 	-- freeze). Distinct HUD N153 (feed plafond). Distinct visual V77
 	-- PlacementPreview early-out (ne pas merger 185a). Distinct
-	-- selectTile (Destroy+recreate, leftover). Recette leftover N153,
-	-- pas merger visual. HUD / UnitModels / Overlay / PlacementPreview
-	-- inchanges.
+	-- selectTile leftover N155 (reuse Part, deja). Recette leftover
+	-- N153, pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview inchanges.
 	if
 		marker
 		and self.actionPreviewIndex == index
@@ -165,6 +175,11 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 
 	local plate = Instance.new("Part")
+	-- N156 leftover : Instance.new + Destroy chaque capture (cap
+	-- MAX_LIVE_FLASHES=90, MAX_FLASHES_PER_WAVE=28). Distinct
+	-- selectTile N155 (reuse deja). Distinct previewTile N154 skip.
+	-- Distinct conquestPulse N134 (euler, pas pool). Distinct flame
+	-- leftover N152. Recette leftover N155.
 	plate.Anchored = true
 	plate.CanCollide = false
 	plate.CanTouch = false

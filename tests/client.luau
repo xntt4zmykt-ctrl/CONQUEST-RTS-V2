@@ -763,22 +763,32 @@ check("construction du monde 3D", function()
 end)
 
 check("calques d'entites, effets et apercu", function()
-	-- N154 : previewTile skip index+valid+color. 2001 puis 2002 sont
-	-- deux indices distincts — pas de skip entre eux, CFrame/Color
-	-- ecrits, Part reutilisee (pas Instance.new au 2e). clearActionPreview
-	-- nil aussi Valid/Color. Leftover N153 fil (check notifications)
-	-- et leftover N152 flame (check navires) doivent rester verts.
-	-- Recette leftover N153, pas merger visual V77 PlacementPreview.
-	-- selectTile Destroy+recreate inchange (leftover). HUD / UnitModels
-	-- / Overlay / PlacementPreview non touches.
+	-- N155 : selectTile reuse Part. 2000 puis 2001 sont deux indices
+	-- distincts — Color/CFrame/Transparency ecrits, Part reutilisee
+	-- (pas Instance.new au 2e). Name SelectedTerritory inchange.
+	-- Tween Create conserve. clearSelection Destroy+nil inchange.
+	-- Leftover N154 previewTile skip (2001 puis 2002 deux indices,
+	-- Part reutilisee) doit rester vert. Leftover N153 fil (check
+	-- notifications) et leftover N152 flame (check navires) doivent
+	-- rester verts. Recette leftover N154, pas merger visual V83
+	-- SelectionRing pulseRot. HUD / UnitModels / Overlay /
+	-- PlacementPreview non touches. tileFlash leftover N156 non
+	-- touche (Instance.new+Destroy chaque capture).
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
+	local selection = effects.selection
+	assert(selection ~= nil, "selection manquante")
+	assert(selection.Name == "SelectedTerritory", "Name selection")
+	effects:selectTile(2001, Color3.fromRGB(231, 76, 60))
+	assert(rawequal(effects.selection, selection), "Part selection recree")
+	assert(selection.Name == "SelectedTerritory", "Name selection mute")
 	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
+	assert(effects.selection == nil, "clearSelection n'a pas nile")
 end)
 
 check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
@@ -1770,7 +1780,8 @@ check("vagues de conquete", function()
 	-- Hauteur Y = 3. Caps flash inchanges. Leftover N95 applyDelta pools
 	-- (check deltas), leftover N133 overlay:explosion, leftover N132 pulse
 	-- doivent rester verts. Recette visual V75 leftover evenements, pas
-	-- merger. Overlay / WorldRenderer inchanges.
+	-- merger. Overlay / WorldRenderer inchanges. Leftover N156 tileFlash
+	-- Instance.new+Destroy chaque capture (non touche).
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
