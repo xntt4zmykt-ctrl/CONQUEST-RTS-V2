@@ -270,6 +270,52 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5d. Index samsBySlot = batiments SAM (ISSUE-N42).
+	do
+		local SAM = Config.BUILDING.SAM
+		local indexed = 0
+		local samsBySlot = state.samsBySlot or {}
+		for slot, set in samsBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= SAM or building.slot ~= slot then
+					fail(`tick {tick} — samsBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realSam = 0
+		for index, building in state.buildings do
+			if building.kind == SAM then
+				realSam += 1
+				local set = samsBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — SAM {index} absent de samsBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realSam then
+			fail(`tick {tick} — samsBySlot count {indexed} != SAM {realSam}`)
+		end
+	end
+
+	-- 5e. coolingBuildings = cooldown > 0 (ISSUE-N43). SAM et silos.
+	if state.coolingBuildings then
+		for index in state.coolingBuildings do
+			local building = state.buildings[index]
+			if not building then
+				fail(`tick {tick} — coolingBuildings[{index}] orphelin`)
+			elseif building.cooldown <= 0 then
+				fail(`tick {tick} — coolingBuildings[{index}] cooldown={building.cooldown}`)
+			end
+		end
+		for index, building in state.buildings do
+			if building.cooldown > 0 and not state.coolingBuildings[index] then
+				fail(`tick {tick} — cooldown {building.cooldown} hors coolingBuildings[{index}]`)
+			end
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5029,6 +5075,233 @@ do
 	end
 
 	Config.TRADE_SHIP_CHANCE = savedChance
+end
+
+do
+	-- N42 : samsBySlot indexe les SAM, pas les silos. transferBuilding change
+	-- de camp. tryIntercept n'a plus besoin du hash buildings.
+	local state = GameState.new(1058)
+	local owner = state:addPlayer(nil, "Defense", Random.new(62), 0)
+	local heir = state:addPlayer(nil, "Heritier", Random.new(63), 0)
+	if not owner or not heir then
+		fail("samsBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 4 then
+					break
+				end
+			end
+		end
+		if #sites < 4 then
+			fail("samsBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[4], Config.BUILDING.SILO, owner.slot)
+			local set = state.samsBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 3 then
+				fail(`samsBySlot — {count} SAM indexes, attendu 3`)
+			elseif set and set[sites[4]] then
+				fail("samsBySlot — silo indexe comme SAM")
+			elseif #Buildings.samsOf(state, owner.slot) ~= 3 then
+				fail(`samsBySlot — samsOf {#Buildings.samsOf(state, owner.slot)} attendu 3`)
+			else
+				state:transferBuilding(sites[1], heir.slot)
+				local oldSet = state.samsBySlot[owner.slot]
+				local newSet = state.samsBySlot[heir.slot]
+				if oldSet and oldSet[sites[1]] then
+					fail("samsBySlot — transfer laisse l'ancien camp")
+				elseif not (newSet and newSet[sites[1]]) then
+					fail("samsBySlot — transfer n'indexe pas le nouvel camp")
+				else
+					state:destroyBuilding(sites[2])
+					if oldSet and oldSet[sites[2]] then
+						fail("samsBySlot — destroy laisse un orphelin")
+					else
+						print("samsBySlot : pose / transfer / destroy OK")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N42 tryIntercept : 0 SAM = pas d'engaged ; 1 SAM a portee = intercept
+	-- + cooldown ; SAM allie / meme slot / hors portee = skip.
+	-- N43 : stepCooldowns O(cooling) ; PORT jamais visite ; intercept leve le set.
+	local state = GameState.new(4243)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(70), 0)
+	local defender = state:addPlayer(nil, "Bouclier", Random.new(71), 0)
+	local friend = state:addPlayer(nil, "Allie", Random.new(72), 0)
+	if not bomber or not defender or not friend then
+		fail("tryIntercept — spawn impossible")
+	else
+		local defSites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == defender.slot and not state.buildings[index] then
+				table.insert(defSites, index)
+				if #defSites >= 2 then
+					break
+				end
+			end
+		end
+		local friendSite: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == friend.slot and not state.buildings[index] then
+				friendSite = index
+				break
+			end
+		end
+		local bomberSite: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == bomber.slot and not state.buildings[index] then
+				bomberSite = index
+				break
+			end
+		end
+		if #defSites < 2 or not friendSite or not bomberSite then
+			fail("tryIntercept — tuiles libres insuffisantes")
+		else
+			local function fireAt(x: number, y: number, destX: number, destY: number, speed: number?)
+				-- speed minuscule : le missile ne detone pas en 1 tick (MISSILE_SPEED=14
+				-- apres apply, spawns trop proches sinon).
+				table.insert(state.missiles, {
+					id = state:nextId(),
+					slot = bomber.slot,
+					kind = Config.NUKE.ATOM,
+					x = x,
+					y = y,
+					sx = x,
+					sy = y,
+					tx = destX,
+					ty = destY,
+					progress = 0,
+					speed = speed or 0.001,
+				})
+			end
+
+			local function wipeSamsExcept(keep: number?)
+				local doomed = {}
+				for slot, set in state.samsBySlot do
+					for tile in set do
+						if tile ~= keep then
+							table.insert(doomed, tile)
+						end
+					end
+				end
+				for _, tile in doomed do
+					state:destroyBuilding(tile)
+				end
+			end
+
+			-- 0 SAM : le missile reste en vol (vitesse rampante, pas de detonation).
+			local capX, capY = MapGen.fromIndex(defender.capitalTile)
+			local farX, farY = MapGen.fromIndex(bomber.capitalTile)
+			fireAt(capX, capY, farX, farY)
+			local before = #state.missiles
+			Nukes.step(state, Random.new(1), function() end)
+			if #state.missiles ~= before then
+				fail(`tryIntercept — 0 SAM a retire le missile ({#state.missiles})`)
+			else
+				table.clear(state.missiles)
+
+				-- 1 SAM a portee : intercept + cooldown + cooling set.
+				local samTile = defSites[1]
+				state:placeBuilding(samTile, Config.BUILDING.SAM, defender.slot)
+				local sx, sy = MapGen.fromIndex(samTile)
+				fireAt(sx, sy, farX, farY)
+				Nukes.step(state, Random.new(2), function() end)
+				local sam = state.buildings[samTile]
+				if #state.missiles ~= 0 then
+					fail(`tryIntercept — SAM a portee n'a pas intercepte ({#state.missiles})`)
+				elseif not sam or sam.cooldown <= 0 then
+					fail("tryIntercept — SAM a portee sans cooldown")
+				elseif not (state.coolingBuildings and state.coolingBuildings[samTile]) then
+					fail("tryIntercept — intercept n'a pas leve coolingBuildings")
+				else
+					print("tryIntercept : 0 SAM skip, 1 SAM a portee engaged")
+
+					-- Cooldown : 3 ticks → 0, retire du set. PORT jamais inscrit.
+					Buildings.armCooldown(state, samTile, 3)
+					state:placeBuilding(defSites[2], Config.BUILDING.PORT, defender.slot)
+					Buildings.stepCooldowns(state)
+					Buildings.stepCooldowns(state)
+					Buildings.stepCooldowns(state)
+					local after = state.buildings[samTile]
+					if not after or after.cooldown ~= 0 then
+						fail(`stepCooldowns — SAM cooldown {if after then after.cooldown else "detruit"}`)
+					elseif state.coolingBuildings and state.coolingBuildings[samTile] then
+						fail("stepCooldowns — SAM encore dans coolingBuildings a 0")
+					elseif state.coolingBuildings and state.coolingBuildings[defSites[2]] then
+						fail("stepCooldowns — PORT inscrit dans coolingBuildings")
+					else
+						print("stepCooldowns : 3 ticks → 0, PORT ignore")
+					end
+
+					-- SAM hors portee : missile pose a SAM_RANGE+5, vitesse rampante.
+					table.clear(state.missiles)
+					sam.cooldown = 0
+					if state.coolingBuildings then
+						state.coolingBuildings[samTile] = nil
+					end
+					local range = (Config.SAM_RANGE or 70) + 5
+					local farX2 = math.clamp(sx + range, 0, Config.MAP_WIDTH - 1)
+					if math.abs(farX2 - sx) < range then
+						farX2 = math.clamp(sx - range, 0, Config.MAP_WIDTH - 1)
+					end
+					fireAt(farX2, sy, farX2 + 2, sy)
+					Nukes.step(state, Random.new(3), function() end)
+					if #state.missiles == 0 then
+						fail("tryIntercept — SAM hors portee a intercepte")
+					else
+						print("tryIntercept : SAM hors portee skip")
+					end
+
+					-- SAM allie : skip areAllied. Un seul SAM, celui de l'allie.
+					table.clear(state.missiles)
+					wipeSamsExcept(nil)
+					state:placeBuilding(friendSite, Config.BUILDING.SAM, friend.slot)
+					state.alliances[friend.slot] = state.alliances[friend.slot] or {}
+					state.alliances[bomber.slot] = state.alliances[bomber.slot] or {}
+					state.alliances[friend.slot][bomber.slot] = state.tick + 5000
+					state.alliances[bomber.slot][friend.slot] = state.tick + 5000
+					local fx, fy = MapGen.fromIndex(friendSite)
+					fireAt(fx, fy, fx + 2, fy)
+					Nukes.step(state, Random.new(4), function() end)
+					if #state.missiles == 0 then
+						fail("tryIntercept — SAM allie a intercepte")
+					else
+						print("tryIntercept : SAM allie skip")
+					end
+
+					-- SAM du tireur : skip meme slot.
+					table.clear(state.missiles)
+					wipeSamsExcept(nil)
+					state:placeBuilding(bomberSite, Config.BUILDING.SAM, bomber.slot)
+					local bx, by = MapGen.fromIndex(bomberSite)
+					fireAt(bx, by, bx + 2, by)
+					Nukes.step(state, Random.new(5), function() end)
+					if #state.missiles == 0 then
+						fail("tryIntercept — SAM du tireur a intercepte")
+					else
+						print("tryIntercept : SAM meme slot skip")
+					end
+				end
+			end
+		end
+	end
 end
 
 do
