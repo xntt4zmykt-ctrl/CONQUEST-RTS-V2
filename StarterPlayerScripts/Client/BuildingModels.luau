@@ -97,7 +97,15 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	for i = 1, teeth do
 		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
 		local roof = block(model, Vector3.new(2.3, 0.35, 7), Vector3.new(x, roofY, 0), STEEL, Enum.Material.Metal)
-		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.Angles(0, 0, math.rad(-12))
+		-- N140 : toits sheds. Plus de CFrame.Angles.
+		-- fromEulerAnglesYXZ(0, 0, math.rad(-12)) ≡ Angles(0, 0, -12°).
+		-- Z=-12° fixe. teeth / x / roofY / taille Vector3.new(2.3, 0.35, 7)
+		-- inchanges. Distinct cylinder() N139 (Z=90 helper). Distinct
+		-- BuildRing N136 (evenement pose). Distinct portes silo leftover
+		-- (±18°). Distinct rampes SAM leftover (pitch -31°). cylinder()
+		-- / playConstruction / WorldRenderer / Overlay / Effects
+		-- inchanges.
+		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-12))
 	end
 
 	local chimneyA = cylinder(model, Vector3.new(9 + (tier - 1) * 2, 1.15, 1.15), Vector3.new(2.7, roofY + 3.3, -1.8), STEEL)
@@ -133,7 +141,16 @@ function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color
 	local part = block(parent, size, offset, color)
 	part.Shape = Enum.PartType.Cylinder
 	-- Le cylindre de Roblox pointe le long de X : on le redresse.
-	part.CFrame = CFrame.new(offset) * CFrame.Angles(0, 0, math.rad(90))
+	-- N139 : cylinder() helper. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- block(...) puis Shape = Cylinder inchanges. Signature
+	-- (parent, size, offset, color) inchangee. Call sites
+	-- buildFactory / buildSilo non edites. Distinct BuildRing
+	-- N136 (evenement pose). Distinct trunks N137 (decor monde).
+	-- Distinct Rock N138 (yaw `phase`). Distinct toits leftover
+	-- N140 (Z=-12°). playConstruction / animate / WorldRenderer /
+	-- Overlay / Effects inchanges.
+	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
 
@@ -296,10 +313,19 @@ local function buildSilo(model: Model, color: Color3, _level: number?)
 	-- Deux portes blindees ouvertes rendent la fonction du silo evidente.
 	local doorA = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(-3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorA.Name = "SiloDoor"
-	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(18))
+	-- N141 : portes silo. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(18)) ≡ Angles(0, 0, 18°).
+	-- fromEulerAnglesYXZ(0, 0, math.rad(-18)) ≡ Angles(0, 0, -18°).
+	-- Z=+18° et Z=-18°. Offsets (-3.6, 1.3, 0) / (3.6, 1.3, 0),
+	-- taille Vector3.new(4.4, 0.45, 6.5), STEEL, Name = "SiloDoor"
+	-- inchanges. Deux sites ensemble. Distinct toits N140 (Z=-12°).
+	-- Distinct cylinder() N139 (Z=90 helper). Distinct rampes SAM
+	-- leftover (pitch -31°). cylinder() / buildFactory /
+	-- playConstruction / WorldRenderer / Overlay / Effects inchanges.
+	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(18))
 	local doorB = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorB.Name = "SiloDoor"
-	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(-18))
+	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-18))
 	local warningStrip = block(model, Vector3.new(9, 0.18, 0.35), Vector3.new(0, 0.86, 4.2), WARNING, Enum.Material.Neon)
 	warningStrip.Name = "SiloWarning"
 end
@@ -319,7 +345,16 @@ local function buildSam(model: Model, color: Color3, _level: number?)
 		for lane = -1, 1, 2 do
 			local launcher = block(model, Vector3.new(0.72, 5.8, 0.72), Vector3.new(side * 1.45, 5.1, lane * 0.72), MISSILE, Enum.Material.Metal)
 			launcher.Name = "Interceptor"
-			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.Angles(math.rad(-31), 0, 0)
+			-- N142 : rampes SAM Interceptor. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(math.rad(-31), 0, 0) ≡ Angles(-31°, 0, 0).
+			-- Pitch X=-31° fixe. Offset side * 1.45, 5.1, lane * 0.72,
+			-- Name = "Interceptor", taille Vector3.new(0.72, 5.8, 0.72),
+			-- MISSILE inchanges. Quatre missiles (2×2) ensemble. Distinct
+			-- portes N141 (Z=±18°). Distinct cylinder() N139 (Z=90).
+			-- Distinct Radar animate N124 (yaw 60 Hz). UnitModels
+			-- leftover apres. buildSilo / playConstruction / animate /
+			-- WorldRenderer / Overlay / Effects inchanges.
+			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.fromEulerAnglesYXZ(math.rad(-31), 0, 0)
 			local nose = block(model, Vector3.new(0.82, 0.9, 0.82), Vector3.new(side * 1.45, 7.85, lane * 0.72 - 1.65), color)
 			nose.Material = Enum.Material.Neon
 		end
@@ -492,7 +527,15 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.Color = Color3.fromRGB(255, 214, 130)
 	ring.Transparency = 0.4
 	ring.Size = Vector3.new(0.4, 3, 3)
-	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	-- N136 : playConstruction BuildRing. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- ground Vector3 inchange. Tween Size/Transparency + task.delay
+	-- Destroy inchanges. Drop / sort Y des parts inchanges.
+	-- Distinct OceanGlint N135 (yaw `angle`, OCEAN_LEVEL + 0.08).
+	-- Distinct Effects ring N134 (Y = 3). Distinct Overlay Shockwave
+	-- N133 (PLAINS + 0.5). Distinct trunks leftover (buildDecorations).
+	-- animate / Overlay / WorldRenderer / Effects inchanges.
+	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
 	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -525,13 +568,40 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 		end
 
 		if child.Name == "Radar" then
-			child.CFrame = rest * CFrame.Angles(0, time * 1.45, 0)
+			-- N124 : translation * yaw. RestCFrame de ces trois pieces
+			-- est une translation pure (block() pose CFrame.new(offset),
+			-- create ajoute position — rotation identite). Donc
+			-- rest * Angles(rx,ry,rz) ≡ CFrame.new(rest.X,Y,Z) *
+			-- fromEulerAnglesYXZ(rx,ry,rz). fromEulerAnglesYXZ ≡ Angles
+			-- ici : Radar/Boom n'ont que Y ; Flag a ry=0 donc X puis Z.
+			-- Plus de CFrame.Angles 60 Hz. Amplitude / frequences
+			-- inchangees. Cable Y inchange (N109). Camera focusX inchangee
+			-- (N122). Minimap nombres inchanges (N123). Roues camion /
+			-- roulis navire inchanges.
+			-- Recette visual V70, portee pas mergee.
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, time * 1.45, 0)
 		elseif child.Name == "CapitalFlag" then
-			child.CFrame = rest * CFrame.Angles(math.sin(time * 2.4) * 0.045, 0, math.sin(time * 1.7) * 0.035)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(
+					math.sin(time * 2.4) * 0.045,
+					0,
+					math.sin(time * 1.7) * 0.035
+				)
 		elseif child.Name == "PortCraneBoom" then
-			child.CFrame = rest * CFrame.Angles(0, math.sin(time * 0.35) * 0.12, 0)
+			child.CFrame = CFrame.new(rest.X, rest.Y, rest.Z)
+				* CFrame.fromEulerAnglesYXZ(0, math.sin(time * 0.35) * 0.12, 0)
 		elseif child.Name == "PortCraneCable" then
-			child.CFrame = rest + Vector3.new(0, math.sin(time * 0.8) * 0.35, 0)
+			-- N109 : Y en nombres depuis rest. Plus de Vector3.new 60 Hz
+			-- (rest + offset). Un CFrame.new. Amplitude 0.35 conservee.
+			-- Radar / flag / boom : N124 (rotation, pas translation).
+			-- Feuillage / houle / camion / unites inchanges (N108/N107/N105/N103).
+			-- Recette visual V60, portee pas mergee.
+			child.CFrame = CFrame.new(
+				rest.X,
+				rest.Y + math.sin(time * 0.8) * 0.35,
+				rest.Z
+			)
 		elseif child.Name == "CityWindows" then
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
