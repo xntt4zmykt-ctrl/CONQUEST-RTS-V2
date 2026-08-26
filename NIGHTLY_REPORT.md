@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 27)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 28)
 
-Déclencheur : ouverture de la **PR #78** (`cursor/analyse-nocturne-du-codebase-b62d`) — siteBuf, elimBuf, specs N83–N84.
+Déclencheur : ouverture de la **PR #82** (`cursor/analyse-nocturne-du-codebase-69f4`) — pathWalkBuf, stationBuf, specs N85–N86.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-69f4`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#80.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-07c6`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#82.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `pathWalkBuf` / `stationBuf` sont des pools module-level, pas de l’état répliqué. Le tableau rendu par `findSeaPath` et `building.links` restent **uniques**.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `ctxBuf` / `doomedBuf` / `collapsingBuf` sont des pools module-level, pas de l’état répliqué. Le tableau rendu par `findSeaPath` et `building.links` restent **uniques**. `ctxBuf` n’est pas le ctx client (`PlacementPreview`).
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #78 (passe 26) : claims vérifiés.** `Bots.gatherSites` recycle `siteBuf` (N81) ; `GameState.stepElimination` recycle `elimBuf` (N82). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #82 (passe 27) : claims vérifiés.** `Navy.findSeaPath` recycle `pathWalkBuf` (N83, retour unique) ; `GameState.refreshRailNetwork` recycle `stationBuf` (N84, truncate avant sort). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #78 a documenté (N83, N84)**.
+Cette passe a **livré ce que #82 a documenté (N85, N86)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #78
+## 2. Revue PR #82
 
-| Claim #78 | Réalité à l’ouverture |
+| Claim #82 | Réalité à l’ouverture |
 |---|---|
-| `siteBuf` (N81) | Oui. Caps 40/60/45. Pas de shuffle. Truncate leftover. Slot / côte vide → `# == 0`. |
-| `elimBuf` (N82) | Oui. Pas nommé `doomed`. Truncate leftover avant `removePlayer`, pas à 0 après return. Partage inter-instances. |
-| Specs N83–N84 | **Corrigés ici.** |
+| `pathWalkBuf` (N83) | Oui. Walk scratch, copie inverse dans un tableau neuf. `not rawequal`. `p1[i]` intact. Pas `return pathWalkBuf`. |
+| `stationBuf` (N84) | Oui. Truncate leftover **avant** `table.sort`. `railParentBuf` / `railXsBuf` / `railYsBuf` / maps de grappe. Inners `neighborsOf` uniques (`building.links`). Slot 99 → pas d’erreur. |
+| Specs N85–N86 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #76 (4197), feel jusqu’à #78, visuelles #39/#44/#47/#50/#54/#57/#61/#64/#67/#69/#72/#74/#77/#79. **#78 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#73←#76) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #80 (bef6), feel jusqu’à #82, visuelles #39/#44/#47/#50/#54/#57/#61/#64/#67/#69/#72/#74/#77/#79/#81. **#82 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#76←#80) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N83–N84 du rapport #78.
+Feel #19 inchangé. Pas de réinvention : N85–N86 du rapport #82.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `Navy.findSeaPath` alloue path + reversed par trajet réussi (N83) | `Navy.luau` (`findSeaPath` seulement), `tests/simulate.luau` | Leftover N37 (BFS déjà poolé). Walk scratch `pathWalkBuf` (`table.create(256)`). Copie inverse dans **un** tableau neuf — `boat.path` unique. Pas de second `reversed`. Deux appels → `not rawequal`. `p1[i]` intact après un second appel. |
-| `GameState.refreshRailNetwork` alloue stations / parent / xs / ys / grappes (N84) | `GameState.luau` (`refreshRailNetwork` seulement), `tests/simulate.luau` | Leftover N64 (index déjà). `stationBuf` + truncate **avant** `table.sort`. `railParentBuf` / `railXsBuf` / `railYsBuf` / maps de grappe recyclées. Inners `neighborsOf` **uniques** (`building.links`). Slot 99 → pas d’erreur. |
+| `Buildings.contextFor` alloue table + 2 closures par resolve (N85) | `Buildings.luau` (`contextFor` + helpers module, `resolve` inchangé à l’appel), `tests/simulate.luau` | Leftover N81 (sites déjà). Record `ctxBuf` + `ctxOwnerAt`/`ctxBuildingAt` module. Slot 99 → `nil` sans muter. Deux appels → `rawequal`. Après A puis B, un `ownerAt` conservé lit B. Même `buffer.readu8(state.owner)` / `state.buildings[index]`. Pas le ctx client. |
+| `ChantierB.cancelOpposingFronts` / `collapsing` allouent 10 Hz (N86) | `ChantierB.luau` (`cancelOpposingFronts` + wrap `stepAttacks` seulement), `tests/simulate.luau` | Leftover combat vivant. `doomedBuf` hash + `table.clear`. `collapsingBuf` + `collapseRecPool`. Truncate leftover **avant** traitement. Clash égal → fronts nuls, leftover 0. Défenseur sous seuil → `collapseFaction` (butin + captor). `origStepAttacks` ignoré. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `Buildings.contextFor` alloc+closures (N85), `ChantierB` doomed/collapsing 10 Hz (N86), pool `building.links`.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `BoatFront.parked` (N87), `collapseFaction` remaining/leftovers (N88), pool `building.links`, ctx client `PlacementPreview`.
 
 ---
 
@@ -64,12 +64,14 @@ init.server  → IntentValidator.enqueue (seq obligatoire en playing, apply imm�
                 playerStatsForReplicate + pricesFor + Research.progress (min courant),
                 fireDeployed, snapshotBoats, snapshotMissiles,
                 flushBuildingDelta via buildingSnapBuf)
-SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), BoatFront, AimFront, tribus, spawn bots différé 15 s
+SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
+    cancelOpposingFronts via doomedBuf, collapsingBuf 10 Hz), BoatFront, AimFront,
+    tribus, spawn bots différé 15 s
 ```
 
 - **Combat vivant** = `ChantierB.stepAttacks`, pas le corps de `GameState.stepAttacks`.
 - **Vérité d’équilibrage** = `ChantierB.apply(Config)` après `install()`, pas `Config.luau` seul.
-- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert ; hardening N29).
+- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert ; hardening N29). `parked` encore alloué par lancer (**N87**).
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **AimFront wrap** = re-visée du front terre du couple ; jamais `isBeachhead`.
 - **`tryAnnex`** = BFS depuis les voisins défenseur du seed déjà capturé ; océan abort ; pool N37-like.
@@ -79,51 +81,51 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **Score nuke bots** = flatten `buildingsBySlot` une fois (N69), puis 90 `scoreBlast`.
 - **Inbound `removePlayer`** = snapshot `buildingsBySlot` → destroy → diplo + transports `kind==1` (100 %, lit **`owner[targetTile]`**) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`.
 - **Hover spawn** = `SpawnHint` (Shared) si `tiles==0`. Serveur = `claimSpawn` (N52+N55).
-- **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `Diplomacy.step` recycle `expiredBuf` (**N79**). `Bots.neighborFactions` recycle `contactBuf` (**N80**). `gatherSites` recycle `siteBuf` (**N81**). `stepElimination` recycle `elimBuf` (**N82**). `findSeaPath` walk scratch, retour unique (**N83**). `refreshRailNetwork` porteuses recyclées (**N84**). `Buildings.contextFor` alloue encore table+closures par resolve (**N85**). `ChantierB.cancelOpposingFronts` / `collapsing` allouent encore 10 Hz (**N86**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `Diplomacy.step` recycle `expiredBuf` (**N79**). `Bots.neighborFactions` recycle `contactBuf` (**N80**). `gatherSites` recycle `siteBuf` (**N81**). `stepElimination` recycle `elimBuf` (**N82**). `findSeaPath` walk scratch, retour unique (**N83**). `refreshRailNetwork` porteuses recyclées (**N84**). `Buildings.contextFor` recycle `ctxBuf` (**N85**). `ChantierB.cancelOpposingFronts` / wrap `stepAttacks` recyclent `doomedBuf` / `collapsingBuf` (**N86**). `BoatFront.parked` alloue encore par lancer (**N87**). `collapseFaction` alloue encore `remaining` / `leftovers` (**N88**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N85–N86)
+## 5. Issues worker-ready (nouveaux, N87–N88)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N84 = faits. N22 = **N67 fait**. N27 = doc only.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N86 = faits. N22 = **N67 fait**. N27 = doc only.
 
 ---
 
-### ISSUE-N85 — `Buildings.contextFor` alloue table + 2 closures par resolve (feel)
+### ISSUE-N87 — `BoatFront.launchAttack` alloue `parked` par lancer (feel)
 
-**Priorité :** P3 alloc pose. Leftover explicite de N10 / N81 (`siteBuf` déjà, plus le hash sites). Distinct de N75 (`pricesFor`) et de N84 (`stationBuf`). Ne pas toucher `Placement.luau` ni `PlacementPreview.luau` (client : le fantôme construit **son** ctx avec les closures `ownerAt`/`buildingAt` fournies par `init.client` — leftover visuel, pas ce worker).
+**Priorité :** P3 alloc marine. Leftover explicite de N86 (`Ne pas toucher BoatFront parked`) et de N5 (beachheads hors cap). Distinct de N86 (`collapsingBuf` 10 Hz combat) et de N23 (`retreatAttack` couple). Ne pas toucher `seedBeachhead` (contrat frontier = voisins encore à la cible) ni AimFront (re-visée terre).
 
-**Problème :** chaque `Buildings.resolve` (intent `BuildOrder` + `Bots.decideBuild`) fait `return { slot, era, gold, terrain, ownerAt = function…, buildingAt = function… }`. Trois allocations (record + 2 closures) par clic / décision bot. Les closures capturent `state`. `Placement.resolve` lit `ctx` de façon synchrone et abandonne — le record n’a pas besoin d’être unique.
+**Problème :** chaque `launchAttack` wrap fait `local parked = {}` puis `table.insert(parked, atk)` pour chaque `isBeachhead`, retire, appelle `origLaunch`, réinsère. Une allocation porteuse par clic / décision bot, même à 0 tête de pont. La loi (garer `isBeachhead` seulement, jamais merger deux ponts, jamais fusionner pont+terre) ne change pas.
 
-**Pourquoi 20K CCU :** leftover N81. Un shard 8 humains + 16 bots pose/upgrade plusieurs fois par seconde en mid-game. Recycle du record + fonctions module (lisent `ctxState`) élimine l’alloc courte. Pas d’autorité (même `buffer.readu8(state.owner)` / `state.buildings[index]`). Ne pas fusionner avec le ctx client : les calques Overlay ne sont pas des buffers serveur.
+**Pourquoi 20K CCU :** leftover N5. Un shard 8 humains + 16 bots relance des fronts plusieurs fois par seconde en mid-game. Recycle de la porteuse élimine l’alloc courte du wrap. Pas d’autorité (mêmes `table.remove` / `table.insert` arrière, même `origLaunch`). Ne pas fusionner avec `collapsingBuf` : parked est une liste d’Attack live, pas des records victim/captor.
 
 **Worker :**
 
-1. Ajouter `ctxState: GameState?` et `ctxBuf: Placement.Context` module-level dans `Buildings.luau`. `ownerAt` / `buildingAt` = fonctions **module** (pas de `function` inline) : `ownerAt` lit `buffer.readu8(ctxState.owner, index)` ; `buildingAt` lit `ctxState.buildings[index]` (kind/slot/level ou nil,nil,nil — **même contrat**). `contextFor` : slot inconnu → `return nil` **sans** muter `ctxBuf`. Slot vivant : poser `ctxState = state`, `ctxBuf.slot/era/gold/terrain`, `ctxBuf.ownerAt` / `ctxBuf.buildingAt` = les fonctions module (identité stable), `return ctxBuf`.
-2. Ne pas require de module nouveau. Ne pas toucher `pricesFor` / `samBuf`. Ne pas toucher `Placement.luau` (le type `Context` reste). Ne pas toucher `PlacementPreview.resolve` (le client passe ses propres closures — un `ctxBuf` serveur n’existe pas côté client). `resolve` reste le seul appelant serveur. Pas de RemoteFunction.
-3. Test : `Buildings.contextFor(state, slot)` deux fois → `rawequal`. Slot 99 → `nil`. `Buildings.resolve` pose encore une CITY (snap / exact inchangé — banc placement existant). Après `contextFor(A)` puis `contextFor(B)`, un `ownerAt` **conservé** du premier ctx lit B (non réentrant — documenter, ne pas « corriger » en clonant). Client 35/35. 6000 ticks.
-4. Fichiers : `Buildings.luau` (`contextFor` + helpers module, `resolve` inchangé à l’appel), `tests/simulate.luau` (bloc court à côté du banc N75 / `pricesFor`).
+1. Ajouter `parkedBuf: { any } = table.create(8)` module-level dans `BoatFront.luau`. Au début du wrap `launchAttack` : n = 0. Si `atk.isBeachhead` : n += 1 ; `parkedBuf[n] = atk` ; `table.remove(self.attacks, i)`. Truncate leftover n+1..# **avant** `origLaunch` (un leftover non truncaté réinsèrerait un pont fantôme d’un lancer précédent). Après `origLaunch` : réinsérer `1..n` (pas `#` sans truncate). Pas de RemoteFunction.
+2. Ne pas modifier `seedBeachhead` / `enqueueFront` / `isBeachhead` critère. Ne pas merger deux ponts du même couple. Ne pas toucher AimFront / ChantierB / `MAX_ACTIVE_ATTACKS_PER_PLAYER`. Ne pas require de module nouveau. `origLaunch` reste le corps terre.
+3. Test : 0 pont + `launchAttack` terre → `#attacks == 1`, pas d’erreur, second lancer 0 pont OK. 2 `seedBeachhead` du même couple + `launchAttack` terre → 2 ponts **plus** 1 front terre (3 Attack), troupes de pont intactes. Deux wrap sans pont → pas d’erreur. Client 35/35. 6000 ticks.
+4. Fichiers : `BoatFront.luau` (wrap `launchAttack` seulement), `tests/simulate.luau` (bloc court à côté du banc « beachhead merge » / aim beachhead).
 
-**Contraintes :** pas de RemoteFunction. Recette N78 (record réécrit, pas une nouvelle table) + closures stables (recette N74 pool). **N85 feel ≠ N75 (`pricesFor`, déjà fait) ≠ N81 (`siteBuf`, déjà fait) ≠ N84 (`stationBuf`, déjà fait).** `ctxBuf` n’est pas réentrant. `resolve` est synchrone et unique. Ne pas `table.clone(ctxBuf)`. Ne pas stocker le ctx au-delà de `Placement.resolve`. `terrain` est le buffer live (pas une copie) — Overlay client a le sien.
+**Contraintes :** pas de RemoteFunction. Recette N86 (`collapsingBuf` + truncate avant traitement). **N87 feel ≠ N86 (`collapsingBuf`, déjà fait) ≠ N5 (cap beachhead, ouvert) ≠ N23 (`retreatAttack`, déjà fait).** `parkedBuf` n’est pas réentrant. `launchAttack` est synchrone. Ne pas `table.clone` des Attack. Les Attack parkés sont les **mêmes** objets (identité), pas des copies. Overlay n’itère pas cette liste.
 
 ---
 
-### ISSUE-N86 — `ChantierB.cancelOpposingFronts` / `collapsing` allouent 10 Hz (feel)
+### ISSUE-N88 — `GameState.collapseFaction` alloue `remaining` / `leftovers` (feel)
 
-**Priorité :** P3 alloc combat. Leftover du wrap `GameState.stepAttacks` vivant. Distinct de N82 (`elimBuf` élimination) et de N23 (`retreatAttack` couple). Ne pas toucher `BoatFront` (`parked` par `launchAttack` — leftover N5, pas 10 Hz) ni `GameState.stepAttacks` mort (corps original ignoré : `local _ = origStepAttacks`).
+**Priorité :** P3 alloc collapse. Leftover explicite de N86 (le wrap recycle la **liste** victim/captor, pas le balayage tuiles). Distinct de N86 (`collapsingBuf`) et de N82 (`elimBuf` slots). Ne pas toucher le corps mort `GameState.stepAttacks` (`local collapsing = {}` ignoré : `local _ = origStepAttacks`).
 
-**Problème :** chaque tick avec fronts, `cancelOpposingFronts` fait `local doomed: { boolean } = {}` (hash sparse indexé par i d’attaque) et le wrap `stepAttacks` fait `local collapsing = {}` puis `table.insert(collapsing, { victim, captor })` par front sous le seuil. Deux allocations porteuses + N records par tick de combat. La loi (clash `min(troops)`, refund si troops>0 au remove, collapse si `tiles < collapseThreshold()` encore vrai **après** la passe) ne change pas.
+**Problème :** chaque `collapseFaction` fait `local remaining = {}` (scan `TILE_COUNT`), puis jusqu’à `COLLAPSE_MAX_PASSES` (24) `local leftovers = {}` + `table.insert`. Deux allocations porteuses + N inserts par absorption. `collapseScratch = table.create(4, 0)` est aussi alloué **par appel**. La loi (butin avant démantèlement, héritier captor prioritaire, île → NEUTRAL, `CONQUEST_PLUNDER_*`) ne change pas.
 
-**Pourquoi 20K CCU :** leftover combat vivant. 10 Hz × 18 slots × quelques fronts. Recycle des porteuses (et pool des records collapse) élimine l’alloc courte du hot path. Pas d’autorité (mêmes soustractions, même `table.remove` arrière, même notify). Ne pas fusionner avec `elimBuf` : collapse n’est pas une élimination (territoire redistribué, pas `removePlayer`).
+**Pourquoi 20K CCU :** leftover N86. Un shard 18 slots absorbe plusieurs factions en late. Recycle des porteuses élimine l’alloc du balayage. Pas d’autorité (même scan, mêmes `setOwner`, même plunder). Ne pas fusionner avec `elimBuf` : collapse redistribue le territoire, `removePlayer` vient après via `stepElimination`. Ne pas fusionner avec `doomedBuf` (indices d’Attack).
 
 **Worker :**
 
-1. Ajouter `doomedBuf: { [number]: boolean } = {}` module-level dans `ChantierB.luau`. Au début de `cancelOpposingFronts` : `table.clear(doomedBuf)`. Remplacer `doomed` par `doomedBuf`. Ne **pas** itérer `#doomedBuf` (c’est un hash sparse — la boucle `for i = #state.attacks, 1, -1` reste). Ajouter `collapsingBuf` (`table.create(8)`) + `collapseRecPool` (`table.create(8)`, records `{ victim, captor }`). Au début du wrap `stepAttacks` : n = 0. À chaque insert : n += 1 ; réécrire un rec du pool (créer si `collapseRecPool[n] == nil`) ; `collapsingBuf[n] = rec`. Truncate leftover n+1..# **avant** la boucle `for _, entry in collapsing`. Traiter `1..n` (pas `#` sans truncate). Pas de RemoteFunction.
-2. Ne pas modifier `attackLogic` / `attackTilesPerTick` / `tryAnnex` / `collapseFaction` / `collapseThreshold`. Ne pas câbler `MAX_TILES_PER_TICK`. Ne pas require de module nouveau. Ne pas toucher `BoatFront.parked`. `origStepAttacks` reste ignoré. Notify humain inchangé.
-3. Test : banc combat vivant existant (guard=80) **doit rester vert**. Ajouter : deux joueurs, fronts opposés A→B et B→A avec troupes égales → les deux fronts disparaissent, troupes restituées (clash). Un défenseur sous le seuil → `collapseFaction` toujours appelé (territoire du captor augmente). Deux appels `cancelOpposingFronts` sans fronts → pas d’erreur, `next(doomedBuf) == nil` après clear. Client 35/35. 6000 ticks.
-4. Fichiers : `ChantierB.luau` (`cancelOpposingFronts` + wrap `stepAttacks` seulement), `tests/simulate.luau` (bloc court à côté du banc « combat vivant »).
+1. Ajouter `collapseRemainBuf: { number } = table.create(64)`, `collapseLeftBuf: { number } = table.create(64)`, `collapseScratch = table.create(4, 0)` module-level dans `GameState.luau`. `collapseFaction` : n = 0 ; scan `TILE_COUNT` → `collapseRemainBuf[n] = index`. Truncate leftover **avant** plunder (`# == 0` → return, comme aujourd’hui). Chaque passe : nLeft = 0 ; écrire `collapseLeftBuf` ; truncate leftover **avant** de swapper (échanger les deux buf, n = nLeft) ; break si n == 0 ou `not progressed`. Itérer `1..n`, pas `#` sans truncate. Pas de RemoteFunction.
+2. Ne pas modifier `COLLAPSE_MAX_PASSES` / `COLLAPSE_MIN_TILES` / plunder / notify. Ne pas câbler `MAX_TILES_PER_TICK`. Ne pas require de module nouveau. Ne pas toucher `ChantierB` wrap (N86 déjà). Ne pas pooler `self.plunders` (payload répliqué). `where = remaining[1]` devient `collapseRemainBuf[1]` **avant** le premier swap.
+3. Test : banc collapse existant (butin bot, territoire captor) **doit rester vert**. Banc N86 collapse recycle **doit rester vert**. Ajouter : `collapseFaction` sur un slot sans tuile → return, pas d’erreur, plunder inchangé. Deux appels (victime déjà à 0 puis autre victime) → pas de leftover de tuiles de A dans B. Client 35/35. 6000 ticks.
+4. Fichiers : `GameState.luau` (`collapseFaction` seulement), `tests/simulate.luau` (bloc court à côté du banc « effondrement » / N86 collapse).
 
-**Contraintes :** pas de RemoteFunction. Recette N79 (`expiredBuf` + pool records) pour collapsing ; recette `table.clear` hash pour doomed (comme `contactBuf` N80). **N86 feel ≠ N82 (`elimBuf`, déjà fait) ≠ N23 (`retreatAttack`, déjà fait) ≠ N8 (combat mort vs vivant, ouvert).** `doomedBuf` / `collapsingBuf` ne sont pas réentrants. `stepAttacks` est unique par tick. Ne pas `table.remove` dans `collapsingBuf` pendant l’itération — la collecte est close avant le traitement. Un leftover d’état A dans l’état B sans truncate ferait collapse d’un slot fantôme — truncate obligatoire (recette N82). Les records ne sont pas répliqués.
+**Contraintes :** pas de RemoteFunction. Recette N82 (`elimBuf` truncate leftover avant traitement). **N88 feel ≠ N86 (`collapsingBuf`, déjà fait) ≠ N82 (`elimBuf`, déjà fait) ≠ N8 (combat mort vs vivant, ouvert).** Les buf ne sont pas réentrants. `collapseFaction` est unique par tick (collecte N86 close avant). Un leftover d’état A dans l’état B sans truncate ferait `setOwner` d’une tuile fantôme — truncate obligatoire. Ne pas itérer `#` sur un buf non truncaté.
 
 ---
 
@@ -135,12 +137,12 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; records stats → **N76 fait** ; `eraProgress` → **N77 fait** ; bateaux → **N70 fait** ; missiles → **N71 fait** ; owner indices → **N72 fait** ; bâtiments → **N73 fait** ; HUD fronts → **N74 fait** ; viewFor → **N78 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
-| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` encore alloué par lancer) |
+| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 nouveau**) |
 | N6 | DataStore debounce / retry / merge additif | P2 | ouvert (`math.max` perd les +1 concurrents) |
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 nouveau** ; `ChantierB` doomed/collapsing → **N86 nouveau**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; `ChantierB` doomed/collapsing → **N86 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -213,12 +215,14 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N80 | `Bots.neighborFactions` alloc hash contacts | P3 | **fait** passe 25 (`contactBuf`) |
 | N81 | `Bots.gatherSites` alloc array / décision | P3 | **fait** passe 26 (`siteBuf`, caps 40/60/45 inchangés) |
 | N82 | `stepElimination` alloc `doomed` 10 Hz | P3 | **fait** passe 26 (`elimBuf`, pas le doomed bâtiments de `removePlayer`) |
-| N83 | `findSeaPath` path + reversed | P3 | **fait** cette passe (`pathWalkBuf`, retour **unique** pour `boat.path`) |
-| N84 | `refreshRailNetwork` stations / parent | P3 | **fait** cette passe (`stationBuf`, pas de pool `building.links`) |
-| N85 | `Buildings.contextFor` table + closures | P3 | **nouveau** (record + `ownerAt`/`buildingAt` module, pas le ctx client) |
-| N86 | `ChantierB` doomed / collapsing 10 Hz | P3 | **nouveau** (`doomedBuf` hash + `collapsingBuf` pool records) |
+| N83 | `findSeaPath` path + reversed | P3 | **fait** passe 27 (`pathWalkBuf`, retour **unique** pour `boat.path`) |
+| N84 | `refreshRailNetwork` stations / parent | P3 | **fait** passe 27 (`stationBuf`, pas de pool `building.links`) |
+| N85 | `Buildings.contextFor` table + closures | P3 | **fait** cette passe (`ctxBuf` + closures module, pas le ctx client) |
+| N86 | `ChantierB` doomed / collapsing 10 Hz | P3 | **fait** cette passe (`doomedBuf` hash + `collapsingBuf` pool records) |
+| N87 | `BoatFront.parked` par lancer | P3 | **nouveau** (`parkedBuf`, truncate avant origLaunch) |
+| N88 | `collapseFaction` remaining / leftovers | P3 | **nouveau** (porteuses tuiles, pas collapsingBuf) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -247,6 +251,7 @@ Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / 
 | `MAX_TRADE_SHIPS` | 24 | n/a | oui (early-out N63) |
 | `WARSHIP_SHELL_RATE` | 20 | 20 | oui (N67) |
 | `RAIL_RANGE` | 56 | n/a | oui (N84, tri + union-find inchangés) |
+| `COLLAPSE_MIN_TILES` | 100 | 100 | oui (N86 wrap, N88 leftover scan) |
 
 ---
 
@@ -262,31 +267,29 @@ factions : 18
 intentions : sequence, idempotence, apply immediat, rate limit OK
 findSeaPath pool : 5 tuiles, 4 appels identiques
 findSeaPath pathWalk : identite unique, p1 intact (N83)
-refreshRail : gares du slot, bunker ignore (N64)
 stationBuf : liens usine, income, identite (N84)
 stationBuf : slot sans joueur, pas d'erreur (N84)
-gatherSites : DEFENSE frontiere, rawequal, cap 60 (N81)
-gatherSites : truncate border + PORT sans cote (N81)
-elimBuf : vivant length 0, rawequal (N82)
-elimBuf : strip → length 1, slot disparu (N82)
-elimBuf : truncate 1→0 inter-instances (N82)
+contextFor : rawequal, slot 99, resolve CITY, ownerAt lit B (N85)
+doomedBuf : deux cancel vides, next nil (N86)
+clash : fronts nuls, leftover 0 (N86)
+collapse recycle : butin + captor grandit (N86)
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.33 p95TickMs=0.77
+metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.72
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `hover spawn isolation : lisiere rouge, disque isole vert (N58)` et `identite, ere, diplomatie et classement`. Overlay `previewTile(valid=false)` ne lève pas. HUD lit `eraProgress` number (N77). HUD remplace `self.diplomacy = payload` (N78). Aucune surface client touchée cette passe.
+Client : **35/35 OK** — dont `hover spawn isolation : lisiere rouge, disque isole vert (N58)` et `identite, ere, diplomatie et classement`. Overlay `previewTile(valid=false)` ne lève pas. HUD lit `eraProgress` number (N77). HUD remplace `self.diplomacy = payload` (N78). Aucune surface client touchée cette passe (`PlacementPreview` / `Placement.luau` inchangés).
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass27.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass28.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N83–N84 sont serveur / pools, pas un Play Solo.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N85–N86 sont serveur / pools, pas un Play Solo.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N83 n’ajoute **pas** de require (`pathWalkBuf` vit dans Navy, qui require déjà GameState / MapGen). N84 n’ajoute **pas** de require (`stationBuf` vit dans GameState). N85 ne devra **pas** require Placement côté GameState (cycle) — `contextFor` reste dans Buildings.
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N85 n’ajoute **pas** de require (`ctxBuf` vit dans Buildings, qui require déjà Placement — pas GameState depuis Placement). N86 n’ajoute **pas** de require (`doomedBuf` vit dans ChantierB). N87 ne devra **pas** require GameState depuis BoatFront au-delà de l’existant. N88 reste dans GameState.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -330,3 +333,7 @@ Piège N82 : `elimBuf` n’est pas réentrant et est **partagé entre toutes les
 Piège N83 : `pathWalkBuf` n’est pas réentrant. `findSeaPath` est synchrone et unique. Ne **jamais** `return pathWalkBuf` : `launchInvasion` / retraite / `spawnTradeShips` font `boat.path = path` — un second BFS aliaserait le trajet du premier transport. Ne pas `table.clone` du walk (ça réintroduit la deuxième alloc). Overlay n’itère pas `boat.path` (non répliqué). Le test d’identité (`not rawequal`, `p1[i]` intact) est pour les call sites serveur. `visitBuf` / `parentScratch` / `queueScratch` inchangés (`buffer.fill(visitBuf, 0, 0)`). Échec BFS / `MAX_BFS_NODES` → `nil`. Origine terrestre **exclue** du path (loi N37).
 
 Piège N84 : `stationBuf` / `railParentBuf` / `railXsBuf` / `railYsBuf` / maps de grappe ne sont pas réentrants. `refreshRailNetwork` est unique par mutation. Truncate leftover **avant** `table.sort` : un leftover non truncaté mélange d’anciennes gares dans le tri et les liens répliqués. Itérer `1..count`, pas `#` sur parent/xs/ys. Ne **pas** pooler les inners `neighborsOf[i]` : elles deviennent `building.links` si usine + changed. Option B (`table.clear` in-place sur `building.links`) **interdite** : Overlay / BuildingDelta (N73) tiennent `links` live. Ne pas référencer `IS_STATION`. Ne pas `table.clone(links)` au dirty. Capital spawn est une gare : `railRoutes == 0` tant qu’il n’y a pas d’usine dans une grappe à 2+ gares. `stationBuf` n’est pas `factory.links` (l’usine ne se lie pas à elle-même).
+
+Piège N85 : `ctxBuf` / `ctxState` ne sont pas réentrants. `resolve` est synchrone et unique. Ne **pas** `table.clone(ctxBuf)`. Slot inconnu → `return nil` **sans** muter (le test N85 l’attrape). Après `contextFor(A)` puis `contextFor(B)`, un `ownerAt` conservé lit B — c’est la loi, ne pas « corriger » en clonant. `terrain` est le buffer live (pas une copie). Ne pas toucher `Placement.luau` ni `PlacementPreview.luau` : le fantôme client construit **son** ctx avec les closures `ownerAt`/`buildingAt` fournies par `init.client`. GameState ne doit **pas** require Placement (cycle). `ctxOwnerAt` sans `ctxState` → `NEUTRAL_SLOT` (jamais renvoyé en prod).
+
+Piège N86 : `doomedBuf` / `collapsingBuf` / `collapseRecPool` ne sont pas réentrants. `stepAttacks` est unique par tick. Ne **pas** itérer `#doomedBuf` (hash sparse — la boucle `for i = #state.attacks, 1, -1` reste). Truncate leftover collapsing **avant** le traitement : un leftover d’état A ferait collapse d’un slot fantôme. Compteur nommé `collapseN` (pas `n`) : le wrap a déjà `local n = MapGen.neighbors` dans la boucle de capture. `doomedBuf` est exporté pour le banc (`ChantierB.doomedBuf`) — Overlay ne le lit pas. Clash égal : leftover 0, **pas** de refund des troupes clashed (le banc N86 l’attrape). Collapse ≠ élimination : `collapseFaction` redistribue, `removePlayer` vient via `stepElimination`. `origStepAttacks` reste ignoré. Notify humain inchangé (`not victim.isBot`).
