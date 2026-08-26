@@ -185,6 +185,11 @@ export type GameState = typeof(setmetatable(
 		-- et score nuke n'iterent plus le hash global. Distinct des index
 		-- par kind (bunkers/sams/silos/factories) : ici c'est tous kinds.
 		buildingsBySlot: { [number]: { [number]: true } },
+		-- Index NAVAL_BASE par camp (ISSUE-N48 / feel N65). syncCarriers
+		-- spawn n'itere plus le hash buildings. Distinct de portsByTile
+		-- (PORT) et de buildingsBySlot (tous kinds). Garde _carriersDirty :
+		-- pas un scan 10 Hz.
+		navalBasesBySlot: { [number]: { [number]: true } },
 		-- Batiments dont cooldown > 0 (ISSUE-N43). stepCooldowns n'itere plus
 		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
 		coolingBuildings: { [number]: true },
@@ -268,6 +273,7 @@ function GameState.new(seed: number): GameState
 	self.silosBySlot = {}
 	self.factoriesByTile = {}
 	self.buildingsBySlot = {}
+	self.navalBasesBySlot = {}
 	self.coolingBuildings = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
@@ -872,6 +878,21 @@ local function indexBuilding(self: GameState, slot: number, index: number, prese
 	end
 end
 
+-- Index NAVAL_BASE : syncCarriers spawn (ISSUE-N48). Recette samsBySlot.
+-- Pas de require(Navy) depuis GameState.
+local function indexNavalBase(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.navalBasesBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.navalBasesBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -897,6 +918,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 		indexFactory(self, index, slot, 1, true)
 	end
 	if kind == B.NAVAL_BASE then
+		indexNavalBase(self, slot, index, true)
 		self._carriersDirty = true
 	end
 	if IS_STATION[kind] then
@@ -955,6 +977,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	indexBuilding(self, previousSlot, index, false)
 	indexBuilding(self, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, previousSlot, index, false)
+		indexNavalBase(self, newSlot, index, true)
 		self._carriersDirty = true
 	end
 	if building.kind == B.DEFENSE then
@@ -1003,6 +1027,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.FACTORY then
 		indexFactory(self, index, building.slot, building.level, false)
+	end
+	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, building.slot, index, false)
 	end
 	if self.coolingBuildings then
 		self.coolingBuildings[index] = nil
@@ -1365,6 +1392,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.buildingsBySlot then
 		self.buildingsBySlot[slot] = nil
+	end
+	if self.navalBasesBySlot then
+		self.navalBasesBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

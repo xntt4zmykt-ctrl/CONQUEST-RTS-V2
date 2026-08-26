@@ -445,9 +445,9 @@ end
 local function syncCarriers(state: GameState)
 	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
 	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
-	-- (ISSUE-N34). Recette feel N38, sans AimFront. Le spawn/despawn
-	-- reste identique. Ciblage obus : N39 (listes recyclees, pas 10 Hz
-	-- nested sur tout state.boats).
+	-- (ISSUE-N34). Recette feel N38, sans AimFront. Spawn : navalBasesBySlot
+	-- (ISSUE-N48 / feel N65), pas le hash. Ciblage obus : N39 (listes
+	-- recyclees, pas 10 Hz nested sur tout state.boats).
 	if not state._carriersDirty then
 		return
 	end
@@ -476,25 +476,57 @@ local function syncCarriers(state: GameState)
 		end
 		seen[boat.homeTile] = true
 	end
-	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
-			local x, y = MapGen.fromIndex(index)
-			table.insert(state.boats, {
-				id = state:nextId(),
-				slot = building.slot,
-				kind = KIND_CARRIER,
-				troops = 0,
-				x = x,
-				y = y,
-				path = {},
-				step = 1,
-				targetTile = index,
-				homeTile = index,
-				angle = (index % 360) * math.pi / 180,
-				health = maxHp,
-				maxHealth = maxHp,
-				lastShellTick = 0,
-			})
+	-- N48 : spawn via navalBasesBySlot, pas le hash buildings. Garde
+	-- _carriersDirty (pas un scan 10 Hz). Fallback hash si l'index est nil.
+	-- Recette feel N65, sans AimFront. Un PORT n'est jamais un carrier.
+	if state.navalBasesBySlot then
+		for _, set in state.navalBasesBySlot do
+			for index in set do
+				if not seen[index] then
+					local building = state.buildings[index]
+					if building and building.kind == Config.BUILDING.NAVAL_BASE then
+						local x, y = MapGen.fromIndex(index)
+						table.insert(state.boats, {
+							id = state:nextId(),
+							slot = building.slot,
+							kind = KIND_CARRIER,
+							troops = 0,
+							x = x,
+							y = y,
+							path = {},
+							step = 1,
+							targetTile = index,
+							homeTile = index,
+							angle = (index % 360) * math.pi / 180,
+							health = maxHp,
+							maxHealth = maxHp,
+							lastShellTick = 0,
+						})
+					end
+				end
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
+				local x, y = MapGen.fromIndex(index)
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = building.slot,
+					kind = KIND_CARRIER,
+					troops = 0,
+					x = x,
+					y = y,
+					path = {},
+					step = 1,
+					targetTile = index,
+					homeTile = index,
+					angle = (index % 360) * math.pi / 180,
+					health = maxHp,
+					maxHealth = maxHp,
+					lastShellTick = 0,
+				})
+			end
 		end
 	end
 end
