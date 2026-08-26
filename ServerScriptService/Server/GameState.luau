@@ -392,6 +392,67 @@ GameState.factoryRecPool = factoryRecPool
 -- portRecPool / factoryRecPool (sidecars) ni Trade.deliveryPool.
 local buildingRecPool: { [number]: Building } = {}
 GameState.buildingRecPool = buildingRecPool
+-- N98 : record Attack recycle (leftover N67/N29). Contrat A free-list,
+-- recette boatFree N96. launchAttack (nouveau couple) / seedBeachhead
+-- pop, table.remove push via releaseAttack. frontier = Heap.new()
+-- neuf et queued = {} neuf a chaque acquire (N65/N64 unique — ne pas
+-- reutiliser le Heap : deux fronts aliaseraient la file). Overwrite
+-- attacker / target / troops / isBeachhead / sourceTile / retreatAt
+-- (nil si terre) / aimX / aimY. Pool module survit a GameState.new.
+-- BoatFront.parkedBuf NE push PAS (gare live). table.clear du record
+-- interdit. Un leftover isBeachhead sur un front terre = park fantome.
+local attackFree: { Attack } = table.create(8)
+GameState.attackFree = attackFree
+
+local function acquireAttack(
+	attacker: number,
+	target: number,
+	troops: number,
+	isBeachhead: boolean?,
+	sourceTile: number?,
+	retreatAt: number?
+): Attack
+	local rec = table.remove(attackFree)
+	local frontier = Heap.new()
+	local queued: { [number]: true } = {}
+	if rec == nil then
+		rec = {
+			attacker = attacker,
+			target = target,
+			troops = troops,
+			frontier = frontier,
+			queued = queued,
+			isBeachhead = isBeachhead,
+			sourceTile = sourceTile,
+			retreatAt = retreatAt,
+		}
+	else
+		rec.attacker = attacker
+		rec.target = target
+		rec.troops = troops
+		rec.frontier = frontier
+		rec.queued = queued
+		rec.isBeachhead = isBeachhead
+		rec.sourceTile = sourceTile
+		rec.retreatAt = retreatAt
+		rec.aimX = nil
+		rec.aimY = nil
+	end
+	return rec
+end
+
+local function freeAttack(atk: Attack)
+	table.insert(attackFree, atk)
+end
+
+GameState.acquireAttack = acquireAttack
+GameState.freeAttack = freeAttack
+
+function GameState.releaseAttack(self: GameState, i: number)
+	local atk = self.attacks[i]
+	table.remove(self.attacks, i)
+	freeAttack(atk)
+end
 -- N83 : pool parallele. drainEvents / drainSounds nil les files
 -- (# == 0) sans detruire les records. notify / sound reecrivent
 -- eventPool[n] / soundPool[n]. Overlay HUD lit le payload tout de
@@ -1582,10 +1643,10 @@ function GameState.removePlayer(self: GameState, slot: number)
 		local atk = self.attacks[i]
 		if atk.attacker == slot then
 			-- La faction disparait : ses troupes engagees disparaissent avec elle.
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 		elseif atk.target == slot then
 			self:returnCommittedTroops(atk)
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 		end
 	end
 
@@ -1937,13 +1998,7 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		return false, `Tu diriges deja {active} offensives. Termine ou renforce un front existant.`
 	end
 
-	local attack: Attack = {
-		attacker = attackerSlot,
-		target = targetSlot,
-		troops = committed,
-		frontier = Heap.new(),
-		queued = {},
-	}
+	local attack = acquireAttack(attackerSlot, targetSlot, committed, nil, nil, nil)
 
 	for index in attacker.border do
 		local n = MapGen.neighbors(index, scratch)
@@ -1956,6 +2011,7 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 	end
 
 	if Heap.isEmpty(attack.frontier) then
+		freeAttack(attack)
 		return false, "Aucun contact terrestre. Passe par la mer."
 	end
 
@@ -2020,13 +2076,7 @@ function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSl
 		end
 	end
 
-	local attack: Attack = {
-		attacker = attackerSlot,
-		target = targetSlot,
-		troops = troops,
-		frontier = Heap.new(),
-		queued = {},
-	}
+	local attack = acquireAttack(attackerSlot, targetSlot, troops, nil, nil, nil)
 	enqueueFront(self, attack, tile)
 	table.insert(self.attacks, attack)
 end
@@ -2181,12 +2231,12 @@ function GameState.stepAttacks(self: GameState)
 		local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 
 		if not attacker then
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 			continue
 		end
 		if atk.target ~= NEUTRAL and not defender then
 			self:returnCommittedTroops(atk)
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 			continue
 		end
 
@@ -2194,7 +2244,7 @@ function GameState.stepAttacks(self: GameState)
 		-- comme lorsqu'un front s'epuise naturellement.
 		if atk.retreatAt and self.tick >= atk.retreatAt then
 			attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 			continue
 		end
 
@@ -2264,7 +2314,7 @@ function GameState.stepAttacks(self: GameState)
 
 		if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 			attacker.troops += math.max(0, atk.troops) -- les survivants rentrent
-			table.remove(self.attacks, i)
+			self:releaseAttack(i)
 		end
 	end
 

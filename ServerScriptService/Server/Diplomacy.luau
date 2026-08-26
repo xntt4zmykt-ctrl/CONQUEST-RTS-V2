@@ -161,7 +161,7 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 		local atk = state.attacks[i]
 		if (atk.attacker == from and atk.target == to) or (atk.attacker == to and atk.target == from) then
 			state:returnCommittedTroops(atk)
-			table.remove(state.attacks, i)
+			state:releaseAttack(i)
 		end
 	end
 

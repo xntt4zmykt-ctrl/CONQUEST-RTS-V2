@@ -38,10 +38,85 @@ local hitTilesBuf: { [number]: number } = {}
 -- N77 : visee MIRV recyclee (nombres, pas Vector2). Truncate leftover
 -- AVANT fill — un leftover viserait les ogives du porteur precedent
 -- (autorite). Distinct de tilesBeforeBuf / hitTilesBuf (N76) / samBuf
--- / blastX. Non reentrant : Nukes.step scinde en serie. Les records
--- state.missiles restent uniques (possession, comme boat.path N64).
+-- / blastX. Non reentrant : Nukes.step scinde en serie.
 local mirvTxBuf: { number } = table.create(8)
 local mirvTyBuf: { number } = table.create(8)
+-- N97 : missile live recycle (leftover N52/N96). Contrat A free-list,
+-- recette boatFree N96. launch / splitMirv pop, table.remove push.
+-- Overwrite id/slot/kind/x/y/sx/sy/tx/ty/progress/speed. engaged /
+-- warhead / radius / troopKill nil sauf ogive (warhead=true + radius
+-- + troopKill). Pool module survit a GameState.new. Ne pas require
+-- depuis GameState (cycle). GameState.removePlayer inchange. Overlay
+-- lit snapshot N52, pas le live. table.clear du record interdit.
+-- Un leftover engaged = SAM skip ; leftover warhead = pas de scission.
+local missileFree: { GameState.Missile } = table.create(8)
+Nukes.missileFree = missileFree
+
+local function acquireMissile(
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	sx: number,
+	sy: number,
+	tx: number,
+	ty: number,
+	progress: number,
+	speed: number,
+	warhead: boolean?,
+	radius: number?,
+	troopKill: number?
+): GameState.Missile
+	local rec = table.remove(missileFree)
+	if rec == nil then
+		rec = {
+			id = id,
+			slot = slot,
+			kind = kind,
+			x = x,
+			y = y,
+			sx = sx,
+			sy = sy,
+			tx = tx,
+			ty = ty,
+			progress = progress,
+			speed = speed,
+			warhead = warhead,
+			radius = radius,
+			troopKill = troopKill,
+		}
+	else
+		rec.id = id
+		rec.slot = slot
+		rec.kind = kind
+		rec.x = x
+		rec.y = y
+		rec.sx = sx
+		rec.sy = sy
+		rec.tx = tx
+		rec.ty = ty
+		rec.progress = progress
+		rec.speed = speed
+		rec.engaged = nil
+		if warhead then
+			rec.warhead = true
+			rec.radius = radius
+			rec.troopKill = troopKill
+		else
+			rec.warhead = nil
+			rec.radius = nil
+			rec.troopKill = nil
+		end
+	end
+	return rec
+end
+
+local function despawnMissile(state: GameState, i: number)
+	local missile = state.missiles[i]
+	table.remove(state.missiles, i)
+	table.insert(missileFree, missile)
+end
 
 --=============================================================================
 -- Tir
@@ -143,19 +218,25 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 	ps.gold -= stats.cost
 
 	local sx, sy = MapGen.fromIndex(bestSilo)
-	table.insert(state.missiles, {
-		id = state:nextId(),
-		slot = slot,
-		kind = kind,
-		x = sx,
-		y = sy,
-		sx = sx,
-		sy = sy,
-		tx = tx,
-		ty = ty,
-		progress = 0,
-		speed = Config.MISSILE_SPEED,
-	})
+	table.insert(
+		state.missiles,
+		acquireMissile(
+			state:nextId(),
+			slot,
+			kind,
+			sx,
+			sy,
+			sx,
+			sy,
+			tx,
+			ty,
+			0,
+			Config.MISSILE_SPEED,
+			nil,
+			nil,
+			nil
+		)
+	)
 
 	-- Une frappe nucleaire est un evenement public : tout le monde voit le
 	-- depart, c'est ce qui declenche la panique diplomatique.
@@ -283,9 +364,19 @@ end
 	perdu du terrain pendant le vol, les ogives ne frappent pas des tuiles
 	qu'elle ne possede plus.
 ]]
-local function splitMirv(state: GameState, missile: GameState.Missile, rng: Random)
+-- Snapshot des champs du porteur AVANT despawn : acquireMissile peut
+-- recycler le meme record comme premiere ogive (rawequal voulu).
+local function splitMirv(
+	state: GameState,
+	slot: number,
+	mx: number,
+	my: number,
+	tx: number,
+	ty: number,
+	rng: Random
+)
 	local stats = Config.NUKE_STATS[Config.NUKE.MIRV]
-	local bx, by = math.floor(missile.tx), math.floor(missile.ty)
+	local bx, by = math.floor(tx), math.floor(ty)
 	local victim = if MapGen.inBounds(bx, by)
 		then buffer.readu8(state.owner, MapGen.toIndex(bx, by))
 		else NEUTRAL
@@ -335,27 +426,30 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 	end
 
 	for i = 1, #mirvTxBuf do
-		table.insert(state.missiles, {
-			id = state:nextId(),
-			slot = missile.slot,
-			kind = Config.NUKE.MIRV,
-			warhead = true,
-			x = missile.x,
-			y = missile.y,
-			sx = missile.x,
-			sy = missile.y,
-			tx = mirvTxBuf[i],
-			ty = mirvTyBuf[i],
-			progress = 0,
-			-- Les ogives retombent plus vite que le porteur ne montait : la
-			-- fenetre d'interception est courte, c'est le prix de la saturation.
-			speed = Config.MISSILE_SPEED * 1.8,
-			radius = stats.warheadRadius,
-			troopKill = stats.warheadTroopKill,
-		})
+		-- Ogives uniques entre elles (pas d'alias live). La premiere
+		-- recycle le porteur despawn (rawequal).
+		table.insert(
+			state.missiles,
+			acquireMissile(
+				state:nextId(),
+				slot,
+				Config.NUKE.MIRV,
+				mx,
+				my,
+				mx,
+				my,
+				mirvTxBuf[i],
+				mirvTyBuf[i],
+				0,
+				Config.MISSILE_SPEED * 1.8,
+				true,
+				stats.warheadRadius,
+				stats.warheadTroopKill
+			)
+		)
 	end
 
-	local owner = state.players[missile.slot]
+	local owner = state.players[slot]
 	state:notify(
 		`\u{2622} Le MIRV {if owner then `de {owner.name} ` else ""}se scinde en {#mirvTxBuf} ogives !`,
 		"alert"
@@ -456,16 +550,19 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 		missile.y = missile.sy + dy * math.min(1, missile.progress)
 
 		if tryIntercept(state, missile, rng) then
-			table.remove(state.missiles, i)
+			despawnMissile(state, i)
 			continue
 		end
 
 		-- Le porteur MIRV n'explose jamais entier : a mi-parcours il libere
 		-- ses ogives et disparait. Intercepter le porteur avant la scission
-		-- reste la seule parade totale.
+		-- reste la seule parade totale. Despawn AVANT split pour que la
+		-- premiere ogive recycle le porteur (snapshot des champs ci-dessus).
 		if missile.kind == Config.NUKE.MIRV and not missile.warhead and missile.progress >= Config.MIRV_SEPARATION then
-			splitMirv(state, missile, rng)
-			table.remove(state.missiles, i)
+			local slot, mx, my = missile.slot, missile.x, missile.y
+			local tx, ty = missile.tx, missile.ty
+			despawnMissile(state, i)
+			splitMirv(state, slot, mx, my, tx, ty, rng)
 			continue
 		end
 
@@ -473,7 +570,7 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 			local stats = Config.NUKE_STATS[missile.kind]
 			Nukes.detonate(state, missile)
 			onExplosion(missile.tx, missile.ty, missile.radius or (if stats then stats.radius else 8))
-			table.remove(state.missiles, i)
+			despawnMissile(state, i)
 		end
 	end
 end

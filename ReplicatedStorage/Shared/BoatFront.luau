@@ -57,15 +57,9 @@ function BoatFront.install(GameState)
 	-- a l'attaquant (setOwner dans Navy.resolveLanding) : l'enfiler comme
 	-- frontier ferait skip+heap vide+remboursement le meme tick.
 	function GameState.seedBeachhead(self, attackerSlot: number, targetSlot: number, troops: number, tile: number)
-		local attack = {
-			attacker = attackerSlot,
-			target = targetSlot,
-			troops = troops,
-			frontier = Heap.new(),
-			queued = {},
-			sourceTile = tile,
-			isBeachhead = true,
-		}
+		-- N98 : meme helper que launchAttack. Ne pas allouer inline —
+		-- leftover pont = debit captures du mauvais camp (banc N68).
+		local attack = GameState.acquireAttack(attackerSlot, targetSlot, troops, true, tile, nil)
 		local n = MapGen.neighbors(tile, neighborScratch)
 		for i = 1, n do
 			local nb = neighborScratch[i]
@@ -78,6 +72,7 @@ function BoatFront.install(GameState)
 			if attacker then
 				attacker.troops += math.max(0, troops)
 			end
+			GameState.freeAttack(attack)
 			return
 		end
 		table.insert(self.attacks, attack)
@@ -93,6 +88,7 @@ function BoatFront.install(GameState)
 			if atk.isBeachhead then
 				n += 1
 				parkedBuf[n] = atk
+				-- N98 : gare live, NE PAS releaseAttack (le pont revient).
 				table.remove(self.attacks, i)
 			end
 		end

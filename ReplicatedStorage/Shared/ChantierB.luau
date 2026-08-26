@@ -329,7 +329,7 @@ function ChantierB.cancelOpposingFronts(state)
 			if owner and atk.troops > 0 then
 				owner.troops += atk.troops
 			end
-			table.remove(state.attacks, i)
+			state:releaseAttack(i)
 		end
 	end
 end
@@ -456,17 +456,17 @@ function ChantierB.install(GameState, Nukes)
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 			if not attacker then
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 				continue
 			end
 			if atk.target ~= NEUTRAL and not defender then
 				self:returnCommittedTroops(atk)
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 				continue
 			end
 			if atk.retreatAt and self.tick >= atk.retreatAt then
 				attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 				continue
 			end
 			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
@@ -527,7 +527,7 @@ function ChantierB.install(GameState, Nukes)
 			end
 			if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 				attacker.troops += math.max(0, atk.troops)
-				table.remove(self.attacks, i)
+				self:releaseAttack(i)
 			end
 		end
 		for i = #collapsingBuf, collapseN + 1, -1 do
