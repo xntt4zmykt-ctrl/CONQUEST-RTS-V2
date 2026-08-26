@@ -239,8 +239,12 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			local centre = segment.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction) + Vector3.new(0, layer.lift, 0)
+			-- N110 : lift cuit dans layer.origin a la pose. Plus de
+			-- Vector3.new(0, lift, 0) 60 Hz. LookAt conserve. Size = API.
+			-- Recette visual V61, portee pas mergee. Cable / camion / houle
+			-- / feuillage / unites inchanges (N109/N105/N107/N108/N103).
+			local centre = layer.origin + segment.direction * (visible - shown / 2)
+			part.CFrame = CFrame.lookAt(centre, centre + segment.direction)
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -318,22 +322,26 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
 		local k = Config.WORLD_SCALE
+		local shoulderLift = 0
+		local asphaltLift = 0.08 * k
+		local stripeLift = 0.18 * k
 		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
 		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
-		asphalt.CFrame = frame + Vector3.new(0, 0.08 * k, 0)
+		asphalt.CFrame = frame + Vector3.new(0, asphaltLift, 0)
 		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
-		stripe.CFrame = frame + Vector3.new(0, 0.18 * k, 0)
+		stripe.CFrame = frame + Vector3.new(0, stripeLift, 0)
 
 		table.insert(segments, {
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
-			-- la chaussee qui la porte.
+			-- la chaussee qui la porte. Lift cuit dans origin (N110) : plus
+			-- de Vector3 60 Hz dans applyRouteProgress.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, lift = 0, ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, lift = 0.08 * k, ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, lift = 0.18 * k, ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, stripeLift, 0), ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,
