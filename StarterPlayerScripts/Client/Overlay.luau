@@ -914,7 +914,16 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
 			pulse.Shape = Enum.PartType.Cylinder
 			pulse.Transparency = 0.28
-			pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
+			-- N132 : fin de delivery DeliveryPulse. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- route.to deja Vector3 (gare) inchange. Tween Size/Transparency +
+			-- task.delay Destroy inchanges. truckModel.Parent = nil inchange.
+			-- Distinct splash N131 (mer, last.X, Y + 0.14). Distinct LaunchWake
+			-- N130. Distinct roues N126. Distinct chantier N113/N115.
+			-- Recette visual V75 leftover evenements Overlay.
+			-- applyUnits / applyRouteProgress non touches.
+			-- PlacementPreview / UnitModels inchanges.
+			pulse.CFrame = CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,

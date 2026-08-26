@@ -998,6 +998,11 @@ check("pose et capture de chaque type de batiment", function()
 	-- N115 segRot rawequal doit rester vert. Recette visual V72, portee
 	-- pas mergee. Recette visual V57 leftover N105. Recette visual
 	-- V64 leftover N115.
+	-- N132 : DeliveryPulse fromEulerAnglesYXZ (pas CFrame.Angles). Fin de
+	-- trajet seulement (progress >= 1). Leftover N126 roues, leftover N115
+	-- segRot, leftover N20 popup or doivent rester verts. Recette visual
+	-- V75 leftover evenements Overlay. applyUnits / applyRouteProgress
+	-- inchanges.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
