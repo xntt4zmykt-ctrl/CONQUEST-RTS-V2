@@ -509,7 +509,15 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	-- Lissage exponentiel encadre : reste correct quel que soit le framerate,
 	-- contrairement a un simple `dt * k` qui devient instable sous 30 FPS.
 	local alpha = 1 - math.exp(-12 * dt)
-	self.focus += (self.targetFocus - self.focus) * alpha
+	-- V68 : lerp focus en nombres. Plus de += / - / * Vector3 60 Hz.
+	-- Un Vector3.new a l'ecriture (pan / clamp / minimap lisent encore
+	-- self.focus). Offset ox/oy/oz inchange (V67). Shake sx/sy/sz
+	-- inchange (V66). Pose CFrame.new * rotation inchangee (V66).
+	-- Champ focusX/Y/Z leftover V69.
+	local fx = self.focus.X + (self.targetFocus.X - self.focus.X) * alpha
+	local fy = self.focus.Y + (self.targetFocus.Y - self.focus.Y) * alpha
+	local fz = self.focus.Z + (self.targetFocus.Z - self.focus.Z) * alpha
+	self.focus = Vector3.new(fx, fy, fz)
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
@@ -523,7 +531,8 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	--   oy = d * sin(pitch)
 	--   oz = d * cos(pitch) * cos(yaw)
 	-- Shake 0 : identique a V66 (oeil = focus + offset). Shake > 0 :
-	-- translation seulement (V66). Lerp focus leftover V68.
+	-- translation seulement (V66). Lerp focus V68 (nombres, un Vector3
+	-- a l'ecriture). Champ nombres leftover V69.
 	-- Unites yaw inchangees (V65). Camion segRot inchange (V64).
 	local d = self.distance
 	local pitch, yaw = self.pitch, self.yaw
@@ -535,9 +544,9 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	local sx = math.sin(self.clock * 31) * self.shake * 0.65
 	local sy = math.cos(self.clock * 37) * self.shake * 0.42
 	local sz = math.sin(self.clock * 23) * self.shake * 0.5
-	local ex = self.focus.X + ox + sx
-	local ey = self.focus.Y + oy + sy
-	local ez = self.focus.Z + oz + sz
+	local ex = fx + ox + sx
+	local ey = fy + oy + sy
+	local ez = fz + oz + sz
 	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
