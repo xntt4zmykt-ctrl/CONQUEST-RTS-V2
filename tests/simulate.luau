@@ -2442,6 +2442,71 @@ if serverBlocks > 1500 then
 	fail(`{serverBlocks} blocs de collision : replication initiale trop lourde`)
 end
 
+-- N191 : leftover ConquestCollision Folder recycle (pas Destroy).
+-- Deux build, rawequal Folder. Park enfants avant take (Ground
+-- recycle via collisionPartFree). Skip Parent nil. Skip non-Folder
+-- (Part homonyme Parent nil, pas collisionFree). Terrain:Clear
+-- inchange. clearDefaultScene inchange (N192). Distinct leftover
+-- N190 ScreenGui. Distinct leftover N184 worldFree client.
+do
+	local first = WorldBuilder.build(state.terrain)
+	if first.Name ~= "ConquestCollision" then
+		fail("collision leftover — Name ConquestCollision absent")
+	elseif first.Parent == nil then
+		fail("collision leftover — Folder non parentee")
+	elseif not first:IsA("Folder") then
+		fail("collision leftover — pas un Folder")
+	else
+		local nFirst = 0
+		local firstGround = nil
+		for _, child in first:GetChildren() do
+			nFirst += 1
+			if child.Name == "Ground" and firstGround == nil then
+				firstGround = child
+			end
+		end
+		if nFirst == 0 then
+			fail("collision leftover — aucun enfant")
+		elseif firstGround == nil then
+			fail("collision leftover — aucun Ground")
+		else
+			local second = WorldBuilder.build(state.terrain)
+			local nSecond = 0
+			local reusedGround = false
+			for _, child in second:GetChildren() do
+				nSecond += 1
+				if rawequal(child, firstGround) then
+					reusedGround = true
+				end
+			end
+			if not rawequal(first, second) then
+				fail("collision leftover — Folder recree (pool non pris)")
+			elseif second.Parent == nil then
+				fail("collision leftover — Folder non reparentee")
+			elseif nSecond ~= nFirst then
+				fail(`collision leftover — enfants empiles ({nSecond} vs {nFirst})`)
+			elseif not reusedGround then
+				fail("collision leftover — Ground recree (collisionPartFree non pris)")
+			else
+				second.Parent = nil
+				local fake = Instance.new("Part")
+				fake.Name = "ConquestCollision"
+				fake.Parent = game:GetService("Workspace")
+				local third = WorldBuilder.build(state.terrain)
+				if fake.Parent ~= nil then
+					fail("collision leftover — Part mismatch pas parkee")
+				elseif third == nil or not third:IsA("Folder") then
+					fail("collision leftover — Folder absent apres mismatch")
+				elseif third.Name ~= "ConquestCollision" then
+					fail("collision leftover — Name perdu apres mismatch")
+				else
+					print("collision leftover : Folder rawequal, Ground recycle, mismatch Part (N191)")
+				end
+			end
+		end
+	end
+end
+
 --=============================================================================
 -- P0 — hash carte, intentions, capacite, metrics
 --=============================================================================

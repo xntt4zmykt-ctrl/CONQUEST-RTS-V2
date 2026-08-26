@@ -370,6 +370,21 @@ Instance.new = function(className)
 	return newInstance(className)
 end
 
+-- Workspace serveur : WorldBuilder.build (N191) relit FindFirstChild /
+-- GetChildren / Parent. Terrain:Clear no-op (SmoothTerrain d'une
+-- partie precedente). Distinct leftover N192 clearDefaultScene
+-- (Baseplate Destroy). Pas de GuiObject.
+do
+	local workspaceInst = newInstance("Workspace")
+	workspaceInst.Name = "Workspace"
+	local terrainInst = newInstance("Terrain")
+	terrainInst.Name = "Terrain"
+	terrainInst.Clear = function() end
+	terrainInst.Parent = workspaceInst
+	workspaceInst.Terrain = terrainInst
+	services["Workspace"] = workspaceInst
+end
+
 -- Expose au banc d'essai de quoi fabriquer un faux Player : c'est le seul
 -- receptacle du dossier `leaderstats`, et rien dans les modules ne le cree.
 __newInstance = newInstance
