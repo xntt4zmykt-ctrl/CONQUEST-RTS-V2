@@ -257,7 +257,7 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- WHITE, Metal, Name = "MissileBody", Shape = Cylinder inchanges.
 	-- Un site. Distinct rampe N145 (pitch -8°). Distinct Bow N144
 	-- (Y=π). Distinct cylinder() N139 (Z=90 bâtiments). Distinct
-	-- ailettes leftover (Z = axis * π/2). Nez / bandes / flamme
+	-- ailettes leftover N147 (Z = axis * π/2). Nez / bandes / flamme
 	-- sans euler. LandingRamp N145 / Bow N144 / addWake N143 /
 	-- Overlay / BuildingModels / place inchanges.
 	local body = addPart(visual, "Part", "MissileBody", Vector3.new(6.2, 1.05, 1.05), WHITE, CFrame.new(0, 0, 0) * CFrame.fromEulerAnglesYXZ(0, math.rad(90), 0), Enum.Material.Metal)
@@ -266,13 +266,24 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	nose.Shape = Enum.PartType.Ball
 	addPart(visual, "Part", "GuidanceBand", Vector3.new(1.18, 1.3, 0.42), faction, CFrame.new(0, 0, -1.9), Enum.Material.Neon)
 	for axis = 0, 3 do
+		-- N147 : ailettes Fin. Plus de CFrame.Angles.
+		-- fromEulerAnglesYXZ(0, 0, axis * math.pi / 2) ≡ Angles(0, 0, axis·π/2).
+		-- Roll Z = axis·90°. Quatre ailettes en croix (axis = 0..3, un
+		-- addPart, ne pas splitter). Offset (0, 0, 2.45), taille
+		-- Vector3.new(0.22, 1.65, 1.4), NAVY_DARK, Metal, Name = "Fin"
+		-- inchanges. Distinct MissileBody N146 (Y=90 cylindre). Distinct
+		-- rampe N145 (pitch -8°). Distinct cylinder() N139 (Z=90
+		-- bâtiments). Distinct leftover mesh visual.parts. Nez / bandes /
+		-- flamme sans euler. MissileBody N146 / LandingRamp N145 / Bow
+		-- N144 / addWake N143 / Overlay / BuildingModels / place
+		-- inchanges.
 		addPart(
 			visual,
 			"WedgePart",
 			"Fin",
 			Vector3.new(0.22, 1.65, 1.4),
 			NAVY_DARK,
-			CFrame.new(0, 0, 2.45) * CFrame.Angles(0, 0, axis * math.pi / 2),
+			CFrame.new(0, 0, 2.45) * CFrame.fromEulerAnglesYXZ(0, 0, axis * math.pi / 2),
 			Enum.Material.Metal
 		)
 	end
