@@ -240,17 +240,16 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			-- N111 : interpolation en nombres depuis ox/oy/oz + dx/dy/dz
-			-- (cuits a la pose). Plus de layer.origin + direction * t 60 Hz.
-			-- LookAt conserve (deux Vector3 = API, leftover N113). Size = API.
-			-- Lift cuit inchange (N110). Cable / camion / houle / feuillage /
-			-- unites inchanges (N109/N105/N107/N108/N103). Recette visual V62,
+			-- N113 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+			-- 60 Hz. Lerp nombres inchange (N111). Size inchange (API). Lift
+			-- cuit inchange (N110). Cable / camion / houle / feuillage /
+			-- unites inchanges (N109/N105/N107/N108/N103). Recette visual V63,
 			-- portee pas mergee.
 			local t = visible - shown / 2
 			local cx = layer.ox + dx * t
 			local cy = layer.oy + dy * t
 			local cz = layer.oz + dz * t
-			part.CFrame = CFrame.lookAt(Vector3.new(cx, cy, cz), Vector3.new(cx + dx, cy + dy, cz + dz))
+			part.CFrame = CFrame.new(cx, cy, cz) * segment.rot
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -326,6 +325,10 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local origin = a - direction * (tileSize / 2)
 		local dx, dy, dz = direction.X, direction.Y, direction.Z
 		local ox, oy, oz = origin.X, origin.Y, origin.Z
+		-- N113 : orientation cuit une fois (grille HV, un axe ≈ 0).
+		-- applyRouteProgress compose translation * rot, plus de lookAt 60 Hz.
+		-- Recette visual V63, portee pas mergee.
+		local rot = CFrame.lookAt(Vector3.zero, direction)
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
@@ -347,6 +350,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 			-- la chaussee qui la porte. Lift cuit dans origin (N110). N111 :
 			-- ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
 			-- plus origin + direction * t a 60 Hz.
+			-- N113 : rot cuit ici. applyRouteProgress n'appelle plus lookAt 60 Hz.
 			layers = {
 				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ox = ox, oy = oy + shoulderLift, oz = oz, ratio = 1 },
 				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ox = ox, oy = oy + asphaltLift, oz = oz, ratio = 1 },
@@ -354,6 +358,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 			},
 			origin = origin,
 			direction = direction,
+			rot = rot,
 			dx = dx,
 			dy = dy,
 			dz = dz,
