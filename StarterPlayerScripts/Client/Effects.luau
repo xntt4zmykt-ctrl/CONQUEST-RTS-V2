@@ -59,26 +59,36 @@ end
 --=============================================================================
 
 function Effects.selectTile(self: Effects, index: number, color: Color3)
-	if self.selection then
-		self.selection:Destroy()
-	end
-
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
-	local marker = Instance.new("Part")
-	marker.Name = "SelectedTerritory"
-	marker.Anchored = true
-	marker.CanCollide = false
-	marker.CanTouch = false
-	marker.CanQuery = false
-	marker.CastShadow = false
-	marker.Material = Enum.Material.Neon
+	local marker = self.selection
+	-- N155 : reuse Part si deja creee. previewTile reutilise deja
+	-- (N96 + N154 skip). selectTile Destroy+recreate chaque clic.
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
+	-- V74 freeze). Distinct HUD N153. Distinct previewTile N154
+	-- skip. Distinct visual V83 SelectionRing pulseRot (ne pas
+	-- merger 0b3d). Name SelectedTerritory inchange. Tween Create
+	-- conserve (pulse Transparency/Size restart). Recette leftover
+	-- N154, pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview inchanges.
+	if not marker then
+		marker = Instance.new("Part")
+		marker.Name = "SelectedTerritory"
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.CastShadow = false
+		marker.Material = Enum.Material.Neon
+		marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
+		marker.Parent = self.root
+		self.selection = marker
+	end
+
 	marker.Color = color
 	marker.Transparency = 0.38
 	marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
 	marker.CFrame = CFrame.new(base.X, height + 0.55, base.Z)
-	marker.Parent = self.root
-	self.selection = marker
 
 	TweenService:Create(marker, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		Transparency = 0.68,
@@ -98,6 +108,25 @@ end
 -- frame, il ne doit donc jamais creer une Part par mouvement de souris.
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
 	local marker = self.actionPreview
+	-- N154 : skip si tuile + valid + color inchanges. actionPreviewIndex
+	-- etait pose et jamais lu. Meme hover 60 Hz (init.client raycast)
+	-- reecrivait Color / Transparency / CFrame.new + indexToWorld.
+	-- Skip les TROIS : attaque vs build peut changer valid/color sur
+	-- la meme tuile. Marker existant requis (premier appel cree).
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual V74
+	-- freeze). Distinct HUD N153 (feed plafond). Distinct visual V77
+	-- PlacementPreview early-out (ne pas merger 185a). Distinct
+	-- selectTile leftover N155 (reuse Part, deja). Recette leftover
+	-- N153, pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview inchanges.
+	if
+		marker
+		and self.actionPreviewIndex == index
+		and self.actionPreviewValid == valid
+		and self.actionPreviewColor == color
+	then
+		return
+	end
 	if not marker then
 		marker = Instance.new("Part")
 		marker.Name = "ActionPreview"
@@ -118,6 +147,8 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	marker.Transparency = if valid then 0.5 else 0.72
 	marker.CFrame = CFrame.new(base.X, height + 0.42, base.Z)
 	self.actionPreviewIndex = index
+	self.actionPreviewValid = valid
+	self.actionPreviewColor = color
 end
 
 function Effects.clearActionPreview(self: Effects)
@@ -125,6 +156,8 @@ function Effects.clearActionPreview(self: Effects)
 		self.actionPreview:Destroy()
 		self.actionPreview = nil
 		self.actionPreviewIndex = nil
+		self.actionPreviewValid = nil
+		self.actionPreviewColor = nil
 	end
 end
 
@@ -142,6 +175,11 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 
 	local plate = Instance.new("Part")
+	-- N156 leftover : Instance.new + Destroy chaque capture (cap
+	-- MAX_LIVE_FLASHES=90, MAX_FLASHES_PER_WAVE=28). Distinct
+	-- selectTile N155 (reuse deja). Distinct previewTile N154 skip.
+	-- Distinct conquestPulse N134 (euler, pas pool). Distinct flame
+	-- leftover N152. Recette leftover N155.
 	plate.Anchored = true
 	plate.CanCollide = false
 	plate.CanTouch = false
@@ -187,7 +225,15 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
-	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N134 : conquestPulse ring. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- Hauteur Y = 3 inchangee. Tween Size/Transparency + task.delay Destroy
+	-- inchanges. Caps MAX_FLASHES_PER_WAVE / MAX_LIVE_FLASHES inchanges.
+	-- conquestWave / lossWave barycentre inchanges. Flashes tuile sans euler.
+	-- Distinct Overlay Shockwave N133 (PLAINS + 0.5). Distinct pulse N132
+	-- (Overlay gare). Distinct WorldRenderer OceanGlint leftover.
+	-- Overlay / WorldRenderer / BuildingModels inchanges.
+	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = self.root
 
 	TweenService:Create(ring, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
