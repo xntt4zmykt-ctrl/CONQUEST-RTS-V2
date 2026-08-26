@@ -1229,19 +1229,66 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Onde horizontale : elle communique la portee bien mieux qu'une simple
 	-- sphere et reste visible quand la camera regarde presque a la verticale.
-	local shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
-	shockwave.Shape = Enum.PartType.Cylinder
+	-- N163 : free-list shockFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). DeliveryPulse
+	-- réutilise déjà (N162, deliveryFree — ne pas partager).
+	-- LandingSplash réutilise déjà (N161, splashFree — ne pas
+	-- partager). LaunchWake réutilise déjà (N160, wakeFree — ne
+	-- pas partager). goldPopup réutilise déjà (N159, goldFree —
+	-- ne pas partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer shockFree pulseFree).
+	-- Distinct floatingText N158. Distinct goldPopup N159.
+	-- Distinct LaunchWake N160. Distinct LandingSplash N161.
+	-- Distinct DeliveryPulse N162 (deliveryFree, ne pas
+	-- partager). Distinct N133 (euler Shockwave déjà inline).
+	-- Distinct visual V81 Shockwave wakeRot (ne pas merger
+	-- 47c0). Distinct BlastSmoke leftover (Destroy, ne pas
+	-- fusionner). Distinct Blast sphère leftover (Destroy, ne
+	-- pas fusionner). Name Shockwave conservé. Reset Size
+	-- (0.32, 5, 5) + Transparency 0.12 + Color 255,229,181 au
+	-- reuse (le tween avait Size (0.32, worldRadius * 2.5,
+	-- worldRadius * 2.5) / Transparency 1 ; worldRadius
+	-- change). Euler N133 inline conservé. Tween Create
+	-- conservé (Size + Transparency restart). routePart non
+	-- modifié (LaunchWake / LandingSplash / DeliveryPulse /
+	-- BlastSmoke). Blast Destroy obligatoire. BlastSmoke
+	-- Destroy obligatoire. Recette leftover N162, pas merger
+	-- visual. HUD / UnitModels / Effects / PlacementPreview /
+	-- goldPopup / LaunchWake / LandingSplash / DeliveryPulse /
+	-- applyUnits / stepInterpolation inchangés.
+	local free = self.shockFree
+	if not free then
+		free = {}
+		self.shockFree = free
+	end
+	local n = #free
+	local shockwave
+	if n > 0 then
+		shockwave = free[n]
+		free[n] = nil
+	else
+		shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
+		shockwave.Shape = Enum.PartType.Cylinder
+	end
+	shockwave.Size = Vector3.new(0.32, 5, 5)
 	shockwave.Transparency = 0.12
+	shockwave.Color = Color3.fromRGB(255, 229, 181)
 	-- N133 : explosion Shockwave. Plus de CFrame.Angles.
 	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
 	-- Hauteur PLAINS + 0.5 inchangee. Tween Size/Transparency +
-	-- task.delay Destroy inchanges. Sphere / fumee / PointLight sans euler.
-	-- Distinct pulse N132 (route.to gare). Distinct splash N131 (mer).
-	-- Distinct LaunchWake N130. Distinct Effects ring N134 (Y = 3).
-	-- Recette visual V75 leftover evenements Overlay.
-	-- applyUnits / stepInterpolation non touches.
-	-- Effects / PlacementPreview / UnitModels inchanges.
+	-- task.delay (Parent = nil, plus Destroy). Sphere / fumee /
+	-- PointLight sans euler. Distinct pulse N132/N162 (route.to
+	-- gare). Distinct splash N131/N161 (mer). Distinct LaunchWake
+	-- N130/N160. Distinct Effects ring N134 (Y = 3). Recette
+	-- visual V75 leftover evenements Overlay. applyUnits /
+	-- stepInterpolation non touches. Effects / PlacementPreview /
+	-- UnitModels inchanges.
 	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+	shockwave.Parent = self.root
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
 		Transparency = 1,
@@ -1283,7 +1330,9 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	end)
 	task.delay(1, function()
 		if shockwave.Parent then
-			shockwave:Destroy()
+			shockwave.Parent = nil
+			local pool = self.shockFree
+			pool[#pool + 1] = shockwave
 		end
 	end)
 end

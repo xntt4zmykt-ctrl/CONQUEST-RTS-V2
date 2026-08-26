@@ -1047,7 +1047,7 @@ check("pose et capture de chaque type de batiment", function()
 	-- rawequal est dans « vagues de conquete »). Name DeliveryPulse
 	-- conservé. Leftover N132 euler inline, leftover N136 BuildRing
 	-- doivent rester verts. Recette leftover N161, pas merger visual
-	-- V80 wakeRot. Shockwave leftover N163 non touche.
+	-- V80 wakeRot. Shockwave leftover N163 (check navires / vagues).
 	-- N136 : BuildRing fromEulerAnglesYXZ (pas CFrame.Angles). Cylindre
 	-- Z=90. playConstruction via applyBuildingDelta plus haut. Leftover
 	-- N132 pulse, leftover N113 rot chantier, leftover N135 OceanGlint
@@ -1786,6 +1786,14 @@ check("navires, missiles et interpolation", function()
 	-- inline, leftover N151 trail doivent rester verts. Recette
 	-- leftover N160, pas merger visual V79 wakeRot. DeliveryPulse
 	-- leftover N162 (check pose / vagues, pas ici).
+	-- N163 : Shockwave free-list shockFree. Pas de
+	-- testFlushDelays ici — l'onde reste parentée (le flush +
+	-- reuse rawequal est dans « vagues de conquete »). Leftover
+	-- N133 euler inline, leftover N161 splash, leftover N160
+	-- wake, leftover N152 flame Size doivent rester verts.
+	-- Recette leftover N162, pas merger visual V81 wakeRot.
+	-- BlastSmoke leftover N164 non touche. Blast sphère leftover
+	-- non touche. overlay:explosion plus bas ne leve pas.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1829,8 +1837,14 @@ check("vagues de conquete", function()
 	-- l'insert N160 ; apres les asserts N161, reconstruire
 	-- FACTORY+CITY + dispatch + step reparente la meme Part
 	-- (rawequal Parent root, Name DeliveryPulse). Distinct
-	-- splashFree / wakeFree / goldFree. Shockwave leftover
-	-- N163 non touche.
+	-- splashFree / wakeFree / goldFree.
+	-- N163 : Shockwave free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse shockFree. Snapshot avant
+	-- l'insert N160 ; apres les asserts N162, explosion(40,40,6)
+	-- (rayon ≠ 9) reparente la meme Part (rawequal Parent root,
+	-- Name Shockwave). Distinct deliveryFree / splashFree /
+	-- wakeFree / goldFree / pulseFree. Blast Destroy / BlastSmoke
+	-- Destroy conservés.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1906,6 +1920,18 @@ check("vagues de conquete", function()
 	assert(pooledDelivery ~= pooledSplash, "deliveryFree partage splashFree")
 	assert(pooledDelivery ~= pooledGold, "deliveryFree partage goldFree")
 	assert(pooledDelivery ~= pooledRing, "deliveryFree partage pulseFree")
+	-- N163 : flush ci-dessus a poussé le Shockwave de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse après N162.
+	local shockPool = overlay.shockFree
+	assert(shockPool ~= nil and #shockPool >= 1, "ondes choc non poolees")
+	local pooledShock = shockPool[#shockPool]
+	assert(pooledShock.Parent == nil, "onde choc encore parente")
+	assert(pooledShock.Name == "Shockwave", "Name Shockwave perdu")
+	assert(pooledShock ~= pooledWake, "shockFree partage wakeFree")
+	assert(pooledShock ~= pooledSplash, "shockFree partage splashFree")
+	assert(pooledShock ~= pooledGold, "shockFree partage goldFree")
+	assert(pooledShock ~= pooledDelivery, "shockFree partage deliveryFree")
+	assert(pooledShock ~= pooledRing, "shockFree partage pulseFree")
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -1952,6 +1978,14 @@ check("vagues de conquete", function()
 	assert(#deliveryPool == deliveryN - 1, "pulse livraison non reutilise")
 	assert(rawequal(pooledDelivery.Parent, overlay.root), "pulse livraison non reparente")
 	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu au reuse")
+	-- N163 : explosion(40, 40, 6) — rayon ≠ 9 du check navires.
+	-- Reset Size (0.32, 5, 5) + Transparency 0.12 avant Tween
+	-- (worldRadius change). Blast / BlastSmoke Destroy conservés.
+	local shockN = #shockPool
+	overlay:explosion(40, 40, 6)
+	assert(#shockPool == shockN - 1, "onde choc non reutilise")
+	assert(rawequal(pooledShock.Parent, overlay.root), "onde choc non reparente")
+	assert(pooledShock.Name == "Shockwave", "Name Shockwave perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()
