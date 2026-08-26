@@ -1327,6 +1327,10 @@ check("navires, missiles et interpolation", function()
 	local extra1 = overlay.units[3].extra
 	assert(extra1 ~= nil, "missile extra absent")
 	assert(extra1.tx == 60 and extra1.ty == 60, "missile extra initial")
+	-- V55 : insert pose des nombres, plus de Vector2.
+	assert(type(overlay.units[1].targetX) == "number" and type(overlay.units[1].currentX) == "number", "navire target pas un nombre")
+	assert(overlay.units[1].targetX == 10 and overlay.units[1].targetY == 10, "navire target insert")
+	assert(overlay.units[3].targetX == 40 and overlay.units[3].currentY == 40, "missile target insert")
 	overlay:stepInterpolation(1 / 60)
 	-- V52 : second lot, meme id, tx/ty differents → mute, rawequal du record.
 	overlay:applyUnits({
@@ -1338,6 +1342,20 @@ check("navires, missiles et interpolation", function()
 	})
 	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "missile extra non mute")
 	assert(rawequal(overlay.units[3].extra, extra1), "missile extra non recycle")
+	-- V55 : meme missile, x/y differents → mute target, rawequal du record unite.
+	local missileUnit = overlay.units[3]
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 50, y = 55, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].targetX == 50 and overlay.units[3].targetY == 55, "missile target non mute")
+	assert(rawequal(overlay.units[3], missileUnit), "missile unit non recycle")
+	local beforeX = overlay.units[3].currentX
+	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
