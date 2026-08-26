@@ -97,7 +97,15 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	for i = 1, teeth do
 		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
 		local roof = block(model, Vector3.new(2.3, 0.35, 7), Vector3.new(x, roofY, 0), STEEL, Enum.Material.Metal)
-		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.Angles(0, 0, math.rad(-12))
+		-- N140 : toits sheds. Plus de CFrame.Angles.
+		-- fromEulerAnglesYXZ(0, 0, math.rad(-12)) ≡ Angles(0, 0, -12°).
+		-- Z=-12° fixe. teeth / x / roofY / taille Vector3.new(2.3, 0.35, 7)
+		-- inchanges. Distinct cylinder() N139 (Z=90 helper). Distinct
+		-- BuildRing N136 (evenement pose). Distinct portes silo leftover
+		-- (±18°). Distinct rampes SAM leftover (pitch -31°). cylinder()
+		-- / playConstruction / WorldRenderer / Overlay / Effects
+		-- inchanges.
+		roof.CFrame = CFrame.new(x, roofY, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-12))
 	end
 
 	local chimneyA = cylinder(model, Vector3.new(9 + (tier - 1) * 2, 1.15, 1.15), Vector3.new(2.7, roofY + 3.3, -1.8), STEEL)

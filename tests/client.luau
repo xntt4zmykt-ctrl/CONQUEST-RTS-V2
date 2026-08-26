@@ -1150,6 +1150,12 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- rester verts. Toits leftover N140 non touches. Recette leftover
 	-- N138, pas merger visual. WorldRenderer / Overlay / Effects
 	-- inchanges.
+	-- N140 : toits usine fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Z=-12° fixe. buildFactory sheds seulement. Leftover N139
+	-- cylinder cheminees, leftover N124 radar, leftover N109 câble
+	-- Y, leftover N136 BuildRing (check pose) doivent rester verts.
+	-- Portes silo leftover non touchees. Recette leftover N139,
+	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
