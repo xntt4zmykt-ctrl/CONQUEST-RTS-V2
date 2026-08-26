@@ -49,6 +49,11 @@ local gainBuf: { number } = table.create(16)
 local lossBuf: { number } = table.create(16)
 local otherBuf: { number } = table.create(16)
 
+-- N114 : compact du prefixe consomme. Seuil 32 = ~10 frames de budget 3.
+-- Pas de table.remove(1). Drain complet (N112) inchange. Recycle Parts (N106)
+-- inchange. Pas d'equivalent visuel (V63 = Overlay lookAt).
+local DIRTY_COMPACT_HEAD = 32
+
 local WorldRenderer = {}
 WorldRenderer.__index = WorldRenderer
 
@@ -732,7 +737,7 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 	-- table.insert inchanges. rebuildChunk recycle Ground/Border inchange
 	-- (N106). meshKeyAt inchange (N104). Houle / feuillage inchanges
 	-- (N107/N108). Stale (dirty deja nil) saute sans compter le budget,
-	-- comme avant. Pas de RemoteFunction.
+	-- comme avant. Compact prefixe N114 apres la boucle. Pas de RemoteFunction.
 	while done < budget and head <= #queue do
 		local chunk = queue[head]
 		head += 1
@@ -745,6 +750,20 @@ function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 
 	if head > #queue then
 		table.clear(queue)
+		head = 1
+	elseif head > DIRTY_COMPACT_HEAD then
+		-- N114 : prefixe 1..head-1 mort tant que la vague n'est pas rattrapee.
+		-- Copie in-place des restants, nil du surplus, tete a 1.
+		-- Pas a chaque frame (seuil 32). Pas de table.remove. Drain N112
+		-- inchange. Recycle Ground/Border inchange (N106).
+		local n = #queue
+		local remaining = n - head + 1
+		for i = 1, remaining do
+			queue[i] = queue[head + i - 1]
+		end
+		for i = remaining + 1, n do
+			queue[i] = nil
+		end
 		head = 1
 	end
 	self.dirtyHead = head
