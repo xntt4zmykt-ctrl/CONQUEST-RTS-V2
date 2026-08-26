@@ -34,6 +34,17 @@ export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
 local colorFor = Theme.factionColor
 local DARK = Color3.fromRGB(29, 35, 43)
+-- N103 : conversion tuile → monde en nombres (meme formule que WorldSpace.tileToWorld).
+-- Le helper allouerait un Vector3 par unite / frame ; il reste le point unique
+-- serveur / batiments / splash — on ne le change pas. Recette visual V56.
+local TILE = Config.TILE_SIZE
+local HALF_W = Config.WORLD_WIDTH / 2
+local HALF_D = Config.WORLD_DEPTH / 2
+local TILE_HALF = TILE / 2
+-- N105 : lift camion en constante. path[i] reste au niveau chaussee ;
+-- on ajoute TRUCK_LIFT sans Vector3.new(0, 0.8, 0) 60 Hz.
+-- Recette visual V57, portee pas mergee. Unites inchangees (N103).
+local TRUCK_LIFT = 0.8
 
 --=============================================================================
 -- Construction
@@ -214,6 +225,7 @@ local function applyRouteProgress(construction: any, progress: number)
 
 	for _, segment in construction.segments do
 		local visible = math.clamp(covered - segment.startsAt, 0, segment.length)
+		local dx, dy, dz = segment.dx, segment.dy, segment.dz
 		for _, layer in segment.layers do
 			local part = layer.part
 			--[[
@@ -228,8 +240,16 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			local centre = segment.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction) + Vector3.new(0, layer.lift, 0)
+			-- N113 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+			-- 60 Hz. Lerp nombres inchange (N111). Size inchange (API). Lift
+			-- cuit inchange (N110). Cable / camion / houle / feuillage /
+			-- unites inchanges (N109/N105/N107/N108/N103). Recette visual V63,
+			-- portee pas mergee.
+			local t = visible - shown / 2
+			local cx = layer.ox + dx * t
+			local cy = layer.oy + dy * t
+			local cz = layer.oz + dz * t
+			part.CFrame = CFrame.new(cx, cy, cz) * segment.rot
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -303,29 +323,45 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local frame = CFrame.lookAt(a + span * 0.5, b)
 		local direction = span.Unit
 		local origin = a - direction * (tileSize / 2)
+		local dx, dy, dz = direction.X, direction.Y, direction.Z
+		local ox, oy, oz = origin.X, origin.Y, origin.Z
+		-- N113 : orientation cuit une fois (grille HV, un axe ≈ 0).
+		-- applyRouteProgress compose translation * rot, plus de lookAt 60 Hz.
+		-- Recette visual V63, portee pas mergee.
+		local rot = CFrame.lookAt(Vector3.zero, direction)
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
 		local k = Config.WORLD_SCALE
+		local shoulderLift = 0
+		local asphaltLift = 0.08 * k
+		local stripeLift = 0.18 * k
 		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
 		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
-		asphalt.CFrame = frame + Vector3.new(0, 0.08 * k, 0)
+		asphalt.CFrame = frame + Vector3.new(0, asphaltLift, 0)
 		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
-		stripe.CFrame = frame + Vector3.new(0, 0.18 * k, 0)
+		stripe.CFrame = frame + Vector3.new(0, stripeLift, 0)
 
 		table.insert(segments, {
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
-			-- la chaussee qui la porte.
+			-- la chaussee qui la porte. Lift cuit dans origin (N110). N111 :
+			-- ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
+			-- plus origin + direction * t a 60 Hz.
+			-- N113 : rot cuit ici. applyRouteProgress n'appelle plus lookAt 60 Hz.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, lift = 0, ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, lift = 0.08 * k, ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, lift = 0.18 * k, ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ox = ox, oy = oy + shoulderLift, oz = oz, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ox = ox, oy = oy + asphaltLift, oz = oz, ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, stripeLift, 0), ox = ox, oy = oy + stripeLift, oz = oz, ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,
+			rot = rot,
+			dx = dx,
+			dy = dy,
+			dz = dz,
 			length = length,
 			startsAt = totalLength,
 		})
@@ -358,6 +394,21 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	local path: { Vector3 } = { worldAt(tiles[1]) }
 	for _, run in runs do
 		table.insert(path, worldAt(run.toIndex))
+	end
+
+	-- N115 : orientation camion cuite une fois par segment (grille HV, Y
+	-- identique aux deux bouts — le lift TRUCK_LIFT s'annule). stepInterpolation
+	-- compose translation * segRot, plus de lookAt 60 Hz. Magnitude < 0.01 →
+	-- rot precedente (ou identite au premier), jamais un lookAt degenere.
+	-- Recette visual V64, portee pas mergee. Chantier segment.rot inchange (N113).
+	local segRot: { CFrame } = {}
+	for i = 1, #path - 1 do
+		local d = path[i + 1] - path[i]
+		if d.Magnitude < 0.01 then
+			segRot[i] = if i > 1 then segRot[i - 1] else CFrame.new(0, 0, 0)
+		else
+			segRot[i] = CFrame.lookAt(Vector3.zero, d)
+		end
 	end
 
 	local from = path[1]
@@ -409,6 +460,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		from = from + Vector3.new(0, 0.8, 0),
 		to = to + Vector3.new(0, 0.8, 0),
 		path = path,
+		segRot = segRot,
 		slot = slot,
 		delivery = nil,
 		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
@@ -449,7 +501,7 @@ end
 --[[
 	"+X or" flottant au-dessus d'une gare, la signature d'une livraison
 	reussie — le seul retour du commerce terrestre, exactement comme dans le
-	jeu de reference.
+	regles CONQUEST.
 ]]
 --[[
 	Notre slot, pour savoir quelles livraisons nous concernent.
@@ -651,78 +703,163 @@ end
 --[[
 	Les instantanes arrivent a 10 Hz. On stocke la position cible et on
 	interpole a chaque frame, sinon les navires avancent par saccades visibles.
+
+	N98 : `trackUnit` est hisse au module — plus de closure par lot.
+	Extra missile pose une fois a l'insert, puis mute (tx/ty). Navire : extra
+	reste nil (la retraite N56 vit sur `retreatTinted`, pas une table 10 Hz).
+
+	N101 : `targetX`/`targetY` + `currentX`/`currentY` nombres (recette visual
+	V55). Vector2 Roblox est immuable : un `Vector2.new` par unite et par lot
+	(10 Hz) plus un userdata par lerp (60 Hz). Insert : poser les quatre
+	nombres. Update : muter `targetX`/`targetY`. Lerp numerique dans
+	`stepInterpolation`. Extra missile inchange (N98).
+	N103 : pose 60 Hz = X/Z monde en nombres (recette visual V56). Distinct
+	de N101 (nombres cible) / N98 (extra).
+	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Distinct de
+	N115 (camion HV cuisable).
+	N117 : mouvement = `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`
+	(recette visual V65). Plus de lookAt deux Vector3 60 Hz.
+	N125 : roulis navire `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71,
+	portee pas mergee). Plus de CFrame.Angles 60 Hz.
+	N126 : roues camion `fromEulerAnglesYXZ(spin, 0, 0)` (recette visual
+	V72, portee pas mergee). Camera N118 deja. Pas de RemoteFunction.
+	HUD / UnitModels / serveur non touches.
 ]]
+local function trackUnit(
+	self: Overlay,
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	isMissile: boolean,
+	extra: any?
+)
+	local unit = self.units[id]
+	if not unit then
+		local visual = if isMissile
+			then UnitModels.createMissile(self.root, slot, kind)
+			else UnitModels.createBoat(self.root, slot, kind)
+		unit = {
+			visual = visual,
+			currentX = x,
+			currentY = y,
+			targetX = x,
+			targetY = y,
+			isMissile = isMissile,
+			phase = (id % 31) / 31 * math.pi * 2,
+			extra = extra,
+		}
+		self.units[id] = unit
+		if not isMissile then
+			local origin = WorldSpace.tileToWorld(x, y)
+			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+			wake.Shape = Enum.PartType.Cylinder
+			wake.Transparency = 0.34
+			-- N130 : insert navire LaunchWake. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- Offset Y OCEAN_LEVEL + 0.12 inchange. Garde not isMissile
+			-- inchangee. Tween Size/Transparency + task.delay Destroy
+			-- inchanges. Distinct footprint N129 (60 Hz hover). Distinct
+			-- roulis N125. Distinct splash/pulse/shockwave (leftover).
+			-- Recette visual V75 leftover evenements Overlay. stepInterpolation
+			-- non touche. UnitModels / PlacementPreview inchanges.
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.16, 9, 9),
+				Transparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				if wake.Parent then
+					wake:Destroy()
+				end
+			end)
+		end
+	else
+		if extra then
+			local stored = unit.extra
+			if stored then
+				stored.tx = extra.tx
+				stored.ty = extra.ty
+			else
+				unit.extra = extra
+			end
+		end
+	end
+	unit.targetX = x
+	unit.targetY = y
+	self.seen[id] = true
+end
+
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
-		local unit = self.units[id]
-		if not unit then
-			local visual = if isMissile
-				then UnitModels.createMissile(self.root, slot, kind)
-				else UnitModels.createBoat(self.root, slot, kind)
-			unit = {
-				visual = visual,
-				current = Vector2.new(x, y),
-				target = Vector2.new(x, y),
-				isMissile = isMissile,
-				phase = (id % 31) / 31 * math.pi * 2,
-				extra = extra,
-			}
-			self.units[id] = unit
-			if not isMissile then
-				local origin = WorldSpace.tileToWorld(x, y)
-				local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-				wake.Shape = Enum.PartType.Cylinder
-				wake.Transparency = 0.34
-				wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.16, 9, 9),
-					Transparency = 1,
-				}):Play()
-				task.delay(0.8, function()
-					if wake.Parent then
-						wake:Destroy()
-					end
-				end)
+	for _, boat in boats do
+		trackUnit(self, boat.id, boat.slot, boat.kind, boat.x, boat.y, false, nil)
+		-- N56 option A : teinte froide des que le serveur marque la retraite.
+		if boat.retreating then
+			local unit = self.units[boat.id]
+			if unit and not unit.retreatTinted then
+				unit.retreatTinted = true
+				for _, piece in unit.visual.pieces do
+					piece.part.Color = piece.part.Color:Lerp(Color3.fromRGB(168, 206, 222), 0.42)
+				end
 			end
 		end
-		unit.target = Vector2.new(x, y)
-		unit.extra = extra
-		self.seen[id] = true
-	end
-
-	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
 	end
 
 	for _, missile in missiles do
-		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
-			tx = missile.tx,
-			ty = missile.ty,
-		})
+		local unit = self.units[missile.id]
+		if unit and unit.extra then
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, nil)
+			unit.extra.tx = missile.tx
+			unit.extra.ty = missile.ty
+		else
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
+				tx = missile.tx,
+				ty = missile.ty,
+			})
+		end
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.
 	for id, unit in self.units do
 		if not self.seen[id] then
 			if not unit.isMissile then
-				local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
-				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-				splash.Shape = Enum.PartType.Cylinder
-				splash.Transparency = 0.18
-				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.18, 15, 15),
-					Transparency = 1,
-				}):Play()
+				-- N56 : une retraite auto ne doit pas jouer le splash d'arrivee
+				-- (le client interpolait vers l'ancienne cible et confondait
+				-- avec un debarquement).
+				local retreating = (unit.extra and unit.extra.retreating) or unit.retreatTinted
+				if not retreating then
+					local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
+					local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
+					splash.Shape = Enum.PartType.Cylinder
+					splash.Transparency = 0.18
+					-- N131 : despawn navire LandingSplash. Plus de CFrame.Angles.
+					-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+					-- Offset Y OCEAN_LEVEL + 0.14 inchange. Gardes not isMissile /
+					-- not retreating (N56) inchangees. Tween Size/Transparency +
+					-- task.delay Destroy inchanges. Distinct LaunchWake N130
+					-- (spawn, Y + 0.12). Distinct pulse N132 (route.to terre).
+					-- Distinct footprint N129. Distinct roulis N125.
+					-- Recette visual V75 leftover evenements Overlay.
+					-- stepInterpolation / trackUnit insert non touches.
+					-- UnitModels / PlacementPreview inchanges.
+					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+						Size = Vector3.new(0.18, 15, 15),
+						Transparency = 1,
+					}):Play()
+					task.delay(0.95, function()
+						if splash.Parent then
+							splash:Destroy()
+						end
+					end)
+				end
 				for _, piece in unit.visual.pieces do
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
 				task.delay(0.95, function()
-					if splash.Parent then
-						splash:Destroy()
-					end
 					if unit.visual.model.Parent then
 						unit.visual.model:Destroy()
 					end
@@ -777,7 +914,16 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
 			pulse.Shape = Enum.PartType.Cylinder
 			pulse.Transparency = 0.28
-			pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
+			-- N132 : fin de delivery DeliveryPulse. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- route.to deja Vector3 (gare) inchange. Tween Size/Transparency +
+			-- task.delay Destroy inchanges. truckModel.Parent = nil inchange.
+			-- Distinct splash N131 (mer, last.X, Y + 0.14). Distinct LaunchWake
+			-- N130. Distinct roues N126. Distinct chantier N113/N115.
+			-- Recette visual V75 leftover evenements Overlay.
+			-- applyUnits / applyRouteProgress non touches.
+			-- PlacementPreview / UnitModels inchanges.
+			pulse.CFrame = CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,
@@ -789,17 +935,37 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			end)
 			continue
 		end
-		local scaled = delivery.progress * (#route.path - 1)
-		local segmentIndex = math.min(#route.path - 1, math.floor(scaled) + 1)
-		local segmentProgress = scaled - math.floor(scaled)
-		local a = route.path[segmentIndex] + Vector3.new(0, 0.8, 0)
-		local b = route.path[segmentIndex + 1] + Vector3.new(0, 0.8, 0)
-		local direction = b - a
-		local position = a + direction * segmentProgress
-		local frame = CFrame.lookAt(position, position + direction)
+		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
+		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
+		-- N115 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+		-- 60 Hz. N126 : roues fromEulerAnglesYXZ(spin, 0, 0). Plus de
+		-- CFrame.Angles 60 Hz. Facteur π * 20 inchange. Pieces non-Wheel
+		-- inchangees (frame * offset). Unites inchangees (N117 / N116 /
+		-- N125). Chantier segment.rot inchange (N113). Recette visual V72
+		-- leftover, portee pas mergee. Extra missile inchange (N98).
+		-- targetX inchange (N101). Une voie sans delivery ne rentre pas ici.
+		local path = route.path
+		local nSeg = #path - 1
+		local scaled = delivery.progress * nSeg
+		local floorScaled = math.floor(scaled)
+		local segmentIndex = math.min(nSeg, floorScaled + 1)
+		local segmentProgress = scaled - floorScaled
+		local a = path[segmentIndex]
+		local b = path[segmentIndex + 1]
+		local ax, ay, az = a.X, a.Y + TRUCK_LIFT, a.Z
+		local bx, by, bz = b.X, b.Y + TRUCK_LIFT, b.Z
+		local dx, dy, dz = bx - ax, by - ay, bz - az
+		local px = ax + dx * segmentProgress
+		local py = ay + dy * segmentProgress
+		local pz = az + dz * segmentProgress
+		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
 		for _, piece in route.truck do
-			local spin = if piece.part.Name == "Wheel" then CFrame.Angles(delivery.progress * math.pi * 20, 0, 0) else CFrame.new()
-			piece.part.CFrame = frame * piece.offset * spin
+			if piece.part.Name == "Wheel" then
+				local spin = delivery.progress * math.pi * 20
+				piece.part.CFrame = frame * piece.offset * CFrame.fromEulerAnglesYXZ(spin, 0, 0)
+			else
+				piece.part.CFrame = frame * piece.offset
+			end
 		end
 	end
 
@@ -808,10 +974,17 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 	end
 
 	for _, unit in self.units do
-		unit.current += (unit.target - unit.current) * alpha
+		-- N101 : lerp numerique. `Vector2.current +=` aurait alloue 60 Hz.
+		unit.currentX += (unit.targetX - unit.currentX) * alpha
+		unit.currentY += (unit.targetY - unit.currentY) * alpha
 
-		local x, y = unit.current.X, unit.current.Y
-		local ground = WorldSpace.tileToWorld(x, y)
+		local x, y = unit.currentX, unit.currentY
+		-- N103 : X/Z monde en nombres. Plus de tileToWorld / Vector3.Unit /
+		-- CFrame.new(position) par unite. Un seul lookAt (N116 : immobile =
+		-- CFrame.new, plus de lookAt). Extra missile inchange (N98).
+		-- Recette visual V56, portee pas mergee. targetX inchange (N101).
+		local worldX = x * TILE - HALF_W + TILE_HALF
+		local worldZ = y * TILE - HALF_D + TILE_HALF
 
 		local height
 		if unit.isMissile then
@@ -830,19 +1003,37 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		end
 
 		local bob = if unit.isMissile then 0 else math.sin(now * 2.4 + unit.phase) * 0.24
-		local position = Vector3.new(ground.X, height + bob, ground.Z)
-		local direction = unit.target - unit.current
-
-		if direction.Magnitude > 0.01 then
-			local look = Vector3.new(direction.X, 0, direction.Y).Unit
-			local frame = CFrame.lookAt(position, position + look)
-			if not unit.isMissile then
-				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
-			end
-			UnitModels.place(unit.visual, frame, now + unit.phase, direction.Magnitude)
+		local py = height + bob
+		local dx = unit.targetX - unit.currentX
+		local dy = unit.targetY - unit.currentY
+		local mag = math.sqrt(dx * dx + dy * dy)
+		-- N116 : immobile = translation seule (regard -Z). Plus de deux
+		-- Vector3 60 Hz hors deplacement.
+		-- N117 : mouvement = translation * yaw euler (regard -Z vers la
+		-- cible). `dy` tuile = monde Z. Plus de lookAt deux Vector3.
+		-- Recette visual V65, portee pas mergee.
+		-- N125 : compose translation*yaw * euler. Plus de CFrame.Angles
+		-- 60 Hz. fromEulerAnglesYXZ(rx, 0, rz) ≡ Angles(rx, 0, rz)
+		-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
+		-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
+		-- Radar / flag / boom inchanges (N124). Yaw inchange (N117).
+		-- Roues camion N126. Immobile : zero compose.
+		-- Recette visual V71, portee pas mergee. Extra missile inchange
+		-- (N98). Camion / chantier inchanges (N115 / N113).
+		-- UnitModels.place inchange. Camera inchangee (N118).
+		local frame
+		if mag <= 0.01 then
+			frame = CFrame.new(worldX, py, worldZ)
 		else
-			UnitModels.place(unit.visual, CFrame.new(position), now + unit.phase, 0)
+			frame = CFrame.new(worldX, py, worldZ)
+				* CFrame.fromEulerAnglesYXZ(0, math.atan2(dx, -dy), 0)
+			if not unit.isMissile then
+				local rx = math.sin(now * 1.7 + unit.phase) * 0.018
+				local rz = math.sin(now * 2.1 + unit.phase) * 0.035
+				frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)
+			end
 		end
+		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)
 	end
 end
 
