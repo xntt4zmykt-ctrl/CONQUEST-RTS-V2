@@ -70,8 +70,8 @@ local otherBuf: { number } = table.create(16)
 -- recyclee (V123). HUD notify recyclee (V124). Effects selectTile
 -- recyclee (V125). Effects clearSelection parque (V126).
 -- Effects clearActionPreview parque (V127). HUD refreshChatSheet
--- recyclee (V128). Leftover suivant = Overlay applyBuildingDelta
--- Destroy modeles (V129).
+-- recyclee (V128). Leftover suivant = Overlay.clear Destroy
+-- batiments (V130). V129 applyBuildingDelta buildingFree deja.
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}

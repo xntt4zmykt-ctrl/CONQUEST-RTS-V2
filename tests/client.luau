@@ -1471,6 +1471,40 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	overlay:applyBuildingDelta(deltas)
 	assert(next(overlay.routes) == nil, "une route detruite reste affichee")
+
+	-- V129 : Overlay applyBuildingDelta Parent=nil buildingFree[kind].
+	-- Recette analogique V128 / V123 / feel N178 inline — ne PAS
+	-- merger feel. Kind+Level match. Recolor capture inchange.
+	-- playConstruction seulement si neuf. Destroy modele navire
+	-- conserve. Ne pas partager ringFree (V123). Overlay.clear
+	-- Destroy conserve (V130). Leftover V128 chatFree (check
+	-- messages) doit rester vert. Leftover V123 ringFree (check
+	-- modeles) doit rester vert. Leftover V80 DeliveryPulse
+	-- (ci-dessus) doit rester vert.
+	assert(type(overlay.buildingFree) == "table", "buildingFree absent")
+	local cityKind = Config.BUILDING.CITY
+	local cityPool = overlay.buildingFree[cityKind]
+	assert(cityPool ~= nil, "buildingFree[CITY] absent")
+	assert(#cityPool >= 1, "buildingFree[CITY] non parque")
+	assert(cityPool[#cityPool + 1] == nil, "buildingFree leftover slot")
+	local parkedCity
+	for i = #cityPool, 1, -1 do
+		if cityPool[i]:GetAttribute("Level") == 1 then
+			parkedCity = cityPool[i]
+			break
+		end
+	end
+	assert(parkedCity ~= nil, "CITY palier 1 non parque")
+	assert(parkedCity.Parent == nil, "CITY pas parque Parent=nil")
+	local nCity = #cityPool
+	overlay:applyBuildingDelta({
+		{ index = cityIndex, kind = cityKind, slot = 1, level = 1 },
+	})
+	assert(rawequal(overlay.buildings[cityIndex], parkedCity), "CITY non recycle")
+	assert(parkedCity.Parent == overlay.root, "CITY recycle hors root")
+	assert(#cityPool == nCity - 1, "buildingFree[CITY] non pop")
+	assert(cityPool[nCity] == nil, "buildingFree leftover slot pop")
+	assert(overlay:buildingAt(cityIndex) == cityKind, "CITY inspecteur perdu au reuse")
 end)
 
 --[[
