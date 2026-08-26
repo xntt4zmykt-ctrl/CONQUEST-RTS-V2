@@ -1279,7 +1279,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- Overlay Blast recyclee (V113). Overlay BlastSmoke recyclee (V114).
 	-- Overlay Shockwave recyclee (V115). Overlay DeliveryPulse recyclee
 	-- (V116). Overlay LandingSplash recyclee (V117). Overlay LaunchWake
-	-- recyclee (V118). MAX_FEED_ENTRIES=3
+	-- recyclee (V118). Overlay goldPopup recyclee (V119). MAX_FEED_ENTRIES=3
 	-- inchange. Pas reentrant. Ne pas inventer un
 	-- pool de TextLabel. FactoryOutput / SiloWarning fermees (V104).
 	-- Feux navire fermes (V105). Wake Transparency fermee (V106).
