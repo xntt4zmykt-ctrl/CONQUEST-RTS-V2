@@ -1,11 +1,9 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 4)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 5)
 
-Déclencheur : ouverture de la **PR #21** (`cursor/analyse-nocturne-du-codebase-e863`) — hardening feel + rapport N1–N16. Base : feel #19 + P0 #16.
+Déclencheur : ouverture de la **PR #22** (`cursor/analyse-nocturne-du-codebase-5ba6`) — beachheads + fronts visés sur feel #21, specs N17–N25.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-5ba6`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#21.
-
-Cette passe **porte les correctifs sûrs de #20** (branche P0 sans feel) **sur le HEAD feel**, et ajoute les specs nées du croisement feel × marine.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-a9d9`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#22.
 
 ---
 
@@ -17,22 +15,26 @@ Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle 
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
+**PR #22 (passe 4) : claims vérifiés.** Beachhead = voisins encore à la cible ; park `isBeachhead` seulement ; combat vivant = `ChantierB.stepAttacks` ; `MAX_TILES_PER_TICK` non lu par le combat installé. Join `ended` avant `pendingMode`. Colis snapshot et `Diplomacy.accept` expiry tiennent.
+
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #21 (feel + nightly N1–N16)
+## 2. Revue PR #22
 
-| Claim #21 | Réalité à l’ouverture |
+| Claim #22 | Réalité à l’ouverture |
 |---|---|
-| Cap 8 humains, Join ended, fireDeployed | Oui. **Mais** Join `ended` était dans `deployPlayer` : `pendingMode` était déjà voté. Corrigé ici. |
-| `areAllied` 2-ways, `removePlayer` via `setOwner` | Oui. |
-| Charge bateau 0.2 | Oui. |
-| Têtes de pont OF | **Non.** `BoatFront.seedBeachhead` enfilait la tuile déjà conquise → skip+remboursement. Porté depuis #20. |
-| Front visé (AimFront `sourceTile`) | **Bug.** `BoatFront` garait **tous** les `sourceTile`, donc un 2e clic créait un 2e Attack. Porté depuis #20 (`isBeachhead` seulement). |
-| Dual Config / ChantierB | Toujours ouvert (N1, N11). |
+| Frontier beachhead = voisins cible, pas tuile debarquée | Oui (`BoatFront.seedBeachhead`). Stub mort `GameState.seedBeachhead` encore faux (N30). |
+| Park `isBeachhead` seulement | Oui. |
+| Colis payé au niveau snapshot | Oui, testé. |
+| `Diplomacy.accept` refuse expiry / pacte actif | Oui, testé. |
+| Join `ended` ne vote plus `pendingMode` | Oui. |
+| N17–N25 specs | N21, N23, N24 **corrigés ici**. Le reste reste ouvert. |
 
-PRs ouvertes au moment de la revue : #16 P0, #17/#18 nightly P0, #19 feel, #20 nightly P0 passe 3, #21 nightly feel. **#21 + cette passe** est le sur-ensemble feel à merger. #20 reste utile seulement si on abandonne feel.
+PRs ouvertes au moment de la revue : #16 P0, #17/#18 nightly P0, #19 feel, #20 nightly P0 passe 3, #21 nightly feel, **#22 sur-ensemble feel**. **#22 + cette passe** est le sur-ensemble feel à merger. #20 reste utile seulement si on abandonne feel.
+
+**Correction N20 :** `refreshRailNetwork` **inclut** déjà `× links` (via `/ (periodSum/n)`). L’écart restant est `stopBonus` + niveau live vs snapshot.
 
 ---
 
@@ -40,14 +42,13 @@ PRs ouvertes au moment de la revue : #16 P0, #17/#18 nightly P0, #19 feel, #20 n
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| Beachhead enfile la tuile déjà à soi | `BoatFront.luau` | Invasions mortes le tick d’atterrissage (skip + heap vide + refund) |
-| Park `sourceTile` (fronts visés) | `BoatFront.luau` | 2e clic = 2e Attack, cap 2 saturé, isolation terre/mer cassée |
-| Colis payé au niveau d’arrivée | `Trade.luau` | Upgrade usine en transit = or extra-server |
-| `Diplomacy.accept` ignore expiry / pacte actif | `Diplomacy.luau` | Accept le tick d’expiry (apply immédiat avant `step`) |
-| `JoinRequest` ended vote `pendingMode` | `init.server.luau` | Spam victoire change le mode du round suivant + brûle le cooldown |
-| `RETREAT_LOSS` / `BOAT_RETREAT_LOSS` absents de Config | `Config.luau` | Tuning mort : seules les valeurs `ChantierB.apply` / `or 0.25` vivaient |
+| `removePlayer` jette les troupes des attaquants | `GameState.luau`, `ChantierB.luau` | Déconnexion défenseur = disparition silencieuse de population (anti-comptabilité) |
+| `retreatAttack` ne marquait que le 1er front (N23) | `GameState.luau` | Terre + tête de pont : un clic doit vider le couple |
+| QuickChat 2-args mark hijack (N21) | `IntentValidator.luau`, `init.server.luau` | `(attack_target, N)` sans sequence visait le slot N |
+| `notify` / `sfx` globaux `FireAllClients` (N24) | `init.server.luau` | Menu / Place MaxPlayers > 8 facturés à chaque trahison / sfx |
+| Commentaire SAM + stub beachhead | `Config.luau`, `GameState.luau` | Honesty tuner (N26) / piège hors bootstrap (N30) |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront (N18), embargo/tribus (N19), railIncome (N20), warships grille (N22), MAX_BOATS (N25).
 
 ---
 
@@ -60,202 +61,170 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 
 - **Combat vivant** = `ChantierB.stepAttacks`, pas le corps de `GameState.stepAttacks`.
 - **Vérité d’équilibrage** = `ChantierB.apply(Config)` après `install()`, pas `Config.luau` seul.
-- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. `sourceTile` d’AimFront n’est plus un critère de parking.
-- **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions → déployés. MatchUpdate / roster / notify global / sfx global → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
+- **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`.
+- **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / **notify&sfx globaux** → déployés. MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
 
 ---
 
-## 5. Issues worker-ready
+## 5. Issues worker-ready (nouveaux, N26–N32)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N16 de #21 restent ouverts** (sauf les bugs §3). Ci-dessous les **nouveaux** tickets (N17–N25). N1–N16 : résumé §5b.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N16 et N17/N18/N19/N20/N22/N25 restent ouverts.** N21/N23/N24 = faits §3.
 
 ---
 
-### ISSUE-N17 — Humains éliminés occupent `MAX_HUMAN_PLAYERS`
+### ISSUE-N26 — `SAM_INTERCEPT_CHANCE` Config 0.55 vs apply 1.0
 
-**Priorité :** P2 anti-exploit / salon.
+**Priorité :** P1 honesty / identité nucléaire.
 
-**Problème :** `slotByPlayer` n’est vidé qu’au disconnect (`onPlayerRemoving`). `deployPlayer` compte **toutes** les entrées. Un commandant éliminé (`removePlayer` / `stepElimination`) reste spectateur **et** bloque le 8e/9e join. `fireDeployed` continue de lui envoyer le firehose 10 Hz.
+**Problème :** `Config.SAM_INTERCEPT_CHANCE = 0.55`. `ChantierB.apply` force **1.0**. En prod, tout missile dans `SAM_RANGE` (70 après apply) est intercepté. Les nukes ne passent que hors portée ou par saturation MIRV. Un tuner qui lit Config croit encore à 45 % de fuites.
 
-**Pourquoi 20K CCU :** spectateurs = destinataires RemoteEvent facturés. Salon 8 humains morts = salon mort jusqu’au restart.
+**Pourquoi 20K CCU :** identité de fin de partie fausse → tilt, rage-quit, tickets « SAM OP ». Ce n’est pas un buff documenté.
 
 **Worker :**
 
-1. Distinguer `slotByPlayer` (autorité / intents) et `spectators` (réplication HUD).
-2. Décision produit (documenter) : (A) mid-match join interdit, mais **ne plus compter** les éliminés dans le cap, (B) libérer le slot pour un nouveau JoinRequest.
-3. Si (A) : `humanCount` = joueurs dont `state.players[slot]` existe encore ; refuser Join si `matchPhase == "playing"` et pas déjà slot.
-4. Test : impossible via bundle (`init.server` exclu). Extraire `countActiveHumans` testable **ou** test Studio documenté.
-5. Fichiers : `init.server.luau`. Ne pas casser `fireDeployed` pour les vivants.
+1. Décision : (A) garder 100 % OF et **écrire 1.0 dans Config** + README, (B) ramener apply à 0.55 et retuner range/CD, (C) garder le drift et documenter dans Config (commentaire déjà posé cette passe).
+2. Si (A) ou (B) : un seul littéral. Test `Nukes` : SAM in-range vs out-of-range, même graine.
+3. Fichiers : `Config.luau`, `ChantierB.luau`, `Nukes.luau`, `tests/simulate.luau`.
 
-**Contraintes :** server-authoritative. Pas de 9e humain vivant. Ne pas réintroduire JoinRequest en `ended`.
+**Contraintes :** ne pas mixer avec N1 (fusion Config). Ne pas changer `SAM_RANGE` / cooldown dans le même PR que le roll du chance.
 
 ---
 
-### ISSUE-N18 — Priorités de heap AimFront ≠ ChantierB / BoatFront
+### ISSUE-N27 — Commerce terrestre ignore l’embargo
 
-**Priorité :** P2 combat.
+**Priorité :** P2 honesty éco / anti-grief.
 
-**Problème :** `AimFront.priority` pèse `terrainMag` (1 / 1.5 / 2). L’expansion `ChantierB.enqueueFront` et `BoatFront.frontPriority` pèsent `TERRAIN_COST/2` (plage 0.85 … sommet 4). Un même front mélange deux ordres dès qu’AimFront a seed puis ChantierB étend.
+**Problème :** `Navy.canTrade` coupe les routes maritimes. `Trade.luau` (camions / trains) **ne lit jamais** `state.embargoes`. Config commente « embargo coupe les revenus » ; `Diplomacy.luau` documente maritime-only. Un embargo allié (N19) ou non ne touche pas l’or usine.
 
-**Pourquoi 20K CCU :** frontier plus chaotique = plus de pops/`guard` gaspillés.
+**Pourquoi 20K CCU :** levier diplomatique mort sur la majeure partie de l’éco (rails >> bateaux commerce).
 
 **Worker :**
 
-1. Une fonction `frontPriority` partagée (AimFront **ou** ChantierB, pas les trois copies).
-2. L’utiliser dans `AimFront.enqueue`, `ChantierB.enqueueFront`, `BoatFront.frontPriority`.
-3. Test : même tuile, même tick, même owner → même coût de heap.
-4. **Ne pas retuner** `attackLogic`. Mesurer 6000 ticks `p95TickMs` / `maxChanged`.
+1. Décision : (A) embargo aussi sur `Trade.resolve` / spawn colis, (B) maritime-only et corriger Config/HUD.
+2. Test simulate : usine + embargo → (A) pas de pay, (B) pay inchangé + commentaire Config.
+3. Fichiers : `Trade.luau` et/ou `Config.luau`, `tests/simulate.luau`.
 
-**Contraintes :** zéro changement d’équilibrage volontaire. Coupler conceptuellement à N13.
+**Contraintes :** ticket de design. Ne pas mixer avec N19 (allié) ni N20 (HUD).
 
 ---
 
-### ISSUE-N19 — Embargo sur un allié + tribus auto-accept
+### ISSUE-N28 — `RequestSnapshot` mort côté client (étend N4)
 
-**Priorité :** P2 design / anti-grief.
+**Priorité :** P2 resync.
 
-**Problème :**
+**Problème :** le serveur rate-limite (5 s, 12/match) et envoie `OwnerSnapshot` + `structureHash`. **Aucun** `FireServer("RequestSnapshot")` client. `structureHash` est `_` ignoré. Un client désynchronisé n’a pas de bouton / retry.
 
-1. `Diplomacy.setEmbargo` n’a **pas** de garde `areAllied`. Un allié coupe le commerce maritime tout en bloquant l’attaque terrestre.
-2. `Tribes.luau` accepte **toute** proposition. Une carte Classique peut se recouvrir d’alliances via les 6 tribus.
-
-**Pourquoi 20K CCU :** graphe d’alliances saturé = moins de fronts légaux, plus de donations, diplomatie HUD O(N²) à 1 Hz.
+**Pourquoi 20K CCU :** un seul client drifté spam en vain s’il existait un retry auto ; aujourd’hui il reste faux jusqu’à reconnexion. 8 humains × overlay bâtiments faux = support.
 
 **Worker :**
 
-1. Décision : (A) embargo interdit entre alliés, (B) embargo rompt le pacte, (C) gardé et documenté.
-2. Tribus : (A) jamais d’alliance, (B) quota / force relative, (C) cooldown comme les bots.
-3. Tests simulate pour la décision retenue.
-4. Fichiers : `Diplomacy.luau`, `Tribes.luau`, `tests/simulate.luau`.
+1. Client : retry borné (ex. après 3 deltas incohérents, ou bouton HUD debug) via le remote existant.
+2. Appliquer `structureHash` : si mismatch, demander un `BuildingDelta` full ou rejouer overlay.
+3. Tests : pas d’E2E bundle pour le remote. Extraire un helper de hash testable ; documenter Studio.
+4. Fichiers : `init.client.luau`, `Overlay.luau` / `WorldRenderer.luau`, éventuellement `init.server.luau`.
 
-**Contraintes :** ticket de design avant code. Ne pas mixer avec N12 (capa).
+**Contraintes :** respecter cooldown/quota. Pas de RemoteFunction. Ne pas envoyer toute la carte bâtiments en clair à 10 Hz.
 
 ---
 
-### ISSUE-N20 — `railIncome` HUD ≠ formule camion
+### ISSUE-N29 — Séquence commitée avant le résultat métier
 
-**Priorité :** P2 honesty éco.
+**Priorité :** P3 idempotence.
 
-**Problème :** `Trade.deliveryValue` = `(base + dist×tile) * level * links * stopBonus`. `GameState.refreshRailNetwork` estime `(goldSum * level) / avgPeriod` : omet `× links` et `stopBonus`. Le leaderboard ment. Cette passe a fixé le **niveau snapshot** ; le HUD n’est toujours pas aligné.
+**Problème :** `IntentValidator.enqueue` écrit `lastSequence` **puis** `applyOne`. Un apply qui refuse (or, cible, cooldown QuickChat) a déjà consommé le numéro. Le client incrémente ; pas d’exploit de doublon, mais l’idempotence « même seq = même intent » est trouée pour le debug.
 
 **Worker :**
 
-1. Extraire `deliveryValue` dans un module partagé testable (`Trade` ou helper Config).
-2. `refreshRailNetwork` / estimate = même fonction, mêmes hypothèses (1 colis / usine, cadence).
-3. Test : usine 3 liens, `railIncome` proportionnel à `deliveryValue`.
-4. Fichiers : `Trade.luau`, `GameState.luau`, `tests/simulate.luau`.
+1. Commit seq seulement si apply `ok`, **ou** garder le commit et documenter « seq = accepté schéma, pas métier ».
+2. Si on recule le commit : rejouer le test cooldown QuickChat (enqueue 2e doit rester ok schéma, apply false).
+3. Fichiers : `IntentValidator.luau`, `tests/simulate.luau`.
 
-**Contraintes :** ne pas changer la formule de payout, seulement l’affichage — **ou** documenter un nerf `links` comme ticket séparé.
+**Contraintes :** ne pas casser DuplicateSequence / StaleSequence. Feel apply immédiat inchangé.
 
 ---
 
-### ISSUE-N21 — QuickChat 2-args : `target` vs `sequence`
+### ISSUE-N30 — Stub `GameState.seedBeachhead` encore faux
 
-**Priorité :** P3 anti-exploit fil.
+**Priorité :** P3 hygiène.
 
-**Problème :** handler `(messageId, targetSlot, sequence)`. Ancien client 2-args : l’entier arg2 est **toujours** lu comme `targetSlot`. Un `needsTarget` avec petit N vise la faction N.
+**Problème :** le vivant est `BoatFront.install`. Le stub de `GameState.luau` enfile encore la tuile d’atterrissage et fusionne avec un front terre. Un test / outil qui saute `SystemsBootstrap.install()` réintroduit le bug #22.
 
 **Worker :**
 
-1. Exiger 3 args pour les messages `needsTarget`, **ou** si arg3 nil et arg2 > MAX_TOTAL_FACTIONS alors arg2 = sequence.
-2. Test IntentValidator : `(id, 99)` sans 3e arg ne doit pas viser le slot 99.
-3. Fichiers : `init.server.luau`, éventuellement `IntentValidator.luau`.
+1. Stub = `error("BoatFront.install() requis")` **ou** déléguer la même logique que BoatFront (voisins + `isBeachhead`, jamais merge terre).
+2. Ne pas dupliquer deux implémentations vivantes.
+3. Fichiers : `GameState.luau`. Commentaire déjà posé cette passe.
 
-**Contraintes :** ne pas casser le client officiel qui envoie déjà 3 args (`init.client.luau` `fireOrder`).
+**Contraintes :** ne pas casser le test beachhead (il passe par BoatFront).
 
 ---
 
-### ISSUE-N22 — Warships O(carriers × boats) par tick
+### ISSUE-N31 — `attackLogic` scan O(#buildings) par pop de heap
 
-**Priorité :** P2 perf mer.
+**Priorité :** P1 perf combat.
 
-**Problème :** `Navy` ciblage warship = double boucle porte-avions × tous les bateaux, chaque tick. (Le pool `visited` de `findSeaPath` reste N16.)
+**Problème :** chaque tuile combattue (`guard < 80` × N fronts) itère **tous** les bâtiments pour trouver un bunker dans `DEFENSE_RADIUS` (30). Pas d’index spatial. 18 factions × villes/SAM/usines × 80 pops.
 
-**Pourquoi 20K CCU :** 6 transports × 8 porte-avions × 10 Hz. Classique 18 factions avec bases navales.
+**Pourquoi 20K CCU :** hotspot #1 du tick sous pression humaine (le banc bots sous-estime : `p95TickMs` headless ≈ 1 ms). Couplé à `tryAnnex` 280 nœuds / capture et `stepDoomsday` O(TILE_COUNT).
 
 **Worker :**
 
-1. Grille spatiale (cellule 8–16 tuiles) ou cap de cibles scannées / carrier.
-2. Banc : ne pas augmenter `p95TickMs` ; test pathfinding existant (`commerce` mer) reste vert.
-3. Fichiers : `Navy.luau`, `tests/simulate.luau`.
+1. Index `defensePostsBySlot` maintenu dans `placeBuilding` / `destroyBuilding` / `setOwner` transfer.
+2. `attackLogic` ne scanne que cet index (ou grille cellule 16).
+3. Banc 6000 ticks : `p95TickMs` ne doit pas monter ; ajouter un micro-bench « 200 bunkers, 20 fronts ».
+4. Fichiers : `ChantierB.luau`, `GameState.luau`, `tests/simulate.luau`.
 
-**Contraintes :** déterminisme (même graine → même cible). Pas de RemoteFunction. Ne pas mixer avec N16 (pool BFS).
+**Contraintes :** déterminisme. Ne pas changer `DEFENSE_POST_BONUS`. Ne pas mixer avec N16 (buffer defense / sea path).
 
 ---
 
-### ISSUE-N23 — `retreatAttack` ne marque que le premier front
+### ISSUE-N32 — `viewFor` propose des requests expirées
 
-**Priorité :** P2 feel / marine.
+**Priorité :** P3 HUD.
 
-**Problème :** `GameState.retreatAttack` s’arrête au **premier** `attacker+target`. Terre + tête de pont contre le même slot : un seul recule. `SystemsBootstrap` appelle ensuite `Navy.retreatBoats` (OK mer), mais le 2e Attack terrestre/beachhead continue.
-
-**Pourquoi 20K CCU / OF :** un clic retraite doit vider le couple, sinon le joueur croit s’être retiré et continue de saigner.
+**Problème :** `Diplomacy.accept` refuse l’expiry (passe 4). `viewFor` copie `state.requests` sans filtrer `tick >= expiry`. Le HUD peut afficher un bouton Accepter fantôme jusqu’au prochain `Diplomacy.step`.
 
 **Worker :**
 
-1. Décision : (A) marquer **tous** les Attacks du couple (sauf si `isBeachhead` a sa propre sémantique), (B) retraite ciblée par `aimTile` / `sourceTile`.
-2. Si (A) : boucle complète, même `retreatAt`. Test : land + beachhead → les deux ont `retreatAt`.
-3. Fichiers : `GameState.luau`, `SystemsBootstrap.luau`, `tests/simulate.luau`.
+1. Filtrer dans `viewFor` (et incoming) `expiry > state.tick`.
+2. Test : request périmée absente de `viewFor` même avant `step`.
+3. Fichiers : `Diplomacy.luau`, `tests/simulate.luau`.
 
-**Contraintes :** ne pas casser `RETREAT_DELAY` / malus 25 %. Server-authoritative.
-
----
-
-### ISSUE-N24 — `notify` / `sfx` globaux encore en `FireAllClients`
-
-**Priorité :** P2 perf réplication.
-
-**Problème :** `fireDeployed` couvre StateDelta / unités / bâtiments / plunder / trade / explosions. `flushEvents` envoie les notifies/sfx **sans `only`** à tout le Place (menu compris). Roster + MatchUpdate idem (volontaire pour le lobby).
-
-**Pourquoi 20K CCU :** Place MaxPlayers > 8 → joueurs menu facturés à chaque trahison / alliance / sfx combat, 10 Hz playing.
-
-**Worker :**
-
-1. Notifies/sfx globaux → `fireDeployed` (même audience que le monde).
-2. Garder MatchUpdate + RosterUpdate en `FireAllClients` (menu a besoin du compte à rebours).
-3. Test : pas d’E2E bundle. Documenter. Ne pas casser Overlay sfx des déployés.
-
-**Fichiers :** `init.server.luau`.
-**Contraintes :** pas de RemoteFunction. Menu reste informé via MatchUpdate.
+**Contraintes :** ne pas changer `ALLIANCE_REQUEST_TIMEOUT`. Server-authoritative (le HUD n’accepte pas tout seul).
 
 ---
 
-### ISSUE-N25 — `MAX_BOATS_PER_PLAYER` Config 6 vs OF 3
+## 5b. Backlog encore ouvert
 
-**Priorité :** P3 honesty / perf mer.
+| ID | Titre | Prio | Statut |
+|---|---|---|---|
+| N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert |
+| N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
+| N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
+| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert |
+| N6 | DataStore debounce / retry / merge additif | P2 | ouvert |
+| N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
+| N8 | Combat mort vs combat vivant | P2 | ouvert |
+| N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert |
+| N10 | Divers P3 | P3 | ouvert ; embargo trains → N27 |
+| N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
+| N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
+| N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
+| N14 | Apply immédiat vs lockstep (feel #19) | P1 | ouvert (produit) |
+| N15 | `PREPARATION_DURATION=0` vs gardes `combatUnlocked` | P2 | ouvert |
+| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 | ouvert ; scan bunkers → N31 |
+| N17 | Humains éliminés occupent le cap | P2 | ouvert |
+| N18 | Heap AimFront ≠ ChantierB / BoatFront | P2 | ouvert |
+| N19 | Embargo allié + tribus auto-accept | P2 | ouvert |
+| N20 | `railIncome` vs `deliveryValue` | P2 | **affiné** : `stopBonus` + live level ; `× links` déjà là |
+| N21 | QuickChat 2-args | P3 | **fait** cette passe |
+| N22 | Warships O(carriers × boats) | P2 | ouvert |
+| N23 | `retreatAttack` premier front | P2 | **fait** cette passe |
+| N24 | notify/sfx `FireAllClients` | P2 | **fait** cette passe |
+| N25 | `MAX_BOATS_PER_PLAYER` 6 vs 3 | P3 | ouvert |
 
-**Problème :** `Config.MAX_BOATS_PER_PLAYER = 6`. `SystemsBootstrap` fait `or 3` (no-op, la clé existe). Navy cap vivant = **6**. Commentaires chantier F / memories disent cap 3.
-
-**Pourquoi 20K CCU :** 18 factions × 6 transports = 108 BFS/paths + overlay bateaux.
-
-**Worker :** (A) baisser Config à 3 (lift OF, mesurer), ou (B) documenter 6 et retirer le `or 3`. Test `Navy.countBoats` au 4e/7e launch. **Ne pas** retuner `BOAT_TROOP_RATIO`.
-
-**Fichiers :** `Config.luau`, `SystemsBootstrap.luau`, `Navy.luau`, `tests/simulate.luau`.
-
----
-
-## 5b. N1–N16 encore ouverts (#21, non traités ici)
-
-| ID | Titre | Prio |
-|---|---|---|
-| N1 | Source unique Config vs `ChantierB.apply` | P1 |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 |
-| N3 | Timebase tick vs `os.clock()` | P1 |
-| N4 | Resync bâtiments (`structureHash` ignoré) | P1 |
-| N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 |
-| N6 | DataStore debounce / retry / merge additif | P2 |
-| N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 |
-| N8 | Combat mort vs combat vivant | P2 |
-| N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 |
-| N10 | Divers P3 (seq nil, README SmoothTerrain, bots nuke, embargo trains, GROWTH_RATE…) | P3 |
-| N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 |
-| N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 |
-| N13 | Parité combat (ère / cost factor / constantes mortes) | P2 |
-| N14 | Apply immédiat vs lockstep (feel #19) | P1 |
-| N15 | `PREPARATION_DURATION=0` vs gardes `combatUnlocked` | P2 |
-| N16 | Buffer `defense` vs scan bunkers + `findSeaPath` 40k | P2 |
-
-Les textes worker-ready complets de N1–N16 sont dans la PR #21 / `NIGHTLY_REPORT.md` historique. Ne pas les dupliquer ici.
+Textes worker-ready N1–N20, N22, N25 : PR #21 / #22 `NIGHTLY_REPORT.md` historique. Ne pas les dupliquer ici.
 
 ---
 
@@ -266,15 +235,15 @@ Les textes worker-ready complets de N1–N16 sont dans la PR #21 / `NIGHTLY_REPO
 | `START_TROOPS` | 150 | 8000 | oui |
 | `GROWTH_RATE` | 0.012 | 0 | formule custom |
 | `MAX_TILES_PER_TICK` | 400 | 56 | **non** (`guard<80`) |
-| `DEFENSE_RADIUS` | 6 | 30 | oui (scan buildings) |
-| `BOAT_TROOP_RATIO` | 0.2 | 0.2 | **oui** (Navy) |
-| `RETREAT_LOSS` | **0.25** (cette passe) | 0.25 | **oui** |
-| `BOAT_RETREAT_LOSS` | **0.25** (cette passe) | 0.25 (`or`) | **oui** (Navy) |
+| `DEFENSE_RADIUS` | 6 | 30 | oui (scan buildings, N31) |
+| `BOAT_TROOP_RATIO` | 0.2 | 0.2 | oui |
+| `RETREAT_LOSS` | 0.25 | 0.25 | oui |
+| `SAM_INTERCEPT_CHANCE` | 0.55 (commentaire N26) | **1.0** | oui |
+| `SAM_RANGE` | 34 | 70 | oui |
+| `TRUCK_GOLD_BASE` | 10 | 14 | oui |
+| `TRAIN_STOP_BONUS` | absent Config | 0.12 | Trade oui ; HUD **non** (N20) |
 | `MAX_BOATS_PER_PLAYER` | 6 | 6 | oui (N25) |
-| `CITY_LEVELS[1].popCapBonus` | 900 | 50000 | oui |
 | `PREPARATION_DURATION` | 0 | 0 | forcé true |
-| `FRONT_TILES_PER_CONTACT` | — | 2.4 | **non** |
-| `CITY_TROOP_INCREASE` | — | 50000 | **non** |
 
 ---
 
@@ -290,22 +259,26 @@ factions : 18
 intentions : sequence, idempotence, apply immediat, rate limit OK
 intentions : schema doctrine/nuke/diplomatie, ended OK
 intentions : QuickChat cooldown honore
+intentions : QuickChat 2-args refuse, 3-args marque
 beachhead : frontier voisins, pas de remboursement
 aim reinforce : un seul front apres deux lancers
 colis snapshot : niveau au depart honore
 accept expire : proposition perimee refusee
+retraite couple : terre + tete de pont marques
+refund disconnect : troupes restituees a l'attaquant
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=10.9 p95Changed=58 maxChanged=746 avgTickMs=0.31 p95TickMs=0.93
+metrics : ticks=6000 avgChanged=7.4 p95Changed=6 maxChanged=790 avgTickMs=0.30 p95TickMs=0.60
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
 Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass4.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass5.log`
+
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` sont dans ReplicatedStorage (formules visibles client, `install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes.
+Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes.
