@@ -82,10 +82,11 @@ local function addWake(visual: Visual)
 	-- V86 trunkRot interdits). Distinct de V91 (rampes SAM, pitch
 	-- X=-31°, BuildingModels — ne PAS retoucher les Interceptor).
 	-- Distinct de V93 (Bow yaw Y=π, carrier + transport — ne PAS
-	-- retoucher les Bow). Distinct de leftover V94 (LandingRamp
-	-- pitch X=-8°, kind==1). Distinct de V78 (LaunchWake Overlay,
-	-- wakeRot cuit, Y = OCEAN+0.12 — autre objet). Construction
-	-- de modele, pas 60 Hz.
+	-- retoucher les Bow). Distinct de V94 (LandingRamp pitch X=-8°,
+	-- kind==1 — ne PAS retoucher la rampe). Distinct de leftover
+	-- V95 (MissileBody yaw Y=90°, cylindre). Distinct de V78
+	-- (LaunchWake Overlay, wakeRot cuit, Y = OCEAN+0.12 — autre
+	-- objet). Construction de modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
 	-- frame * offset ensuite. Size 1.15, 0.08, 6.5 / FOAM / Neon /
 	-- Transparency 0.62 / role wake / Name Wake inchanges. Call sites
@@ -150,9 +151,11 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- transport/cargo, comme V92 wakeRot / V91 rampRot / V90 doorRot /
 	-- V89 roofRot / V88 cylinderRot / V86 trunkRot interdits).
 	-- Distinct de V92 (sillages, yaw Y=±11°, addWake — ne PAS
-	-- retoucher les Wake). Distinct de leftover V94 (LandingRamp
-	-- pitch X=-8°, kind==1). Distinct de V78 (LaunchWake Overlay —
-	-- autre objet). Construction de modele, pas 60 Hz.
+	-- retoucher les Wake). Distinct de V94 (LandingRamp pitch
+	-- X=-8°, kind==1 — ne PAS retoucher la rampe). Distinct de
+	-- leftover V95 (MissileBody yaw Y=90°, cylindre). Distinct de
+	-- V78 (LaunchWake Overlay — autre objet). Construction de
+	-- modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
 	-- frame * offset ensuite. Size 5.6, 1.6, 3.6 / NAVY / Metal /
 	-- Name Bow / WedgePart inchanges. Call site buildCarrier
@@ -195,7 +198,8 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- V93 : meme recette, translation Y=0.05 / Z=-5.9. Size 4.8,
 	-- 1.65, 3.3 / NAVY / Metal / Name Bow / WedgePart inchanges.
 	-- Call site createBoat kind==1/2 (avant pont). Ne pas merger
-	-- feel c62f. Ne PAS retoucher LandingRamp (leftover V94).
+	-- feel c62f. Ne PAS retoucher LandingRamp (V94 deja). Ne PAS
+	-- retoucher MissileBody (leftover V95).
 	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
@@ -226,7 +230,25 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 		addPart(visual, "Part", "Superstructure", Vector3.new(3.45, 2.5, 3.05), NAVY, CFrame.new(0, 1.85, 2.65), Enum.Material.Metal)
 		local bridge = addPart(visual, "Part", "BridgeGlass", Vector3.new(3.52, 0.58, 0.13), GLASS, CFrame.new(0, 2.2, 1.08), Enum.Material.Glass)
 		bridge.Transparency = 0.1
-		local ramp = addPart(visual, "WedgePart", "LandingRamp", Vector3.new(3.25, 0.28, 2.9), NAVY_DARK, CFrame.new(0, 0.72, -4.45) * CFrame.Angles(math.rad(-8), 0, 0), Enum.Material.DiamondPlate)
+		-- V94 : translation * fromEulerAnglesYXZ (pitch X=-8° fixe).
+		-- Plus de CFrame.Angles a LandingRamp. Recette feel N145
+		-- inline — ne PAS cuire un rampRot (un seul site, kind==1
+		-- amphibie, comme V93 bowRot / V92 wakeRot / V91 rampRot
+		-- SAM interdits). Distinct de V93 (Bow yaw Y=π, carrier +
+		-- transport/cargo — ne PAS retoucher les Bow). Distinct de
+		-- V92 (Wake yaw Y=±11°, addWake — ne PAS retoucher les
+		-- Wake). Distinct de leftover V95 (MissileBody yaw Y=90°,
+		-- cylindre). Distinct de V91 (rampes SAM, pitch X=-31°,
+		-- BuildingModels — autre fichier). Distinct de V78
+		-- (LaunchWake Overlay — autre objet). Construction de
+		-- modele, pas 60 Hz. addPart pose part.CFrame = offset ;
+		-- Overlay place compose frame * offset ensuite. Size
+		-- 3.25, 0.28, 2.9 / NAVY_DARK puis Color = faction /
+		-- DiamondPlate / Name LandingRamp / WedgePart inchanges.
+		-- Call site createBoat kind==1 seulement (cargo kind==2 et
+		-- carrier kind==3 n'ont pas de rampe). Ne pas merger feel
+		-- 95ed.
+		local ramp = addPart(visual, "WedgePart", "LandingRamp", Vector3.new(3.25, 0.28, 2.9), NAVY_DARK, CFrame.new(0, 0.72, -4.45) * CFrame.fromEulerAnglesYXZ(math.rad(-8), 0, 0), Enum.Material.DiamondPlate)
 		ramp.Color = faction
 		for side = -1, 1, 2 do
 			addPart(visual, "Part", "Lifeboat", Vector3.new(0.62, 0.62, 2.5), GOLD, CFrame.new(side * 2.18, 1.18, 1.15), Enum.Material.Metal)
