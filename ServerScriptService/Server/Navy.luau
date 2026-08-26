@@ -197,7 +197,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
+	local ratio = Config.BOAT_TROOP_RATIO or 0.2
+	local troops = math.floor(ps.troops * ratio * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end

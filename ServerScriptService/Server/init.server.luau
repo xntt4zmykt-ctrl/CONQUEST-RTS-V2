@@ -98,6 +98,7 @@ local winnerSlot: number? = nil
 local winnerName: string? = nil
 local snapshotCooldown: { [number]: number } = {}
 local snapshotCount: { [number]: number } = {}
+local joinCooldown: { [number]: number } = {}
 local currentMapMeta: any = nil
 
 -- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
@@ -403,6 +404,19 @@ local function deployPlayer(player: Player, nationId: number)
 		return -- deja en jeu
 	end
 
+	local humanCount = 0
+	for _ in slotByPlayer do
+		humanCount += 1
+	end
+	if humanCount >= Config.MAX_HUMAN_PLAYERS then
+		notify:FireClient(
+			player,
+			`Salon plein ({Config.MAX_HUMAN_PLAYERS} commandants max).`,
+			"bad"
+		)
+		return
+	end
+
 	nationByPlayer[player] = nationId
 	local nation = Nations.get(nationId)
 	local profile = Persistence.load(player.UserId)
@@ -432,13 +446,18 @@ joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId
 	if typeof(nationId) ~= "number" then
 		return
 	end
+	local now = os.clock()
+	local lastJoin = joinCooldown[player.UserId]
+	if lastJoin and now - lastJoin < (Config.JOIN_COOLDOWN_SEC or 2) then
+		return
+	end
+	joinCooldown[player.UserId] = now
 	if typeof(modeId) == "string" then
 		local requestedMode = GameModes.get(modeId)
 		pendingMode = requestedMode.id
-		-- Tant que personne n'est deploye, ce n'est pas encore une partie : le
-		-- mode choisi peut donc s'appliquer immediatement au lieu d'attendre le
-		-- match suivant.
-		if matchPhase == "waiting" then
+		-- Premier deploiement seulement : un second JoinRequest en lobby ne
+		-- doit pas changer le mode pour tout le salon.
+		if matchPhase == "waiting" and next(slotByPlayer) == nil then
 			activeMode = requestedMode
 			state.mode = activeMode
 		end
@@ -462,6 +481,7 @@ local function onPlayerRemoving(player: Player)
 	IntentValidator.clearPlayer(player.UserId)
 	snapshotCooldown[player.UserId] = nil
 	snapshotCount[player.UserId] = nil
+	joinCooldown[player.UserId] = nil
 	Persistence.release(player.UserId)
 end
 

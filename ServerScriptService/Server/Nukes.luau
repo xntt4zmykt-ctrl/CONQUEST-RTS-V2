@@ -3,9 +3,10 @@
 	Phase nucleaire.
 
 	Regle de design : le nucleaire ne doit jamais etre une strategie
-	d'ouverture. Il se debloque tard (voir NUKE_UNLOCK_LAND_RATIO), coute cher,
-	et surtout il est interceptable — une batterie SAM bien placee rend une
-	frappe incertaine, donc la menace vaut souvent plus que le tir.
+	d'ouverture. Il se debloque par ere (silo + ere Atomique), coute cher,
+	et est bloque tant que combatUnlocked est faux — comme l'attaque terrestre
+	et le debarquement. Il est interceptable : une batterie SAM bien placee
+	rend une frappe incertaine, donc la menace vaut souvent plus que le tir.
 
 	L'effet est volontairement brutal sur la population et les batiments, mais
 	ne rase pas le territoire entierement : une frappe affaiblit, elle ne
@@ -61,6 +62,9 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 	local targetOwner = buffer.readu8(state.owner, targetTile)
 	if targetOwner ~= NEUTRAL and state:areAllied(slot, targetOwner) then
 		return false, "Tu es allie a cette faction."
+	end
+	if targetOwner ~= NEUTRAL and not state.combatUnlocked then
+		return false, "Les frontieres sont protegees pendant la preparation."
 	end
 
 	--[[
@@ -300,7 +304,12 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 
 	-- Pertes humaines : proportionnelles a la part du territoire touche, pour
 	-- qu'une frappe sur un petit empire soit devastatrice et qu'une frappe sur
-	-- un geant ne soit qu'une morsure.
+	-- un geant ne soit qu'une morsure. Snapshot AVANT le crater : setOwner
+	-- reduit victim.tiles dans la boucle, ce qui faussait le denominateur.
+	local tilesBefore: { [number]: number } = {}
+	for ownerSlot, ownerPs in state.players do
+		tilesBefore[ownerSlot] = ownerPs.tiles
+	end
 	local hitTiles: { [number]: number } = {}
 
 	for dy = -radius, radius do
@@ -338,7 +347,7 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 	for slot, tilesHit in hitTiles do
 		local victim = state.players[slot]
 		if victim then
-			local share = tilesHit / math.max(1, victim.tiles + tilesHit)
+			local share = tilesHit / math.max(1, tilesBefore[slot] or victim.tiles)
 			local loss = victim.troops * troopKill * math.min(1, share * 3)
 			victim.troops = math.max(0, victim.troops - loss)
 			state:notify(`\u{2622} Ton territoire a ete frappe — {math.floor(loss)} pertes.`, "bad", slot)
