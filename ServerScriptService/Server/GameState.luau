@@ -297,6 +297,17 @@ local statsRecPool: { [number]: StatsRec } = {}
 -- Non reentrant — step() unique / tick. Ne pas truncate a 0 apres return.
 -- Garde visuel : skip awaitingSpawn (passe 16). settledHumans inchange.
 local elimBuf: { number } = table.create(8)
+-- V39 : porteuses refreshRailNetwork (recette feel N84 / N81 truncate-avant-sort).
+-- Les inners neighborsOf deviennent building.links — uniques, pas poolees.
+-- Non reentrant — un seul refresh par mutation. Ne pas referencer IS_STATION
+-- (local trop bas, nil au runtime — piege V22). Formule HUD visuelle
+-- inchangee (pas de TRAIN_STOP_BONUS ici : il vit dans Trade).
+local stationBuf: { number } = table.create(32)
+local railParentBuf: { number } = table.create(32)
+local railXsBuf: { number } = table.create(32)
+local railYsBuf: { number } = table.create(32)
+local clusterStations: { [number]: number } = {}
+local clusterFactoryCount: { [number]: number } = {}
 
 --=============================================================================
 -- Construction
@@ -632,7 +643,9 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 
 	-- 1. Collecte des gares. Index du camp (V22) : pas un scan hash.
 	-- Ne pas user IS_STATION ici : local trop bas, nil au runtime.
-	local stations: { number } = {}
+	-- V39 : stationBuf + truncate leftover AVANT sort (un leftover non
+	-- truncaté mélangerait d'anciennes gares dans table.sort).
+	local n = 0
 	if self.buildingsBySlot then
 		local set = self.buildingsBySlot[slot]
 		if set then
@@ -647,7 +660,8 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 						or building.kind == B.FACTORY
 					)
 				then
-					table.insert(stations, index)
+					n += 1
+					stationBuf[n] = index
 				end
 			end
 		end
@@ -662,40 +676,43 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 					or building.kind == B.FACTORY
 				)
 			then
-				table.insert(stations, index)
+				n += 1
+				stationBuf[n] = index
 			end
 		end
+	end
+	for i = #stationBuf, n + 1, -1 do
+		stationBuf[i] = nil
 	end
 	-- L'ordre d'iteration d'une table Luau n'est pas garanti : sans tri, la
 	-- composition des grappes et donc les liens repliques changeraient a chaque
 	-- recalcul et satureraient la replication.
-	table.sort(stations)
+	table.sort(stationBuf)
 
-	local count = #stations
+	local count = n
 	local range2 = Config.RAIL_RANGE * Config.RAIL_RANGE
 
 	-- 2. Union-find sur les gares a portee. `parent` indexe la position dans
-	-- `stations`, pas la tuile : les indices de tuile sont trop epars.
-	local parent = table.create(count, 0)
+	-- `stationBuf`, pas la tuile : les indices de tuile sont trop epars.
+	-- Iterer 1..count, pas # (leftover parent/xs/ys hors budget).
 	for i = 1, count do
-		parent[i] = i
+		railParentBuf[i] = i
 	end
 
 	local function find(i: number): number
-		while parent[i] ~= i do
-			parent[i] = parent[parent[i]]
-			i = parent[i]
+		while railParentBuf[i] ~= i do
+			railParentBuf[i] = railParentBuf[railParentBuf[i]]
+			i = railParentBuf[i]
 		end
 		return i
 	end
 
-	local xs = table.create(count, 0)
-	local ys = table.create(count, 0)
-	for i, index in stations do
-		xs[i], ys[i] = MapGen.fromIndex(index)
+	for i = 1, count do
+		railXsBuf[i], railYsBuf[i] = MapGen.fromIndex(stationBuf[i])
 	end
 
 	-- Liens par gare, pour l'affichage des voies cote client.
+	-- V39 : inners uniques (deviennent building.links). Pas de pool partage.
 	local neighborsOf: { { number } } = table.create(count)
 	for i = 1, count do
 		neighborsOf[i] = {}
@@ -703,13 +720,13 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 
 	for i = 1, count do
 		for j = i + 1, count do
-			local dx, dy = xs[i] - xs[j], ys[i] - ys[j]
+			local dx, dy = railXsBuf[i] - railXsBuf[j], railYsBuf[i] - railYsBuf[j]
 			if dx * dx + dy * dy <= range2 then
-				table.insert(neighborsOf[i], stations[j])
-				table.insert(neighborsOf[j], stations[i])
+				table.insert(neighborsOf[i], stationBuf[j])
+				table.insert(neighborsOf[j], stationBuf[i])
 				local ri, rj = find(i), find(j)
 				if ri ~= rj then
-					parent[ri] = rj
+					railParentBuf[ri] = rj
 				end
 			end
 		end
@@ -717,12 +734,12 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 
 	-- 3. Taille de la grappe, et usines qu'elle contient : une grappe ne
 	-- produit que si elle contient au moins une usine.
-	local clusterStations: { [number]: number } = {}
-	local clusterFactoryCount: { [number]: number } = {}
+	table.clear(clusterStations)
+	table.clear(clusterFactoryCount)
 	for i = 1, count do
 		local root = find(i)
 		clusterStations[root] = (clusterStations[root] or 0) + 1
-		local building = self.buildings[stations[i]]
+		local building = self.buildings[stationBuf[i]]
 		if building and building.kind == B.FACTORY then
 			clusterFactoryCount[root] = (clusterFactoryCount[root] or 0) + 1
 		end
@@ -746,7 +763,7 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 
 	local income = 0
 	for i = 1, count do
-		local building = self.buildings[stations[i]]
+		local building = self.buildings[stationBuf[i]]
 		local links = neighborsOf[i]
 		if building and building.kind == B.FACTORY and #links > 0 then
 			-- Esperance par colis : tirage uniforme sur les liaisons, distance
@@ -754,7 +771,7 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 			-- Periode : trajet + rechargement.
 			local goldSum = 0
 			local periodSum = 0
-			local fx, fy = MapGen.fromIndex(stations[i])
+			local fx, fy = MapGen.fromIndex(stationBuf[i])
 			for _, other in links do
 				local ox, oy = MapGen.fromIndex(other)
 				local dx, dy = fx - ox, fy - oy
@@ -762,8 +779,8 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 				goldSum += Config.TRUCK_GOLD_BASE + d * Config.TRUCK_GOLD_PER_TILE
 				periodSum += math.max(1, math.ceil(d / Config.TRUCK_SPEED)) + Config.TRUCK_COOLDOWN
 			end
-			local n = #links
-			income += (goldSum * building.level) / (periodSum / n)
+			local linkN = #links
+			income += (goldSum * building.level) / (periodSum / linkN)
 		end
 	end
 
@@ -773,7 +790,7 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 	-- 5. Liens repliques. Seules les usines portent des voies visibles : dessiner
 	-- chaque arete deux fois doublerait la geometrie pour rien.
 	for i = 1, count do
-		local index = stations[i]
+		local index = stationBuf[i]
 		local building = self.buildings[index]
 		if building and building.kind == B.FACTORY then
 			local links = neighborsOf[i]
