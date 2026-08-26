@@ -30,6 +30,39 @@ Minimap.__index = Minimap
 
 export type Minimap = typeof(setmetatable({} :: any, Minimap))
 
+-- N187 : parkPanel / takePanel hoistes pour destroy() + new()
+-- sans Destroy du Frame Minimap rematch. Skip Parent nil (deja
+-- parke par un second destroy()). Push panelFree (Frame, pas
+-- placeRootFree / ghostFree / worldFree / previewFree MainMenu).
+-- take n'importe quel Frame, Name Minimap, Parent parent.
+-- View / Focus FindFirstChild reuse, sinon construction
+-- inchangee. CreateEditableImage seulement si pas de leftover
+-- View+image. Recette leftover N186. Pas merger visual V69.
+-- Distinct leftover N152 flame. Distinct leftover N123 setFocus.
+-- Overlay non touche. PlacementPreview non touche.
+-- WorldRenderer non touche. setFocus N123 inchange.
+-- init.client minimap:destroy() deja. Ne pas vider panelFree.
+-- Pas de delay. Distinct leftover N188 RadialMenu.destroy.
+local panelFree: { Frame } = {}
+
+local function parkPanel(panel: Frame)
+	if not panel.Parent then
+		return
+	end
+	panel.Parent = nil
+	panelFree[#panelFree + 1] = panel
+end
+
+local function takePanel(): Frame?
+	local n = #panelFree
+	if n == 0 then
+		return nil
+	end
+	local last = panelFree[n]
+	panelFree[n] = nil
+	return last
+end
+
 -- La minimap est le troisieme element permanent : elle doit rester lisible
 -- sans manger le coin de l'ecran. 176 px suffisent pour situer un front.
 local WIDTH = 176
@@ -55,14 +88,36 @@ end
 	Renvoie nil si le rendu d'image n'est pas disponible.
 ]]
 function Minimap.new(parent: GuiObject, terrain: buffer, onJump: (number) -> ()): Minimap?
-	local created, image = pcall(function()
-		return AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
-	end)
-
-	if not created or not image then
-		warn(`[CONQUEST RTS] minimap indisponible (EditableImage) : {tostring(image)}`)
-		return nil
+	-- N187 : peek leftover AVANT CreateEditableImage. Take seulement
+	-- une fois l'image assuree (fail Create sans take = candidate
+	-- reste dans panelFree). Name Minimap / Parent parent reposes
+	-- au reuse (rematch init.client). View / Focus reuse si
+	-- presents. CreateEditableImage seulement si pas de leftover
+	-- View+image. Second Create au reuse = fuite GPU.
+	local leftoverView: ImageLabel? = nil
+	local leftoverImage = nil
+	local candidate = if #panelFree > 0 then panelFree[#panelFree] else nil
+	if candidate then
+		local existingView = candidate:FindFirstChild("View")
+		if existingView and existingView:IsA("ImageLabel") then
+			leftoverView = existingView
+			leftoverImage = existingView:FindFirstChildWhichIsA("EditableImage")
+		end
 	end
+
+	local image = leftoverImage
+	if not image then
+		local created, img = pcall(function()
+			return AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+		end)
+		if not created or not img then
+			warn(`[CONQUEST RTS] minimap indisponible (EditableImage) : {tostring(img)}`)
+			return nil
+		end
+		image = img
+	end
+
+	local leftover = takePanel()
 
 	local self = setmetatable({}, Minimap) :: any
 	self.terrain = terrain
@@ -70,70 +125,104 @@ function Minimap.new(parent: GuiObject, terrain: buffer, onJump: (number) -> ())
 	self.pixels = buffer.create(W * H * 4)
 	self.needsUpload = true
 
-	local panel = Theme.panel("Minimap", parent)
+	-- N187 : take Frame leftover avant create. Ne pas Theme.panel
+	-- au reuse (UICorner + UIStroke dupliques). AnchorPoint /
+	-- Position / Size reecrits (valeurs construction inchangees).
+	local panel: Frame
+	if leftover then
+		panel = leftover
+		panel.Name = "Minimap"
+		panel.Parent = parent
+	else
+		panel = Theme.panel("Minimap", parent)
+	end
 	panel.AnchorPoint = Vector2.new(1, 1)
 	panel.Position = UDim2.new(1, -Theme.space.md, 1, -Theme.space.md)
 	panel.Size = UDim2.fromOffset(WIDTH + Theme.space.sm * 2, HEIGHT + Theme.space.sm * 2 + 24)
 	self.panel = panel
 
-	local title = Theme.label(panel, "TACTICAL MAP", Theme.textSize.tiny, Theme.color.accent)
-	title.Position = UDim2.fromOffset(Theme.space.sm, 5)
-	title.Size = UDim2.new(1, -Theme.space.sm * 2, 0, 14)
-	title.FontFace = Theme.font.medium
+	if not panel:FindFirstChildWhichIsA("TextLabel") then
+		local title = Theme.label(panel, "TACTICAL MAP", Theme.textSize.tiny, Theme.color.accent)
+		title.Position = UDim2.fromOffset(Theme.space.sm, 5)
+		title.Size = UDim2.new(1, -Theme.space.sm * 2, 0, 14)
+		title.FontFace = Theme.font.medium
+	end
 
-	local view = Instance.new("ImageLabel")
-	view.Name = "View"
-	view.Position = UDim2.fromOffset(Theme.space.sm, Theme.space.sm + 18)
-	view.Size = UDim2.fromOffset(WIDTH, HEIGHT)
-	view.BackgroundColor3 = Theme.color.void
-	view.BorderSizePixel = 0
-	view.ResampleMode = Enum.ResamplerMode.Pixelated
-	view.ScaleType = Enum.ScaleType.Stretch
-	view.Parent = panel
-	Theme.corner(view, Theme.radius.sm)
+	local view: ImageLabel
+	if leftoverView then
+		view = leftoverView
+	else
+		view = Instance.new("ImageLabel")
+		view.Name = "View"
+		view.Position = UDim2.fromOffset(Theme.space.sm, Theme.space.sm + 18)
+		view.Size = UDim2.fromOffset(WIDTH, HEIGHT)
+		view.BackgroundColor3 = Theme.color.void
+		view.BorderSizePixel = 0
+		view.ResampleMode = Enum.ResamplerMode.Pixelated
+		view.ScaleType = Enum.ScaleType.Stretch
+		view.Parent = panel
+		Theme.corner(view, Theme.radius.sm)
+	end
 	self.view = view
 
-	local attached = pcall(function()
-		view.ImageContent = (Content :: any).fromObject(image)
-	end)
-	if not attached then
-		pcall(function()
-			image.Parent = view
+	if image.Parent ~= view then
+		local attached = pcall(function()
+			view.ImageContent = (Content :: any).fromObject(image)
 		end)
+		if not attached then
+			pcall(function()
+				image.Parent = view
+			end)
+		end
+		-- Parent meme si Content.fromObject a reussi : le rematch
+		-- FindFirstChildWhichIsA recupere l'EditableImage. Sans
+		-- ca, leftover View sans enfant → second Create = fuite.
+		if image.Parent ~= view then
+			image.Parent = view
+		end
 	end
 
 	-- Marqueur de camera : montre ou on regarde sur la carte.
-	local marker = Instance.new("Frame")
-	marker.Name = "Focus"
-	marker.AnchorPoint = Vector2.new(0.5, 0.5)
-	marker.Size = UDim2.fromOffset(10, 10)
-	marker.BackgroundTransparency = 1
-	marker.Parent = view
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Theme.color.text
-	stroke.Thickness = 1.5
-	stroke.Transparency = 0.2
-	stroke.Parent = marker
-	Theme.corner(marker, Theme.radius.sm)
+	local existingFocus = view:FindFirstChild("Focus")
+	local marker: Frame
+	if existingFocus and existingFocus:IsA("Frame") then
+		marker = existingFocus
+	else
+		marker = Instance.new("Frame")
+		marker.Name = "Focus"
+		marker.AnchorPoint = Vector2.new(0.5, 0.5)
+		marker.Size = UDim2.fromOffset(10, 10)
+		marker.BackgroundTransparency = 1
+		marker.Parent = view
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Theme.color.text
+		stroke.Thickness = 1.5
+		stroke.Transparency = 0.2
+		stroke.Parent = marker
+		Theme.corner(marker, Theme.radius.sm)
+	end
 	self.marker = marker
 
-	local hit = Instance.new("TextButton")
-	hit.BackgroundTransparency = 1
-	hit.Text = ""
-	hit.Size = UDim2.fromScale(1, 1)
-	hit.AutoButtonColor = false
-	hit.Parent = view
+	-- Hit leftover : ne pas reconnecter (double-fire jump).
+	if not view:FindFirstChildWhichIsA("TextButton") then
+		local hit = Instance.new("TextButton")
+		hit.BackgroundTransparency = 1
+		hit.Text = ""
+		hit.Size = UDim2.fromScale(1, 1)
+		hit.AutoButtonColor = false
+		hit.Parent = view
 
-	hit.MouseButton1Down:Connect(function(x: number, y: number)
-		local origin = view.AbsolutePosition
-		local size = view.AbsoluteSize
-		if size.X <= 0 or size.Y <= 0 then
-			return
-		end
-		local u = math.clamp((x - origin.X) / size.X, 0, 0.999)
-		local v = math.clamp((y - origin.Y) / size.Y, 0, 0.999)
-		onJump(MapGen.toIndex(math.floor(u * W), math.floor(v * H)))
-	end)
+		hit.MouseButton1Down:Connect(function(x: number, y: number)
+			local origin = view.AbsolutePosition
+			local size = view.AbsoluteSize
+			if size.X <= 0 or size.Y <= 0 then
+				return
+			end
+			local u = math.clamp((x - origin.X) / size.X, 0, 0.999)
+			local v = math.clamp((y - origin.Y) / size.Y, 0, 0.999)
+			onJump(MapGen.toIndex(math.floor(u * W), math.floor(v * H)))
+		end)
+	end
 
 	-- Peinture initiale : tout le terrain, aucun proprietaire.
 	for index = 0, W * H - 1 do
@@ -197,7 +286,14 @@ function Minimap.setFocus(self: Minimap, x: number, _y: number, z: number)
 end
 
 function Minimap.destroy(self: Minimap)
-	self.panel:Destroy()
+	-- N187 : rematch park Frame existant. Pas Destroy. Enfants
+	-- laisses (new() View/Focus reuse + leftover image enfant).
+	-- Skip Parent nil (parkPanel). Pas take (new() deja).
+	-- Pas setFocus. Pas Overlay. Pas PlacementPreview. Pas
+	-- WorldRenderer. Pas init.client. Recette leftover N186.
+	-- Pas merger visual V69. Distinct leftover N152 flame.
+	-- Distinct leftover N188 RadialMenu.destroy.
+	parkPanel(self.panel)
 end
 
 return Minimap

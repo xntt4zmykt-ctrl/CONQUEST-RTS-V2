@@ -3007,6 +3007,13 @@ check("camera tactile : panoramique, pincement et torsion", function()
 end)
 
 check("minimap", function()
+	-- N123 : (x, y, z) nombres. Origine monde → centre de la carte.
+	-- Recette visual V69 leftover minimap, portee pas mergee.
+	-- N187 : destroy() parkPanel, pas Destroy. Garder destroy()
+	-- en fin (deja). Pas de second new() (volerait le panel).
+	-- Skip setFocus. Skip PlacementPreview. Skip WorldRenderer.
+	-- Skip Overlay. Skip init.client. Recette leftover N186,
+	-- pas merger visual V69. Distinct leftover N152 flame.
 	local minimap = Minimap.new(screenGui, terrain, function() end)
 	if minimap then
 		local delta = buffer.create(5)
@@ -3014,8 +3021,6 @@ check("minimap", function()
 		buffer.writeu8(delta, 4, 3)
 		minimap:applyDelta(delta)
 		minimap:flush()
-		-- N123 : (x, y, z) nombres. Origine monde → centre de la carte.
-		-- Recette visual V69 leftover minimap, portee pas mergee.
 		minimap:setFocus(0, 0, 0)
 		assert(minimap.marker.Position.X.Scale == 0.5, "marqueur X hors centre")
 		assert(minimap.marker.Position.Y.Scale == 0.5, "marqueur Y hors centre")
