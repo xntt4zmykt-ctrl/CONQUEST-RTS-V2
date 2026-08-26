@@ -240,9 +240,11 @@ function WorldRenderer.buildDecorations(self: WorldRenderer)
 				-- (Y TreeTrunk = ground + height/2, Y SavannaTrunk = ground + 1.6).
 				-- Distinct de V85 (BuildRing, BuildingModels). Distinct de V84
 				-- (OceanGlint yaw `angle` variable). Distinct de V59 (feuillage
-				-- 60 Hz, couronne). Construction de chunk, pas 60 Hz.
+				-- 60 Hz, couronne). Distinct de V87 (Rock yaw `phase` variable).
+				-- Construction de chunk, pas 60 Hz.
 				-- Shape = Cylinder pose APRES. Couronne translation seule.
-				-- Ne pas toucher Rock (leftover V87, yaw `phase`).
+				-- Ne pas retoucher Rock (V87 deja). Leftover V88 = cylinder()
+				-- BuildingModels, pas ce fichier.
 				local trunk = decorationPart(folder, "Part", "TreeTrunk", Vector3.new(height, 0.55, 0.55), Color3.fromRGB(91, 67, 47), CFrame.new(base.X, ground + height / 2, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90)), Enum.Material.Wood)
 				trunk.Shape = Enum.PartType.Cylinder
 				local crown = decorationPart(folder, "Part", "TreeCrown", Vector3.new(3.2, 3.8, 3.2), Color3.fromRGB(48 + (px % 3) * 6, 104 + (py % 4) * 6, 69), CFrame.new(base.X, ground + height + 1.1, base.Z), Enum.Material.LeafyGrass)
@@ -256,8 +258,17 @@ function WorldRenderer.buildDecorations(self: WorldRenderer)
 				crown.Shape = Enum.PartType.Ball
 				table.insert(self.animatedFoliage, { part = crown, base = crown.CFrame, phase = phase })
 			elseif terrain >= Config.TERRAIN.HILLS then
-				-- Leftover V87 : Rock yaw `phase` variable, encore CFrame.Angles.
-				local rock = decorationPart(folder, "WedgePart", "Rock", Vector3.new(1.8 + px % 3, 1.1 + py % 2, 1.8 + (px + py) % 2), Color3.fromRGB(103, 111, 118), CFrame.new(base.X, ground + 0.55, base.Z) * CFrame.Angles(0, phase, 0), Enum.Material.Rock)
+				-- V87 : translation * fromEulerAnglesYXZ (yaw `phase` variable).
+				-- Plus de CFrame.Angles a buildDecorations pour Rock.
+				-- Recette feel N138 inline — ne PAS cuire un rockRot
+				-- (yaw distinct par rocher, comme V84 glintRot interdit).
+				-- Distinct de V86 (TreeTrunk Z=90° fixe). Distinct de V84
+				-- (OceanGlint yaw `angle` variable, buildOcean). Distinct de V59
+				-- (feuillage 60 Hz, couronne). Construction de chunk, pas 60 Hz.
+				-- ClassName WedgePart. CastShadow pose APRES.
+				-- Ne pas retoucher TreeTrunk / SavannaTrunk (V86 deja).
+				-- Leftover V88 = BuildingModels cylinder(), pas ce fichier.
+				local rock = decorationPart(folder, "WedgePart", "Rock", Vector3.new(1.8 + px % 3, 1.1 + py % 2, 1.8 + (px + py) % 2), Color3.fromRGB(103, 111, 118), CFrame.new(base.X, ground + 0.55, base.Z) * CFrame.fromEulerAnglesYXZ(0, phase, 0), Enum.Material.Rock)
 				rock.CastShadow = true
 			end
 		end
