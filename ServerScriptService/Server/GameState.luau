@@ -308,6 +308,14 @@ local railXsBuf: { number } = table.create(32)
 local railYsBuf: { number } = table.create(32)
 local clusterStations: { [number]: number } = {}
 local clusterFactoryCount: { [number]: number } = {}
+-- V45 : collapseFaction porteuses tuiles (recette elimBuf / V37). Distinct
+-- de collapsingBuf (victim/captor V41) et de elimBuf (slots). Non reentrant
+-- — un collapse par tick (collecte V41 close avant). Truncate leftover
+-- AVANT plunder / swap : un leftover d'etat A ferait setOwner fantome.
+-- collapseScratch distinct de scratch (setOwner l'ecrase).
+local collapseRemainBuf: { number } = table.create(64)
+local collapseLeftBuf: { number } = table.create(64)
+local collapseScratch = table.create(4, 0)
 
 --=============================================================================
 -- Construction
@@ -1708,13 +1716,19 @@ end
 	ce balayage ponctuel.
 ]]
 function GameState.collapseFaction(self: GameState, victimSlot: number, captorSlot: number)
-	local remaining: { number } = {}
+	local remain = collapseRemainBuf
+	local left = collapseLeftBuf
+	local n = 0
 	for index = 0, Config.TILE_COUNT - 1 do
 		if buffer.readu8(self.owner, index) == victimSlot then
-			table.insert(remaining, index)
+			n += 1
+			remain[n] = index
 		end
 	end
-	if #remaining == 0 then
+	for i = #remain, n + 1, -1 do
+		remain[i] = nil
+	end
+	if n == 0 then
 		return
 	end
 
@@ -1737,29 +1751,29 @@ function GameState.collapseFaction(self: GameState, victimSlot: number, captorSl
 			-- La capitale si elle tient encore, sinon n'importe quelle tuile
 			-- restante : l'important est que le chiffre apparaisse SUR la
 			-- depouille, pas au milieu de nulle part.
+			-- collapseRemainBuf[1] AVANT le premier swap (V45).
 			local where = victim.capitalTile
 			if not where or buffer.readu8(self.owner, where) ~= victimSlot then
-				where = remaining[1]
+				where = collapseRemainBuf[1]
 			end
 			table.insert(self.plunders, { tile = where, slot = captorSlot, gold = loot })
 		end
 	end
 
-	local collapseScratch = table.create(4, 0)
-
 	for _ = 1, Config.COLLAPSE_MAX_PASSES do
-		local leftovers: { number } = {}
+		local nLeft = 0
 		local progressed = false
 
-		for _, index in remaining do
+		for i = 1, n do
+			local index = remain[i]
 			if buffer.readu8(self.owner, index) ~= victimSlot then
 				continue
 			end
 
-			local n = MapGen.neighbors(index, collapseScratch)
+			local nn = MapGen.neighbors(index, collapseScratch)
 			local heir = NEUTRAL
-			for i = 1, n do
-				local nb = collapseScratch[i]
+			for j = 1, nn do
+				local nb = collapseScratch[j]
 				local owner = buffer.readu8(self.owner, nb)
 				if owner == captorSlot then
 					heir = captorSlot
@@ -1780,19 +1794,25 @@ function GameState.collapseFaction(self: GameState, victimSlot: number, captorSl
 				self:setOwner(index, heir)
 				progressed = true
 			else
-				table.insert(leftovers, index)
+				nLeft += 1
+				left[nLeft] = index
 			end
 		end
 
-		remaining = leftovers
-		if #remaining == 0 or not progressed then
+		for i = #left, nLeft + 1, -1 do
+			left[i] = nil
+		end
+		remain, left = left, remain
+		n = nLeft
+		if n == 0 or not progressed then
 			break
 		end
 	end
 
 	-- Ce qui n'a aucun voisin hostile — une ile, une enclave alliee — retourne
 	-- au neutre plutot que de rester la propriete d'un mort.
-	for _, index in remaining do
+	for i = 1, n do
+		local index = remain[i]
 		if buffer.readu8(self.owner, index) == victimSlot then
 			self:setOwner(index, NEUTRAL)
 		end
