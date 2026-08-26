@@ -1607,6 +1607,11 @@ check("navires, missiles et interpolation", function()
 	-- leftover N128/N127 pieces, leftover N125 roulis, leftover N116
 	-- immobile, leftover N129 apercu doivent rester verts. applyUnits({}, {})
 	-- plus bas ne leve pas. Recette visual V75 leftover evenements Overlay.
+	-- N133 : explosion Shockwave fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Hauteur PLAINS + 0.5. overlay:explosion plus bas ne leve pas.
+	-- Sphere / fumee sans euler. Leftover N131 splash despawn, leftover
+	-- N130 wake spawn, leftover N125 yaw+roulis, leftover N116 immobile
+	-- doivent rester verts. Recette visual V75 leftover evenements Overlay.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")

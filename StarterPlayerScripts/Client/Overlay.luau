@@ -1069,7 +1069,16 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	local shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
 	shockwave.Shape = Enum.PartType.Cylinder
 	shockwave.Transparency = 0.12
-	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N133 : explosion Shockwave. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- Hauteur PLAINS + 0.5 inchangee. Tween Size/Transparency +
+	-- task.delay Destroy inchanges. Sphere / fumee / PointLight sans euler.
+	-- Distinct pulse N132 (route.to gare). Distinct splash N131 (mer).
+	-- Distinct LaunchWake N130. Distinct Effects ring N134 (Y = 3).
+	-- Recette visual V75 leftover evenements Overlay.
+	-- applyUnits / stepInterpolation non touches.
+	-- Effects / PlacementPreview / UnitModels inchanges.
+	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
 		Transparency = 1,
