@@ -228,6 +228,46 @@ local function checkInvariants(state, tick)
 		if indexed ~= realDef then
 			fail(`tick {tick} — bunkersBySlot count {indexed} != DEFENSE {realDef}`)
 		end
+		-- N41 : chaque bunker indexe est dans sa cellule spatiale.
+		if state.bunkerCells then
+			local r = math.max(1, Config.DEFENSE_RADIUS or 30)
+			for slot, set in state.bunkersBySlot do
+				for index in set do
+					local x, y = MapGen.fromIndex(index)
+					local key = math.floor(y / r) * 1024 + math.floor(x / r)
+					local bucket = state.bunkerCells[slot] and state.bunkerCells[slot][key]
+					if not (bucket and bucket[index]) then
+						fail(`tick {tick} — bunker {index} absent de bunkerCells[{slot}][{key}]`)
+					end
+				end
+			end
+		end
+	end
+
+	-- 5c. Index portsByTile = batiments PORT (ISSUE-N40).
+	do
+		local PORT = Config.BUILDING.PORT
+		local indexed = 0
+		for index, info in state.portsByTile do
+			indexed += 1
+			local building = state.buildings[index]
+			if not building or building.kind ~= PORT or building.slot ~= info.slot or building.level ~= info.level then
+				fail(`tick {tick} — portsByTile[{index}] orphelin`)
+			end
+		end
+		local realPort = 0
+		for index, building in state.buildings do
+			if building.kind == PORT then
+				realPort += 1
+				local info = state.portsByTile[index]
+				if not info or info.slot ~= building.slot or info.level ~= building.level then
+					fail(`tick {tick} — port {index} absent de portsByTile`)
+				end
+			end
+		end
+		if indexed ~= realPort then
+			fail(`tick {tick} — portsByTile count {indexed} != PORT {realPort}`)
+		end
 	end
 
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
@@ -4293,6 +4333,10 @@ do
 			if math.abs(postedAgain - postedLoss) > 0.01 then
 				fail("attackLogic bunkers — second appel sans mutation a derive")
 			end
+			local cells = postState.bunkerCells and postState.bunkerCells[def.slot]
+			if not cells then
+				fail("attackLogic bunkers — bunkerCells absent apres pose")
+			end
 
 			local cx, cy = MapGen.fromIndex(combatTile)
 			local far: number? = nil
@@ -4311,15 +4355,20 @@ do
 			if not far then
 				fail("attackLogic bunkers — tuile hors rayon introuvable")
 			else
-				postState:destroyBuilding(combatTile)
 				postState:setOwner(far, def.slot)
-				local farBase = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				local midPosted = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
 				postState:placeBuilding(far, Config.BUILDING.DEFENSE, def.slot)
-				local farLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
-				if math.abs(farLoss - farBase) > 0.01 then
-					fail(`attackLogic bunkers — hors rayon {farLoss} attendu {farBase}`)
+				local twoLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				if math.abs(twoLoss - midPosted) > 0.01 then
+					fail(`attackLogic bunkers — 2 bunkers stackent ({twoLoss} vs {midPosted})`)
 				end
+				postState:destroyBuilding(combatTile)
+				local farOnly = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
 				postState:destroyBuilding(far)
+				local unposted = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				if math.abs(farOnly - unposted) > 0.01 then
+					fail(`attackLogic bunkers — hors rayon {farOnly} attendu {unposted}`)
+				end
 				postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, def.slot)
 				postState:transferBuilding(combatTile, att.slot)
 				if postState.bunkersBySlot[def.slot] and postState.bunkersBySlot[def.slot][combatTile] then
@@ -4328,7 +4377,7 @@ do
 					fail("attackLogic bunkers — capture n'indexe pas le nouveau camp")
 				else
 					local afterCapture = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
-					if math.abs(afterCapture - farBase) > 0.01 then
+					if math.abs(afterCapture - unposted) > 0.01 then
 						fail(`attackLogic bunkers — defenseur capture encore posted ({afterCapture})`)
 					else
 						postState:destroyBuilding(combatTile)
@@ -4793,6 +4842,193 @@ do
 			end
 		end
 	end
+end
+
+do
+	-- N40 : spawnTradeShips. Index portsByTile, vague 2 PORT, 0 PORT,
+	-- plafond MAX_TRADE_SHIPS. TRADE_SHIP_CHANCE force a 1 puis restaure.
+	-- Capture de PORT (N35) : convoi en mer continue — deja couvert.
+	local savedChance = Config.TRADE_SHIP_CHANCE
+	Config.TRADE_SHIP_CHANCE = 1
+
+	local idxState = GameState.new(4040)
+	local idxOwner = idxState:addPlayer(nil, "Quai", Random.new(40), 0)
+	if not idxOwner then
+		fail("trade spawn — spawn index impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if idxState:isLand(index) and MapGen.isCoastal(idxState.terrain, index) and not idxState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("trade spawn — tuile cotiere introuvable")
+		else
+			idxState:placeBuilding(site, Config.BUILDING.PORT, idxOwner.slot)
+			local rec = idxState.portsByTile[site]
+			if not rec or rec.slot ~= idxOwner.slot or rec.level ~= 1 then
+				fail("trade spawn — pose n'a pas indexe")
+			else
+				idxState:upgradeBuilding(site)
+				local after = idxState.portsByTile[site]
+				if not after or after.level ~= idxState.buildings[site].level then
+					fail("trade spawn — upgrade n'a pas mis a jour le niveau")
+				else
+					idxState:destroyBuilding(site)
+					if idxState.portsByTile[site] ~= nil then
+						fail("trade spawn — destroy laisse l'index")
+					else
+						print("trade spawn index : pose / upgrade / destroy OK")
+					end
+				end
+			end
+		end
+	end
+
+	local waveState = GameState.new(4041)
+	local seller = waveState:addPlayer(nil, "Vendeur", Random.new(41), 0)
+	local buyer = waveState:addPlayer(nil, "Acheteur", Random.new(42), 0)
+	if not seller or not buyer then
+		fail("trade spawn wave — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if waveState:isLand(index) and MapGen.isCoastal(waveState.terrain, index) and not waveState.buildings[index] then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(waveState, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade spawn wave — aucune paire cotiere reliee")
+		else
+			waveState:setOwner(portA, seller.slot)
+			waveState:setOwner(portB, buyer.slot)
+			waveState:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			waveState:placeBuilding(portB, Config.BUILDING.PORT, buyer.slot)
+			waveState.tick = 0
+			Navy.step(waveState, Random.new(7))
+			local spawned = 0
+			for _, boat in waveState.boats do
+				if boat.kind == Navy.KIND_TRADE then
+					spawned += 1
+				end
+			end
+			if spawned < 1 then
+				fail("trade spawn wave — 0 convoi avec chance=1")
+			else
+				print(`trade spawn wave : {spawned} convoi(s)`)
+			end
+		end
+	end
+
+	local emptyState = GameState.new(4042)
+	local ghost = emptyState:addPlayer(nil, "Fantome", Random.new(43), 0)
+	if not ghost then
+		fail("trade spawn empty — spawn impossible")
+	else
+		emptyState.tick = 0
+		Navy.step(emptyState, Random.new(8))
+		local trades = 0
+		for _, boat in emptyState.boats do
+			if boat.kind == Navy.KIND_TRADE then
+				trades += 1
+			end
+		end
+		if trades ~= 0 then
+			fail(`trade spawn empty — {trades} convoi(s) sans PORT`)
+		else
+			print("trade spawn empty : 0 PORT, pas de convoi")
+		end
+	end
+
+	local capState = GameState.new(4043)
+	local capA = capState:addPlayer(nil, "CapA", Random.new(44), 0)
+	local capB = capState:addPlayer(nil, "CapB", Random.new(45), 0)
+	if not capA or not capB then
+		fail("trade spawn cap — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if capState:isLand(index) and MapGen.isCoastal(capState.terrain, index) and not capState.buildings[index] then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(capState, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade spawn cap — aucune paire cotiere reliee")
+		else
+			capState:setOwner(portA, capA.slot)
+			capState:setOwner(portB, capB.slot)
+			capState:placeBuilding(portA, Config.BUILDING.PORT, capA.slot)
+			capState:placeBuilding(portB, Config.BUILDING.PORT, capB.slot)
+			local path = Navy.findSeaPath(capState, portA :: number, portB :: number)
+			if not path or #path < 2 then
+				fail("trade spawn cap — route trop courte")
+			else
+				for _ = 1, Config.MAX_TRADE_SHIPS do
+					table.insert(capState.boats, {
+						id = capState:nextId(),
+						slot = capA.slot,
+						kind = Navy.KIND_TRADE,
+						troops = 0,
+						x = 0,
+						y = 0,
+						path = path,
+						step = 1,
+						targetTile = portB,
+						homeTile = portA,
+					})
+				end
+				capState.tick = 0
+				Navy.step(capState, Random.new(9))
+				local afloat = 0
+				for _, boat in capState.boats do
+					if boat.kind == Navy.KIND_TRADE then
+						afloat += 1
+					end
+				end
+				if afloat > Config.MAX_TRADE_SHIPS then
+					fail(`trade spawn cap — {afloat} convois > {Config.MAX_TRADE_SHIPS}`)
+				else
+					print(`trade spawn cap : {afloat} convoi(s), plafond {Config.MAX_TRADE_SHIPS}`)
+				end
+			end
+		end
+	end
+
+	Config.TRADE_SHIP_CHANCE = savedChance
 end
 
 do
