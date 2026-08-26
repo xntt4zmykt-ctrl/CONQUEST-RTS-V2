@@ -651,51 +651,71 @@ end
 --[[
 	Les instantanes arrivent a 10 Hz. On stocke la position cible et on
 	interpole a chaque frame, sinon les navires avancent par saccades visibles.
+
+	N98 : `trackUnit` est hisse au module — plus de closure par lot.
+	Extra missile pose une fois a l'insert, puis mute (tx/ty). Navire : extra
+	reste nil (la retraite N56 vit sur `retreatTinted`, pas une table 10 Hz).
 ]]
+local function trackUnit(
+	self: Overlay,
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	isMissile: boolean,
+	extra: any?
+)
+	local unit = self.units[id]
+	if not unit then
+		local visual = if isMissile
+			then UnitModels.createMissile(self.root, slot, kind)
+			else UnitModels.createBoat(self.root, slot, kind)
+		unit = {
+			visual = visual,
+			current = Vector2.new(x, y),
+			target = Vector2.new(x, y),
+			isMissile = isMissile,
+			phase = (id % 31) / 31 * math.pi * 2,
+			extra = extra,
+		}
+		self.units[id] = unit
+		if not isMissile then
+			local origin = WorldSpace.tileToWorld(x, y)
+			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+			wake.Shape = Enum.PartType.Cylinder
+			wake.Transparency = 0.34
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.16, 9, 9),
+				Transparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				if wake.Parent then
+					wake:Destroy()
+				end
+			end)
+		end
+	else
+		if extra then
+			local stored = unit.extra
+			if stored then
+				stored.tx = extra.tx
+				stored.ty = extra.ty
+			else
+				unit.extra = extra
+			end
+		end
+	end
+	unit.target = Vector2.new(x, y)
+	self.seen[id] = true
+end
+
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
-		local unit = self.units[id]
-		if not unit then
-			local visual = if isMissile
-				then UnitModels.createMissile(self.root, slot, kind)
-				else UnitModels.createBoat(self.root, slot, kind)
-			unit = {
-				visual = visual,
-				current = Vector2.new(x, y),
-				target = Vector2.new(x, y),
-				isMissile = isMissile,
-				phase = (id % 31) / 31 * math.pi * 2,
-				extra = extra,
-			}
-			self.units[id] = unit
-			if not isMissile then
-				local origin = WorldSpace.tileToWorld(x, y)
-				local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-				wake.Shape = Enum.PartType.Cylinder
-				wake.Transparency = 0.34
-				wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.16, 9, 9),
-					Transparency = 1,
-				}):Play()
-				task.delay(0.8, function()
-					if wake.Parent then
-						wake:Destroy()
-					end
-				end)
-			end
-		end
-		unit.target = Vector2.new(x, y)
-		unit.extra = extra
-		self.seen[id] = true
-	end
-
 	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false, {
-			retreating = boat.retreating == true,
-		})
+		trackUnit(self, boat.id, boat.slot, boat.kind, boat.x, boat.y, false, nil)
 		-- N56 option A : teinte froide des que le serveur marque la retraite.
 		if boat.retreating then
 			local unit = self.units[boat.id]
@@ -709,10 +729,17 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 	end
 
 	for _, missile in missiles do
-		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
-			tx = missile.tx,
-			ty = missile.ty,
-		})
+		local unit = self.units[missile.id]
+		if unit and unit.extra then
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, nil)
+			unit.extra.tx = missile.tx
+			unit.extra.ty = missile.ty
+		else
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
+				tx = missile.tx,
+				ty = missile.ty,
+			})
+		end
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.

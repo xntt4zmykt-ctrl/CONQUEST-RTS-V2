@@ -2495,13 +2495,31 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 	end
 
 	-- Classement trie par territoire : c'est la mesure qui decide la victoire.
-	local ranked: Ranking = {}
+	-- N97 : recycle self.ranked + inner records (recette visual V50 / boatSnapBuf).
+	-- Distinct de N96 (hash barycentre) et de N76 (playerStatsForReplicate).
+	-- Non reentrant. Truncate leftover AVANT table.sort (une ligne fantome
+	-- apparaitrait dans VictoryScreen.show / #hud.ranked).
+	-- Ne PAS table.insert. Ne PAS remplacer self.ranked.
+	local ranked: Ranking = self.ranked
+	local n = 0
 	local maxTiles = 1
 	for slot, s in stats do
-		table.insert(ranked, { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold })
+		n += 1
+		local rec = ranked[n]
+		if rec == nil then
+			ranked[n] = { slot = slot, tiles = s.tiles, troops = s.troops, gold = s.gold }
+		else
+			rec.slot = slot
+			rec.tiles = s.tiles
+			rec.troops = s.troops
+			rec.gold = s.gold
+		end
 		if s.tiles > maxTiles then
 			maxTiles = s.tiles
 		end
+	end
+	for i = #ranked, n + 1, -1 do
+		ranked[i] = nil
 	end
 	table.sort(ranked, function(a, b)
 		if a.tiles == b.tiles then
@@ -2509,7 +2527,6 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 		end
 		return a.tiles > b.tiles
 	end)
-	self.ranked = ranked
 
 	--[[
 		Le classement maison a ete retire : la liste native de Roblox le donne

@@ -228,6 +228,14 @@ check("identite, ere, diplomatie et classement", function()
 		)
 	end
 
+	-- N97 : leftover truncate. Premier update 12 slots, second un seul
+	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
+	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
+	assert(#hud.ranked == 1, "leftover ranked non truncate")
+	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	hud:update(stats, roster)
+
 	hud:setDiplomacy({
 		allies = { [2] = true },
 		incoming = { [3] = true },
@@ -1336,6 +1344,20 @@ check("navires, missiles et interpolation", function()
 	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
 	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
 	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
+	-- N98 : extra missile mute, pas remplace. Navire : extra reste nil
+	-- (retraite N56 via retreatTinted).
+	assert(overlay.units[1].extra == nil, "un navire ne doit pas porter extra")
+	local extra = overlay.units[3].extra
+	assert(extra ~= nil and extra.tx == 60 and extra.ty == 60, "extra missile initial absent")
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "extra missile non mute")
+	assert(rawequal(extra, overlay.units[3].extra), "record extra missile remplace")
 	overlay:stepInterpolation(1 / 60)
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
