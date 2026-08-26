@@ -891,6 +891,19 @@ function GameState.addPlayer(
 	return state
 end
 
+--[[
+	Rend les troupes engagees a l'attaquant. Pas de malus de retraite : le
+	front meurt sans combat (defenseur disparu, pacte). Met atk.troops a 0
+	pour qu'un second appel ne double pas le credit.
+]]
+function GameState.returnCommittedTroops(self: GameState, atk: Attack)
+	local attacker = self.players[atk.attacker]
+	if attacker then
+		attacker.troops += math.max(0, atk.troops)
+	end
+	atk.troops = 0
+end
+
 function GameState.removePlayer(self: GameState, slot: number)
 	local state = self.players[slot]
 	if not state then
@@ -914,7 +927,11 @@ function GameState.removePlayer(self: GameState, slot: number)
 
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
+		if atk.attacker == slot then
+			-- La faction disparait : ses troupes engagees disparaissent avec elle.
+			table.remove(self.attacks, i)
+		elseif atk.target == slot then
+			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
 		end
 	end
@@ -1391,7 +1408,12 @@ function GameState.stepAttacks(self: GameState)
 		local attacker = self.players[atk.attacker]
 		local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 
-		if not attacker or (atk.target ~= NEUTRAL and not defender) then
+		if not attacker then
+			table.remove(self.attacks, i)
+			continue
+		end
+		if atk.target ~= NEUTRAL and not defender then
+			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
 			continue
 		end

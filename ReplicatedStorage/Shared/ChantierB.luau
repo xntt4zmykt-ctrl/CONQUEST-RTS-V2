@@ -373,7 +373,12 @@ function ChantierB.install(GameState, Nukes)
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				self:returnCommittedTroops(atk)
 				table.remove(self.attacks, i)
 				continue
 			end
