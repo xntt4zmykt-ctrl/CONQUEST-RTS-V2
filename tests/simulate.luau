@@ -8492,6 +8492,111 @@ do
 	end
 end
 
+do
+	-- N89 : GameState.removePlayer recycle settledRecPool[slot].
+	-- Deux eliminations meme slot (recycle addPlayer) → rawequal record
+	-- + GameState.settledRecPool[slot]. Champs a jour. Bot / slot 99
+	-- → settledHumans[slot] == nil. Banc N37 (humain snapshotte, bot
+	-- ignore, XP) inchange. Banc N88 stats live. Pas N70 / N90.
+	local state = GameState.new(1089)
+	local pA = __newInstance("Player")
+	pA.Name = "SettledA"
+	pA.UserId = 301
+	local pB = __newInstance("Player")
+	pB.Name = "SettledB"
+	pB.UserId = 302
+	local human = state:addPlayer(pA :: any, "SettledA", Random.new(1), 0)
+	if not human then
+		fail("settled pool — spawn impossible")
+	else
+		human.betrayals = 2
+		human.capturedTiles = 9
+		human.capitalsCaptured = 1
+		human.buildingsBuilt = 4
+		local slot = human.slot
+		state:removePlayer(slot)
+		local snap1 = state.settledHumans[slot]
+		if snap1 == nil or not rawequal(snap1, GameState.settledRecPool[slot]) then
+			fail("settled pool — recPool[slot] distinct")
+		elseif snap1.betrayals ~= 2 or snap1.capturedTiles ~= 9 or snap1.player ~= pA then
+			fail("settled pool — champs A")
+		else
+			local human2 = state:addPlayer(pB :: any, "SettledB", Random.new(2), 0)
+			local bot = state:addPlayer(nil, "SettledBot", Random.new(3), 0)
+			if not human2 or human2.slot ~= slot then
+				fail("settled pool — recycle slot")
+			elseif not bot then
+				fail("settled pool — bot spawn impossible")
+			else
+				human2.betrayals = 5
+				human2.capturedTiles = 14
+				human2.capitalsCaptured = 2
+				human2.buildingsBuilt = 7
+				state:removePlayer(slot)
+				state:removePlayer(bot.slot)
+				state:removePlayer(99)
+				local snap2 = state.settledHumans[slot]
+				if snap2 == nil or not rawequal(snap1, snap2) then
+					fail("settled pool — rawequal recycle")
+				elseif not rawequal(snap2, GameState.settledRecPool[slot]) then
+					fail("settled pool — recPool perdu")
+				elseif snap2.betrayals ~= 5 or snap2.capturedTiles ~= 14 or snap2.player ~= pB then
+					fail("settled pool — champs B stale")
+				elseif snap2.capitalsCaptured ~= 2 or snap2.buildingsBuilt ~= 7 then
+					fail("settled pool — capitals/buildings stale")
+				elseif state.settledHumans[bot.slot] ~= nil then
+					fail("settled pool — bot snapshotte")
+				elseif state.settledHumans[99] ~= nil then
+					fail("settled pool — slot 99")
+				else
+					print("settled pool : rawequal slot, bot/99 nil (N89)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N90 : MatchLifecycle.buildProfilePacket recycle profileBuf.
+	-- Deux appels → rawequal record. xp change → champ a jour.
+	-- lastGain nil apres un gain → pas de leftover. Profile nil / {}
+	-- → zeros + lastGain nil. Banc N37 / N88 inchanges. Pas N86 / N6.
+	-- Ne pas pooler Persistence.record (N6) ni payload Intent (N82).
+	local p1 = MatchLifecycle.buildProfilePacket({
+		betrayals = 1,
+		matches = 2,
+		wins = 1,
+		xp = 100,
+		level = 3,
+	}, 12)
+	local p2 = MatchLifecycle.buildProfilePacket({
+		betrayals = 0,
+		matches = 5,
+		wins = 2,
+		xp = 200,
+		level = 4,
+	}, nil)
+	if not rawequal(p1, p2) or not rawequal(p1, MatchLifecycle.profileBuf) then
+		fail("profilePacket pool — rawequal record")
+	elseif p2.xp ~= 200 or p2.matches ~= 5 or p2.level ~= 4 then
+		fail("profilePacket pool — champs stale")
+	elseif p2.lastGain ~= nil then
+		fail("profilePacket pool — lastGain leftover")
+	elseif p2.betrayals ~= 0 or p2.wins ~= 2 then
+		fail("profilePacket pool — betrayals/wins")
+	else
+		local empty1 = MatchLifecycle.buildProfilePacket(nil, 99)
+		local empty2 = MatchLifecycle.buildProfilePacket({})
+		if empty1.lastGain ~= nil or empty1.xp ~= 0 or empty1.matches ~= 0 then
+			fail("profilePacket pool — args vides non reset")
+		elseif not rawequal(empty1, empty2) or not rawequal(empty1, MatchLifecycle.profileBuf) then
+			fail("profilePacket pool — args vides non recycle")
+		else
+			print("profilePacket pool : rawequal, lastGain nil, reset (N90)")
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
