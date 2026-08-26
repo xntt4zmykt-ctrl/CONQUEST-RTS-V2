@@ -42,6 +42,27 @@ local VALID = Color3.fromRGB(110, 235, 160)
 local SNAPPED = Color3.fromRGB(120, 200, 255)
 local INVALID = Color3.fromRGB(255, 105, 95)
 
+-- N92 : ctx hover recycle. Record + champs reecrits a chaque resolve
+-- (recette N85 ctxBuf serveur). Distinct de ctxBuf Buildings et de
+-- candBuf Placement. Unique appelant synchrone (resolve). Pas de
+-- RemoteFunction. Ne pas table.clone. ownerAt/buildingAt viennent
+-- du caller (init.client) — ne pas cacher si la tuile change de camp.
+local function previewOwnerAt(_index: number): number
+	return 0
+end
+local function previewBuildingAt(_index: number): (number?, number?, number?)
+	return nil, nil, nil
+end
+local previewCtx: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = previewOwnerAt,
+	buildingAt = previewBuildingAt,
+}
+PlacementPreview.previewCtx = previewCtx
+
 function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPreview
 	local self = setmetatable({}, PlacementPreview) :: any
 
@@ -97,16 +118,14 @@ function PlacementPreview.resolve(
 	counts: { [number]: number },
 	buildCostModifier: number
 ): (number, string)
-	local ctx: Placement.Context = {
-		slot = mySlot,
-		era = era,
-		gold = gold,
-		terrain = self.terrain,
-		ownerAt = ownerAt,
-		buildingAt = buildingAt,
-	}
+	previewCtx.slot = mySlot
+	previewCtx.era = era
+	previewCtx.gold = gold
+	previewCtx.terrain = self.terrain
+	previewCtx.ownerAt = ownerAt
+	previewCtx.buildingAt = buildingAt
 
-	local resolution = Placement.resolve(ctx, tile, kind, counts, buildCostModifier)
+	local resolution = Placement.resolve(previewCtx, tile, kind, counts, buildCostModifier)
 	if not resolution then
 		return tile, "invalid"
 	end
@@ -207,7 +226,14 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 	self.footprint.Transparency = 0.6
 	self.footprint.Color = color
 	self.footprint.Size = Vector3.new(0.3, radius, radius)
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N129 : translation * euler Z=90. Plus de CFrame.Angles 60 Hz.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2)
+	-- (rx=0, ry=0 → Z seul). Angle 90° inchange. Hauteur ground + 0.4
+	-- inchangee (feel ≠ visual 0.42). Size Vector3.new inchange (API).
+	-- Pas de pulse (feel n'en a pas). Distinct LaunchWake N130 (evenement).
+	-- Distinct N127/N128 pieces navire. Distinct N124 Radar rest identite.
+	-- Recette visual V75 leftover deja sur 1b5c — portee euler, pas mergee.
+	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 end
 
 function PlacementPreview.hide(self: PlacementPreview)
