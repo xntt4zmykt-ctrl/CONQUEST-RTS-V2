@@ -873,6 +873,9 @@ Config.RENDER_MODE = "Blocks" -- "Blocks" | "CanvasExperimental" | "LowDetail"
 -- Intentions reseau
 Config.INTENT_RATE_LIMIT_PER_SEC = 20
 Config.MAX_PENDING_INTENTS = 32 -- par joueur, file avant flush (dormant si apply immediat)
+-- Compat tests / outils : si true, une intention playing sans sequence est
+-- acceptee (non idempotente). Production = false (ISSUE-N41).
+Config.ALLOW_UNSEQUENCED_INTENTS = false
 Config.JOIN_COOLDOWN_SEC = 2 -- anti-spam JoinRequest
 Config.SNAPSHOT_COOLDOWN_SEC = 5
 Config.MAX_SNAPSHOTS_PER_MATCH = 12

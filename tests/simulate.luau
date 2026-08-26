@@ -206,6 +206,34 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5b. Index bunkersBySlot = batiments DEFENSE (ISSUE-N42).
+	do
+		local DEF = Config.BUILDING.DEFENSE
+		local indexed = 0
+		for slot, set in state.bunkersBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= DEF or building.slot ~= slot then
+					fail(`tick {tick} — bunkersBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realDef = 0
+		for index, building in state.buildings do
+			if building.kind == DEF then
+				realDef += 1
+				local set = state.bunkersBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — bunker {index} absent de bunkersBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realDef then
+			fail(`tick {tick} — bunkersBySlot count {indexed} != DEFENSE {realDef}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -2515,6 +2543,50 @@ do
 					end
 				end
 			end
+
+			-- N41 : playing refuse sequence nil ; lobby ratio/doctrine l'accepte.
+			IntentValidator.reset()
+			local landTile: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					landTile = index
+					break
+				end
+			end
+			if not landTile then
+				fail("intentions — aucune tuile terre pour N41")
+			else
+				local okNil, reasonNil =
+					IntentValidator.enqueue(ctx, fakePlayer, "Attack", nil, { index = landTile })
+				if okNil or reasonNil ~= "InvalidSchema" then
+					fail(`intentions — Attack sans sequence accepte ({tostring(reasonNil)})`)
+				end
+				local okSeq = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = 0.22 })
+				if not okSeq then
+					fail("intentions — SetAttackRatio sequence 1 refusee")
+				end
+				local okDup1, reasonDup1 =
+					IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = 0.8 })
+				if okDup1 or reasonDup1 ~= "DuplicateSequence" then
+					fail(`intentions — seq 1 non idempotente ({tostring(reasonDup1)})`)
+				end
+				ctx.matchPhase = "waiting"
+				IntentValidator.reset()
+				local okLobby = IntentValidator.enqueue(
+					ctx,
+					fakePlayer,
+					"SetAttackRatio",
+					nil,
+					{ ratio = 0.33 }
+				)
+				if not okLobby then
+					fail("intentions — SetAttackRatio lobby sans sequence refuse")
+				elseif ps.attackRatio < 0.32 or ps.attackRatio > 0.34 then
+					fail(`intentions — ratio lobby non applique ({ps.attackRatio})`)
+				end
+				ctx.matchPhase = "playing"
+				print("intentions : sequence nil refusee en playing, optionnelle en lobby (N41)")
+			end
 		end
 	end
 end
@@ -3745,6 +3817,94 @@ do
 			fail("settledHumans — bot snapshotte")
 		else
 			print("settledHumans : snapshot humain elimine, bot ignore")
+		end
+	end
+end
+
+do
+	-- N42 : posted lit bunkersBySlot, pas le hash buildings. Capture change le camp.
+	local ChantierB = __require("ChantierB")
+	local postState = GameState.new(4242)
+	local att = postState:addPlayer(nil, "Assaillant", Random.new(1), 0)
+	local def = postState:addPlayer(nil, "Defenseur", Random.new(2), 0)
+	if not att or not def then
+		fail("attackLogic bunkers — spawn impossible")
+	else
+		local combatTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(postState.owner, index) == def.slot and not postState.buildings[index] then
+				combatTile = index
+				break
+			end
+		end
+		if not combatTile then
+			fail("attackLogic bunkers — tuile defenseur libre introuvable")
+		else
+			local troops = 10000
+			local bonus = Config.DEFENSE_POST_BONUS or 5
+			local baseLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+			postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, def.slot)
+			if not (postState.bunkersBySlot[def.slot] and postState.bunkersBySlot[def.slot][combatTile]) then
+				fail("attackLogic bunkers — pose n'a pas indexe")
+			end
+			local postedLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+			if math.abs(postedLoss - baseLoss * bonus) > 0.01 then
+				fail(
+					`attackLogic bunkers — posted {postedLoss} attendu {baseLoss * bonus} (base {baseLoss})`
+				)
+			end
+
+			local cx, cy = MapGen.fromIndex(combatTile)
+			local far: number? = nil
+			local minR = (Config.DEFENSE_RADIUS or 30) + 1
+			local minR2 = minR * minR
+			for index = 0, Config.TILE_COUNT - 1 do
+				if postState:isLand(index) and not postState.buildings[index] then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - cx, y - cy
+					if dx * dx + dy * dy > minR2 then
+						far = index
+						break
+					end
+				end
+			end
+			if not far then
+				fail("attackLogic bunkers — tuile hors rayon introuvable")
+			else
+				postState:destroyBuilding(combatTile)
+				postState:setOwner(far, def.slot)
+				local farBase = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				postState:placeBuilding(far, Config.BUILDING.DEFENSE, def.slot)
+				local farLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				if math.abs(farLoss - farBase) > 0.01 then
+					fail(`attackLogic bunkers — hors rayon {farLoss} attendu {farBase}`)
+				end
+				postState:destroyBuilding(far)
+				postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, def.slot)
+				postState:transferBuilding(combatTile, att.slot)
+				if postState.bunkersBySlot[def.slot] and postState.bunkersBySlot[def.slot][combatTile] then
+					fail("attackLogic bunkers — capture laisse l'ancien camp")
+				elseif not (postState.bunkersBySlot[att.slot] and postState.bunkersBySlot[att.slot][combatTile]) then
+					fail("attackLogic bunkers — capture n'indexe pas le nouveau camp")
+				else
+					local afterCapture = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+					if math.abs(afterCapture - farBase) > 0.01 then
+						fail(`attackLogic bunkers — defenseur capture encore posted ({afterCapture})`)
+					else
+						postState:destroyBuilding(combatTile)
+						local attBase = select(1, ChantierB.attackLogic(postState, troops, def, att, combatTile))
+						postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, att.slot)
+						local attPosted = select(1, ChantierB.attackLogic(postState, troops, def, att, combatTile))
+						if math.abs(attPosted - attBase * bonus) > 0.01 then
+							fail(
+								`attackLogic bunkers — nouveau proprio sans posted ({attPosted} vs {attBase * bonus})`
+							)
+						else
+							print("attackLogic bunkers : posted / hors rayon / capture OK")
+						end
+					end
+				end
+			end
 		end
 	end
 end

@@ -44,12 +44,15 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local mag, speed = terrainMagSpeed(terrain)
 	local posted = false
 	if defender then
+		-- Index par camp (ISSUE-N42) : O(bunkers_défenseur), pas O(buildings).
+		-- Le buffer `defense` encode un falloff sans slot — il pilote tileCost
+		-- mort, pas le flag posted (capture d'un bunker sans ré-aura).
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local DEF = Config.BUILDING.DEFENSE
-		for index, building in state.buildings do
-			if building.kind == DEF and building.slot == defender.slot then
+		local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+		if bunkers then
+			for index in bunkers do
 				local bx, by = MapGen.fromIndex(index)
 				local dx, dy = bx - cx, by - cy
 				if dx * dx + dy * dy <= r2 then

@@ -136,9 +136,28 @@ local function checkRate(userId: number, now: number): boolean
 	return count <= limit
 end
 
-local function checkSequence(userId: number, sequence: number?): (boolean, RefuseReason?)
+-- Lobby : ratio / doctrine ne mutent pas la carte. Playing : toute action
+-- mutante exige un entier >= 1 (ISSUE-N41). Flag de repli pour outils.
+local LOBBY_OPTIONAL_SEQUENCE = {
+	SetAttackRatio = true,
+	ChooseDoctrine = true,
+}
+
+local function sequenceRequired(actionType: string, matchPhase: string): boolean
+	if Config.ALLOW_UNSEQUENCED_INTENTS then
+		return false
+	end
+	if matchPhase ~= "playing" and LOBBY_OPTIONAL_SEQUENCE[actionType] then
+		return false
+	end
+	return true
+end
+
+local function checkSequence(userId: number, sequence: number?, required: boolean): (boolean, RefuseReason?)
 	if sequence == nil then
-		-- Compat : intention sans numero — acceptee mais non idempotente.
+		if required then
+			return false, "InvalidSchema"
+		end
 		return true, nil
 	end
 	if not isInteger(sequence) or sequence < 1 then
@@ -213,7 +232,7 @@ function IntentValidator.enqueue(
 		return false, "RateLimited"
 	end
 
-	local seqOk, seqReason = checkSequence(userId, sequence)
+	local seqOk, seqReason = checkSequence(userId, sequence, sequenceRequired(actionType, ctx.matchPhase))
 	if not seqOk then
 		bumpRefuse(seqReason :: string)
 		return false, seqReason

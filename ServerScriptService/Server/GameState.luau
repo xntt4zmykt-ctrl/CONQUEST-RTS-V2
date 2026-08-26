@@ -152,6 +152,10 @@ export type GameState = typeof(setmetatable(
 		boats: { Boat },
 		missiles: { Missile },
 		buildings: { [number]: Building },
+		-- Index O(1) des bunkers par camp. attackLogic (hot path) ne scanne
+		-- plus le hash buildings entier (ISSUE-N42). Le buffer `defense` reste
+		-- la source du cout de tuile (falloff), pas du flag posted.
+		bunkersBySlot: { [number]: { [number]: true } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -223,6 +227,7 @@ function GameState.new(seed: number): GameState
 	self.boats = {}
 	self.missiles = {}
 	self.buildings = {}
+	self.bunkersBySlot = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -699,6 +704,20 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+-- Index bunker : pose / capture / destroy seulement, jamais dans le tick.
+local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.bunkersBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.bunkersBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -709,6 +728,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
+		indexBunker(self, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -763,6 +783,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
+	if building.kind == B.DEFENSE then
+		indexBunker(self, previousSlot, index, false)
+		indexBunker(self, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -778,6 +802,7 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
 		self:applyDefenseAura(index, -1)
+		indexBunker(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1021,6 +1046,7 @@ function GameState.removePlayer(self: GameState, slot: number)
 	if self.quickChatLast then
 		self.quickChatLast[slot] = nil
 	end
+	self.bunkersBySlot[slot] = nil
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
