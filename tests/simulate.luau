@@ -6576,6 +6576,151 @@ do
 end
 
 do
+	-- N60 : Diplomacy.step recycle expired. 2 joueurs, request+accept,
+	-- tick = expiry stockee → step nil le pacte, pose le cooldown, notify
+	-- de terme (pas TRAHI). Second step : toujours pas allies, pas d'erreur.
+	-- 3 joueurs, deux pactes A–B et A–C le meme tick → les deux tombent.
+	-- Recette feel 2f5d N79. Ne pas casser le test areAllied expiry
+	-- (avant step) plus haut.
+	local state = GameState.new(1079)
+	local a = state:addPlayer(nil, "TermeA", Random.new(51), 0)
+	local b = state:addPlayer(nil, "TermeB", Random.new(52), 0)
+	if not a or not b then
+		fail("diplomacy step expired — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		if not Diplomacy.accept(state, a.slot, b.slot) then
+			fail("diplomacy step expired — accept refuse")
+		else
+			local expiry = state.alliances[a.slot][b.slot]
+			if typeof(expiry) ~= "number" then
+				fail("diplomacy step expired — expiry non numerique")
+			else
+				state.tick = expiry
+				table.clear(state.events)
+				Diplomacy.step(state)
+				local cd = state.allianceCooldowns[a.slot]
+				local termNotify = false
+				local betrayNotify = false
+				for _, ev in state.events do
+					if typeof(ev.text) == "string" then
+						if string.find(ev.text, "terme", 1, true) then
+							termNotify = true
+						end
+						if string.find(ev.text, "TRAHI", 1, true) then
+							betrayNotify = true
+						end
+					end
+				end
+				if state:areAllied(a.slot, b.slot) then
+					fail("diplomacy step expired — encore allies")
+				elseif state.alliances[a.slot][b.slot] ~= nil or state.alliances[b.slot][a.slot] ~= nil then
+					fail("diplomacy step expired — entree encore posee")
+				elseif not (cd and cd[b.slot] == expiry + Config.ALLIANCE_COOLDOWN) then
+					fail("diplomacy step expired — cooldown absent")
+				elseif not termNotify or betrayNotify then
+					fail("diplomacy step expired — notify terme/TRAHI")
+				elseif a.betrayals ~= 0 then
+					fail("diplomacy step expired — compteur trahison")
+				else
+					Diplomacy.step(state)
+					if state:areAllied(a.slot, b.slot) then
+						fail("diplomacy step expired — second step reallie")
+					else
+						print("diplomacy step expired : terme, cooldown, pas TRAHI (N60)")
+						local trio = GameState.new(1080)
+						local x = trio:addPlayer(nil, "TrioA", Random.new(61), 0)
+						local y = trio:addPlayer(nil, "TrioB", Random.new(62), 0)
+						local z = trio:addPlayer(nil, "TrioC", Random.new(63), 0)
+						if not x or not y or not z then
+							fail("diplomacy step expired — trio spawn impossible")
+						else
+							Diplomacy.request(trio, x.slot, y.slot)
+							Diplomacy.accept(trio, x.slot, y.slot)
+							Diplomacy.request(trio, x.slot, z.slot)
+							Diplomacy.accept(trio, x.slot, z.slot)
+							local expAB = trio.alliances[x.slot][y.slot]
+							local expAC = trio.alliances[x.slot][z.slot]
+							if typeof(expAB) ~= "number" or expAB ~= expAC then
+								fail("diplomacy step expired — trio expiries divergentes")
+							else
+								trio.tick = expAB
+								Diplomacy.step(trio)
+								if trio:areAllied(x.slot, y.slot) or trio:areAllied(x.slot, z.slot) then
+									fail("diplomacy step expired — trio pacte survivant")
+								else
+									print("diplomacy step expired : A–B et A–C tombent ensemble (N60)")
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N61 : neighborFactions recycle contactBuf. 2 joueurs colles →
+	-- contacts[b] >= 1. Second appel → rawequal. Slot 99 → map vide.
+	-- removePlayer(b) → contacts[gone] absent (tuiles devenues NEUTRAL).
+	-- Recette feel 2f5d N80. NEUTRAL n'est pas cache.
+	local state = GameState.new(1081)
+	local a = state:addPlayer(nil, "FrontA", Random.new(71), 0)
+	local b = state:addPlayer(nil, "FrontB", Random.new(72), 0)
+	if not a or not b then
+		fail("neighborFactions — spawn impossible")
+	else
+		local contact = nil
+		local scratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+						state:setOwner(nb, b.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("neighborFactions — pas de contact terrestre")
+		else
+			local first = Bots.neighborFactions(state, a.slot)
+			if (first[b.slot] or 0) < 1 then
+				fail("neighborFactions — voisin absent")
+			else
+				local again = Bots.neighborFactions(state, a.slot)
+				if not rawequal(first, again) then
+					fail("neighborFactions — rawequal")
+				else
+					local empty = Bots.neighborFactions(state, 99)
+					if next(empty) ~= nil then
+						fail("neighborFactions — slot 99 non vide")
+					else
+						print("neighborFactions : contact, rawequal, slot 99 vide (N61)")
+						local gone = b.slot
+						state:removePlayer(gone)
+						local after = Bots.neighborFactions(state, a.slot)
+						if after[gone] ~= nil then
+							fail("neighborFactions — disparu encore present")
+						else
+							print("neighborFactions : removePlayer → disparu absent (N61)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
