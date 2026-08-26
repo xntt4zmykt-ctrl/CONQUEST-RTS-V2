@@ -782,19 +782,8 @@ local function replicate()
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
 	-- snapshotBoats (N56) porte `retreating`, jamais path / homeTile.
 	local boats = state:snapshotBoats()
-
-	local missiles = {}
-	for _, missile in state.missiles do
-		table.insert(missiles, {
-			id = missile.id,
-			slot = missile.slot,
-			x = missile.x,
-			y = missile.y,
-			tx = missile.tx,
-			ty = missile.ty,
-			kind = missile.kind,
-		})
-	end
+	-- snapshotMissiles (N71) : Types.MissileSnapshot seulement, pas progress.
+	local missiles = state:snapshotMissiles()
 
 	fireDeployed(unitSnapshot, boats, missiles)
 

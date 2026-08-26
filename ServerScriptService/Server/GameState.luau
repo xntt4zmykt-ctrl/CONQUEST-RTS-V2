@@ -243,6 +243,23 @@ local boatSnapBuf: {
 	}
 } =
 	table.create(48)
+-- N71 : UnitSnapshot missiles recycle (recette boatSnapBuf / N70). Champs
+-- uniquement Types.MissileSnapshot — pas sx/sy/progress/speed.
+local missileSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+} =
+	table.create(16)
+-- N72 : indices dirty pour flushOwnerDelta. Le buffer outbound reste neuf
+-- (RemoteEvent). Early-out dirty vide sans allouer.
+local dirtyIndexBuf: { number } = table.create(64)
 
 --=============================================================================
 -- Construction
@@ -1137,6 +1154,53 @@ function GameState.snapshotBoats(self: GameState): {
 		boatSnapBuf[i] = nil
 	end
 	return boatSnapBuf
+end
+
+--[[
+	Payload UnitSnapshot missiles (10 Hz). Pas de sx/sy/progress/speed
+	(Types.MissileSnapshot). Overlay interpolé via tx/ty seulement.
+	init.server est hors bundle : ce helper est le contrat testable.
+	N71 : recycle missileSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotMissiles(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		tx: number,
+		ty: number,
+		kind: number,
+	}
+}
+	local n = 0
+	for _, missile in self.missiles do
+		n += 1
+		local rec = missileSnapBuf[n]
+		if rec == nil then
+			missileSnapBuf[n] = {
+				id = missile.id,
+				slot = missile.slot,
+				x = missile.x,
+				y = missile.y,
+				tx = missile.tx,
+				ty = missile.ty,
+				kind = missile.kind,
+			}
+		else
+			rec.id = missile.id
+			rec.slot = missile.slot
+			rec.x = missile.x
+			rec.y = missile.y
+			rec.tx = missile.tx
+			rec.ty = missile.ty
+			rec.kind = missile.kind
+		end
+	end
+	for i = #missileSnapBuf, n + 1, -1 do
+		missileSnapBuf[i] = nil
+	end
+	return missileSnapBuf
 end
 
 function GameState.addPlayer(
@@ -2062,21 +2126,28 @@ end
 --[[
 	Serialise les changements de proprietaire depuis le dernier appel, au format
 	[u32 index][u8 slot] repete. On n'envoie jamais la carte entiere.
+	N72 : recycle dirtyIndexBuf. Early-out dirty vide sans allouer. Le buffer
+	outbound reste neuf (RemoteEvent) — ne pas le recycler.
 ]]
 function GameState.flushOwnerDelta(self: GameState): buffer?
-	local indices = {}
-	for index in self.dirty do
-		table.insert(indices, index)
-	end
-	table.clear(self.dirty)
-
-	local count = #indices
-	if count == 0 then
+	if next(self.dirty) == nil then
+		table.clear(self.dirty)
 		return nil
 	end
 
-	local buf = buffer.create(count * 5)
-	for i, index in indices do
+	local n = 0
+	for index in self.dirty do
+		n += 1
+		dirtyIndexBuf[n] = index
+	end
+	for i = #dirtyIndexBuf, n + 1, -1 do
+		dirtyIndexBuf[i] = nil
+	end
+	table.clear(self.dirty)
+
+	local buf = buffer.create(n * 5)
+	for i = 1, n do
+		local index = dirtyIndexBuf[i]
 		local offset = (i - 1) * 5
 		buffer.writeu32(buf, offset, index)
 		buffer.writeu8(buf, offset + 4, buffer.readu8(self.owner, index))
