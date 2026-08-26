@@ -1,111 +1,125 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 2)
 
-Déclencheur : ouverture de la **PR #16** (`cursor/p0-framework-hardening-5b2e`) — IntentValidator, hash carte, metrics.
+Déclencheur : ouverture de la **PR #17** (`cursor/analyse-nocturne-du-codebase-f89b`) — correctifs d’autorité + rapport d’architecture. Base : PR #16 (`cursor/p0-framework-hardening-5b2e`).
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-f89b`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready** à copier dans GitHub Issues. Aucun commentaire n’a pu être posté sur #16.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-4548`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16 / #17.
 
 ---
 
 ## 1. Verdict
 
-Le moteur est **server-authoritative**. Les clients n’envoient que des intentions ; `IntentValidator` enfile, le tick applique, `GameState` / `Navy` / `Nukes` / `Diplomacy` mutent. **Aucun cycle de `require`.**
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que des intentions ; `IntentValidator` enfile, le tick applique.
 
-La PR #16 est un bon P0 (file d’intentions, hash carte, metrics, découplage `Research`). Ce run a **corrigé les trous d’autorité et de comptabilité encore ouverts**, sans toucher aux tests client (34/34 OK).
+La PR #17 a bien fermé les trous P0 d’autorité (9e humain, JoinRequest throttle, nuke prep, `areAllied`, `removePlayer`/`setOwner`, file bornée). Cette passe a **corrigé ce que #17 a manqué** : JoinRequest en phase `ended`, réplication `FireAllClients` vers le menu, QuickChat succès fantôme, cadran sur AFK non spawn, HUD alliance unidirectionnelle, message ville « +900 ».
 
-**20K CCU n’est pas un objectif de salon.** Le produit actuel est ~12 factions / salon (`PUBLIC_MATCH_CAPACITY`), 8 humains max. 20K CCU = ~1 700 serveurs identiques. Le goulot n’est pas un monde unique de 20K joueurs : c’est le **coût tick + réplication par serveur** × le **matchmaking** (MemoryStore / Teleport), encore absent.
+**Correction importante vs rapport #17 :** `MAX_TILES_PER_TICK = 56` est **écrit** par `ChantierB.apply` mais **jamais lu** par le combat installé. Le débit vivant est `attackTilesPerTick * speedFactor`, borné par `guard < 80`. Le banc imprime `attackTilesPerTick(10k,nil,1)=2`.
+
+**20K CCU** = ~1 700 shards × 12 factions publiques / 8 humains, pas un monde unique. Le goulot mesuré : **réplication stats+unités 10 Hz** (N2, partiellement réduit ici via audience) × matchmaking absent (N7).
 
 Banc headless (`./tests/run.sh`) : **exit 0**.
 
-- Serveur : 5 seeds + invariants + P0 + nouveaux gardes (doctrine, nuke prep, `areAllied`, `removePlayer`, `stripTerritory`, file).
-- Client : 34 OK, aucun écran cassé.
-- Metrics 6000 ticks : `avgChanged=8.7 p95Changed=16 maxChanged=479 avgTickMs=0.37 p95TickMs=0.66`. **`MAX_TILES_PER_TICK` vivant = 56** (override `ChantierB.apply`), pas 400 (`Config.luau`).
+- Serveur : 5 seeds + invariants + P0 + gardes #17 + QuickChat cooldown + doomsday AFK + `viewFor` unidirectionnel.
+- Client : **34/34 OK**.
+- Metrics 6000 ticks : `avgChanged=8.7 p95Changed=16 maxChanged=479 avgTickMs=0.39 p95TickMs=0.69`.
+- **Factions observées : 18** (bots + 6 tribus) alors que `PUBLIC_MATCH_CAPACITY=12`.
 
 ---
 
-## 2. Correctifs livrés dans cette PR (sûrs)
+## 2. Revue PR #17
+
+**À merger** (autorité + comptabilité), sous réserve de N1 (dual Config/ChantierB) et de N11 (`MAX_TILES_PER_TICK` mort).
+
+Points encore vrais après #17, mal étiquetés dans son rapport :
+
+| Claim #17 | Réalité |
+|---|---|
+| `MAX_TILES_PER_TICK` vivant = 56 | Constante **inutilisée**. Combat = `attackTilesPerTick` + `guard < 80`. |
+| `justClaimed` avalait l’offensive | Le flag n’existe plus en prod (`awaitingSpawn` / `claimSpawn`). Le test #17 pose `justClaimed` sur un objet mort. |
+| Embargo « or par tick » | Docs seulement. L’embargo coupe les **navires de commerce**. |
+| Capacité publique 12 | `Bots.spawnAll` ajoute **toujours 6 tribus** par-dessus. Banc : 18 factions. |
+
+---
+
+## 3. Correctifs livrés dans cette passe (sûrs)
 
 | Bug | Fichiers | Pourquoi |
 |---|---|---|
-| 9e humain non refusé | `init.server.luau` `deployPlayer` | `MAX_HUMAN_PLAYERS` n’était qu’un `warn` |
-| `JoinRequest` sans throttle | `init.server.luau` + `Config.JOIN_COOLDOWN_SEC` | spam RemoteEvent hors IntentValidator |
-| Mode lobby last-writer | `init.server.luau` | seul le **premier** deploiement pose `activeMode` |
-| Nuke pendant la prep | `Nukes.launch` | terre/mer respectaient `combatUnlocked`, pas le silo |
-| `justClaimed` avalait la 1re offensive | `SystemsBootstrap` / `IntentValidator` | succès silencieux, 0 front |
-| Doctrine 999 → Industrielle | `Doctrines.isValid` + enqueue | repli silencieux |
-| Nuke/diplomatie hors schéma en file | `IntentValidator` | charge de file pour des intents morts |
-| Ordres en phase `ended` | `IntentValidator` | doctrine/ratio encore acceptés |
-| File d’intents non bornée | `Config.MAX_PENDING_INTENTS=32` | RAM si flush prend du retard |
-| `areAllied` unidirectionnel | `GameState.areAllied` | un camp peut frapper, l’autre non |
-| `removePlayer` saute `setOwner` | `GameState.removePlayer` | frontieres fantômes chez les survivants |
-| Spawn humain `tiles=1` à 0 tuiles | `ChantierB.stripTerritory` | `colonizedRatio` / HUD faussés |
-| Pertes nuke post-cratère | `Nukes.detonate` | snapshot `tilesBefore` |
-| Charge bateau `/5` vs Config 0.4 | `Navy` + `Config.BOAT_TROOP_RATIO=0.2` | aligne constante et moteur (1/5 OF) |
+| `JoinRequest` pendant `ended` | `init.server.luau` `deployPlayer` | Spawn + MapInit sur une carte morte (~20 s post-match) |
+| `FireAllClients` StateDelta / Units / buildings / plunder / trade / explosions | `init.server.luau` `fireDeployed` | Facturation Roblox par destinataire, y compris le menu |
+| Lobby `waiting` vide à 10 Hz | `init.server.luau` `stepOnce` | MatchUpdate 1 Hz seulement tant que personne n’est déployé |
+| Phase `ended` à 10 Hz | `init.server.luau` | Réplication 1 Hz (summary HUD) |
+| Hash terrain → `RequestSnapshot` | `init.client.luau` | Le snapshot owner ne répare pas un générateur divergé ; brûlait le quota 12/match |
+| QuickChat `ok = true` malgré cooldown | `IntentValidator.luau` | Succès fantôme + file brûlée |
+| `viewFor` alliances 1-way | `Diplomacy.viewFor` | HUD menteur vs `areAllied` bidirectionnel |
+| Cadran saigne `awaitingSpawn` / `tiles=0` | `ChantierB.stepDoomsday` | Humain AFK non spawn drainé late-game |
+| Message ville « +900 » | `Buildings.luau` | Runtime = `CITY_LEVELS[1].popCapBonus` (50 000 après apply) |
+| Commentaire embargo | `Diplomacy.luau` | Aligné sur `canTrade` |
+| Commentaire combat | `ChantierB.stepAttacks` | Documente que 56 n’est pas le cap vivant |
 
-**Non modifié (volontaire)** : `MAX_TILES_PER_TICK` (mesure d’abord, et ChantierB le fixe déjà à 56), coalescence des deltas, DataStore session lock, beachheads, snapshot bâtiments.
+**Non modifié (volontaire) :** coalescence des payloads stats (N2 restant), timebase tick (N3), building snapshot (N4), beachheads (N5), DataStore (N6), matchmaking (N7), fusion ChantierB (N8), index rot (N9), tribus vs capa (N12), parité combat ère/cost factor (N13).
 
 ---
 
-## 3. Cartographie des systèmes critiques
+## 4. Cartographie des systèmes critiques
 
 ```
 init.server  → IntentValidator.flush → Bots / Navy / Nukes / Trade / Diplomacy → GameState.step → replicate
-SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFront, AimFront, tribus, spawn bots différé
+SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), BoatFront, AimFront, tribus, spawn bots différé
 ```
 
-- **Combat vivant** = `ChantierB.stepAttacks`, pas `GameState.stepAttacks` (code mort après bootstrap).
+- **Combat vivant** = `ChantierB.stepAttacks` (`attackLogic` + `attackTilesPerTick`), pas `GameState.stepAttacks`.
 - **Carte** : buffers `terrain` / `owner` / `defense`, 256×160, seed répliquée, deltas `[u32][u8]`.
-- **Réplication 10 Hz** : `StateDelta` (owner + **stats complets**), `UnitSnapshot` (bateaux+missiles **même vides**). 1 Hz : diplomatie, match, leaderstats.
+- **Réplication (après cette passe)** : `StateDelta` / `UnitSnapshot` / `BuildingDelta` → **deployés seulement**. `MatchUpdate` reste `FireAllClients` (menu). Playing 10 Hz ; waiting vide et ended → 1 Hz.
 - **DataStore** : `ConquestRTS_Reputation_v1` / `player_{userId}`, `UpdateAsync` + `math.max`, pas de lock, pas de debounce.
 
 ---
 
-## 4. Issues worker-ready (à créer dans GitHub)
+## 5. Issues worker-ready (à créer dans GitHub)
 
-`gh issue create` n’est pas disponible dans cette automation. Copier chaque bloc.
+`gh issue create` n’est pas disponible. Copier chaque bloc.
 
 ---
 
 ### ISSUE-N1 — Source unique d’équilibrage (Config vs ChantierB.apply)
 
-**Priorité :** P1 — bloquant pour tout tuning 20K / playtest.
+**Priorité :** P1 — bloquant pour tout tuning.
 
-**Problème :** `ReplicatedStorage/Shared/Config.luau` n’est **pas** la vérité runtime. `ChantierB.apply(Config)` (appelé par `SystemsBootstrap.install`) écrase START_TROOPS (150→8000), GROWTH_RATE (0.012→0), MAX_TILES_PER_TICK (400→56), SAM_RANGE (34→70), SAM_INTERCEPT_CHANCE (0.55→1), DEFENSE_RADIUS (6→30), MISSILE_SPEED (1.6→14), CITY pop, etc. La PR #16 a journalisé « plafond 400 inchangé » alors que le banc imprime **56**.
+**Problème :** `ReplicatedStorage/Shared/Config.luau` n’est **pas** la vérité runtime. `ChantierB.apply(Config)` écrase START_TROOPS (150→8000), GROWTH_RATE (0.012→0), MAX_TILES_PER_TICK (400→56, **puis inutilisé**), SAM_RANGE (34→70), DEFENSE_RADIUS (6→30), CITY pop 900→50000, etc.
 
-**Pourquoi 20K CCU :** deux tables d’équilibrage = deux simulations. Un worker qui « baisse MAX_TILES_PER_TICK » dans Config ne change rien en prod. Un tick à 56 tuiles vs 400 change CPU, deltas, et ressenti.
+**Pourquoi 20K CCU :** deux tables = deux simulations. Un worker qui « baisse MAX_TILES_PER_TICK » dans Config ne change rien.
 
 **Worker :**
 
-1. Inventaire : grep `cfg.` dans `ChantierB.apply` vs `Config.luau`. Tableau avant/après.
-2. Déplacer **toutes** les valeurs vivantes dans `Config.luau` (section « Production / port OF » commentée).
-3. `ChantierB.apply` ne doit plus muter Config — ou devenir un no-op documenté.
-4. `SystemsBootstrap` : retirer les `or 0.2` / `or 3` morts (`BOAT_TROOP_RATIO` et `MAX_BOATS_PER_PLAYER` sont déjà dans Config).
-5. Mettre à jour README (SmoothTerrain vs `RENDER_MODE=Blocks`) et le commentaire P0 de #16.
-6. Test : `./tests/run.sh` ; assert `Config.MAX_TILES_PER_TICK` **après** `SystemsBootstrap.install()` égale la constante documentée.
-7. **Ne pas** retuner les chiffres OF sans mesure. Juste une seule source.
+1. Inventaire : grep `cfg.` dans `ChantierB.apply` vs `Config.luau`. Tableau avant/après (voir §6).
+2. Déplacer **toutes** les valeurs vivantes dans `Config.luau` (section « Production »).
+3. `ChantierB.apply` no-op documenté, ou supprimé.
+4. `SystemsBootstrap` : retirer les `or 0.2` / `or 3` morts.
+5. Test : `./tests/run.sh` ; assert après `SystemsBootstrap.install()` que les constantes documentées = runtime.
+6. **Ne pas** retuner. Lift-and-shift.
 
-**Contraintes :** ne pas changer les valeurs vivantes dans ce ticket (lift-and-shift). Server-authoritative. Ne pas casser le banc client.
+**Contraintes :** server-authoritative. Ne pas casser le banc client. Coupler avec N11 (câbler ou supprimer `MAX_TILES_PER_TICK`).
 
 ---
 
 ### ISSUE-N2 — Réplication : delta `stats` + UnitSnapshot dirty
 
-**Priorité :** P1 perf.
+**Priorité :** P1 perf. Audience corrigée dans cette passe ; **payload** encore plein.
 
-**Problème :** `init.server.luau` `replicate()` fait `StateDelta:FireAllClients(ownerDelta, stats)` chaque tick avec **toute** la table stats (buildPrices recalculés via `BuildingDefs.BUILDABLE` pour **chaque** slot). `UnitSnapshot:FireAllClients` même si listes identiques (commentaire : snapshot vide pour tuer les fantômes). Roblox facture **par destinataire**.
+**Problème :** `replicate()` construit toute la table `stats` (buildPrices via `BuildingDefs.BUILDABLE` pour **chaque** slot) et snapshot bateaux+missiles chaque tick playing. `TickMetrics` ne compte que les octets **owner** delta.
 
-**Pourquoi 20K CCU :** 8 humains × 10 Hz × payload multi-KB. À 1 700 serveurs le CPU/egress par instance reste le multiplicateur. Mesurer avant d’élargir `PUBLIC_MATCH_CAPACITY`.
+**Pourquoi 20K CCU :** 8 humains × 10 Hz × payload multi-KB. Audience menu retirée ; le coût par commandant reste.
 
 **Worker :**
 
-1. Instrumenter dans `TickMetrics` : `statsBytesEstimate`, `unitSnapshotBytes`, `remoteFireCount` (ne pas changer `MAX_TILES_PER_TICK`).
-2. Envoyer `buildPrices` seulement si inflation/doctrine a changé, ou 1 Hz.
-3. Flag `boatsDirty` / `missilesDirty` ; si inchangé, skip. Envoyer un snapshot vide **au plus** 1 Hz pour le cleanup overlay.
-4. Option : n’envoyer `stats[slot]` que si un champ a changé (hash par slot).
-5. Tests : overlay client doit encore retirer le dernier navire (rejouer le cas « liste vide » dans `tests/client.luau` Overlay). Banc serveur : metrics présentes.
+1. Instrumenter `TickMetrics` : `statsBytesEstimate`, `unitSnapshotBytes`, `remoteFireCount`.
+2. `buildPrices` seulement si inflation/doctrine a changé, ou 1 Hz.
+3. Flag `boatsDirty` / `missilesDirty` ; snapshot vide **au plus** 1 Hz pour cleanup overlay.
+4. Option : hash par slot, n’envoyer `stats[slot]` que si changé.
+5. Tests : overlay retire le dernier navire (`tests/client.luau` Overlay). Banc : metrics présentes.
 6. Fichiers : `init.server.luau`, `TickMetrics.luau`, `Overlay.luau`, `tests/simulate.luau`, `tests/client.luau`.
 
-**Contraintes :** pas de RemoteFunction ; toujours server → client ; ne pas casser l’animation d’arrivée navire.
+**Contraintes :** pas de RemoteFunction ; toujours server → client ; ne pas casser l’animation d’arrivée navire. Garder `fireDeployed` (ne pas revenir à FireAllClients).
 
 ---
 
@@ -113,20 +127,19 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Priorité :** P1 sim.
 
-**Problème :** `Heartbeat` cap 5 steps ; si `accumulator > TICK_DT*5` → **zero**. Les timers de match (`matchEndsAt`, `combatStartsAt`, `doctrineLockAt`) sont en `os.clock()`. Sous lag, la sim saute des ticks **mais le chrono réel continue** → prep/combat/victoire se désynchronisent de l’économie.
+**Problème :** `Heartbeat` cap 5 steps ; si `accumulator > TICK_DT*5` → **zero**. Les timers (`matchEndsAt`, `combatStartsAt`, `doctrineLockAt`) sont en `os.clock()`. Sous lag, la sim saute des ticks **mais le chrono réel continue**.
 
-**Pourquoi 20K CCU :** un shard chargé (GC, DataStore, spike de dirty tiles) décale la sim. À 10 Hz c’est l’équilibrage entier.
+**Pourquoi 20K CCU :** shard chargé (GC, DataStore, dirty tiles) décale la sim. À 10 Hz c’est l’équilibrage entier.
 
 **Worker :**
 
-1. Choisir **une** timebase : tout en `state.tick` (recommandé) **ou** catch-up borné sans jeter la sim.
+1. Une timebase : tout en `state.tick` (recommandé).
 2. Convertir `PREPARATION_DURATION`, `MATCH_DURATION`, `DOCTRINE_CHOICE_DURATION`, `POST_MATCH_DELAY` en ticks.
 3. `checkVictory` / `combatUnlocked` / `endMatch` / `restartAt` lisent `state.tick`.
-4. Documenter le cap Heartbeat (5) : skip **render/replicate extra**, pas la sim, si on garde wall-clock.
-5. Tests headless : avancer artificiellement l’accumulateur n’est pas possible hors Studio ; tester que `combatUnlocked` bascule à `PREPARATION_DURATION / TICK_DT` ticks.
-6. Fichiers : `init.server.luau`, `Config.luau`, `tests/simulate.luau`.
+4. Tests : `combatUnlocked` bascule à `PREPARATION_DURATION / TICK_DT` ticks.
+5. Fichiers : `init.server.luau`, `Config.luau`, `tests/simulate.luau`.
 
-**Contraintes :** pas de changement d’équilibrage visible si le serveur tient 10 Hz. Server-authoritative.
+**Contraintes :** pas de changement d’équilibrage si le serveur tient 10 Hz.
 
 ---
 
@@ -134,37 +147,33 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Priorité :** P1 correctness.
 
-**Problème :** `RequestSnapshot` envoie owner buffer + `structureHash()`. Le client (`init.client.luau` OwnerSnapshot) **jette** le hash (`_structureHash`) et n’applique que le owner. Après desync, territoire OK, overlay bâtiments faux jusqu’au prochain `BuildingDelta`.
-
-**Pourquoi 20K CCU :** un spike de deltas perdus (packet drop) à 10 Hz × chunks. Resync incomplet = HUD / placement mensonger (le serveur reste vrai, UX exploitée pour se plaindre / mal cliquer).
+**Problème :** `RequestSnapshot` envoie owner + `structureHash()`. Le client jette le hash (`_structureHash`) et n’applique que l’owner. Cette passe a **arrêté** d’appeler snapshot sur un mismatch de **terrain** (inutile). Le resync bâtiments reste ouvert.
 
 **Worker :**
 
-1. Étendre `OwnerSnapshot` **ou** ajouter `BuildingSnapshot` (même format que `flushBuildingDelta`).
-2. Client : si hash local ≠ hash serveur, appliquer le snapshot structures.
-3. Quota existant (5 s, 12/match) inchangé.
-4. Tests client : handler OwnerSnapshot n’élève pas ; si possible, hash mismatch → overlay rebuild.
-5. Fichiers : `Remotes.luau`, `init.server.luau`, `init.client.luau`, `WorldRenderer` / `Overlay`.
+1. Étendre `OwnerSnapshot` **ou** `BuildingSnapshot` (format `flushBuildingDelta`).
+2. Client : si hash local ≠ serveur, appliquer le snapshot structures.
+3. Quota 5 s / 12/match inchangé.
+4. Fichiers : `Remotes.luau`, `init.server.luau`, `init.client.luau`, Overlay.
 
-**Contraintes :** pas de logique de jeu client. Rate-limit déjà en place — ne pas l’enlever.
+**Contraintes :** pas de logique de jeu client. Ne pas enlever le rate-limit.
 
 ---
 
 ### ISSUE-N5 — Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER`
 
-**Priorité :** P2 anti-exploit / lisibilité.
+**Priorité :** P2 anti-exploit.
 
-**Problème :** `GameState.launchAttack` cap 2 fronts terre. `BoatFront.seedBeachhead` insère **toujours** un `Attack` avec `sourceTile`, sans cap. N débarquements = N fronts.
+**Problème :** `GameState.launchAttack` cap 2 fronts terre. `BoatFront.seedBeachhead` insère **toujours** un `Attack` avec `sourceTile`, sans cap.
 
-**Pourquoi 20K CCU :** plus de fronts = plus de `stepAttacks` (heap par front) + plus de `attackTargets` répliqués.
+**Pourquoi 20K CCU :** N débarquements = N heaps `stepAttacks` + `attackTargets` plus gros (nourrit N2).
 
 **Worker :**
 
 1. Lire `BoatFront.luau` et `Navy.luau` landing.
-2. Décision design (documenter dans Config) : (A) cap global 2 y compris bateaux, (B) cap séparé `MAX_BEACHHEADS`, (C) fusionner vers un beachhead existant même cible.
-3. Implémenter + message de refus.
-4. Test simulate : N+1 `seedBeachhead` refuse ou fusionne.
-5. Ne pas casser l’isolation terre/mer (`sourceTile ~= nil` ne fusionne pas avec un front terre) — c’est le bug Chantier 5.
+2. Décision (documenter dans Config) : (A) cap global 2 y compris bateaux, (B) `MAX_BEACHHEADS`, (C) fusionner vers un beachhead existant même cible.
+3. Test : N+1 `seedBeachhead` refuse ou fusionne.
+4. Ne pas casser l’isolation terre/mer (`sourceTile ~= nil`).
 
 ---
 
@@ -172,20 +181,19 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Priorité :** P2 persistance.
 
-**Problème :** `Persistence.save` à chaque `record()` et `release()`. Disconnect + fin de match + `BindToClose` = burst. Pas de retry/backoff. Pas de session MemoryStore. `matches += 1` au rage-quit. `BindToClose` synchrone sur tous les joueurs.
+**Problème :** `Persistence.save` à chaque `record()` / `release()`. Pas de retry. Pas de session MemoryStore. `matches += 1` au rage-quit. `BindToClose` synchrone.
 
-**Pourquoi 20K CCU :** budget DataStore **par univers**, pas par serveur. 1 700 shards × 8 humains × writes de fin de match = throttle Roblox, pertes de réputation.
+**Pourquoi 20K CCU :** budget DataStore **par univers**. 1 700 shards × 8 humains × writes de fin de match = throttle.
 
 **Worker :**
 
-1. Debounce writes (ex. 5 s) ; flush immédiat sur `BindToClose`.
-2. Retry 3× backoff sur `UpdateAsync` failure.
-3. Ne pas double-compter : si `resultRecorded`, `release` save sans `record`. (Déjà le cas dans `onPlayerRemoving` — vérifier tous les chemins.)
-4. Documenter l’absence de session lock (même user, deux serveurs, `math.max` OK pour XP, pas pour `matches` additifs). Ticket séparé si vrai lock MemoryStore.
-5. Tests : le module `Persistence` est **exclu** du bundle (`tests/bundle.js` EXCLUDE). Ajouter un mini-harness avec DataStore stub **ou** extraire merge `UpdateAsync` dans une fonction pure testable.
-6. Fichiers : `Persistence.luau`, `tests/bundle.js` si harness, `init.server.luau` inchangé sauf si double-save.
+1. Debounce 5 s ; flush immédiat `BindToClose`.
+2. Retry 3× backoff sur `UpdateAsync`.
+3. Vérifier tous les chemins : pas de double `record` + `release`.
+4. Extraire le merge `UpdateAsync` en fonction pure testable (`Persistence` est exclu du bundle).
+5. Fichiers : `Persistence.luau`, éventuellement `tests/bundle.js`.
 
-**Contraintes :** pas de PII ; clé `player_{userId}` uniquement. Studio doit rester jouable si DataStore down (`pcall` + cache).
+**Contraintes :** pas de PII ; clé `player_{userId}` uniquement. Studio jouable si DataStore down.
 
 ---
 
@@ -193,17 +201,15 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Priorité :** P2 infra (hors sim).
 
-**Problème :** une Place = une partie. Pas de file d’attente, pas de sharding, pas de `TeleportService`. 20K CCU est impossible sans N instances.
+**Problème :** une Place = une partie. Pas de file, pas de sharding, pas de `TeleportService`.
 
 **Worker (ne pas toucher la sim) :**
 
-1. Place « lobby » (max 50) + Places « match » (12 factions).
-2. MemoryStore queue par mode (`classic` / `blitz` / `marathon`).
-3. TeleportOptions : seed, mode, liste UserIds. Le match Place appelle `startMatch` avec cette seed.
-4. Respecter `MAX_HUMAN_PLAYERS` / `PUBLIC_MATCH_CAPACITY` (déjà enforced côté match après ce nightly).
+1. Place lobby (max 50) + Places match (12 factions).
+2. MemoryStore queue par mode.
+3. TeleportOptions : seed, mode, UserIds.
+4. Respecter `MAX_HUMAN_PLAYERS` / `PUBLIC_MATCH_CAPACITY` **et N12 (tribus)**.
 5. Aucune logique de combat dans le lobby.
-
-**Contraintes :** server-authoritative ; ne pas répliquer la carte, seulement seed + mapMeta.
 
 ---
 
@@ -215,11 +221,11 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Worker :**
 
-1. Soit supprimer les fonctions mortes et garder ChantierB comme impl, soit inliner ChantierB dans GameState et tuer le monkey-patch.
-2. Tests `simulate.luau` doivent viser le chemin **installé** (`SystemsBootstrap.install()` déjà appelé en tête — garder cet ordre).
-3. Commentaire d’en-tête sur chaque fonction patchée : `NOTE: overridden by ChantierB.install`.
+1. Soit supprimer les fonctions mortes, soit inliner ChantierB dans GameState (zéro drift).
+2. Tests `simulate.luau` visent le chemin **installé**.
+3. Commentaire d’en-tête sur chaque fonction patchée.
 
-**Contraintes :** zero changement d’équilibrage. Diff de comportement = échec.
+**Contraintes :** zero changement d’équilibrage.
 
 ---
 
@@ -227,48 +233,115 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn), BoatFr
 
 **Priorité :** P2 perf late-game.
 
-**Problème :** `ChantierB.luau` rot parcourt jusqu’à toute la carte par joueur marqué. Late-game = pile le moment où le tick est déjà chaud (nukes, 207 explosions mesurées / 6000 ticks).
+**Problème :** rot parcourt jusqu’à toute la carte par joueur marqué. L’exemption AFK (cette passe) ne réduit pas le scan des empires sous quota. Late-game = 207 explosions / 6000 ticks mesurées.
 
 **Worker :**
 
-1. Maintenir une liste de tuiles par slot (incrémentale via `setOwner`) **ou** un frontier de rot.
-2. Budget : max K tuiles rot / tick / faction (déjà un grain `ROT_GRAIN_SECONDS`).
-3. Test invariant : tuiles rot / owner buffer.
+1. Liste de tuiles par slot (incrémentale via `setOwner`) **ou** frontier de rot.
+2. Budget K tuiles rot / tick / faction.
+3. Test invariant owner buffer.
 4. Ne pas scanner 40960 indices par joueur par tick.
+
+---
+
+### ISSUE-N11 — Câbler ou supprimer `MAX_TILES_PER_TICK`
+
+**Priorité :** P1 honesty / perf combat.
+
+**Problème :** `ChantierB.apply` pose 56. `GameState.stepAttacks` (mort) le lisait. Le combat installé utilise `attackTilesPerTick` (ex. 2 tuiles/tick pour 10k troupes vs neutre, contact 1) et `while guard < 80`. PR #16 a journalisé « plafond 400 inchangé » ; #17 a dit « runtime 56 ». Les deux sont faux pour la prod.
+
+**Pourquoi 20K CCU :** le cap combat est le 1er levier CPU tick. Un knob mort = on ne peut pas limiter une offensive géante.
+
+**Worker :**
+
+1. Décision : (A) `numTiles = min(attackTilesPerTick*speed, MAX_TILES_PER_TICK)` et baisser guard, **ou** (B) supprimer la constante partout (Config, apply, tests, README).
+2. Si (A) : mesurer 6000 ticks avant/après (`TickMetrics` p95TickMs, maxChanged). Ne pas changer le ressenti sans mesure.
+3. Mettre à jour le test qui imprime `MAX_TILES_PER_TICK reste 56`.
+4. Fichiers : `ChantierB.luau`, `Config.luau`, `GameState.luau` (code mort), `tests/simulate.luau`.
+
+**Contraintes :** ne pas retuner `attackLogic`. Commentaire déjà en place dans `stepAttacks`.
+
+---
+
+### ISSUE-N12 — Tribus vs `PUBLIC_MATCH_CAPACITY`
+
+**Priorité :** P1 produit / perf tick.
+
+**Problème :** `activateMatch` fait `min(botCount, PUBLIC_MATCH_CAPACITY, MAX_TOTAL_FACTIONS)` puis `Bots.spawnAll`. Le wrap `SystemsBootstrap` appelle **ensuite** `Tribes.spawnAll(..., TRIBE_COUNT or 6)`. Banc : **18 factions** en Classique (12+6). Marathon `botCount=16` est déjà plafonné à 12 **puis** +6 tribus.
+
+**Pourquoi 20K CCU :** 18 IA + 6 tribus step + plus de fronts/stats. La capa publique affichée (12) est un mensonge HUD (`MatchUpdate.maxPlayers`).
+
+**Worker :**
+
+1. Décision produit : (A) tribus **dans** le budget 12, (B) capa publique 12 humains/bots + 6 tribus documentée (18), (C) tribus opt-in par mode.
+2. `botsToSpawn + TRIBE_COUNT <= MAX_TOTAL_FACTIONS` toujours.
+3. Aligner `GameModes` taglines (Classique « 12 nations », Marathon « 16 »).
+4. Test simulate : après `Bots.spawnAll` + flush pending, `#state.players` respecte la décision.
+5. Fichiers : `SystemsBootstrap.luau`, `init.server.luau` `activateMatch`, `GameModes.luau`, `Config.luau`, `tests/simulate.luau`.
+
+**Contraintes :** ne pas casser le spawn différé 15 s (`DEPLOY_DURATION`). Server-authoritative.
+
+---
+
+### ISSUE-N13 — Parité combat ChantierB vs GameState mort
+
+**Priorité :** P2 équilibrage.
+
+**Problème :** le `tileCost` mort appliquait `sizeAttackFactors` **(speed, cost)** et `Eras.accumulate(defender.era).defense`. Le vivant n’applique que `speedFactor` au débit de tuiles ; `attackLogic` ignore l’ère. `FRONT_TILES_PER_CONTACT`, `DEFENSE_COST_DIVISOR`, `CITY_TROOP_INCREASE` sont écrits par apply et jamais lus.
+
+**Worker :**
+
+1. Tableau : chaque constante apply → lue où (vivant / mort / nulle part).
+2. Décision : réintroduire ère + cost factor dans `attackLogic` **ou** documenter l’écart comme voulu.
+3. Supprimer les clés mortes ou les câbler.
+4. Tests de régression : même graine, dumps de captures / pertes — drift = échec si on choisit « zéro changement ».
+
+**Contraintes :** ticket de design avant code. Ne pas mixer avec N1 sans inventaire.
 
 ---
 
 ### ISSUE-N10 — Divers (P3, tickets séparés)
 
-1. **Séquence nil encore acceptée** (`IntentValidator.checkSequence`) — compat clients stale. Plan : métrique `refuseCounts` + date de coupure ; ensuite refuser `InvalidSchema`.
-2. **Marathon `botCount=16` vs `PUBLIC_MATCH_CAPACITY=12`** — le mode est silencieusement plafonné. Soit monter la capa publique, soit baisser `botCount` marathon à 12, soit `min()` documenté dans GameModes.
-3. **README** parle encore de SmoothTerrain alors que `RENDER_MODE=Blocks` et `WorldBuilder` collision blocs. Alignement docs.
-4. **Invariant côte inverse** : `simulate.luau` détecte fausses côtes, pas les côtes manquantes. Ajouter le check reverse après ISSUE removePlayer (déjà fixé, le check reste utile).
-5. **Bots `decideNuke`** : 90 tuiles front × tous les bâtiments. Index spatial (chunk) si le tick p95 dépasse 8 ms en late-game.
-6. **`pendingMode` last-writer** pendant un match (mode du *prochain* round). Décision produit : host only / vote / freeze.
-7. **Tests Studio multi-clients** : le headless ne charge pas `init.server.luau` (exclu du bundle). Un test d’intégration 2 joueurs JoinRequest reste un trou.
+1. **Séquence nil encore acceptée** (`IntentValidator.checkSequence`) — métrique `refuseCounts` + date de coupure.
+2. **README** SmoothTerrain vs `RENDER_MODE=Blocks` / `WorldBuilder` collision blocs.
+3. **Invariant côte inverse** : `simulate.luau` détecte fausses côtes, pas les côtes manquantes.
+4. **Bots `decideNuke`** : 90 tuiles front × tous les bâtiments. Index spatial si p95 tick > 8 ms late-game.
+5. **`pendingMode` last-writer** pendant un match (mode du *prochain* round). Host only / vote / freeze.
+6. **Tests Studio multi-clients** : `init.server.luau` exclu du bundle. JoinRequest 2 joueurs = trou.
+7. **`justClaimed` test mort** (`tests/simulate.luau`) — remplacer par `awaitingSpawn` + `claimSpawn` puis `launchAttack`.
+8. **Allied boat landing** (`Navy.luau`) rembourse 100 % si le cible s’allie en mer — vs `BOAT_RETREAT_LOSS` 25 %. Décision design.
+9. **`BuildingDefs` description « +900 »** encore statique (HUD catalogue). `Buildings.describeBuild` est corrigé ; le catalogue non (N1).
 
 ---
 
-## 5. Revue PR #16 (sans commentaire GitHub)
+## 6. Drift Config → `ChantierB.apply` (extrait)
 
-**À merger** après relecture, sous réserve du dual Config/ChantierB (N1) clairement compris : les metrics « 400 » sont celles de `Config.luau` **avant** apply, le runtime est 56.
-
-Points forts : IntentValidator, `terrainHash` / `mapMeta`, rate-limit snapshot, `SystemsBootstrap` (Research pur, banc vert), capacité produit explicite, identité CONQUEST.
-
-Hors scope #16 (toujours vrai) : lobby Teleport, coalescence deltas, Studio multi-client.
+| Clé | Config | Après apply | Lu en prod ? |
+|---|---|---|---|
+| `START_TROOPS` | 150 | 8000 | oui |
+| `GROWTH_RATE` | 0.012 | 0 | oui (formule custom) |
+| `MAX_TILES_PER_TICK` | 400 | 56 | **non** |
+| `DEFENSE_RADIUS` | 6 | 30 | oui |
+| `SAM_RANGE` / chance / CD | 34 / 0.55 / 90 | 70 / 1 / 75 | oui |
+| `CITY_LEVELS[1].popCapBonus` | 900 | 50000 | oui |
+| `CITY_TROOP_INCREASE` | — | 50000 | **non** |
+| `FRONT_TILES_PER_CONTACT` | — | 2.4 | **non** |
+| `BOAT_TROOP_RATIO` | 0.2 | 0.2 | oui |
 
 ---
 
-## 6. Preuve tests
+## 7. Preuve tests
 
 ```
 ./tests/run.sh  → exit 0
 Serveur : Tous les invariants tiennent.
   intentions : sequence, idempotence, rate limit OK
   intentions : schema doctrine/nuke/diplomatie, ended, file OK
+  intentions : QuickChat cooldown honore
+  combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
+  factions : 18
   MAX_TILES_PER_TICK reste 56
 Client  : 34 OK — Tous les ecrans se construisent et s'executent sans erreur.
 ```
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-followup.log`
