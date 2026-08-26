@@ -1283,7 +1283,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- (plus bas) doit rester vert. Leftover V129 buildingFree
 	-- (plus bas) doit rester vert. Leftover V116 DeliveryPulse
 	-- (plus bas) doit rester vert. Leftover V133 FactionLabels
-	-- Destroy conserve.
+	-- labelFree deja (check etiquettes). Leftover V134
+	-- PlacementPreview setKind Destroy conserve.
 	assert(type(overlay.routeFree) == "table", "routeFree absent")
 	assert(#overlay.routeFree == 0, "routeFree non vide a la pose")
 	assert(overlay.routeFree[1] == nil, "routeFree leftover slot pose")
@@ -1526,7 +1527,9 @@ check("pose et capture de chaque type de batiment", function()
 	-- modeles) doit rester vert. Leftover V80 DeliveryPulse
 	-- (ci-dessus) doit rester vert. Overlay.clear parkRoute
 	-- (V132, plus bas). V131 routeFree deja (ci-dessus, pose
-	-- 3 voies). Leftover V133 FactionLabels Destroy conserve.
+	-- 3 voies). Leftover V133 FactionLabels labelFree deja
+	-- (check etiquettes). Leftover V134 PlacementPreview
+	-- setKind Destroy conserve.
 	assert(type(overlay.buildingFree) == "table", "buildingFree absent")
 	local cityKind = Config.BUILDING.CITY
 	local cityPool = overlay.buildingFree[cityKind]
@@ -1561,7 +1564,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- Leftover V128 chatFree doit rester vert. Leftover V123
 	-- ringFree doit rester vert. Leftover V131 routeFree
 	-- (ci-dessus) doit rester vert. Leftover V133 FactionLabels
-	-- Destroy conserve.
+	-- labelFree deja (check etiquettes). Leftover V134
+	-- PlacementPreview setKind Destroy conserve.
 	local liveCity = overlay.buildings[cityIndex]
 	assert(liveCity ~= nil, "CITY live absente avant clear")
 	assert(rawequal(liveCity, parkedCity), "CITY live n'est pas le reuse V129")
@@ -1596,8 +1600,9 @@ check("pose et capture de chaque type de batiment", function()
 	-- buildingFree. Leftover V131 recycle (ci-dessus) doit
 	-- rester vert. Leftover V130 buildingFree (ci-dessus) doit
 	-- rester vert. Leftover V116 DeliveryPulse (ci-dessus)
-	-- doit rester vert. Leftover V133 FactionLabels Destroy
-	-- conserve.
+	-- doit rester vert. Leftover V133 FactionLabels labelFree
+	-- deja (check etiquettes). Leftover V134 PlacementPreview
+	-- setKind Destroy conserve.
 	factoryEntry.kind = Config.BUILDING.FACTORY
 	factoryEntry.slot = 1
 	factoryEntry.level = 1
@@ -2375,8 +2380,42 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
 	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
 
+	-- V133 : FactionLabels refresh/clear Parent=nil labelFree.
+	-- Recette analogique V132 / feel N182 inline — ne PAS
+	-- merger feel. Take n'importe quel entry. Name
+	-- FactionAnchor{slot}. Skip Parent == nil. Ne pas
+	-- partager routeFree Overlay. Skip surveyTerritories
+	-- (V49). Leftover V132 Overlay.clear routes (check pose)
+	-- doit rester vert. Leftover V49 barycentre (ci-dessus)
+	-- doit rester vert. Leftover V134 PlacementPreview
+	-- setKind Destroy conserve.
+	assert(type(labels.labelFree) == "table", "labelFree absent")
+	assert(first.anchor.Parent == nil, "slot 1 pas parque Parent=nil")
+	assert(#labels.labelFree == 1, "labelFree non push au disparu")
+	assert(rawequal(labels.labelFree[1], first), "slot 1 non push")
+	assert(labels.labelFree[2] == nil, "labelFree leftover slot")
+	assert(first.anchor.Name == "FactionAnchor1", "Name ancre parque")
+	labels.labels[1] = first
+	local nSkip = #labels.labelFree
+	labels:refresh(emptied, stats, roster)
+	assert(#labels.labelFree == nSkip, "refresh skip Parent==nil re-parque")
+	assert(first.anchor.Parent == nil, "skip Parent==nil unparque")
+	assert(labels.labels[1] == nil, "slot 1 reapparu au skip")
+	labels:refresh(owner, stats, roster)
+	assert(rawequal(labels.labels[1], first), "slot 1 non recycle")
+	assert(first.anchor.Parent == labels.root, "slot 1 recycle hors root")
+	assert(first.anchor.Name == "FactionAnchor1", "Name ancre recycle")
+	assert(#labels.labelFree == nSkip - 1, "labelFree non pop")
+	assert(labels.labelFree[nSkip] == nil, "labelFree leftover slot pop")
+	assert(first.name.Text == "Valoria", "nom perdu au reuse")
+	assert(labels.labels[2] ~= nil, "slot 2 perdu au reuse")
+
 	labels:clear()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
+	assert(first.anchor.Parent == nil, "clear slot 1 pas parque Parent=nil")
+	assert(second.anchor.Parent == nil, "clear slot 2 pas parque Parent=nil")
+	assert(#labels.labelFree == 2, "labelFree non push au clear")
+	assert(labels.labelFree[3] == nil, "labelFree leftover slot clear")
 end)
 
 --[[

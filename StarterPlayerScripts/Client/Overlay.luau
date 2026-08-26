@@ -156,7 +156,7 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- navire conserve. Overlay.clear Parent=nil (V130).
 	-- V131 : syncFactoryRoutes routeFree deja. V132 :
 	-- Overlay.clear parkRoute deja. Leftover suivant =
-	-- FactionLabels refresh/clear Destroy (V133). Pas
+	-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja. Pas
 	-- reentrant.
 	self.buildingFree = {} :: { [number]: { Model } }
 
@@ -166,7 +166,7 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Parent = nil, pas Destroy. Take cle usine+ville, sinon
 	-- n'importe quel record. Camion Parent = nil (V116)
 	-- conserve. Overlay.clear parkRoute (V132) deja. Leftover
-	-- suivant = FactionLabels refresh/clear Destroy (V133).
+	-- suivant = PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	-- Pas reentrant.
 	self.routeFree = {} :: { any }
 
@@ -185,7 +185,7 @@ function Overlay.clear(self: Overlay)
 	-- cle. Camion Parent = nil (V116) conserve. V131
 	-- syncFactoryRoutes deja. Ne pas partager ringFree /
 	-- shipFree / buildingFree. Leftover suivant =
-	-- FactionLabels refresh/clear Destroy (V133).
+	-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	for _, model in self.buildings do
 		if model.Parent ~= nil then
 			parkBuilding(self, model)
@@ -316,7 +316,7 @@ end
 -- obligatoire. Skip Parent == nil (deja parque). Ne pas
 -- partager buildingFree / deliveryFree. Overlay.clear
 -- reutilise parkRoute (V132). Leftover suivant =
--- FactionLabels refresh/clear Destroy (V133). Pas de delay.
+-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja. Pas de delay.
 parkRoute = function(self: Overlay, route: any)
 	local truckModel = route.truckModel
 	if truckModel and truckModel.Parent ~= nil then
@@ -467,8 +467,8 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	-- PAS merger feel. Match → poseRoute (geometry deja
 	-- valide). Mismatch → reset Name / CFrame / segments dans
 	-- le Model recycle. Overlay.clear parkRoute (V132) deja.
-	-- Leftover suivant = FactionLabels refresh/clear Destroy
-	-- (V133).
+	-- Leftover suivant = PlacementPreview setKind Destroy
+	-- (V134). V133 FactionLabels labelFree deja.
 	local reused = takeRoute(self, factoryIndex, cityIndex)
 	if reused and reused.factory == factoryIndex and reused.city == cityIndex then
 		poseRoute(self, reused, factoryIndex, cityIndex, slot)
@@ -913,7 +913,7 @@ end
 -- inline — ne PAS merger feel. Pas Destroy. Ne pas partager
 -- ringFree. Overlay.clear Parent=nil (V130). V131 routeFree
 -- deja. Overlay.clear parkRoute (V132) deja. Leftover
--- suivant = FactionLabels refresh/clear Destroy (V133).
+-- suivant = PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 parkBuilding = function(self: Overlay, model: Model)
 	local kind = model:GetAttribute("Kind") :: number?
 	if not kind or kind == 0 then
@@ -1100,7 +1100,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		-- Ne pas partager ringFree. Overlay.clear Parent=nil
 		-- (V130). V131 routeFree deja. Overlay.clear
 		-- parkRoute (V132) deja. Leftover suivant =
-		-- FactionLabels refresh/clear Destroy (V133).
+		-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 		if existing then
 			parkBuilding(self, existing)
 		end

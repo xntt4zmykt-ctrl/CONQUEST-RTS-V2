@@ -1776,7 +1776,7 @@ function HUD.refreshChatSheet(self: HUD)
 	-- flame (V74). Overlay.clear Parent=nil (V130). V131
 	-- syncFactoryRoutes routeFree deja. Overlay.clear
 	-- parkRoute (V132) deja. Leftover suivant =
-	-- FactionLabels refresh/clear Destroy (V133).
+	-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	-- V129 applyBuildingDelta buildingFree deja.
 	local chatFree = self.chatFree
 	if not chatFree then

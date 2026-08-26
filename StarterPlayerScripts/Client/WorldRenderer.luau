@@ -73,7 +73,7 @@ local otherBuf: { number } = table.create(16)
 -- recyclee (V128). Overlay.clear Parent=nil (V130).
 -- V131 syncFactoryRoutes routeFree deja. Overlay.clear
 -- parkRoute (V132) deja. Leftover suivant =
--- FactionLabels refresh/clear Destroy (V133). V129
+-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja. V129
 -- applyBuildingDelta buildingFree deja.
 local DIRTY_COMPACT_HEAD = 32
 
