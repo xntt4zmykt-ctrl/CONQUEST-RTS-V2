@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Trace des voies ferrees, modele OpenFront.
+	Trace des voies ferrees, regle CONQUEST.
 
 	Le probleme qu'on corrige : les liaisons logistiques etaient des courbes de
 	Bezier tirees d'un point a un autre, avec un coude arbitraire pour ne pas
@@ -8,7 +8,7 @@
 	ignorait completement la grille — alors que TOUT le reste du jeu est aligne
 	sur la case : les frontieres, les batiments, les blocs de terrain.
 
-	L'algorithme du jeu de reference tient en trois choix, et c'est leur
+	L'algorithme CONQUEST tient en trois choix, et c'est leur
 	combinaison qui produit des voies droites :
 
 	  1. **Quatre directions, aucune diagonale.** Une voie ne peut aller que
@@ -41,7 +41,7 @@ local H = Config.MAP_HEIGHT
 local OCEAN = Config.TERRAIN.OCEAN
 
 --[[
-	Couts. Les valeurs viennent du jeu de reference et se tiennent entre elles :
+	Couts. Les valeurs viennent CONQUEST et se tiennent entre elles :
 	le detour vaut la peine tant qu'il economise un virage, et un virage vaut
 	trois cases de detour.
 ]]
