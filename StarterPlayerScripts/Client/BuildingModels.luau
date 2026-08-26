@@ -313,10 +313,19 @@ local function buildSilo(model: Model, color: Color3, _level: number?)
 	-- Deux portes blindees ouvertes rendent la fonction du silo evidente.
 	local doorA = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(-3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorA.Name = "SiloDoor"
-	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(18))
+	-- N141 : portes silo. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(18)) ≡ Angles(0, 0, 18°).
+	-- fromEulerAnglesYXZ(0, 0, math.rad(-18)) ≡ Angles(0, 0, -18°).
+	-- Z=+18° et Z=-18°. Offsets (-3.6, 1.3, 0) / (3.6, 1.3, 0),
+	-- taille Vector3.new(4.4, 0.45, 6.5), STEEL, Name = "SiloDoor"
+	-- inchanges. Deux sites ensemble. Distinct toits N140 (Z=-12°).
+	-- Distinct cylinder() N139 (Z=90 helper). Distinct rampes SAM
+	-- leftover (pitch -31°). cylinder() / buildFactory /
+	-- playConstruction / WorldRenderer / Overlay / Effects inchanges.
+	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(18))
 	local doorB = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorB.Name = "SiloDoor"
-	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(-18))
+	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-18))
 	local warningStrip = block(model, Vector3.new(9, 0.18, 0.35), Vector3.new(0, 0.86, 4.2), WARNING, Enum.Material.Neon)
 	warningStrip.Name = "SiloWarning"
 end
