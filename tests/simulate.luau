@@ -2349,6 +2349,226 @@ do
 			fail("intentions — rate limit non declenche")
 		end
 		print("intentions : sequence, idempotence, rate limit OK")
+
+		-- Doctrine inconnue : plus de repli silencieux vers Industrielle.
+		IntentValidator.reset()
+		local okBadDoc, reasonBadDoc =
+			IntentValidator.enqueue(ctx, fakePlayer, "ChooseDoctrine", 1, { doctrineId = 999 })
+		if okBadDoc or reasonBadDoc ~= "InvalidSchema" then
+			fail(`intentions — doctrine 999 acceptee ({tostring(reasonBadDoc)})`)
+		end
+
+		-- Action diplomatique hors catalogue.
+		local okBadDip, reasonBadDip = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"Diplomacy",
+			2,
+			{ action = "hackGold", targetSlot = 1 }
+		)
+		if okBadDip or reasonBadDip ~= "UnknownAction" then
+			fail(`intentions — diplomatie pirate acceptee ({tostring(reasonBadDip)})`)
+		end
+
+		-- Nuke kind hors NUKE_STATS.
+		local okBadNuke, reasonBadNuke =
+			IntentValidator.enqueue(ctx, fakePlayer, "Nuke", 3, { index = 0, kind = 99 })
+		if okBadNuke or reasonBadNuke ~= "InvalidSchema" then
+			fail(`intentions — nuke kind 99 accepte ({tostring(reasonBadNuke)})`)
+		end
+
+		-- Phase ended : plus aucun ordre, y compris doctrine / ratio.
+		ctx.matchPhase = "ended"
+		local okEnded, reasonEnded =
+			IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 4, { ratio = 0.5 })
+		if okEnded or reasonEnded ~= "NotPlaying" then
+			fail(`intentions — ordre accepte en phase ended ({tostring(reasonEnded)})`)
+		end
+		ctx.matchPhase = "playing"
+
+		-- Plafond de file par joueur (au-dela du rate limit 20/s).
+		IntentValidator.reset()
+		local clock = 0
+		ctx.now = function()
+			return clock
+		end
+		local pendingCapped = false
+		local seq = 0
+		for wave = 0, 3 do
+			clock = wave * 1.01
+			for _ = 1, (Config.INTENT_RATE_LIMIT_PER_SEC or 20) do
+				seq += 1
+				local ok, reason =
+					IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", seq, { ratio = 0.2 })
+				if not ok and reason == "RateLimited" then
+					if IntentValidator.pendingCount() >= (Config.MAX_PENDING_INTENTS or 32) then
+						pendingCapped = true
+					end
+					break
+				end
+			end
+			if pendingCapped then
+				break
+			end
+		end
+		if not pendingCapped then
+			fail(
+				`intentions — plafond de file non declenche (pending={IntentValidator.pendingCount()})`
+			)
+		end
+		ctx.now = os.clock
+		print("intentions : schema doctrine/nuke/diplomatie, ended, file OK")
+	end
+end
+
+do
+	-- Alliance : areAllied exige les deux directions.
+	local state = GameState.new(101)
+	local a = state:addPlayer(nil, "A", Random.new(1), 0)
+	local b = state:addPlayer(nil, "B", Random.new(2), 0)
+	if not a or not b then
+		fail("alliances — spawn impossible")
+	else
+		state.alliances[a.slot][b.slot] = true
+		if state:areAllied(a.slot, b.slot) then
+			fail("areAllied vrai sur un pacte a une direction")
+		end
+		state.alliances[b.slot][a.slot] = true
+		if not state:areAllied(a.slot, b.slot) then
+			fail("areAllied faux sur un pacte symetrique")
+		end
+	end
+end
+
+do
+	-- removePlayer doit laisser les frontieres voisines coherentes.
+	local state = GameState.new(202)
+	local a = state:addPlayer(nil, "Stay", Random.new(1), 0)
+	local b = state:addPlayer(nil, "Leave", Random.new(2), 0)
+	if not a or not b then
+		fail("removePlayer — spawn impossible")
+	else
+		local contact = nil
+		local scratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+						state:setOwner(nb, b.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("removePlayer — impossible de creer un contact")
+		elseif not a.border[contact] then
+			fail("removePlayer — contact non marque frontiere avant depart")
+		else
+			state:removePlayer(b.slot)
+			if buffer.readu8(state.owner, contact) ~= a.slot then
+				fail("removePlayer — tuile du survivant perdue")
+			end
+			if not a.border[contact] then
+				fail("removePlayer — frontiere du survivant non rafraichie (contact vs neutre)")
+			end
+		end
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(303)
+	local bot = state:addPlayer(nil, "Stripped", Random.new(3), 0)
+	if not bot then
+		fail("stripTerritory — spawn impossible")
+	else
+		ChantierB.stripTerritory(state, bot)
+		if bot.tiles ~= 0 then
+			fail(`stripTerritory — tiles={bot.tiles} attendu 0`)
+		end
+		local owned = 0
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == bot.slot then
+				owned += 1
+			end
+		end
+		if owned ~= 0 then
+			fail(`stripTerritory — {owned} tuiles encore possedees`)
+		end
+	end
+end
+
+do
+	-- justClaimed ne doit plus avaler une vraie offensive.
+	local state = GameState.new(404)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Claimant", Random.new(4), 0)
+	if not a then
+		fail("justClaimed — spawn impossible")
+	else
+		a.justClaimed = true
+		a.troops = 500
+		a.attackRatio = 1
+		local target = Config.NEUTRAL_SLOT
+		local ok, message = state:launchAttack(a.slot, target)
+		if ok and message == nil and #state.attacks == 0 then
+			fail("justClaimed — launchAttack a renvoye un succes silencieux")
+		end
+	end
+end
+
+do
+	-- Nukes : meme garde combatUnlocked que terre / mer.
+	local state = GameState.new(505)
+	state.combatUnlocked = false
+	local a = state:addPlayer(nil, "Bomber", Random.new(5), 0)
+	local b = state:addPlayer(nil, "Target", Random.new(6), 0)
+	if not a or not b then
+		fail("nukes prep — spawn impossible")
+	else
+		a.era = 5
+		a.gold = 99999
+		local siloTile = nil
+		local scratch = table.create(4, 0)
+		if a.capitalTile then
+			local n = MapGen.neighbors(a.capitalTile, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if buffer.readu8(state.owner, nb) == a.slot then
+					siloTile = nb
+					break
+				end
+			end
+		end
+		if not siloTile then
+			fail("nukes prep — pas de tuile pour le silo")
+		else
+			state:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
+			local ok, message = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if ok then
+				fail("nukes prep — frappe acceptee pendant la preparation")
+			elseif not message or not string.find(message, "preparation", 1, true) then
+				fail(`nukes prep — mauvais refus ({tostring(message)})`)
+			end
+			state.combatUnlocked = true
+			local ok2, message2 = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if not ok2 then
+				fail(`nukes prep — frappe refusee une fois le combat ouvert ({tostring(message2)})`)
+			end
+		end
+	end
+end
+
+do
+	if math.abs((Config.BOAT_TROOP_RATIO or 0) - 0.2) > 1e-9 then
+		fail(`BOAT_TROOP_RATIO={Config.BOAT_TROOP_RATIO} attendu 0.2 (charge 1/5)`)
 	end
 end
 

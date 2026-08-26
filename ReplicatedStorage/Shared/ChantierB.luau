@@ -265,7 +265,9 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
