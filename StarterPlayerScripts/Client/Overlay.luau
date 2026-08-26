@@ -877,8 +877,9 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- V57 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
 		-- V64 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
-		-- 60 Hz. Roues : Angles conserve. Unites : V65 (yaw, pas segRot).
-		-- Chantier segment.rot inchange (V63).
+		-- 60 Hz. Roues : Angles conserve (leftover V72). Unites : V65 yaw
+		-- + V71 roulis fromEulerAnglesYXZ. Chantier segment.rot inchange
+		-- (V63). Radar / flag / boom inchanges (V70).
 		local path = route.path
 		local nSeg = #path - 1
 		local scaled = delivery.progress * nSeg
@@ -919,6 +920,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- Immobile = lookX=0, lookZ=-1 → atan2(0, 1) = 0 → identite
 		-- (meme pose que CFrame.new(x,y,z)). Extra missile inchange (V52).
 		-- Camion segRot inchange (V64). Chantier segment.rot inchange (V63).
+		-- V71 : roulis navire fromEulerAnglesYXZ, plus de CFrame.Angles.
 		local worldX = x * TILE - HALF_W + TILE_HALF
 		local worldZ = y * TILE - HALF_D + TILE_HALF
 
@@ -947,7 +949,15 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local lookZ = if mag > 0.01 then dy else -1
 		local frame = CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, math.atan2(lookX, -lookZ), 0)
 		if mag > 0.01 and not unit.isMissile then
-			frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+			-- V71 : compose translation*yaw * euler. Plus de CFrame.Angles
+			-- 60 Hz. fromEulerAnglesYXZ(rx, 0, rz) ≡ Angles(rx, 0, rz)
+			-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
+			-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
+			-- Radar / flag / boom inchanges (V70). Yaw inchange (V65).
+			-- Roues camion leftover V72. Immobile : zero compose.
+			local rx = math.sin(now * 1.7 + unit.phase) * 0.018
+			local rz = math.sin(now * 2.1 + unit.phase) * 0.035
+			frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)
 		end
 		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)
 	end
