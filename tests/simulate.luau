@@ -35,6 +35,7 @@ local QuickChat = __require("QuickChat")
 local IntentValidator = __require("IntentValidator")
 local TickMetrics = __require("TickMetrics")
 local Research = __require("Research")
+local MatchLifecycle = __require("MatchLifecycle")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -198,6 +199,34 @@ local function checkInvariants(state, tick)
 		end
 		if math.abs((realCityGold[slot] or 0) - ps.cityGoldBonus) > 0.0001 then
 			fail(`tick {tick} — slot {slot} : cityGoldBonus={ps.cityGoldBonus} mais {realCityGold[slot] or 0} reel`)
+		end
+	end
+
+	-- 5b. Index bunkersBySlot = batiments DEFENSE (ISSUE-N36).
+	do
+		local DEF = Config.BUILDING.DEFENSE
+		local indexed = 0
+		for slot, set in state.bunkersBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= DEF or building.slot ~= slot then
+					fail(`tick {tick} — bunkersBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realDef = 0
+		for index, building in state.buildings do
+			if building.kind == DEF then
+				realDef += 1
+				local set = state.bunkersBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — bunker {index} absent de bunkersBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realDef then
+			fail(`tick {tick} — bunkersBySlot count {indexed} != DEFENSE {realDef}`)
 		end
 	end
 
@@ -4152,6 +4181,208 @@ do
 					else
 						print("trade port-detruit : convoi coule, pas d'or")
 					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N37 : removePlayer snapshotte l'humain elimine ; un bot ne l'est pas.
+	local settledState = GameState.new(404)
+	local fake = __newInstance("Player")
+	fake.Name = "Elimine"
+	fake.UserId = 99
+	local human = settledState:addPlayer(fake :: any, "Elimine", Random.new(1), 0)
+	local bot = settledState:addPlayer(nil, "BotMort", Random.new(2), 0)
+	if not human or not bot then
+		fail("settledHumans — spawn impossible")
+	else
+		human.betrayals = 4
+		human.capturedTiles = 12
+		human.capitalsCaptured = 1
+		human.buildingsBuilt = 3
+		local hSlot = human.slot
+		local bSlot = bot.slot
+		settledState:removePlayer(hSlot)
+		settledState:removePlayer(bSlot)
+		local settled = settledState.settledHumans[hSlot]
+		if not settled then
+			fail("settledHumans — snapshot absent apres removePlayer")
+		elseif settled.betrayals ~= 4 or settled.capturedTiles ~= 12 then
+			fail(
+				`settledHumans — stats {settled.betrayals}/{settled.capturedTiles} attendu 4/12`
+			)
+		elseif settledState.players[hSlot] then
+			fail("settledHumans — PlayerState encore vivant")
+		elseif settledState.settledHumans[bSlot] then
+			fail("settledHumans — bot snapshotte")
+		else
+			print("settledHumans : snapshot humain elimine, bot ignore")
+		end
+
+		-- Helper endMatch : l'elimine apparait, le bot non, resultRecorded saute.
+		local recorded = { [fake] = false }
+		local recs = MatchLifecycle.endMatchRecords(
+			{ [fake] = hSlot },
+			settledState.players,
+			settledState.settledHumans,
+			{}
+		)
+		if #recs ~= 1 or recs[1].slot ~= hSlot or recs[1].stats.betrayals ~= 4 then
+			fail(`endMatch helper — {#recs} cible(s), attendu 1 humain`)
+		else
+			local xp = MatchLifecycle.experienceFor(recs[1].stats, false)
+			local expected = Config.XP_PER_MATCH
+				+ math.floor(12 / Config.XP_TILE_DIVISOR)
+				+ 1 * Config.XP_PER_CAPITAL
+				+ 3 * Config.XP_PER_BUILDING
+			if xp ~= expected then
+				fail(`endMatch helper — XP {xp} attendu {expected}`)
+			else
+				recorded[fake] = true
+				local skipped = MatchLifecycle.endMatchRecords(
+					{ [fake] = hSlot },
+					settledState.players,
+					settledState.settledHumans,
+					recorded
+				)
+				if #skipped ~= 0 then
+					fail("endMatch helper — double-grave apres resultRecorded")
+				else
+					print("endMatch helper : elimine vu, bot ignore, pas de double-grave")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N36 : posted lit bunkersBySlot, pas le hash buildings. Capture change le camp.
+	local ChantierB = __require("ChantierB")
+	local postState = GameState.new(4242)
+	local att = postState:addPlayer(nil, "Assaillant", Random.new(1), 0)
+	local def = postState:addPlayer(nil, "Defenseur", Random.new(2), 0)
+	if not att or not def then
+		fail("attackLogic bunkers — spawn impossible")
+	else
+		local combatTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(postState.owner, index) == def.slot and not postState.buildings[index] then
+				combatTile = index
+				break
+			end
+		end
+		if not combatTile then
+			fail("attackLogic bunkers — tuile defenseur libre introuvable")
+		else
+			local troops = 10000
+			local bonus = Config.DEFENSE_POST_BONUS or 5
+			local baseLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+			postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, def.slot)
+			if not (postState.bunkersBySlot[def.slot] and postState.bunkersBySlot[def.slot][combatTile]) then
+				fail("attackLogic bunkers — pose n'a pas indexe")
+			end
+			local postedLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+			if math.abs(postedLoss - baseLoss * bonus) > 0.01 then
+				fail(
+					`attackLogic bunkers — posted {postedLoss} attendu {baseLoss * bonus} (base {baseLoss})`
+				)
+			end
+			local postedAgain = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+			if math.abs(postedAgain - postedLoss) > 0.01 then
+				fail("attackLogic bunkers — second appel sans mutation a derive")
+			end
+
+			local cx, cy = MapGen.fromIndex(combatTile)
+			local far: number? = nil
+			local minR = (Config.DEFENSE_RADIUS or 30) + 1
+			local minR2 = minR * minR
+			for index = 0, Config.TILE_COUNT - 1 do
+				if postState:isLand(index) and not postState.buildings[index] then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - cx, y - cy
+					if dx * dx + dy * dy > minR2 then
+						far = index
+						break
+					end
+				end
+			end
+			if not far then
+				fail("attackLogic bunkers — tuile hors rayon introuvable")
+			else
+				postState:destroyBuilding(combatTile)
+				postState:setOwner(far, def.slot)
+				local farBase = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				postState:placeBuilding(far, Config.BUILDING.DEFENSE, def.slot)
+				local farLoss = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+				if math.abs(farLoss - farBase) > 0.01 then
+					fail(`attackLogic bunkers — hors rayon {farLoss} attendu {farBase}`)
+				end
+				postState:destroyBuilding(far)
+				postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, def.slot)
+				postState:transferBuilding(combatTile, att.slot)
+				if postState.bunkersBySlot[def.slot] and postState.bunkersBySlot[def.slot][combatTile] then
+					fail("attackLogic bunkers — capture laisse l'ancien camp")
+				elseif not (postState.bunkersBySlot[att.slot] and postState.bunkersBySlot[att.slot][combatTile]) then
+					fail("attackLogic bunkers — capture n'indexe pas le nouveau camp")
+				else
+					local afterCapture = select(1, ChantierB.attackLogic(postState, troops, att, def, combatTile))
+					if math.abs(afterCapture - farBase) > 0.01 then
+						fail(`attackLogic bunkers — defenseur capture encore posted ({afterCapture})`)
+					else
+						postState:destroyBuilding(combatTile)
+						local attBase = select(1, ChantierB.attackLogic(postState, troops, def, att, combatTile))
+						postState:placeBuilding(combatTile, Config.BUILDING.DEFENSE, att.slot)
+						local attPosted = select(1, ChantierB.attackLogic(postState, troops, def, att, combatTile))
+						if math.abs(attPosted - attBase * bonus) > 0.01 then
+							fail(
+								`attackLogic bunkers — nouveau proprio sans posted ({attPosted} vs {attBase * bonus})`
+							)
+						else
+							print("attackLogic bunkers : posted / hors rayon / capture OK")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N36 Option A : pose/destroy bunker n'ecrit plus le buffer defense.
+	local auraState = GameState.new(4545)
+	local owner = auraState:addPlayer(nil, "Bunkers", Random.new(45), 0)
+	if not owner then
+		fail("defense aura — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(auraState.owner, index) == owner.slot and not auraState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("defense aura — tuile libre introuvable")
+		else
+			auraState:placeBuilding(site, Config.BUILDING.DEFENSE, owner.slot)
+			local written = 0
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(auraState.defense, index) ~= 0 then
+					written += 1
+				end
+			end
+			if written ~= 0 then
+				fail(`defense aura — buffer defense encore ecrit ({written} tuiles)`)
+			elseif not (auraState.bunkersBySlot[owner.slot] and auraState.bunkersBySlot[owner.slot][site]) then
+				fail("defense aura — bunkersBySlot non indexe")
+			else
+				auraState:destroyBuilding(site)
+				if auraState.bunkersBySlot[owner.slot] and auraState.bunkersBySlot[owner.slot][site] then
+					fail("defense aura — destroy laisse l'index")
+				else
+					print("defense aura : buffer non ecrit, index pose/destroy OK")
 				end
 			end
 		end
