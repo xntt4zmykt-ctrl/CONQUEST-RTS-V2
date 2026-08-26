@@ -3085,6 +3085,170 @@ do
 end
 
 do
+	-- N68 : BoatFront.launchAttack recycle parkedBuf. 0 pont + land →
+	-- #attacks == 1, parkedBuf truncaté, second lancer (renfort) OK.
+	-- 2 seedBeachhead même couple + land → 2 ponts + 1 terre (3 Attack),
+	-- troupes de pont intactes. Second wrap → toujours 3 (pas de pont
+	-- fantôme leftover). Recette feel 07c6 N87. Ne pas fermer N29/N5.
+	local BoatFront = __require("BoatFront")
+	local land = GameState.new(1090)
+	land.combatUnlocked = true
+	local la = land:addPlayer(nil, "ParkA", Random.new(61), 0)
+	local lb = land:addPlayer(nil, "ParkB", Random.new(62), 0)
+	if not la or not lb then
+		fail("parkedBuf — spawn land impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contact = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(land.owner, index) == la.slot and land:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if land:isLand(nb) and buffer.readu8(land.owner, nb) == 0 then
+						land:setOwner(nb, lb.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("parkedBuf — pas de contact terrestre")
+		else
+			la.attackRatio = 1
+			la.troops = 4000
+			local ok1 = land:launchAttack(la.slot, lb.slot)
+			if not ok1 or #land.attacks ~= 1 then
+				fail(`parkedBuf — 0 pont land ({ok1} fronts={#land.attacks})`)
+			elseif #BoatFront.parkedBuf ~= 0 then
+				fail(`parkedBuf — leftover 0 pont (#{#BoatFront.parkedBuf})`)
+			else
+				la.troops = 4000
+				local ok2 = land:launchAttack(la.slot, lb.slot)
+				if not ok2 or #land.attacks ~= 1 then
+					fail(`parkedBuf — second 0 pont ({ok2} fronts={#land.attacks})`)
+				elseif #BoatFront.parkedBuf ~= 0 then
+					fail(`parkedBuf — leftover second wrap (#{#BoatFront.parkedBuf})`)
+				else
+					print("parkedBuf : 0 pont land, rawequal wrap, leftover 0 (N68)")
+					local sea = GameState.new(1091)
+					sea.combatUnlocked = true
+					local sa = sea:addPlayer(nil, "ParkSeaA", Random.new(63), 0)
+					local sb = sea:addPlayer(nil, "ParkSeaB", Random.new(64), 0)
+					if not sa or not sb then
+						fail("parkedBuf — spawn sea impossible")
+					else
+						local pairsFound: { { number } } = {}
+						for index = 0, Config.TILE_COUNT - 1 do
+							if sea:isLand(index) then
+								local nn = MapGen.neighbors(index, scratch)
+								for i = 1, nn do
+									local nb = scratch[i]
+									if sea:isLand(nb) and nb ~= index then
+										local used = false
+										for _, pair in pairsFound do
+											if pair[1] == index or pair[1] == nb or pair[2] == index or pair[2] == nb then
+												used = true
+												break
+											end
+										end
+										if not used then
+											table.insert(pairsFound, { index, nb })
+											if #pairsFound >= 2 then
+												break
+											end
+										end
+									end
+								end
+							end
+							if #pairsFound >= 2 then
+								break
+							end
+						end
+						if #pairsFound < 2 then
+							fail("parkedBuf — deux paires terrestres introuvables")
+						else
+							local landContact = nil
+							for index = 0, Config.TILE_COUNT - 1 do
+								if buffer.readu8(sea.owner, index) == sa.slot and sea:isLand(index) then
+									local nn = MapGen.neighbors(index, scratch)
+									for i = 1, nn do
+										local nb = scratch[i]
+										if sea:isLand(nb) and buffer.readu8(sea.owner, nb) == 0 then
+											local clash = false
+											for _, pair in pairsFound do
+												if nb == pair[1] or nb == pair[2] or index == pair[1] or index == pair[2] then
+													clash = true
+													break
+												end
+											end
+											if not clash then
+												sea:setOwner(nb, sb.slot)
+												landContact = index
+												break
+											end
+										end
+									end
+								end
+								if landContact then
+									break
+								end
+							end
+							if not landContact then
+								fail("parkedBuf — pas de contact terre distinct des ponts")
+							else
+								local troopsA, troopsB = 700, 900
+								sea:setOwner(pairsFound[1][1], sa.slot)
+								sea:setOwner(pairsFound[1][2], sb.slot)
+								sea:setOwner(pairsFound[2][1], sa.slot)
+								sea:setOwner(pairsFound[2][2], sb.slot)
+								sea:seedBeachhead(sa.slot, sb.slot, troopsA, pairsFound[1][1])
+								sea:seedBeachhead(sa.slot, sb.slot, troopsB, pairsFound[2][1])
+								if #sea.attacks ~= 2 then
+									fail(`parkedBuf — {#sea.attacks} ponts apres 2 seed (attendu 2)`)
+								else
+									sa.attackRatio = 1
+									sa.troops = 5000
+									local launched = sea:launchAttack(sa.slot, sb.slot)
+									local nBeach, nLand, beachTroops = 0, 0, 0
+									for _, atk in sea.attacks do
+										if atk.isBeachhead then
+											nBeach += 1
+											beachTroops += atk.troops
+										else
+											nLand += 1
+										end
+									end
+									if not launched or #sea.attacks ~= 3 or nBeach ~= 2 or nLand ~= 1 then
+										fail(
+											`parkedBuf — 2 ponts+terre ({launched} #={#sea.attacks} beach={nBeach} land={nLand})`
+										)
+									elseif beachTroops ~= troopsA + troopsB then
+										fail(`parkedBuf — troupes pont {beachTroops} != {troopsA + troopsB}`)
+									else
+										sa.troops = 5000
+										sea:launchAttack(sa.slot, sb.slot)
+										if #sea.attacks ~= 3 then
+											fail(`parkedBuf — leftover pont fantome (#{#sea.attacks})`)
+										else
+											print("parkedBuf : 2 ponts + 1 terre, leftover 3 (N68)")
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- Colis : le niveau snapshot au depart, pas le niveau a l'arrivee.
 	local landState = GameState.new(2720)
 	local a = landState:addPlayer(nil, "Snapshot", Random.new(22), 0)
@@ -7120,6 +7284,107 @@ do
 										print("collapse recycle : butin + captor grandit (N67)")
 									end
 								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N69 : collapseFaction recycle remaining / leftovers. Slot sans tuile
+	-- → return, plunder inchangé (truncate leftover d'un collapse précédent).
+	-- Deux appels (victime A à 0 puis victime B) → pas de leftover de
+	-- tuiles de A dans B. Recette feel 07c6 N88. Banc collapse existant
+	-- et N67 restent verts.
+	local empty = GameState.new(1092)
+	local ea = empty:addPlayer(nil, "EmptyVic", Random.new(71), 0)
+	local eh = empty:addPlayer(nil, "EmptyHeir", Random.new(72), 0)
+	if not ea or not eh then
+		fail("collapseRemain — spawn vide impossible")
+	else
+		local toStrip: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(empty.owner, index) == ea.slot then
+				table.insert(toStrip, index)
+			end
+		end
+		for _, index in toStrip do
+			empty:setOwner(index, Config.NEUTRAL_SLOT)
+		end
+		ea.gold = 2500
+		eh.gold = 100
+		table.clear(empty.plunders)
+		empty:collapseFaction(ea.slot, eh.slot)
+		if ea.gold ~= 2500 or eh.gold ~= 100 or #empty.plunders ~= 0 then
+			fail("collapseRemain — plunder d'un slot sans tuile")
+		elseif ea.tiles ~= 0 then
+			fail(`collapseRemain — tiles={ea.tiles} apres strip`)
+		else
+			print("collapseRemain : slot vide return, plunder inchange (N69)")
+			local full = GameState.new(1093)
+			local fa = full:addPlayer(nil, "RemainA", Random.new(73), 0)
+			local fb = full:addPlayer(nil, "RemainB", Random.new(74), 0)
+			local fh = full:addPlayer(nil, "RemainH", Random.new(75), 0)
+			if not fa or not fb or not fh then
+				fail("collapseRemain — spawn leftover impossible")
+			else
+				local scratch = table.create(4, 0)
+				local function glue(victimSlot: number, heirSlot: number): boolean
+					for index = 0, Config.TILE_COUNT - 1 do
+						if buffer.readu8(full.owner, index) == victimSlot and full:isLand(index) then
+							local nn = MapGen.neighbors(index, scratch)
+							for i = 1, nn do
+								local nb = scratch[i]
+								if full:isLand(nb) and buffer.readu8(full.owner, nb) == 0 then
+									full:setOwner(nb, heirSlot)
+									return true
+								end
+							end
+						end
+					end
+					return false
+				end
+				if not glue(fa.slot, fh.slot) or not glue(fb.slot, fh.slot) then
+					fail("collapseRemain — pas de contact captor")
+				else
+					local aTiles: { number } = {}
+					for index = 0, Config.TILE_COUNT - 1 do
+						if buffer.readu8(full.owner, index) == fa.slot then
+							table.insert(aTiles, index)
+						end
+					end
+					fa.gold = 3000
+					full:collapseFaction(fa.slot, fh.slot)
+					if fa.tiles ~= 0 then
+						fail(`collapseRemain — A conserve {fa.tiles} tuiles`)
+					else
+						fa.gold = 1800
+						table.clear(full.plunders)
+						full:collapseFaction(fa.slot, fh.slot)
+						if fa.gold ~= 1800 or #full.plunders ~= 0 then
+							fail("collapseRemain — leftover A re-plunder")
+						else
+							local bBefore = fb.tiles
+							local hBefore = fh.tiles
+							fb.gold = 2000
+							full:collapseFaction(fb.slot, fh.slot)
+							local aOwnedByB = 0
+							for _, index in aTiles do
+								if buffer.readu8(full.owner, index) == fb.slot then
+									aOwnedByB += 1
+								end
+							end
+							if fb.tiles >= bBefore or fb.tiles > 0 then
+								fail(`collapseRemain — B conserve {fb.tiles} tuiles`)
+							elseif fh.tiles <= hBefore then
+								fail("collapseRemain — captor B inchange")
+							elseif aOwnedByB > 0 then
+								fail(`collapseRemain — leftover A dans B ({aOwnedByB})`)
+							else
+								print("collapseRemain : A a 0 puis B, pas de leftover (N69)")
 							end
 						end
 					end
