@@ -9845,6 +9845,300 @@ do
 	end
 end
 
+do
+	-- N101 : RailPath.find recycle Heap + hashes (leftover N99).
+	-- Deux traces distincts → chemins non rawequal (N64 unique),
+	-- second appel rawequal le Heap module. path1 non mute.
+	-- Banc voies / N65 / N99 verts. Overlay lit le tableau, pas le Heap.
+	local railTerrain = MapGen.generate(4242)
+	local land: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1, 37 do
+		if buffer.readu8(railTerrain, index) ~= Config.TERRAIN.OCEAN then
+			table.insert(land, index)
+		end
+	end
+	if #land < 4 then
+		fail("rail heap — pas assez de terre")
+	else
+		local from1, to1 = land[1], land[#land]
+		local from2, to2 = land[2], land[#land - 1]
+		if from1 == to1 or from2 == to2 then
+			fail("rail heap — paires degeneres")
+		else
+			local path1 = RailPath.find(railTerrain, from1, to1)
+			local heap1 = RailPath.searchHeap
+			if not path1 or path1[1] ~= from1 or path1[#path1] ~= to1 then
+				fail("rail heap — path1 invalide")
+			elseif heap1 == nil then
+				fail("rail heap — searchHeap absent")
+			else
+				local snapshot = table.clone(path1)
+				local path2 = RailPath.find(railTerrain, from2, to2)
+				if not path2 or path2[1] ~= from2 or path2[#path2] ~= to2 then
+					fail("rail heap — leftover cameFrom (path2)")
+				elseif rawequal(path1, path2) then
+					fail("rail heap — path alias (N64)")
+				elseif not rawequal(RailPath.searchHeap, heap1) then
+					fail("rail heap — Heap recree (N101)")
+				else
+					local mutated = #path1 ~= #snapshot
+					if not mutated then
+						for i = 1, #path1 do
+							if path1[i] ~= snapshot[i] then
+								mutated = true
+								break
+							end
+						end
+					end
+					if mutated then
+						fail("rail heap — path1 mute par le 2e find")
+					else
+						print("rail heap : rawequal Heap, path unique (N101)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N102 : releaseAttack swap-pop (leftover N98/N100). Deux fronts
+	-- terre A→B et A→C : accept A-B relache le couple, A→C reste,
+	-- pas de trou, 2e launch A→B rawequal. 2 ponts + terre : retreatAt
+	-- tous → #==0, pas de trou, leftover N68 (3) avant retraite.
+	-- Banc N67 / N68 / N98 / N99 verts. BoatFront.parkedBuf sans release.
+	local diplo = GameState.new(1106)
+	diplo.combatUnlocked = true
+	local da = diplo:addPlayer(nil, "SwapAtk", Random.new(115), 0)
+	local db = diplo:addPlayer(nil, "SwapB", Random.new(116), 0)
+	local dc = diplo:addPlayer(nil, "SwapC", Random.new(117), 0)
+	local diploOk = false
+	if not da or not db or not dc then
+		fail("attack order — spawn diplo impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contactB: number? = nil
+		local contactC: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(diplo.owner, index) == da.slot and diplo:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if diplo:isLand(nb) and buffer.readu8(diplo.owner, nb) == 0 then
+						if not contactB then
+							diplo:setOwner(nb, db.slot)
+							contactB = index
+						elseif not contactC then
+							diplo:setOwner(nb, dc.slot)
+							contactC = index
+						end
+					end
+				end
+			end
+			if contactB and contactC then
+				break
+			end
+		end
+		if not contactB or not contactC then
+			fail("attack order — deux contacts introuvables")
+		else
+			da.attackRatio = 1
+			da.troops = 8000
+			local okB = diplo:launchAttack(da.slot, db.slot)
+			da.troops = 8000
+			local okC = diplo:launchAttack(da.slot, dc.slot)
+			if not okB or not okC or #diplo.attacks ~= 2 then
+				fail(`attack order — launch ({okB}/{okC} #={#diplo.attacks})`)
+			else
+				local recB: any = nil
+				local recC: any = nil
+				for _, atk in diplo.attacks do
+					if atk.target == db.slot then
+						recB = atk
+					elseif atk.target == dc.slot then
+						recC = atk
+					end
+				end
+				if not recB or not recC then
+					fail("attack order — fronts B/C absents")
+				else
+					Diplomacy.request(diplo, da.slot, db.slot)
+					local signed = Diplomacy.accept(diplo, da.slot, db.slot)
+					local hole = false
+					for i = 1, #diplo.attacks do
+						if diplo.attacks[i] == nil then
+							hole = true
+							break
+						end
+					end
+					local remain = diplo.attacks[1]
+					if not signed then
+						fail("attack order — accept refuse")
+					elseif hole then
+						fail("attack order — trou array apres accept")
+					elseif #diplo.attacks ~= 1 or remain ~= recC or remain.target ~= dc.slot then
+						fail(`attack order — restant ({#diplo.attacks} target={remain and remain.target})`)
+					else
+						local recycled = false
+						for _, rec in GameState.attackFree do
+							if rawequal(rec, recB) then
+								recycled = true
+								break
+							end
+						end
+						if not recycled then
+							fail("attack order — B absent de attackFree")
+						else
+							Diplomacy.breakAlliance(diplo, da.slot, db.slot)
+							da.troops = 8000
+							local ok2 = diplo:launchAttack(da.slot, db.slot)
+							local again = nil
+							for _, atk in diplo.attacks do
+								if atk.target == db.slot then
+									again = atk
+									break
+								end
+							end
+							if not ok2 or not again or not rawequal(again, recB) then
+								fail("attack order — 2e launch B non recycle")
+							elseif #diplo.attacks ~= 2 then
+								fail(`attack order — leftover C perdu (#{#diplo.attacks})`)
+							else
+								diploOk = true
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local sea = GameState.new(1107)
+	sea.combatUnlocked = true
+	local sa = sea:addPlayer(nil, "SwapSeaA", Random.new(118), 0)
+	local sb = sea:addPlayer(nil, "SwapSeaB", Random.new(119), 0)
+	local seaOk = false
+	if not sa or not sb then
+		fail("attack order beach — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local pairsFound: { { number } } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if sea:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if sea:isLand(nb) and nb ~= index then
+						local used = false
+						for _, pair in pairsFound do
+							if pair[1] == index or pair[2] == index or pair[1] == nb or pair[2] == nb then
+								used = true
+								break
+							end
+						end
+						if not used then
+							table.insert(pairsFound, { index, nb })
+							if #pairsFound >= 2 then
+								break
+							end
+						end
+					end
+				end
+			end
+			if #pairsFound >= 2 then
+				break
+			end
+		end
+		if #pairsFound < 2 then
+			fail("attack order beach — deux paires terrestres introuvables")
+		else
+			local landContact: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(sea.owner, index) == sa.slot and sea:isLand(index) then
+					local nn = MapGen.neighbors(index, scratch)
+					for i = 1, nn do
+						local nb = scratch[i]
+						if sea:isLand(nb) and buffer.readu8(sea.owner, nb) == 0 then
+							local clash = false
+							for _, pair in pairsFound do
+								if nb == pair[1] or nb == pair[2] or index == pair[1] or index == pair[2] then
+									clash = true
+									break
+								end
+							end
+							if not clash then
+								sea:setOwner(nb, sb.slot)
+								landContact = index
+								break
+							end
+						end
+					end
+				end
+				if landContact then
+					break
+				end
+			end
+			if not landContact then
+				fail("attack order beach — pas de contact terre distinct des ponts")
+			else
+				sa.attackRatio = 1
+				sa.troops = 5000
+				sea:setOwner(pairsFound[1][1], sa.slot)
+				sea:setOwner(pairsFound[1][2], sb.slot)
+				sea:setOwner(pairsFound[2][1], sa.slot)
+				sea:setOwner(pairsFound[2][2], sb.slot)
+				sea:seedBeachhead(sa.slot, sb.slot, 700, pairsFound[1][1])
+				sea:seedBeachhead(sa.slot, sb.slot, 900, pairsFound[2][1])
+				sa.troops = 5000
+				sea:launchAttack(sa.slot, sb.slot)
+				local nBeach, nLand = 0, 0
+				for _, atk in sea.attacks do
+					if atk.isBeachhead then
+						nBeach += 1
+					else
+						nLand += 1
+					end
+				end
+				local holeBefore = false
+				for i = 1, #sea.attacks do
+					if sea.attacks[i] == nil then
+						holeBefore = true
+						break
+					end
+				end
+				if #sea.attacks ~= 3 or nBeach ~= 2 or nLand ~= 1 or holeBefore then
+					fail(
+						`attack order beach — leftover 3 ({#sea.attacks} beach={nBeach} land={nLand} hole={holeBefore})`
+					)
+				else
+					for _, atk in sea.attacks do
+						atk.retreatAt = sea.tick
+					end
+					sea:stepAttacks()
+					local holeAfter = false
+					for i = 1, #sea.attacks do
+						if sea.attacks[i] == nil then
+							holeAfter = true
+							break
+						end
+					end
+					if holeAfter then
+						fail("attack order beach — trou apres retraite")
+					elseif #sea.attacks ~= 0 then
+						fail(`attack order beach — fronts restants (#{#sea.attacks})`)
+					else
+						seaOk = true
+					end
+				end
+			end
+		end
+	end
+
+	if diploOk and seaOk then
+		print("attack order : swap-pop accept / 3 fronts retraite (N102)")
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
