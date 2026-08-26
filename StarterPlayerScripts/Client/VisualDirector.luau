@@ -12,15 +12,88 @@ local Workspace = game:GetService("Workspace")
 
 local VisualDirector = {}
 
+-- N189 : parkEffect / takeEffect hoistes pour mismatch Lighting
+-- sans Destroy. Skip Parent nil (deja parke). Push effectFree[ClassName]
+-- reelle du leftover (map className → { Instance }, pas veilFree
+-- TextButton / panelFree Frame / placeRootFree / ghostFree /
+-- worldFree). take du ClassName voulu avant Instance.new. Chemin
+-- class match inchange (return existing). Recette leftover N188.
+-- Pas merger visual. Distinct leftover N152 flame. Overlay non
+-- touche. RadialMenu non touche. Minimap non touche. init.client
+-- apply() unique — ne pas l'ajouter au rematch. ScreenGui stale
+-- = leftover N190, pas ici. Ne pas vider effectFree.
+local effectFree: { [string]: { Instance } } = {}
+local cloudFree: { Clouds } = {}
+
+local function parkEffect(inst: Instance)
+	if not inst.Parent then
+		return
+	end
+	inst.Parent = nil
+	local className = inst.ClassName
+	local bucket = effectFree[className]
+	if not bucket then
+		bucket = {}
+		effectFree[className] = bucket
+	end
+	bucket[#bucket + 1] = inst
+end
+
+local function takeEffect(className: string): Instance?
+	local bucket = effectFree[className]
+	if not bucket then
+		return nil
+	end
+	local n = #bucket
+	if n == 0 then
+		return nil
+	end
+	local last = bucket[n]
+	bucket[n] = nil
+	return last
+end
+
+local function parkCloud(clouds: Clouds)
+	if not clouds.Parent then
+		return
+	end
+	clouds.Parent = nil
+	cloudFree[#cloudFree + 1] = clouds
+end
+
+local function takeCloud(): Clouds?
+	local n = #cloudFree
+	if n == 0 then
+		return nil
+	end
+	local last = cloudFree[n]
+	cloudFree[n] = nil
+	return last
+end
+
+-- Leftover Terrain homonyme hors Clouds : park sous sa ClassName
+-- reelle (effectFree), jamais cloudFree (take Clouds recevrait un
+-- Part). Clouds reels → cloudFree.
+local function parkCloudsLeftover(inst: Instance)
+	if inst:IsA("Clouds") then
+		parkCloud(inst :: Clouds)
+		return
+	end
+	parkEffect(inst)
+end
+
 local function effect(className: string, name: string): Instance
 	local existing = Lighting:FindFirstChild(name)
 	if existing and existing.ClassName == className then
 		return existing
 	end
 	if existing then
-		existing:Destroy()
+		parkEffect(existing)
 	end
-	local created = Instance.new(className)
+	local created = takeEffect(className)
+	if created == nil then
+		created = Instance.new(className)
+	end
 	created.Name = name
 	created.Parent = Lighting
 	return created
@@ -73,9 +146,14 @@ function VisualDirector.apply()
 		local clouds = terrain:FindFirstChild("ConquestClouds")
 		if not clouds or not clouds:IsA("Clouds") then
 			if clouds then
-				clouds:Destroy()
+				parkCloudsLeftover(clouds)
 			end
-			clouds = Instance.new("Clouds")
+			local taken = takeCloud()
+			if taken then
+				clouds = taken
+			else
+				clouds = Instance.new("Clouds")
+			end
 			clouds.Name = "ConquestClouds"
 			clouds.Parent = terrain
 		end

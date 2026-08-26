@@ -84,6 +84,18 @@ Doctrines.LIST = {
 
 Doctrines.DEFAULT_ID = 1
 
+function Doctrines.isValid(id: number?): boolean
+	if typeof(id) ~= "number" or id ~= math.floor(id) then
+		return false
+	end
+	for _, doctrine in Doctrines.LIST do
+		if doctrine.id == id then
+			return true
+		end
+	end
+	return false
+end
+
 function Doctrines.get(id: number?): Doctrine
 	for _, doctrine in Doctrines.LIST do
 		if doctrine.id == id then

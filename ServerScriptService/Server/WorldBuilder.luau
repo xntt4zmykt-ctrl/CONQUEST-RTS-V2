@@ -32,6 +32,107 @@ local OCEAN = Config.TERRAIN.OCEAN
 
 local WorldBuilder = {}
 
+-- N191 : parkCollision / takeCollision / parkCollisionChild hoistes
+-- pour build() sans Destroy du leftover ConquestCollision. Skip
+-- Parent nil (deja parke par un second build()). Push collisionFree
+-- (Folder, pas worldFree client / effectFree / guiFree). take
+-- n'importe quel Folder, Name ConquestCollision, Parent Workspace.
+-- Enfants leftover detaches AVANT take (Ground / Seabed / murs →
+-- collisionPartFree, pas chunkGround client N106 ; leftover autre
+-- Parent = nil). Recette leftover N184. Pas merger visual. Distinct
+-- leftover N190 ScreenGui. Distinct leftover N189 VisualDirector.
+-- Distinct leftover N152 flame. Distinct leftover N192
+-- clearDefaultScene (studioFree, jamais take ici). Terrain:Clear
+-- inchange. WorldRenderer non touche. Overlay non touche.
+-- init.client non touche. Ne pas vider collisionFree. Pas de delay.
+-- Si park sans take : ne pas livrer. Si take sans park enfants :
+-- ne pas livrer.
+local collisionFree: { Folder } = {}
+local collisionPartFree: { Part } = {}
+-- N192 : parkStudioDefault hoiste pour clearDefaultScene sans
+-- Destroy du leftover Baseplate / SpawnLocation. Skip Parent nil
+-- (deja parke par un second clearDefaultScene). Push studioFree
+-- (jamais take dans build — Baseplate n'est PAS une dalle Ground).
+-- Pas collisionPartFree / collisionFree (take Ground recevrait
+-- une dalle Studio 512²). Recette leftover N191 isolee. Pas merger
+-- visual. Distinct leftover N191 build. Distinct leftover N190
+-- ScreenGui. Distinct leftover N152 flame. Terrain:Clear inchange.
+-- WorldRenderer non touche. Overlay non touche. init.client non
+-- touche. Ne pas vider studioFree. Pas de delay. Si park dans
+-- collisionPartFree : ne pas livrer. Si take dans build : ne pas
+-- livrer. Si Parent=nil sans push : ne pas livrer.
+local studioFree: { Instance } = {}
+
+local function parkCollisionPart(part: Part)
+	if not part.Parent then
+		return
+	end
+	part.Parent = nil
+	collisionPartFree[#collisionPartFree + 1] = part
+end
+
+local function takeCollisionPart(): Part?
+	local n = #collisionPartFree
+	if n == 0 then
+		return nil
+	end
+	local last = collisionPartFree[n]
+	collisionPartFree[n] = nil
+	return last
+end
+
+local function parkCollisionChildren(root: Folder)
+	for _, child in root:GetChildren() do
+		if child:IsA("BasePart") then
+			parkCollisionPart(child :: Part)
+		elseif child.Parent then
+			child.Parent = nil
+		end
+	end
+end
+
+local function parkCollision(root: Folder)
+	if not root.Parent then
+		return
+	end
+	parkCollisionChildren(root)
+	root.Parent = nil
+	collisionFree[#collisionFree + 1] = root
+end
+
+local function takeCollision(): Folder?
+	local n = #collisionFree
+	if n == 0 then
+		return nil
+	end
+	local last = collisionFree[n]
+	collisionFree[n] = nil
+	return last
+end
+
+local function parkStudioDefault(inst: Instance)
+	if not inst.Parent then
+		return
+	end
+	inst.Parent = nil
+	studioFree[#studioFree + 1] = inst
+end
+
+local function acquireCollisionPart(name: string): Part
+	local part = takeCollisionPart()
+	if not part then
+		part = Instance.new("Part")
+	end
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = true
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Transparency = 1
+	return part
+end
+
 --[[
 	Cle de fusion cote serveur : la hauteur seule. On ignore volontairement le
 	proprietaire ET le type de terrain, puisqu'une collision invisible n'a ni
@@ -65,17 +166,26 @@ function WorldBuilder.blocksFor(terrain: buffer): { GreedyMesh.Rect }
 end
 
 function WorldBuilder.build(terrain: buffer): Folder
-	local existing = Workspace:FindFirstChild("ConquestCollision")
-	if existing then
-		existing:Destroy()
+	-- N191 : take Folder leftover avant create. Name ConquestCollision /
+	-- Parent Workspace reposes au reuse (nouvelle partie, meme Lua
+	-- state serveur). Enfants parkés AVANT take (sinon Ground empiles).
+	local leftover = Workspace:FindFirstChild("ConquestCollision")
+	if leftover and leftover:IsA("Folder") then
+		parkCollision(leftover :: Folder)
+	elseif leftover then
+		leftover.Parent = nil
 	end
 
 	-- Le SmoothTerrain d'une partie precedente doit disparaitre, sinon il
 	-- flotte au milieu des blocs.
 	Workspace.Terrain:Clear()
 
-	local folder = Instance.new("Folder")
+	local folder = takeCollision()
+	if not folder then
+		folder = Instance.new("Folder")
+	end
 	folder.Name = "ConquestCollision"
+	parkCollisionChildren(folder)
 
 	local blocks = WorldBuilder.blocksFor(terrain)
 
@@ -84,16 +194,9 @@ function WorldBuilder.build(terrain: buffer): Folder
 		local height = rect.key
 		local origin = WorldSpace.tileToWorld(rect.x, rect.y)
 
-		local part = Instance.new("Part")
-		part.Name = "Ground"
-		part.Anchored = true
-		part.CanCollide = true
-		part.CanTouch = false
 		-- Invisible et non interrogeable : le joueur voit et clique la
 		-- geometrie coloree du client, jamais celle-ci.
-		part.Transparency = 1
-		part.CanQuery = false
-		part.CastShadow = false
+		local part = acquireCollisionPart("Ground")
 		part.Size = Vector3.new(rect.width * TILE, height, rect.depth * TILE)
 		part.CFrame = CFrame.new(
 			origin.X + (rect.width - 1) * TILE / 2,
@@ -105,14 +208,7 @@ function WorldBuilder.build(terrain: buffer): Folder
 
 	-- Plancher oceanique : un avatar tombe a la mer doit s'arreter quelque part
 	-- plutot que de sombrer sans fin.
-	local seabed = Instance.new("Part")
-	seabed.Name = "Seabed"
-	seabed.Anchored = true
-	seabed.CanCollide = true
-	seabed.CanTouch = false
-	seabed.CanQuery = false
-	seabed.CastShadow = false
-	seabed.Transparency = 1
+	local seabed = acquireCollisionPart("Seabed")
 	seabed.Size = Vector3.new(Config.WORLD_WIDTH, 1, Config.WORLD_DEPTH)
 	seabed.CFrame = CFrame.new(0, Config.OCEAN_LEVEL - 0.5, 0)
 	seabed.Parent = folder
@@ -126,14 +222,7 @@ function WorldBuilder.build(terrain: buffer): Folder
 	local halfDepth = Config.WORLD_DEPTH / 2
 
 	local function borderWall(name: string, size: Vector3, position: Vector3)
-		local wall = Instance.new("Part")
-		wall.Name = name
-		wall.Anchored = true
-		wall.CanCollide = true
-		wall.CanTouch = false
-		wall.CanQuery = false
-		wall.CastShadow = false
-		wall.Transparency = 1
+		local wall = acquireCollisionPart(name)
 		wall.Size = size
 		wall.CFrame = CFrame.new(position)
 		wall.Parent = folder
@@ -170,11 +259,16 @@ end
 	Nettoie la scene par defaut de Studio. Sans ca, la baseplate d'origine
 	flotte au milieu de la carte et le point d'apparition par defaut projette
 	les joueurs a cote du monde.
+
+	N192 : park Baseplate / SpawnLocation (Parent = nil, studioFree)
+	au lieu de Destroy. Jamais recréés — aucun take dans build().
+	Skip Parent nil. Skip non-Baseplate / non-SpawnLocation (Terrain,
+	ConquestCollision, decoys). Pas collisionPartFree.
 ]]
 function WorldBuilder.clearDefaultScene()
 	for _, child in Workspace:GetChildren() do
 		if child.Name == "Baseplate" or child:IsA("SpawnLocation") then
-			child:Destroy()
+			parkStudioDefault(child)
 		end
 	end
 end
