@@ -910,7 +910,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- dans le check navires. V74 flame Size = API. V75 rot + V76 Size
 	-- rayon + V77 early-out hover dans le check apercu. V78 wakeRot
 	-- + V79 LandingSplash (check navires). V80 DeliveryPulse (ci-dessous).
-	-- Leftover V81 (Shockwave, check navires explosion). Voies encore
+	-- V81 Shockwave (check navires explosion). Leftover V82 (Effects
+	-- conquestPulse). Voies encore
 	-- vivantes ici ; la destruction plus bas les vide (le check
 	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
@@ -937,7 +938,8 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveRoute.delivery == nil, "livraison encore active")
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
 	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
-	-- l'arrivee. Recette feel N132. Leftover V81 (Shockwave).
+	-- l'arrivee. Recette feel N132. V81 Shockwave (check navires).
+	-- Leftover V82 (Effects conquestPulse).
 	local pulseFound = false
 	local aPulse
 	for _, node in overlay.root:GetChildren() do
@@ -1050,7 +1052,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
 	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). V80
-	-- DeliveryPulse (check pose/capture). Leftover V81 (Shockwave).
+	-- DeliveryPulse (check pose/capture). V81 Shockwave (check navires).
+	-- Leftover V82 (Effects conquestPulse).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1100,7 +1103,8 @@ check("apercu de placement pour chaque batiment", function()
 	-- (resolve) dans le check accrochage. Leftover V73 (radar/flag)
 	-- dans le check navires. V78 wakeRot + V79 LandingSplash
 	-- (check navires). V80 DeliveryPulse (check pose/capture).
-	-- Leftover V81 (Shockwave). Hauteurs +0.42 / +0.38.
+	-- V81 Shockwave (check navires). Leftover V82 (Effects
+	-- conquestPulse). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1551,7 +1555,9 @@ check("navires, missiles et interpolation", function()
 	-- Plus de CFrame.Angles a chaque spawn navire. V79 : LandingSplash
 	-- reutilise wakeRot au despawn (feel N131, Y + 0.14). V80 : DeliveryPulse
 	-- reutilise wakeRot a l'arrivee camion (feel N132, check pose/capture).
-	-- Leftover V81 (Shockwave). Leftover V77 (Preview hover) dans le check apercu.
+	-- V81 : Shockwave reutilise wakeRot a l'explosion (feel N133,
+	-- PLAINS + 0.5). Leftover V82 (Effects conquestPulse). Leftover V77
+	-- (Preview hover) dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
 	local bakedWake = overlay.wakeRot
@@ -1675,6 +1681,24 @@ check("navires, missiles et interpolation", function()
 	assert(math.abs(aSplash.CFrame.Y - (Config.OCEAN_LEVEL + 0.14)) < 1e-6, "splash Y")
 	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree au despawn")
 	overlay:explosion(50, 50, 9)
+	-- V81 : Shockwave reutilise wakeRot. Plus de CFrame.Angles explosion.
+	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast / fumee inchangees.
+	-- Leftover V82 (Effects conquestPulse).
+	local shockFound = false
+	local aShock
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "Shockwave" then
+			shockFound = true
+			aShock = node
+		end
+	end
+	assert(shockFound, "pas de Shockwave a l'explosion")
+	assert(aShock ~= nil and aShock.CFrame, "shock sans CFrame")
+	assert(
+		math.abs(aShock.CFrame.Y - (Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5)) < 1e-6,
+		"shock Y"
+	)
+	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree a l'explosion")
 end)
 
 check("vagues de conquete", function()
@@ -1732,7 +1756,8 @@ check("camera strategique", function()
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
 	-- V78 wakeRot + V79 LandingSplash (check navires). V80 DeliveryPulse
-	-- (check pose/capture). Leftover V81 (Shockwave).
+	-- (check pose/capture). V81 Shockwave (check navires). Leftover V82
+	-- (Effects conquestPulse).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
