@@ -318,6 +318,15 @@ InstanceMT.methods = {
 		return nil
 	end,
 
+	FindFirstChildOfClass = function(self, className)
+		for _, child in rawget(self, "_children") do
+			if child.ClassName == className then
+				return child
+			end
+		end
+		return nil
+	end,
+
 	IsA = function(self, className)
 		local own = rawget(self, "ClassName")
 		if own == className then

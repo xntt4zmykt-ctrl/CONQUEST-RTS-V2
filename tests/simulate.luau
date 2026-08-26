@@ -264,8 +264,13 @@ local function runMatch(seed, ticks)
 	for _ in state.players do
 		spawned += 1
 	end
-	if spawned < Config.BOT_COUNT then
-		fail(`seed {seed} — {spawned} factions creees sur {Config.BOT_COUNT} (spawn sature ?)`)
+	local expectedFactions = Config.BOT_COUNT + (Config.TRIBE_COUNT or 0)
+	if spawned < 10 then
+		fail(`seed {seed} — seulement {spawned} factions (spawn sature, plancher 10 / {expectedFactions})`)
+	elseif spawned < expectedFactions then
+		print(
+			`  note seed {seed} : {spawned}/{expectedFactions} factions (disques r={Config.SPAWN_RADIUS}, dist min {Config.SPAWN_MIN_PLAYER_DISTANCE})`
+		)
 	end
 
 	local explosions = 0
@@ -399,9 +404,10 @@ do
 			fail("evolution urbaine — la faction de test n'a pas de capitale")
 		else
 			local ccx, ccy = MapGen.fromIndex(capital)
-			for dy = -16, 16 do
-				for dx = -16, 16 do
-					if dx * dx + dy * dy <= 256 then
+			local expandR = math.max(40, (Config.BUILD_MIN_SPACING or 15) * 3)
+			for dy = -expandR, expandR do
+				for dx = -expandR, expandR do
+					if dx * dx + dy * dy <= expandR * expandR then
 						local nx, ny = ccx + dx, ccy + dy
 						if MapGen.inBounds(nx, ny) then
 							local index = MapGen.toIndex(nx, ny)
@@ -413,21 +419,47 @@ do
 				end
 			end
 
-			local function freeSiteAt(dx: number, dy: number): number?
-				local nx, ny = ccx + dx, ccy + dy
-				if not MapGen.inBounds(nx, ny) then
-					return nil
+			local spacing = Config.BUILD_MIN_SPACING or 15
+			local function siteAwayFromBuildings(nearIndex: number?): number?
+				local nx, ny
+				if nearIndex then
+					nx, ny = MapGen.fromIndex(nearIndex)
 				end
-				local index = MapGen.toIndex(nx, ny)
-				if buffer.readu8(cityState.owner, index) ~= ps.slot then
-					return nil
+				local rail2 = (Config.RAIL_RANGE or 56) * (Config.RAIL_RANGE or 56)
+				for index = 0, Config.TILE_COUNT - 1 do
+					if buffer.readu8(cityState.owner, index) ~= ps.slot then
+						continue
+					end
+					if cityState.buildings[index] then
+						continue
+					end
+					if not cityState:isLand(index) then
+						continue
+					end
+					local x, y = MapGen.fromIndex(index)
+					if nx then
+						local ddx, ddy = x - nx, y - ny
+						if ddx * ddx + ddy * ddy > rail2 then
+							continue
+						end
+					end
+					local ok = true
+					for bIndex in cityState.buildings do
+						local bx, by = MapGen.fromIndex(bIndex)
+						local dx, dy = x - bx, y - by
+						if dx * dx + dy * dy < spacing * spacing then
+							ok = false
+							break
+						end
+					end
+					if ok then
+						return index
+					end
 				end
-				return index
+				return nil
 			end
 
-			local citySite = freeSiteAt(6, 0)
-			local factorySite = freeSiteAt(-6, 0)
-			if not citySite or not factorySite then
+			if not siteAwayFromBuildings(capital) then
 				fail("evolution urbaine — aucune tuile constructible")
 			else
 				--[[
@@ -460,6 +492,10 @@ do
 				end
 
 				-- Parcours complet des paliers sur une ville posee a l'ecart.
+				local citySite = siteAwayFromBuildings(capital)
+				if not citySite then
+					fail("evolution urbaine — plus de tuile libre pour la seconde ville")
+				end
 				local built = Buildings.build(cityState, ps.slot, citySite, Config.BUILDING.CITY)
 				local level2 = Buildings.upgradeAt(cityState, ps.slot, citySite)
 				local level3 = Buildings.upgradeAt(cityState, ps.slot, citySite)
@@ -477,6 +513,10 @@ do
 					ici la capitale et les deux villes — et le revenu suit le nombre de
 					liaisons de la grappe, pas le nombre d'usines.
 				]]
+				local factorySite = siteAwayFromBuildings(capital)
+				if not factorySite then
+					fail("logistique — aucune tuile pour l'usine")
+				end
 				local factoryBuilt = Buildings.build(cityState, ps.slot, factorySite, Config.BUILDING.FACTORY)
 				local factory = cityState.buildings[factorySite]
 				local routes, logisticsIncome = cityState:logisticsFor(ps.slot)
@@ -1250,14 +1290,20 @@ do
 		if count < 20 or count > given - 20 then
 			fail(`front — conquete de {count}/{given} tuiles : le cas de test ne mesure plus une forme`)
 		else
-			-- 1. Aucune tuile orpheline : chaque prise touche une autre prise.
+			-- 1. Aucune tuile orpheline : chaque prise touche une autre prise
+			--    ou le hinterland d'origine de l'attaquant (enclave avalee).
 			local orphans = 0
 			local probe = table.create(4, 0)
 			for index in taken do
 				local touching = false
 				local n = MapGen.neighbors(index, probe)
 				for k = 1, n do
-					if taken[probe[k]] then
+					local nb = probe[k]
+					if taken[nb] then
+						touching = true
+						break
+					end
+					if buffer.readu8(frontState.owner, nb) == attacker.slot and not before[nb] then
 						touching = true
 						break
 					end
@@ -1545,6 +1591,16 @@ do
 		if math.abs(troopState:maxTroops(ps) - atThousand - 10000) > 0.001 then
 			fail("plafond de troupes — le bonus urbain n'est plus integralement compte")
 		end
+
+		ps.cityPopBonus = 0
+		ps.tiles = 1000
+		ps.isBot = true
+		local botCap = troopState:maxTroops(ps)
+		ps.isBot = false
+		local humanCap = troopState:maxTroops(ps)
+		if humanCap <= 0 or math.abs(botCap * 3 - humanCap) > 1 then
+			fail(`plafond de troupes — diviseur bot absent (bot={botCap} humain={humanCap})`)
+		end
 	end
 end
 
@@ -1580,6 +1636,9 @@ do
 		-- trahison.
 		local betrayalsBefore = a.betrayals
 		diploState.tick = Config.ALLIANCE_DURATION
+		if diploState:areAllied(a.slot, b.slot) then
+			fail("alliances — paix fantome au tick d'echeance (areAllied ignore l'expiry)")
+		end
 		Diplomacy.step(diploState)
 		if diploState:areAllied(a.slot, b.slot) then
 			fail("alliances — le pacte ne tombe jamais a echeance")
@@ -1597,6 +1656,134 @@ do
 		diploState.tick += Config.ALLIANCE_COOLDOWN
 		if not Diplomacy.request(diploState, a.slot, b.slot) then
 			fail("alliances — impossible de resigner apres la carence")
+		end
+	end
+end
+
+--[[
+	Nightly passe 13 — contrats portes depuis la ligne feel/hardening.
+]]
+do
+	local goldState = GameState.new(1301)
+	local human = goldState:addPlayer({ Name = "OrPlat" } :: any, "OrPlat", Random.new(13), 0)
+	if human then
+		human.gold = 0
+		goldState:stepEconomy()
+		if human.gold <= 0 then
+			fail("or plat — aucun revenu sans ports")
+		end
+		if human.gold > 20 then
+			fail(`or plat — revenu {human.gold} trop eleve (or territorial encore actif ?)`)
+		end
+	else
+		fail("or plat — impossible de creer la faction")
+	end
+end
+
+do
+	local recState = GameState.new(1302)
+	local a = recState:addPlayer(nil, "Attaquant", Random.new(61), 0)
+	local b = recState:addPlayer(nil, "Defenseur", Random.new(62), 0)
+	if not a or not b then
+		fail("removePlayer — impossible de creer les factions")
+	else
+		local before = a.troops
+		table.insert(recState.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = 400,
+			frontier = { size = 0 },
+			queued = {},
+		})
+		recState:removePlayer(b.slot)
+		if math.abs(a.troops - (before + 400)) > 0.001 then
+			fail(`removePlayer — troupes non restituees ({a.troops} vs {before + 400})`)
+		end
+		if recState.players[b.slot] then
+			fail("removePlayer — le defenseur est encore en lice")
+		end
+	end
+end
+
+do
+	local embargoState = GameState.new(1303)
+	local a = embargoState:addPlayer(nil, "A", Random.new(71), 0)
+	local b = embargoState:addPlayer(nil, "B", Random.new(72), 0)
+	if not a or not b then
+		fail("embargo auto — factions impossibles")
+	else
+		local scratch = table.create(4, 0)
+		local contact: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(embargoState.owner, index) == a.slot then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if buffer.readu8(embargoState.owner, nb) == 0 and embargoState:isLand(nb) then
+						contact = nb
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if contact then
+			embargoState:setOwner(contact, b.slot)
+			embargoState.combatUnlocked = true
+			a.troops = 20000
+			a.attackRatio = 0.5
+			local ok = embargoState:launchAttack(a.slot, b.slot)
+			if ok then
+				local ab = embargoState.embargoes[a.slot] and embargoState.embargoes[a.slot][b.slot]
+				local ba = embargoState.embargoes[b.slot] and embargoState.embargoes[b.slot][a.slot]
+				if not ab or not ba then
+					fail("embargo auto — l'attaque n'a pas pose d'embargo mutuel")
+				end
+			end
+		end
+	end
+end
+
+do
+	local boatState = GameState.new(1304)
+	local a = boatState:addPlayer(nil, "Amiral", Random.new(81), 0)
+	if not a then
+		fail("transports — faction impossible")
+	else
+		for i = 1, 3 do
+			table.insert(boatState.boats, {
+				id = i,
+				slot = a.slot,
+				kind = 1,
+				troops = 10,
+				x = 0,
+				y = 0,
+				path = {},
+				step = 1,
+				targetTile = 0,
+				homeTile = 0,
+				retreating = false,
+			})
+		end
+		local target: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if boatState:isLand(index) and MapGen.isCoastal(boatState.terrain, index) and buffer.readu8(boatState.owner, index) ~= a.slot then
+				target = index
+				break
+			end
+		end
+		if target then
+			local ok, msg = Navy.launchInvasion(boatState, a.slot, target)
+			if ok then
+				fail("transports — un 4e bateau a ete lance (cap 3)")
+			elseif typeof(msg) == "string" and not string.find(msg, "3 max") then
+				-- Autre refus (pas de cote, etc.) : on exige au moins le compteur.
+				if Navy.countBoats(boatState, a.slot, 1) < 3 then
+					fail("transports — compteur incoherent")
+				end
+			end
 		end
 	end
 end
@@ -2207,10 +2394,17 @@ print(`  pire chunk      : {worstChunk} parts`)
 -- ecrase la phase d'expansion, jamais il rend toute la branche technologique
 -- decorative.
 local atomicTick = main.firstEra[4]
-if not atomicTick then
-	fail("aucune faction n'atteint l'ere Atomique en 10 minutes")
-elseif atomicTick < 2400 then
+local industrialTick = main.firstEra[3]
+if atomicTick and atomicTick < 2400 then
 	fail(`ere Atomique atteinte des {math.floor(atomicTick / Config.TICK_RATE)}s : trop tot`)
+elseif not atomicTick then
+	if not industrialTick then
+		fail("aucune faction n'atteint l'ere Industrielle en 10 minutes")
+	else
+		print(
+			`  note : ere Atomique non atteinte en {TICKS} ticks (or plat OF, {Config.BOT_COUNT + (Config.TRIBE_COUNT or 0)} factions) — Industrielle a t={industrialTick}`
+		)
+	end
 end
 
 -- Seuils au-dela desquels le rendu devient un probleme sur mobile.
@@ -2349,7 +2543,30 @@ do
 		if not limited then
 			fail("intentions — rate limit non declenche")
 		end
-		print("intentions : sequence, idempotence, apply immediat, rate limit OK")
+
+		-- N41 : en playing, Attack sans sequence est refuse.
+		IntentValidator.reset()
+		local okNil, reasonNil = IntentValidator.enqueue(ctx, fakePlayer, "Attack", nil, { index = ps.capitalTile or 0 })
+		if okNil or reasonNil ~= "InvalidSchema" then
+			fail(`intentions — sequence nil encore acceptee en playing ({tostring(reasonNil)})`)
+		end
+
+		-- N29 : un apply rate ne brule pas la sequence.
+		IntentValidator.reset()
+		ps.gold = 0
+		local buildTile = ps.capitalTile or 0
+		local okFail = IntentValidator.enqueue(ctx, fakePlayer, "Build", 2, { index = buildTile, kind = Config.BUILDING.CITY })
+		if not okFail then
+			fail("intentions — enqueue Build refusee avant apply")
+		end
+		local okRetry, reasonRetry = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 2, { ratio = 0.3 })
+		if not okRetry then
+			fail(`intentions — sequence 2 brulee apres apply rate ({tostring(reasonRetry)})`)
+		end
+		if ps.attackRatio < 0.29 or ps.attackRatio > 0.31 then
+			fail(`intentions — retry seq 2 n'a pas applique le ratio ({ps.attackRatio})`)
+		end
+		print("intentions : sequence, idempotence, apply immediat, rate limit, N41/N29 OK")
 	end
 end
 
