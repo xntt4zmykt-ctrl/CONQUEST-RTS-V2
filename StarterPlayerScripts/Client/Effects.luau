@@ -71,7 +71,8 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- Distinct de V119 (goldPopup goldFree, Overlay). Distinct de V82
 	-- (ConquestPulse pulseRot). Distinct de V83 (SelectionRing).
 	-- Distinct de V121 (tileFlash flashFree). Distinct de V122
-	-- (conquestPulse pulseFree). Pas reentrant.
+	-- (conquestPulse pulseFree). Distinct de V123 (BuildRing ringFree,
+	-- BuildingModels). Pas reentrant.
 	-- Evenement vague mineure (count >= 4), pas 60 Hz.
 	self.textFree = {} :: { Part }
 

@@ -26,6 +26,19 @@ local Config = require(Shared:WaitForChild("Config"))
 
 local BuildingModels = {}
 
+-- V123 : free-list BuildRing PAR module BuildingModels (pas pulseFree /
+-- flashFree / blastFree). Recette feel N166 inline — ne PAS merger
+-- 6cec / 595e / 6512. Leftover Parent = nil, pas Destroy. Name
+-- BuildRing conserve (V85). Size visuel (0.5, 4, 4) — pas feel
+-- (0.4, 3, 3). Transparency 0.25 — pas feel 0.4. Euler N136 inline
+-- (pas de ringRot cuit, pas Effects.pulseRot). Parent = model (pas
+-- overlay.root). PointLight enfant FindFirstChildWhichIsA. Distinct
+-- de V122 (conquestPulse pulseFree, Effects). Distinct de V121
+-- (tileFlash flashFree). Distinct de V113 (Blast blastFree, Overlay).
+-- Dust / scaffold Destroy conserves. Pas reentrant. Evenement
+-- chantier, pas 60 Hz.
+BuildingModels.ringFree = {} :: { Part }
+
 local B = Config.BUILDING
 
 local CONCRETE = Color3.fromRGB(172, 176, 184)
@@ -568,15 +581,39 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 		):Play()
 	end
 
-	local ring = Instance.new("Part")
+	-- V123 : recycler BuildRing. Color 255,200,110 + Transparency 0.25
+	-- + Size (0.5, 4, 4) + CFrame.new(ground) * fromEulerAnglesYXZ(0, 0,
+	-- rad(90)) AVANT Tween (un leftover Size 0.5×18×18 / Transparency 1
+	-- du chantier precedent). Recette feel N166 inline — ne PAS merger
+	-- 6cec / 595e / 6512. Name BuildRing conserve (V85). Size visuel
+	-- (0.5, 4, 4) inchange — pas feel (0.4, 3, 3). Transparency 0.25
+	-- inchangee — pas feel 0.4. Euler N136 deja inline (V85) — ne pas
+	-- cuire ringRot, ne pas reutiliser Effects.pulseRot. Parent = model
+	-- (pas overlay.root). Pas de pool partage avec pulseFree / flashFree
+	-- / blastFree. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
+	-- Distinct de V122 (conquestPulse pulseFree, Effects). Distinct de
+	-- V121 (tileFlash flashFree). Distinct de V113 (Blast blastFree).
+	-- Distinct de V85 (euler deja). Delay total+0.3 inchange. Tween
+	-- Size (0.5, 18, 18) + Transparency 1 inchanges. Dust / scaffold
+	-- Destroy conserves. Ne pas changer conquestPulse (V122 deja).
+	-- Ne pas geler Size flame (V74).
+	local ringFree = BuildingModels.ringFree
+	local rn = #ringFree
+	local ring = if rn > 0 then ringFree[rn] else nil
+	if ring then
+		ringFree[rn] = nil
+	else
+		ring = Instance.new("Part")
+		ring.Name = "BuildRing"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+	end
 	ring.Name = "BuildRing"
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
 	ring.Color = Color3.fromRGB(255, 200, 110)
 	ring.Transparency = 0.25
 	ring.Size = Vector3.new(0.5, 4, 4)
@@ -590,11 +627,17 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
-	local light = Instance.new("PointLight")
+	-- V123 : PointLight enfant reutilise. FindFirstChildWhichIsA, pas
+	-- Instance.new a chaque chantier. Brightness / Range / Color
+	-- reecrits. Recette feel N166 / analogique V113.
+	local light = ring:FindFirstChildWhichIsA("PointLight")
+	if not light then
+		light = Instance.new("PointLight")
+		light.Parent = ring
+	end
 	light.Color = Color3.fromRGB(255, 190, 100)
 	light.Brightness = 2.2
 	light.Range = 22
-	light.Parent = ring
 
 	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.5, 18, 18),
@@ -627,9 +670,8 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	end)
 
 	task.delay(total + 0.3, function()
-		if ring.Parent then
-			ring:Destroy()
-		end
+		ring.Parent = nil
+		ringFree[#ringFree + 1] = ring
 		if dust.Parent then
 			dust:Destroy()
 		end
