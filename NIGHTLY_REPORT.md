@@ -1,52 +1,52 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 12)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 13)
 
-Déclencheur : ouverture de la **PR #36** (`cursor/analyse-nocturne-du-codebase-9975`) — inbound transports/missiles, aura defense coupée, specs N46–N48.
+Déclencheur : ouverture de la **PR #38** (`cursor/analyse-nocturne-du-codebase-fd0b`) — request croisée, cadran/colis, convois inbound, specs N49–N51.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-fd0b`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#36.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-d425`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#38.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes et slot cible sont dérivés serveur.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion et slot cible diplomatique sont dérivés serveur.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #36 (passe 11) : claims vérifiés.** Transports inbound `kind==1` restitués 100 % avant `setOwner`, missiles contrat B (`toIndex(floor(tx),floor(ty))`, pas de refund, tiers conservé), `applyDefenseAura` plus appelé. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #38 (passe 12) : claims vérifiés.** `requestIsLive` (inverse périmée enfilée, inverse live → pacte), cadran/colis purgés au recycle, convois `kind==2` inbound coulés avant `setOwner`. Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #36 a documenté (N46, N47, N48)**. Recettes = hardening 915c / 1dbe / 69b4, pas une nouvelle sémantique. Feel n’avait toujours pas `requestIsLive`, cadran/colis recycle, ni convois `kind==2`.
+Cette passe a **livré ce que #38 a documenté (N49, N50, N51)**. Recettes = hardening N28 restant / N33 / fd1e option B, pas une nouvelle sémantique. Feel n’avait toujours pas `targetSlot` au launch, `findSpawn` anti-splash, ni convoi vs PORT détruit au combat.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #36
+## 2. Revue PR #38
 
-| Claim #36 | Réalité à l’ouverture |
+| Claim #38 | Réalité à l’ouverture |
 |---|---|
-| Transports inbound restitués (N43) | Oui. `kind==1`, avant `setOwner`, 100 %, pas de require Navy. |
-| Missiles inbound contrat B (N44) | Oui. `toIndex(floor(tx),floor(ty))`, pas de refund, tiers conservé. |
-| `applyDefenseAura` writes mortes (N45 A) | Oui. Index `bunkersBySlot` inchangé. |
-| Specs N46–N48 | **Corrigés ici.** |
+| `Diplomacy.request` inverse périmée (N46) | Oui. `requestIsLive` ; inverse live → `accept` ; périmée → clear + enfiler. `accept` / `areAllied` non touchés. |
+| Cadran / colis recycle (N47) | Oui. `doomWarnedAt` / `doomUnderSince` / `tradeDeliveries` purgés avant héritage. `stepDoomsday` inchangé. |
+| Convoi inbound `kind==2` (N48) | Oui. Coulé avant `setOwner`, pas d’or, tiers conservé. |
+| Specs N49–N51 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, #17/#18/#20/#23/#25/#27/#30/#31/#33/#35 hardening, #19/#21/#22/#24/#26/#28/#29/#32/#34/#36 feel. **#36 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30←#31←#33←#35) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #37, feel jusqu’à #38. **#38 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←#20←#23←#25←#27←#30←#31←#33←#35←#37) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N46–N48 du rapport #36.
+Feel #19 inchangé. Pas de réinvention : N49–N51 du rapport #38.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `Diplomacy.request` bloqué par une inverse périmée (N46) | `Diplomacy.luau` | `accept` refuse déjà une expiry et **return false sans enfiler**. `Bots.step` tourne **avant** `Diplomacy.step`. Recette 915c : `requestIsLive` ; inverse live → `accept` ; périmée → clear + enfiler. **`accept` / `areAllied` non touchés.** |
-| Cadran / colis au recycle (N47) | `GameState.luau` | `doomWarnedAt` / `doomUnderSince` indexés par slot ; `tradeDeliveries` par tuile (`delivery.slot` = payeur). Recette 1dbe : purge **après** destroy / inbound boats-missiles / `setOwner` ; ceinture `addPlayer`. `stepDoomsday` inchangé. |
-| Convoi marchand inbound (N48) | `GameState.luau` | `kind==2` d’autrui survivait ; JoinRequest + PORT sur la même tuile → **les deux camps encaissent**. Recette 69b4 contrat B : couler avant `setOwner` via `owner[targetTile]`, pas d’or, pas de malus vendeur, tiers conservé. Pas de require Navy. |
+| `retreatBoats` ignore un flip de côte (N49) | `Navy.luau`, `SystemsBootstrap.luau` | `launchInvasion` pose `targetSlot` (faction visée). `retreatBoats` filtre ce champ (fallback `owner[targetTile]` si absent). Le wrap `retreatAttack` appelle **toujours** `retreatBoats` : un 2e geste rappelle les transports tardifs. **N10.8 / inbound 100 % N43 non touchés.** |
+| `findSpawn` ignore splash / fallout (N50) | `GameState.luau` | **C1+C2.** C1 : refuse un centre dont une ogive en vol a `toIndex(floor(tx),floor(ty))` à distance `missile.radius` ou `NUKE_STATS[kind].radius` (+ `SPAWN_RADIUS`). C2 : refuse `fallout[index] > tick` dans le disque. Contrat B (N44) inchangé — on n’annule pas la frappe. MIRV bus `radius=0` ignoré (N54). |
+| Convoi vs PORT détruit au combat (N51) | `Navy.luau` | Recette fd1e / PR #37 option B. Dans `Navy.step`, avant resolveLanding : `kind==TRADE` et `buildings[targetTile]` n’est plus un PORT → `table.remove`. Capture (`transferBuilding`) : le PORT existe encore → le convoi continue. Pas d’or, pas de malus vendeur. N48 recycle inchangé. Pas de `destSlot` (≠ N49 `targetSlot`). |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), `retreatBoats` / `targetSlot` (N49), `findSpawn` splash (N50), convoi vs PORT détruit au combat (N51), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK (cadran non effacé si `tiles==0`).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), warships grille (N22), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), `claimSpawn` splash (N52), débarquement auto vs flip (N53), MIRV bus vs spawn (N54), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK.
 
 ---
 
@@ -54,7 +54,7 @@ Feel #19 inchangé. Pas de réinvention : N46–N48 du rapport #36.
 
 ```
 init.server  → IntentValidator.enqueue (seq obligatoire en playing, apply immédiat) → tick :
-  Bots.step → Navy.step (syncCarriers si dirty) → Nukes.step → Trade.step → Diplomacy.step → GameState.step → replicate(fireDeployed)
+  Bots.step → Navy.step (syncCarriers si dirty ; coule TRADE si PORT absent) → Nukes.step → Trade.step → Diplomacy.step → GameState.step → replicate(fireDeployed)
 SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), BoatFront, AimFront, tribus, spawn bots différé 15 s
 ```
 
@@ -66,75 +66,76 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **`tryAnnex`** = BFS depuis les voisins défenseur du seed déjà capturé ; océan abort ; pool N37-like.
 - **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, pas un scan 10 Hz.
 - **Posted bunker** = index `bunkersBySlot`, pas le hash `buildings` ni le buffer `defense` (écritures coupées, N45).
-- **Inbound `removePlayer`** = diplo + transports `kind==1` (100 %) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`. Bateaux/missiles **du** partant détruits.
-- **`Diplomacy.request`** = inverse live → acceptation ; inverse périmée → clear + enfiler (plus de silence d’un tick).
-- **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
+- **Inbound `removePlayer`** = diplo + transports `kind==1` (100 %, lit **`owner[targetTile]`** même après N49) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`. Bateaux/missiles **du** partant détruits.
+- **`Diplomacy.request`** = inverse live → acceptation ; inverse périmée → clear + enfiler.
+- **Retraite navale** = `targetSlot` au launch ; wrap 2e geste rappelle les tardifs.
+- **`findSpawn`** = disque neutre **et** hors crater ogive / fallout chaud. `claimSpawn` (clic humain) **pas encore** (N52).
+- **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. `targetSlot` bateau **non** répliqué (snapshot = id/slot/x/y/troops/kind). MatchUpdate / roster → tous (menu). Playing 10 Hz ; lobby vide et ended → 1 Hz.
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N49–N51)
+## 5. Issues worker-ready (nouveaux, N52–N54)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N32/N34/N36–N48 = faits. N27 = doc only.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N22, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N32/N34/N36–N51 = faits. N27 = doc only.
 
 ---
 
-### ISSUE-N49 — `retreatBoats` ignore un flip de côte (feel)
+### ISSUE-N52 — `claimSpawn` ignore splash / fallout (feel)
 
-**Priorité :** P2 combat / comptabilité navale. Spécifié sur hardening 915c (N28 restant) ; **absent de la ligne feel**. Distinct de N43 (inbound `removePlayer` déjà fermé) et de N10.8 (malus allié en mer).
+**Priorité :** P3 nucléaire / spawn humain. Suite de N50 (C1+C2 livrés dans `findSpawn` / `autoPlacePending` seulement).
 
-**Problème :** `Navy.retreatBoats(state, slot, targetOwner)` filtre `buffer.readu8(owner, boat.targetTile) == targetOwner`. Un transport n’a **pas** de `targetSlot` au `launchInvasion`. Conséquences :
+**Problème :** un humain en `awaitingSpawn` clique une tuile. `ChantierB.claimSpawn` accepte toute terre neutre (ou le plus proche dans r=6) **sans** lire `state.missiles` ni `state.fallout`. `placeDisk` pose la capitale dans le crater. N50 a fermé le chemin RNG / timeout ; le clic contourne.
 
-1. `retreatAttack(A, B)` ne rappelle **pas** une invasion si la côte a déjà changé de main (neutre, tiers) — les troupes restent en mer vers un quai qui n’est plus B.
-2. Le wrapper `SystemsBootstrap.retreatAttack` appelle `retreatBoats` même si `origRetreat` a dit « déjà ordonnée » : un 2e geste peut encore rappeler des bateaux tardifs.
-
-**Pourquoi 20K CCU :** late-game invasions + flip de côte le même tick que la retraite. Sans `targetSlot`, la retraite est une lecture de carte, pas une intention.
+**Pourquoi 20K CCU :** JoinRequest + clic spawn en fin de partie nucléaire. Moins chaud que N50 (il faut un humain, pas un bot auto-placé) mais c’est le seul chemin spawn encore naïf.
 
 **Worker :**
 
-1. Stocker `targetSlot` (faction visée au launch) sur le transport dans `Navy.launchInvasion`.
-2. `retreatBoats` filtre `boat.targetSlot == targetOwner` (fallback `owner[targetTile]` si le champ manque — bateaux déjà en mer).
-3. Test : invasion en mer vs B → flip de la côte à un tiers → `retreatAttack(A, B)` rappelle le transport. Second test : wrapper 2e geste — documenter si les bateaux tardifs doivent partir.
-4. Fichiers : `Navy.luau` (`launchInvasion`, `retreatBoats`), éventuellement `SystemsBootstrap.retreatAttack`, `tests/simulate.luau`.
+1. Extraire un helper `isSpawnSafe(state, center)` (C1 ogive + C2 fallout, même formule que `findSpawn` : rayon `missile.radius` ou `NUKE_STATS[kind].radius`, + `SPAWN_RADIUS` ; `fallout[index] > tick` dans le disque). L’appeler depuis `findSpawn` **et** `claimSpawn` (si le `best` n’est pas sûr → refuser ou chercher plus loin, pas poser quand même).
+2. Ne **pas** annuler une frappe tiers (N44 / N50). Pas de refund. MIRV bus `radius=0` = N54, pas ici.
+3. Test : missile ATOM en vol sur une tuile neutre, `claimSpawn(slot, tile)` refuse (ou décale hors rayon). `findSpawn splash` / `findSpawn fallout` / `nuke third-party` restent verts.
+4. Fichiers : `ChantierB.luau` (`claimSpawn` / éventuellement helper partagé), `GameState.findSpawn`, `tests/simulate.luau`.
 
-**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N33). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % N43). Recette = hardening N28 restant. **N49 feel ≠ N28 feel historique (RequestSnapshot mort, déjà ouvert).**
-
----
-
-### ISSUE-N50 — `findSpawn` ignore splash / fallout d’une frappe tiers (feel)
-
-**Priorité :** P3 nucléaire / spawn. Reste du contrat C (hardening N33). Contrat B (ogive visée sur le disparu) = **N44 fait**.
-
-**Problème :** une frappe **déjà visée sur un voisin** dont le cratère recouvre l’ancien capital / le `SPAWN_RADIUS` de `findSpawn`. `addPlayer` choisit un disque terrestre libre, sans lire `state.missiles` ni `state.fallout`. L’héritier spawn, `Nukes.step` explose, SAM de l’héritier n’existait pas au `engaged`.
-
-**Pourquoi 20K CCU :** moins chaud que N44 (il faut un voisin sous missile + spawn coincé dans le rayon). Distinct du contrat B déjà livré (`nuke third-party` doit rester vert).
-
-**Worker :**
-
-1. Ne **pas** rouvrir le contrat B. Options : (C1) `findSpawn` refuse un centre dont un missile en vol a `toIndex(floor(tx),floor(ty))` à distance `NUKE_STATS[kind].radius` (ogive : `missile.radius`) ; (C2) `findSpawn` refuse `state.fallout[index] > tick` ; (C3) documenter « le territoire, pas le joueur » pour le splash tiers.
-2. Test : A tire sur C (capitale), `removePlayer(B)`, forcer le spawn de l’héritier dans le rayon (tuiles libres), `Nukes.step`. Assert selon C1/C2/C3. `nuke third-party` inchangé.
-3. Fichiers : `GameState.findSpawn` / `addPlayer`, éventuellement `Nukes`, `tests/simulate.luau`.
-
-**Contraintes :** ne pas annuler une frappe tiers (régression N44). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Recette = hardening N33. **N50 feel ≠ N33 feel historique (`BOAT_LANDING_BONUS` mort, toujours ouvert).**
+**Contraintes :** pas de RemoteFunction. Ne pas poser un disque à cheval sur un crater « pour dépanner ». Ne pas toucher `stripTerritory`. Recette = N50 C1+C2 étendu au clic. **N52 feel ≠ N33 feel historique (`BOAT_LANDING_BONUS` mort).**
 
 ---
 
-### ISSUE-N51 — Convoi vs PORT détruit au combat (cap `MAX_TRADE_SHIPS`) (feel)
+### ISSUE-N53 — Débarquement auto sur une côte flippée (feel)
 
-**Priorité :** P3 économie / congestion. Reste de N48 hors recycle. Spécifié sur hardening 69b4 (N35).
+**Priorité :** P3 combat naval. Suite de N49 : `retreatBoats` honore `targetSlot`, mais `Navy.step` **n’en tient pas compte**.
 
-**Problème :** N48 coule le convoi inbound au **recycle de slot**. Si le PORT d’arrivée est **détruit au combat** (`destroyBuilding` / capture) **sans** `removePlayer`, le `kind==2` reste en mer jusqu’à `step > #path`, puis `resolveTrade` no-op (bâtiment absent). Il occupe `MAX_TRADE_SHIPS` (24) pendant tout le transit. Pas d’or fantôme (pas de rebuild du même tick par un héritier — ça, N48 l’a fermé).
+**Problème :** si le joueur **ne** retraite **pas**, un transport dont `targetSlot == B` continue vers `targetTile` même si `owner[targetTile]` est devenu C (neutre / tiers). À l’arrivée : `resolveLanding` lit le proprio courant, `setOwner` + `seedBeachhead(A, C, …)`. Conséquence : une invasion ordonnée contre B ouvre un pont contre C sans second clic. Distinct de N49 (geste retraite) et de N10.8 (allié en mer → retraite 25 %).
 
-**Pourquoi 20K CCU :** late-game raids de ports + 24 slots globaux. Un camp peut saturer le cap avec des convois morts. Distinct de N20 (gold HUD) et du contrat B recycle.
+Le wrap 2e geste (N49) ne couvre que le cas « le joueur reclique retraite ». Un AFK / bot qui a lancé l’invasion ne reclique pas.
+
+**Pourquoi 20K CCU :** late-game invasions + flip de côte le même transit. Sans garde, un shard 18 factions accumule des têtes de pont « accidentelles » hors cap mental du joueur.
 
 **Worker — choisir UNE option :**
 
-1. **(A)** stocker `destSlot` au spawn, `resolveTrade` exige `destination.slot == destSlot`, et `Navy.step` coule dès que `buildings[targetTile]` n’est plus un PORT ; **(B)** `Navy.step` coule tout `kind==2` dont le PORT d’arrivée a disparu (pas d’attente fin de path) ; **(C)** documenter la congestion comme volontaire.
-2. **Recette livrée sur hardening fd1e / PR #37 = option B.** Dans `Navy.step`, avant resolveLanding : si `kind==TRADE` et `buildings[targetTile]` n’est plus un PORT → `table.remove`. Capture (`transferBuilding`) : le PORT existe encore → le convoi continue. Pas d’or, pas de malus vendeur.
-3. Si A ou B : pas d’or. Ne pas taxer le vendeur. Ne pas recâbler N48 (recycle déjà coulé dans `removePlayer`).
-4. Test : convoi A→port B, `destroyBuilding(portB)` **sans** `removePlayer`, `Navy.step`. Assert : plus de `kind==2` (A/B) **ou** commentaire + assert volontaire (C). Second test : capture du PORT (transfer) → convoi survit. Troisième : N48 recycle toujours vert.
-5. Fichiers : `Navy.luau` (`Navy.step` ; ne pas toucher `spawnTradeShips` si B), `tests/simulate.luau`.
+1. **(A)** `Navy.step` : si `kind==TRANSPORT` et `not retreating` et `typeof(targetSlot)=="number"` et `owner[targetTile] ~= targetSlot` et `owner ~= boat.slot` → `beginRetreat` (même classe que allié / océan). **(B)** documenter « on débarque chez qui tient la plage » (comportement actuel) + test d’assert volontaire. **(C)** retarget `targetSlot` au proprio courant (mutation d’intention serveur — déconseillé).
+2. Si A : fallback identique N49 (pas de `targetSlot` → lire `owner`). Ne pas maluser une côte déjà nôtre (own-tile 100 % inchangé). Ne pas recâbler inbound `removePlayer` (lit encore `owner[targetTile]`, volontaire).
+3. Test A : invasion A→B, flip côte vers C, **sans** `retreatAttack`, `Navy.step` jusqu’à arrivée. Assert : transport en retraite / coulé, **pas** de `seedBeachhead` vs C. Test B : pont vs C + commentaire. `boat retreat flip` (N49) et `boat inbound` (N43) restent verts.
+4. Fichiers : `Navy.luau` (`Navy.step` seulement si A), `tests/simulate.luau`.
 
-**Contraintes :** pas de `require(Navy)` depuis GameState. Ne pas toucher `TRADE_GOLD_*`. Ne pas mixer avec N49 `targetSlot` transports (champs distincts : `destSlot` convoi ≠ `targetSlot` invasion). Pas de RemoteFunction. Recette = **fd1e / PR #37**, pas une nouvelle sémantique. **N51 feel ≠ N35 feel historique (aura, déjà fait).**
+**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N33). Ne pas merger `targetSlot` convoi (N51 n’en a pas). **N53 feel ≠ N28 feel historique (RequestSnapshot).**
+
+---
+
+### ISSUE-N54 — `findSpawn` ignore un MIRV bus en vol (feel)
+
+**Priorité :** P3 nucléaire / spawn. Trou restant de N50 C1.
+
+**Problème :** C1 refuse seulement `blast > 0`. Un MIRV a `NUKE_STATS[3].radius = 0` (le bus ne cratère pas ; les ogives portent `missile.radius` après `MIRV_SEPARATION`). Tant que le bus n’a pas scindé, `findSpawn` / (futur N52) `claimSpawn` peuvent poser une capitale dans le `spread` de la cible. Après séparation, N50 C1 s’applique aux ogives — trop tard si le disque est déjà posé.
+
+**Pourquoi 20K CCU :** une frappe MIRV late-game + recycle de slot / clic spawn pendant le vol du bus. Plus rare que ATOM/H (N50) mais le MIRV est *l’*arme de fin de partie.
+
+**Worker :**
+
+1. Si `kind == MIRV` et `not missile.warhead` : traiter le rayon d’exclusion comme `stats.spread` (ou `warheadRadius + spread`, documenter le choix) autour de `(floor(tx), floor(ty))`. Ogives déjà scindées : N50 C1 inchangé (`missile.radius`).
+2. Ne **pas** annuler le MIRV (N44). Pas de refund. Ne pas inventer un crater bus (radius reste 0 à la détonation).
+3. Test : MIRV en vol (`progress < MIRV_SEPARATION`) visé sur une poche neutre, `findSpawn` refuse. Après mock séparation (insérer des ogives `warhead=true`), C1 ogive continue de refuser. `nuke third-party` inchangé.
+4. Fichiers : `GameState.findSpawn` (et le helper N52 s’il existe), `tests/simulate.luau`. `Nukes.luau` seulement si on lit `spread` via une fonction déjà exportée — **pas** de `require Nukes` depuis GameState.
+
+**Contraintes :** pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius` / `spread`, pas une constante magique. Ne pas casser N50 C1 ATOM/H. **N54 feel ≠ N26 feel historique (SAM).**
 
 ---
 
@@ -187,14 +188,17 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N43 | Transports inbound `removePlayer` (feel) | P2 | **fait** passe 11 |
 | N44 | Missiles inbound vs slot recyclé | P2 | **fait** passe 11 |
 | N45 | `applyDefenseAura` writes mortes | P3 | **fait** passe 11 |
-| N46 | `Diplomacy.request` inverse périmée | P2 | **fait** cette passe (port 915c) |
-| N47 | Cadran / colis recycle feel | P2 | **fait** cette passe (port 1dbe) |
-| N48 | Convoi marchand inbound | P2 | **fait** cette passe (port 69b4) |
-| N49 | `retreatBoats` / `targetSlot` après flip | P2 | **nouveau** (port hardening N28 restant) |
-| N50 | `findSpawn` splash / fallout | P3 | **nouveau** (port hardening N33) |
-| N51 | Convoi vs PORT détruit au combat | P3 | **nouveau** (port hardening N35) |
+| N46 | `Diplomacy.request` inverse périmée | P2 | **fait** passe 12 |
+| N47 | Cadran / colis recycle feel | P2 | **fait** passe 12 |
+| N48 | Convoi marchand inbound | P2 | **fait** passe 12 |
+| N49 | `retreatBoats` / `targetSlot` après flip | P2 | **fait** cette passe (port hardening N28 restant) |
+| N50 | `findSpawn` splash / fallout | P3 | **fait** cette passe (C1+C2 ; MIRV bus → N54) |
+| N51 | Convoi vs PORT détruit au combat | P3 | **fait** cette passe (port fd1e / PR #37) |
+| N52 | `claimSpawn` splash / fallout | P3 | **nouveau** (N50 n’a couvert que `findSpawn`) |
+| N53 | Débarquement auto vs côte flippée | P3 | **nouveau** (`Navy.step` ignore `targetSlot`) |
+| N54 | MIRV bus vs `findSpawn` | P3 | **nouveau** (N50 C1 `blast>0` rate radius=0) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -270,15 +274,20 @@ doomsday recycle : timers cadran purges au recycle de slot
 colis recycle : colis / cooldown purges au recycle de slot
 trade inbound : convoi coule, pas d'or a l'heritier
 trade third-party : convoi A→C conserve, or verse
+boat retreat flip : targetSlot honore, 2e geste rappele le tardif
+findSpawn splash : crater d'ogive refuse
+findSpawn fallout : disque chaud refuse
+trade port-detruit : convoi coule, pas d'or
+trade port-capture : PORT transfere, convoi survit
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.37 p95TickMs=1.17
+metrics : ticks=6000 avgChanged=11.3 p95Changed=45 maxChanged=747 avgTickMs=0.36 p95TickMs=1.19
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur. N46–N48 sont server-only : banc client inchangé.
+Client : **34/34 OK** — tous les écrans se construisent et s’exécutent sans erreur. N49–N51 sont server-only : banc client inchangé.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass12.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass13.log`
 
 Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live).
 
@@ -286,6 +295,7 @@ Studio / client Roblox réel : non exercé dans cet environnement (pas de DataMo
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement). `bunkersBySlot` est un champ d’état, pas un module. N46 n’ajoute **pas** de require. N47/N48 n’ajoutent **pas** de `require Navy` / `require Nukes` / `require Trade` depuis `GameState`.
+Pas de cycle. `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState` (snapshot `settledHumans` seulement). `bunkersBySlot` est un champ d’état, pas un module. N49 n’ajoute **pas** de require. N50 n’ajoute **pas** de `require Nukes` depuis `GameState`. N51 n’ajoute **pas** de `require Navy` depuis GameState (la garde vit dans `Navy.step`).
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
+Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
