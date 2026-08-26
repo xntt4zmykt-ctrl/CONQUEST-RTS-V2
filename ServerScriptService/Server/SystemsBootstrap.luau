@@ -80,14 +80,6 @@ function SystemsBootstrap.install()
 				return true, nil
 			end
 
-			local already = false
-			for _, atk in self.attacks do
-				if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
-					already = true
-					break
-				end
-			end
-
 			local aim = if ps then ps.aimTile else nil
 			if ps then
 				ps.aimTile = nil
@@ -98,9 +90,9 @@ function SystemsBootstrap.install()
 				Diplomacy.setEmbargo(self, attackerSlot, targetSlot, true)
 				Diplomacy.setEmbargo(self, targetSlot, attackerSlot, true)
 			end
-			if ok and typeof(aim) == "number" and not already then
+			if ok and typeof(aim) == "number" then
 				for _, atk in self.attacks do
-					if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
+					if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 						AimFront.focus(self, atk, math.floor(aim))
 						break
 					end

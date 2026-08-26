@@ -55,9 +55,15 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
+	-- Une inverse perimee n'est plus une offre : on l'efface et on enfile la notre.
 	local theirs = state.requests[to]
 	if theirs and theirs[from] then
-		return Diplomacy.accept(state, to, from)
+		local invExpiry = theirs[from]
+		if typeof(invExpiry) == "number" and state.tick >= invExpiry then
+			theirs[from] = nil
+		else
+			return Diplomacy.accept(state, to, from)
+		end
 	end
 
 	state.requests[from][to] = state.tick + Config.ALLIANCE_REQUEST_TIMEOUT
@@ -70,6 +76,11 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+		requests[to] = nil
+		return false, "Proposition expiree."
 	end
 	requests[to] = nil
 
@@ -316,10 +327,9 @@ function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: stri
 	local message = `\u{1F4AC} {speaker.name} : {QuickChat.format(entry, targetName)}`
 	if entry.alliesOnly then
 		state:notify(message, "info", slot)
-		local allySet = state.alliances[slot]
-		if allySet then
-			for other in allySet do
-				state:notify(message, "info", other)
+		for otherSlot in state.players do
+			if otherSlot ~= slot and state:areAllied(slot, otherSlot) then
+				state:notify(message, "info", otherSlot)
 			end
 		end
 	else
@@ -481,8 +491,10 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	local allySet = state.alliances[slot]
 	if allySet then
-		for other in allySet do
-			allies[other] = true
+		for other, expiry in allySet do
+			if expiry == true or (typeof(expiry) == "number" and state.tick < expiry) then
+				allies[other] = true
+			end
 		end
 	end
 

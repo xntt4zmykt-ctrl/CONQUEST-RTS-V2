@@ -2335,6 +2335,9 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	if embargoed then
 		status ..= "  \u{2716} embargo"
 	end
+	if d.traitors[slot] then
+		status ..= "  Traître (actif)"
+	end
 
 	-- Marquages de cible visibles sur cette faction : les miens et ceux de mes
 	-- allies. Savoir qu'on est designe est aussi une information — elle invite

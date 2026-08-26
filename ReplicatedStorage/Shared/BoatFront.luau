@@ -44,7 +44,9 @@ function BoatFront.install(GameState)
 	end
 	GameState.__boatFront = true
 
-	-- Débarquement = toujours un Attack séparé avec sourceTile.
+	-- Debarquement = Attack separe avec isBeachhead. sourceTile reste l'ancre
+	-- visuelle ; AimFront pose aussi sourceTile sur un front terre, donc le
+	-- parking ne doit jamais se fier a sourceTile seul.
 	function GameState.seedBeachhead(self, attackerSlot: number, targetSlot: number, troops: number, tile: number)
 		local attack = {
 			attacker = attackerSlot,
@@ -53,19 +55,30 @@ function BoatFront.install(GameState)
 			frontier = Heap.new(),
 			queued = {},
 			sourceTile = tile,
+			isBeachhead = true,
 		}
-		enqueueFront(self, attack, tile)
+		local n = MapGen.neighbors(tile, priorityScratch)
+		local seeded = false
+		for i = 1, n do
+			local nb = priorityScratch[i]
+			if self:isLand(nb) and buffer.readu8(self.owner, nb) == targetSlot then
+				enqueueFront(self, attack, nb)
+				seeded = true
+			end
+		end
+		if not seeded then
+			enqueueFront(self, attack, tile)
+		end
 		table.insert(self.attacks, attack)
 	end
 
-	-- launchAttack ne doit fusionner qu'avec des fronts terre (sourceTile nil).
-	-- On retire temporairement les fronts bateau pendant l'appel original.
+	-- launchAttack ne doit fusionner qu'avec des fronts terre (pas isBeachhead).
 	local origLaunch = GameState.launchAttack
 	function GameState.launchAttack(self, attackerSlot: number, targetSlot: number)
 		local parked = {}
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
-			if atk.sourceTile ~= nil then
+			if atk.isBeachhead then
 				table.insert(parked, atk)
 				table.remove(self.attacks, i)
 			end
@@ -75,13 +88,6 @@ function BoatFront.install(GameState)
 
 		for _, atk in parked do
 			table.insert(self.attacks, atk)
-		end
-
-		-- Marquer le front terre nouvellement créé / renforcé
-		for _, atk in self.attacks do
-			if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
-				-- ok land front
-			end
 		end
 
 		return ok, message

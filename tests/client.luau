@@ -263,6 +263,10 @@ check("identite, ere, diplomatie et classement", function()
 	hud:selectFaction(nil)
 	assert(not hud.diploDrawer.Visible, "la fiche reste ouverte apres deselection")
 
+	hud:selectFaction(6)
+	assert(string.find(hud.diploStatus.Text, "Tra") ~= nil, "la marque de traitre actif n'apparait pas sur la fiche")
+	hud:selectFaction(nil)
+
 	-- La nation 7 est designee comme cible par l'allie : la fiche doit le dire,
 	-- c'est l'information qui declenche une rupture avant la frappe.
 	hud:selectFaction(7)

@@ -235,6 +235,7 @@ function GameState.new(seed: number): GameState
 	self.tradeDeliveries = {}
 	self.tradeCooldowns = {}
 	self.mode = nil
+	self.settledHumans = {}
 	-- L'etat brut reste immediatement jouable pour les simulations et les
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
@@ -910,13 +911,75 @@ function GameState.removePlayer(self: GameState, slot: number)
 		return
 	end
 
-	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
-	-- dans la boucle de tick.
-	for index = 0, Config.TILE_COUNT - 1 do
-		if buffer.readu8(self.owner, index) == slot then
-			buffer.writeu8(self.owner, index, NEUTRAL)
-			self.dirty[index] = true
+	-- Fronts : le defenseur qui part restitue les troupes engagees ; l'attaquant
+	-- qui part abandonne (ses troupes partent avec lui).
+	for i = #self.attacks, 1, -1 do
+		local atk = self.attacks[i]
+		if atk.target == slot then
+			local attacker = self.players[atk.attacker]
+			if attacker then
+				attacker.troops += math.max(0, atk.troops)
+			end
+			table.remove(self.attacks, i)
+		elseif atk.attacker == slot then
+			table.remove(self.attacks, i)
 		end
+	end
+
+	-- Recyclage inbound AVANT setOwner (contrat B) : pas de require Navy/Nukes.
+	-- kind 1 = transport, kind 2 = convoi. Frappe / convoi deja vise sur un
+	-- tiers = conserve.
+	for i = #self.boats, 1, -1 do
+		local boat = self.boats[i]
+		local kind = boat.kind
+		if kind == 1 then
+			if boat.slot == slot then
+				table.remove(self.boats, i)
+			else
+				local dest = boat.targetTile
+				if dest and buffer.readu8(self.owner, dest) == slot then
+					local owner = self.players[boat.slot]
+					if owner then
+						owner.troops += math.max(0, boat.troops or 0)
+					end
+					table.remove(self.boats, i)
+				end
+			end
+		elseif kind == 2 then
+			if boat.slot == slot then
+				table.remove(self.boats, i)
+			else
+				local dest = boat.targetTile
+				if dest and buffer.readu8(self.owner, dest) == slot then
+					table.remove(self.boats, i)
+				end
+			end
+		elseif boat.slot == slot then
+			table.remove(self.boats, i)
+		end
+	end
+
+	for i = #self.missiles, 1, -1 do
+		local missile = self.missiles[i]
+		local tx = math.floor(missile.tx or 0)
+		local ty = math.floor(missile.ty or 0)
+		if MapGen.inBounds(tx, ty) and buffer.readu8(self.owner, MapGen.toIndex(tx, ty)) == slot then
+			table.remove(self.missiles, i)
+		end
+	end
+
+	if self.tradeDeliveries then
+		for index, delivery in self.tradeDeliveries do
+			if delivery.slot == slot then
+				self.tradeDeliveries[index] = nil
+			end
+		end
+	end
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
 	end
 
 	for index, building in self.buildings do
@@ -925,20 +988,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
-	for i = #self.attacks, 1, -1 do
-		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
-			table.remove(self.attacks, i)
-		end
-	end
-	for i = #self.boats, 1, -1 do
-		if self.boats[i].slot == slot then
-			table.remove(self.boats, i)
-		end
-	end
-	for i = #self.missiles, 1, -1 do
-		if self.missiles[i].slot == slot then
-			table.remove(self.missiles, i)
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(self.owner, index) == slot then
+			self:setOwner(index, NEUTRAL)
 		end
 	end
 
@@ -956,8 +1008,28 @@ function GameState.removePlayer(self: GameState, slot: number)
 		set[slot] = nil
 	end
 	self.allianceCooldowns[slot] = nil
+	for _, set in self.requests do
+		set[slot] = nil
+	end
 	self.requests[slot] = nil
+	for _, set in self.embargoes do
+		set[slot] = nil
+	end
 	self.embargoes[slot] = nil
+	if self.allianceExtensions then
+		for _, set in self.allianceExtensions do
+			set[slot] = nil
+		end
+		self.allianceExtensions[slot] = nil
+	end
+	if self.targetMarks then
+		self.targetMarks[slot] = nil
+		for marker, marked in self.targetMarks do
+			if marked == slot then
+				self.targetMarks[marker] = nil
+			end
+		end
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
@@ -991,8 +1063,27 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 end
 
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
-	local set = self.alliances[a]
-	return set ~= nil and set[b] ~= nil
+	if a == b then
+		return false
+	end
+	local setA = self.alliances[a]
+	local setB = self.alliances[b]
+	if not setA or not setB then
+		return false
+	end
+	local expA = setA[b]
+	local expB = setB[a]
+	if expA == nil or expB == nil then
+		return false
+	end
+	-- Legacy tests / snapshots : `true` reste un pacte vivant.
+	if expA == true or expB == true then
+		return true
+	end
+	if typeof(expA) ~= "number" or typeof(expB) ~= "number" then
+		return true
+	end
+	return self.tick < expA and self.tick < expB
 end
 
 --=============================================================================
@@ -1241,14 +1332,23 @@ end
 	couteuse a prendre, et les survivants rentrent ensuite au pays.
 ]]
 function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	local marked = false
+	local already = false
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			if atk.retreatAt then
-				return false, "La retraite est deja ordonnee."
+				already = true
+			else
+				atk.retreatAt = self.tick + Config.RETREAT_DELAY
+				marked = true
 			end
-			atk.retreatAt = self.tick + Config.RETREAT_DELAY
-			return true, "Retraite ordonnee : le front se degage."
 		end
+	end
+	if marked then
+		return true, "Retraite ordonnee : le front se degage."
+	end
+	if already then
+		return false, "La retraite est deja ordonnee."
 	end
 	return false, "Aucune offensive sur ce front."
 end
@@ -1657,6 +1757,14 @@ function GameState.stepElimination(self: GameState): { number }
 			-- Seules les eliminations de joueurs humains sont publiques : voir
 			-- douze bots mourir un par un n'apprend rien et sature le fil.
 			if not ps.isBot then
+				self.settledHumans = self.settledHumans or {}
+				self.settledHumans[slot] = {
+					name = ps.name,
+					betrayals = ps.betrayals,
+					capturedTiles = ps.capturedTiles,
+					capitalsCaptured = ps.capitalsCaptured,
+					buildingsBuilt = ps.buildingsBuilt,
+				}
 				self:notify(`\u{1F480} {ps.name} a ete elimine.`, "alert")
 			end
 			self:removePlayer(slot)

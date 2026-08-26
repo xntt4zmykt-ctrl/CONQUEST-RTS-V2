@@ -136,6 +136,8 @@ local function humanTargetProtected(
 	return target.tiles < Config.BOT_HUMAN_PROTECTION_TILES and attacker.tiles > target.tiles
 end
 
+Bots.humanTargetProtected = humanTargetProtected
+
 -- Le leader ne doit pas seulement etre "la meilleure cible" : quand il a
 -- deja pris une avance nette, les factions secondaires doivent comprendre
 -- qu'une guerre entre elles lui laisse la partie. Les constantes de coalition
@@ -413,7 +415,12 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 		end
 	end
 
-	local allies = state.alliances[slot] or {}
+	local allies = {}
+	for other in state.players do
+		if other ~= slot and state:areAllied(slot, other) then
+			allies[other] = true
+		end
+	end
 	local leader, coalitionActive = dominantLeader(state)
 	local threatened = coalitionActive and leader ~= slot
 
@@ -517,8 +524,13 @@ local function decideChat(state: GameState, ps: GameState.PlayerState, rng: Rand
 		end
 	end
 	if worst then
-		local allies = state.alliances[slot]
-		local hasAlly = allies ~= nil and next(allies) ~= nil
+		local hasAlly = false
+		for other in state.players do
+			if other ~= slot and state:areAllied(slot, other) then
+				hasAlly = true
+				break
+			end
+		end
 		-- Avec des allies on demande du renfort, seul on designe la menace a
 		-- toute la carte : dans les deux cas on cherche a ne pas mourir seul.
 		if hasAlly then

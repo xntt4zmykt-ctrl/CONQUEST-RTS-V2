@@ -197,6 +197,10 @@ end
 
 function Effects.conquestPulse(self: Effects, x: number, y: number, radius: number, color: Color3)
 	local ground = WorldSpace.tileToWorld(x, y)
+	local height = 3
+	if self.terrain and MapGen.inBounds(x, y) then
+		height = WorldSpace.surfaceHeight(self.terrain, MapGen.toIndex(x, y)) + 0.8
+	end
 	local worldRadius = math.clamp(radius, 3, 40) * Config.TILE_SIZE
 
 	local ring = Instance.new("Part")
@@ -210,7 +214,7 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
-	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	ring.CFrame = CFrame.new(ground.X, height, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
 	ring.Parent = self.root
 
 	TweenService:Create(ring, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
