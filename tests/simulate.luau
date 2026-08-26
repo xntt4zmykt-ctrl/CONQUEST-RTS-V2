@@ -2349,7 +2349,1314 @@ do
 			fail("intentions — rate limit non declenche")
 		end
 		print("intentions : sequence, idempotence, rate limit OK")
+
+		-- Doctrine inconnue : plus de repli silencieux vers Industrielle.
+		IntentValidator.reset()
+		local okBadDoc, reasonBadDoc =
+			IntentValidator.enqueue(ctx, fakePlayer, "ChooseDoctrine", 1, { doctrineId = 999 })
+		if okBadDoc or reasonBadDoc ~= "InvalidSchema" then
+			fail(`intentions — doctrine 999 acceptee ({tostring(reasonBadDoc)})`)
+		end
+
+		-- Action diplomatique hors catalogue.
+		local okBadDip, reasonBadDip = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"Diplomacy",
+			2,
+			{ action = "hackGold", targetSlot = 1 }
+		)
+		if okBadDip or reasonBadDip ~= "UnknownAction" then
+			fail(`intentions — diplomatie pirate acceptee ({tostring(reasonBadDip)})`)
+		end
+
+		-- Nuke kind hors NUKE_STATS.
+		local okBadNuke, reasonBadNuke =
+			IntentValidator.enqueue(ctx, fakePlayer, "Nuke", 3, { index = 0, kind = 99 })
+		if okBadNuke or reasonBadNuke ~= "InvalidSchema" then
+			fail(`intentions — nuke kind 99 accepte ({tostring(reasonBadNuke)})`)
+		end
+
+		-- Phase ended : plus aucun ordre, y compris doctrine / ratio.
+		ctx.matchPhase = "ended"
+		local okEnded, reasonEnded =
+			IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 4, { ratio = 0.5 })
+		if okEnded or reasonEnded ~= "NotPlaying" then
+			fail(`intentions — ordre accepte en phase ended ({tostring(reasonEnded)})`)
+		end
+		ctx.matchPhase = "playing"
+
+		-- Plafond de file par joueur (au-dela du rate limit 20/s).
+		IntentValidator.reset()
+		local clock = 0
+		ctx.now = function()
+			return clock
+		end
+		local pendingCapped = false
+		local seq = 0
+		for wave = 0, 3 do
+			clock = wave * 1.01
+			for _ = 1, (Config.INTENT_RATE_LIMIT_PER_SEC or 20) do
+				seq += 1
+				local ok, reason =
+					IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", seq, { ratio = 0.2 })
+				if not ok and reason == "RateLimited" then
+					if IntentValidator.pendingCount() >= (Config.MAX_PENDING_INTENTS or 32) then
+						pendingCapped = true
+					end
+					break
+				end
+			end
+			if pendingCapped then
+				break
+			end
+		end
+		if not pendingCapped then
+			fail(
+				`intentions — plafond de file non declenche (pending={IntentValidator.pendingCount()})`
+			)
+		end
+		ctx.now = os.clock
+		print("intentions : schema doctrine/nuke/diplomatie, ended, file OK")
+
+		-- QuickChat : le cooldown serveur doit faire echouer l'intent, pas un succes fantome.
+		IntentValidator.reset()
+		table.clear(replies)
+		state.tick = 10
+		local okChat = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 1, { messageId = "social_luck" })
+		if not okChat then
+			fail("intentions — QuickChat refuse a l'enqueue")
+		end
+		IntentValidator.flush(ctx)
+		local firstChat = replies[#replies]
+		if not firstChat or not firstChat.ok then
+			fail("intentions — premier QuickChat non applique")
+		end
+		table.clear(replies)
+		local okChat2 = IntentValidator.enqueue(ctx, fakePlayer, "QuickChat", 2, { messageId = "social_luck" })
+		if not okChat2 then
+			fail("intentions — second QuickChat refuse a l'enqueue (devrait attendre le flush)")
+		end
+		IntentValidator.flush(ctx)
+		local secondChat = replies[#replies]
+		if not secondChat or secondChat.ok then
+			fail("intentions — QuickChat en cooldown rapporte un succes")
+		end
+
+		-- Ratio extreme borne a l'enqueue, pas seulement a l'apply.
+		IntentValidator.reset()
+		local okHuge = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 10, { ratio = 99 })
+		if not okHuge then
+			fail("intentions — ratio 99 refuse a l'enqueue")
+		end
+		IntentValidator.flush(ctx)
+		if ps.attackRatio ~= 1 then
+			fail(`intentions — ratio 99 non borne ({ps.attackRatio})`)
+		end
+		IntentValidator.reset()
+		IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 11, { ratio = -8 })
+		IntentValidator.flush(ctx)
+		if math.abs(ps.attackRatio - 0.05) > 1e-9 then
+			fail(`intentions — ratio -8 non borne ({ps.attackRatio})`)
+		end
+
+		-- needsTarget : (id, 99) ne vise pas le slot 99 (hors MAX_TOTAL_FACTIONS).
+		IntentValidator.reset()
+		local okAim, reasonAim = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"QuickChat",
+			12,
+			{ messageId = "attack_target", targetSlot = 99 }
+		)
+		if okAim or reasonAim ~= "InvalidTarget" then
+			fail(`intentions — QuickChat slot 99 accepte ({tostring(reasonAim)})`)
+		end
+		local okSelf, reasonSelf = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"Diplomacy",
+			13,
+			{ action = "request", targetSlot = ps.slot }
+		)
+		if okSelf or reasonSelf ~= "InvalidTarget" then
+			fail(`intentions — diplomatie vers soi acceptee ({tostring(reasonSelf)})`)
+		end
+		print("intentions : QuickChat cooldown honore")
+		print("intentions : ratio borne, QuickChat slot hors catalogue refuse")
+		print("intentions : diplomatie vers soi refusee")
 	end
+end
+
+do
+	-- Alliance : areAllied exige les deux directions.
+	local state = GameState.new(101)
+	local a = state:addPlayer(nil, "A", Random.new(1), 0)
+	local b = state:addPlayer(nil, "B", Random.new(2), 0)
+	if not a or not b then
+		fail("alliances — spawn impossible")
+	else
+		state.alliances[a.slot][b.slot] = true
+		if state:areAllied(a.slot, b.slot) then
+			fail("areAllied vrai sur un pacte a une direction")
+		end
+		state.alliances[b.slot][a.slot] = true
+		if not state:areAllied(a.slot, b.slot) then
+			fail("areAllied faux sur un pacte symetrique")
+		end
+		-- Vue HUD : un pacte a une direction ne doit pas apparaitre comme alliance.
+		state.alliances[b.slot][a.slot] = nil
+		local oneWay = Diplomacy.viewFor(state, a.slot)
+		if oneWay.allies[b.slot] then
+			fail("viewFor — alliance unidirectionnelle exposee au HUD")
+		end
+	end
+end
+
+do
+	-- removePlayer doit laisser les frontieres voisines coherentes.
+	local state = GameState.new(202)
+	local a = state:addPlayer(nil, "Stay", Random.new(1), 0)
+	local b = state:addPlayer(nil, "Leave", Random.new(2), 0)
+	if not a or not b then
+		fail("removePlayer — spawn impossible")
+	else
+		local contact = nil
+		local scratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+						state:setOwner(nb, b.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("removePlayer — impossible de creer un contact")
+		elseif not a.border[contact] then
+			fail("removePlayer — contact non marque frontiere avant depart")
+		else
+			state:removePlayer(b.slot)
+			if buffer.readu8(state.owner, contact) ~= a.slot then
+				fail("removePlayer — tuile du survivant perdue")
+			end
+			if not a.border[contact] then
+				fail("removePlayer — frontiere du survivant non rafraichie (contact vs neutre)")
+			end
+		end
+	end
+end
+
+do
+	-- Troupes engagees rendues si le defenseur disparait (deco / elimination).
+	local Heap = __require("Heap")
+	local state = GameState.new(404)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Attaquant", Random.new(4), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(5), 0)
+	if not a or not b then
+		fail("refund defenseur — spawn impossible")
+	else
+		local committed = 800
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = committed,
+			frontier = Heap.new(),
+			queued = {},
+		})
+		local before = a.troops
+		state:removePlayer(b.slot)
+		if math.abs(a.troops - (before + committed)) > 1e-9 then
+			fail(`refund defenseur — troupes {a.troops} attendu {before + committed}`)
+		end
+		if #state.attacks ~= 0 then
+			fail(`refund defenseur — {#state.attacks} fronts restants`)
+		end
+		print("refund defenseur : removePlayer rend les troupes")
+	end
+end
+
+do
+	-- Attack orphelin (slot cible deja nil) rembourse au step vivant.
+	local Heap = __require("Heap")
+	local state = GameState.new(405)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Attaquant", Random.new(6), 0)
+	local b = state:addPlayer(nil, "Fantome", Random.new(7), 0)
+	if not a or not b then
+		fail("refund orphelin — spawn impossible")
+	else
+		local committed = 650
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = committed,
+			frontier = Heap.new(),
+			queued = {},
+		})
+		state.players[b.slot] = nil
+		local before = a.troops
+		state:stepAttacks()
+		if math.abs(a.troops - (before + committed)) > 1e-9 then
+			fail(`refund orphelin — troupes {a.troops} attendu {before + committed}`)
+		end
+		if #state.attacks ~= 0 then
+			fail("refund orphelin — front encore en file")
+		end
+		print("refund orphelin : stepAttacks rend les troupes")
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(303)
+	local bot = state:addPlayer(nil, "Stripped", Random.new(3), 0)
+	if not bot then
+		fail("stripTerritory — spawn impossible")
+	else
+		ChantierB.stripTerritory(state, bot)
+		if bot.tiles ~= 0 then
+			fail(`stripTerritory — tiles={bot.tiles} attendu 0`)
+		end
+		local owned = 0
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == bot.slot then
+				owned += 1
+			end
+		end
+		if owned ~= 0 then
+			fail(`stripTerritory — {owned} tuiles encore possedees`)
+		end
+	end
+end
+
+do
+	-- justClaimed ne doit plus avaler une vraie offensive.
+	local state = GameState.new(404)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Claimant", Random.new(4), 0)
+	if not a then
+		fail("justClaimed — spawn impossible")
+	else
+		a.justClaimed = true
+		a.troops = 500
+		a.attackRatio = 1
+		local target = Config.NEUTRAL_SLOT
+		local ok, message = state:launchAttack(a.slot, target)
+		if ok and message == nil and #state.attacks == 0 then
+			fail("justClaimed — launchAttack a renvoye un succes silencieux")
+		end
+	end
+end
+
+do
+	-- Nukes : meme garde combatUnlocked que terre / mer.
+	local state = GameState.new(505)
+	state.combatUnlocked = false
+	local a = state:addPlayer(nil, "Bomber", Random.new(5), 0)
+	local b = state:addPlayer(nil, "Target", Random.new(6), 0)
+	if not a or not b then
+		fail("nukes prep — spawn impossible")
+	else
+		a.era = 5
+		a.gold = 99999
+		local siloTile = nil
+		local scratch = table.create(4, 0)
+		if a.capitalTile then
+			local n = MapGen.neighbors(a.capitalTile, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if buffer.readu8(state.owner, nb) == a.slot then
+					siloTile = nb
+					break
+				end
+			end
+		end
+		if not siloTile then
+			fail("nukes prep — pas de tuile pour le silo")
+		else
+			state:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
+			local ok, message = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if ok then
+				fail("nukes prep — frappe acceptee pendant la preparation")
+			elseif not message or not string.find(message, "preparation", 1, true) then
+				fail(`nukes prep — mauvais refus ({tostring(message)})`)
+			end
+			state.combatUnlocked = true
+			local ok2, message2 = Nukes.launch(state, a.slot, b.capitalTile, Config.NUKE.ATOM)
+			if not ok2 then
+				fail(`nukes prep — frappe refusee une fois le combat ouvert ({tostring(message2)})`)
+			end
+		end
+	end
+end
+
+do
+	if math.abs((Config.BOAT_TROOP_RATIO or 0) - 0.2) > 1e-9 then
+		fail(`BOAT_TROOP_RATIO={Config.BOAT_TROOP_RATIO} attendu 0.2 (charge 1/5)`)
+	end
+end
+
+do
+	-- Cadran : un humain pas encore spawn (tiles=0) ne doit pas saigner.
+	local Doomsday = __require("Doomsday")
+	local state = GameState.new(707)
+	state.mode = GameModes.get("blitz")
+	local leader = state:addPlayer(nil, "Leader", Random.new(7), 0)
+	local afk = state:addPlayer(nil, "Afk", Random.new(8), 0)
+	if not leader or not afk then
+		fail("doomsday spawn — spawn impossible")
+	else
+		local ChantierB = __require("ChantierB")
+		ChantierB.stripTerritory(state, afk)
+		afk.awaitingSpawn = true
+		afk.troops = 12000
+		local before = afk.troops
+		-- Au-dela de la grace (40 % de 600 s = 240 s).
+		state.tick = math.floor((state.mode.duration * 0.55) / Config.TICK_DT)
+		if not Doomsday.waveState(state.mode.duration, state.tick * Config.TICK_DT).armed then
+			fail("doomsday spawn — vague non armee dans le scenario de test")
+		elseif GameState.stepDoomsday then
+			GameState.stepDoomsday(state)
+			if afk.troops ~= before then
+				fail(`doomsday spawn — troupes AFK {before} -> {afk.troops}`)
+			end
+		else
+			fail("doomsday spawn — stepDoomsday absent")
+		end
+	end
+end
+
+do
+	-- Beachhead : la tuile debarquee est deja a l'attaquant. L'enfiler dans
+	-- la frontier faisait skip + remboursement le meme tick (invasions mortes).
+	local state = GameState.new(9191)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Debarque", Random.new(91), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(92), 0)
+	if not invader or not defender then
+		fail("beachhead — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local landing: number? = nil
+		local inland: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local n = MapGen.neighbors(index, scratch)
+				for i = 1, n do
+					local nb = scratch[i]
+					if state:isLand(nb) and nb ~= index then
+						landing, inland = index, nb
+						break
+					end
+				end
+			end
+			if landing then
+				break
+			end
+		end
+		if not landing or not inland then
+			fail("beachhead — paire terrestre introuvable")
+		else
+			state:setOwner(landing, invader.slot)
+			state:setOwner(inland, defender.slot)
+			local committed = 800
+			local troopsBefore = invader.troops
+			state:seedBeachhead(invader.slot, defender.slot, committed, landing)
+			if #state.attacks ~= 1 then
+				fail(`beachhead — {#state.attacks} fronts apres seed (attendu 1)`)
+			else
+				local atk = state.attacks[1]
+				if atk.queued[landing] then
+					fail("beachhead — la tuile debarquee est encore dans la frontier")
+				end
+				if not atk.queued[inland] then
+					fail("beachhead — le voisin cible n'est pas enfile")
+				end
+				if atk.frontier.size < 1 then
+					fail("beachhead — frontier vide")
+				end
+				state:step()
+				if invader.troops >= troopsBefore + committed then
+					fail("beachhead — troupes remboursees sans expansion")
+				end
+				local inlandOwner = buffer.readu8(state.owner, inland)
+				local still = false
+				for _, front in state.attacks do
+					if front.attacker == invader.slot then
+						still = true
+						break
+					end
+				end
+				if inlandOwner ~= invader.slot and not still then
+					fail("beachhead — ni capture ni front survivant")
+				end
+				print("beachhead : frontier voisins, pas de remboursement")
+			end
+		end
+	end
+end
+
+do
+	-- Renforcer un front vise ne doit pas creer un second Attack.
+	local state = GameState.new(4242)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Aimer", Random.new(11), 0)
+	if not a then
+		fail("aim reinforce — spawn impossible")
+	else
+		a.troops = 8000
+		a.attackRatio = 1
+		local scratch = table.create(4, 0)
+		local aimTile: number? = nil
+		local targetSlot: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) then
+					local owner = buffer.readu8(state.owner, nb)
+					if owner ~= a.slot then
+						aimTile = nb
+						targetSlot = owner
+						break
+					end
+				end
+			end
+			if aimTile then
+				break
+			end
+		end
+		if not aimTile or targetSlot == nil then
+			fail("aim reinforce — pas de contact")
+		else
+			a.aimTile = aimTile
+			local ok1 = state:launchAttack(a.slot, targetSlot)
+			if not ok1 then
+				fail("aim reinforce — premiere offensive refusee")
+			else
+				local n1 = #state.attacks
+				if n1 < 1 then
+					fail("aim reinforce — aucun front")
+				else
+					a.troops = 8000
+					a.aimTile = aimTile
+					state:launchAttack(a.slot, targetSlot)
+					if #state.attacks ~= n1 then
+						fail(`aim reinforce — fronts dupliques ({n1} -> {#state.attacks})`)
+					end
+					print("aim reinforce : un seul front apres deux lancers")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Colis : le niveau snapshot au depart, pas le niveau a l'arrivee.
+	local landState = GameState.new(2720)
+	local a = landState:addPlayer(nil, "Snapshot", Random.new(22), 0)
+	if not a then
+		fail("colis snapshot — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		local cityTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if landState:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				local cx, cy = fx + Config.TRUCK_SPEED + 3, fy
+				if MapGen.inBounds(cx, cy) then
+					local candidate = MapGen.toIndex(cx, cy)
+					if landState:isLand(candidate) then
+						factoryTile, cityTile = index, candidate
+						break
+					end
+				end
+			end
+		end
+		if not factoryTile or not cityTile then
+			fail("colis snapshot — paire terrestre introuvable")
+		else
+			landState:setOwner(factoryTile, a.slot)
+			landState:setOwner(cityTile, a.slot)
+			landState:placeBuilding(factoryTile, Config.BUILDING.FACTORY, a.slot)
+			landState:placeBuilding(cityTile, Config.BUILDING.CITY, a.slot)
+			landState.tick += 1
+			Trade.step(landState, Random.new(7), function() end)
+			local delivery = landState.tradeDeliveries[factoryTile]
+			if not delivery then
+				fail("colis snapshot — pas d'expedition")
+			else
+				local snapLevel = delivery.level
+				landState.buildings[factoryTile].level = snapLevel + 2
+				local goldBefore = a.gold
+				landState.tick = delivery.arrivalTick
+				Trade.step(landState, Random.new(9), function() end)
+				local gained = a.gold - goldBefore
+				local stopBonus = 1 + math.min(0.8, (delivery.links - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+				local expected = (Config.TRUCK_GOLD_BASE + delivery.distance * Config.TRUCK_GOLD_PER_TILE)
+					* snapLevel
+					* math.max(1, delivery.links)
+					* stopBonus
+				if math.abs(gained - expected) > 0.01 then
+					fail(`colis snapshot — gain {gained} attendu {expected} (niveau depart)`)
+				end
+				print("colis snapshot : niveau au depart honore")
+			end
+		end
+	end
+end
+
+do
+	-- Proposition expiree : refus meme si Diplomacy.step n'a pas encore nettoye.
+	local state = GameState.new(5153)
+	local a = state:addPlayer(nil, "Offrant", Random.new(71), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(72), 0)
+	if not a or not b then
+		fail("accept expire — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		state.tick += Config.ALLIANCE_REQUEST_TIMEOUT + 1
+		if Diplomacy.accept(state, a.slot, b.slot) then
+			fail("accept expire — proposition perimee encore honoree")
+		end
+		if state:areAllied(a.slot, b.slot) then
+			fail("accept expire — pacte cree hors delai")
+		end
+		print("accept expire : proposition perimee refusee")
+	end
+end
+
+do
+	-- HUD : une proposition expiree ne doit plus apparaitre incoming/outgoing.
+	local state = GameState.new(5154)
+	local a = state:addPlayer(nil, "Offrant", Random.new(81), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(82), 0)
+	if not a or not b then
+		fail("viewFor expiry — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		local liveIn = Diplomacy.viewFor(state, b.slot)
+		local liveOut = Diplomacy.viewFor(state, a.slot)
+		if not liveIn.incoming[a.slot] then
+			fail("viewFor expiry — proposition vive absente en incoming")
+		end
+		if not liveOut.outgoing[b.slot] then
+			fail("viewFor expiry — proposition vive absente en outgoing")
+		end
+		state.tick += Config.ALLIANCE_REQUEST_TIMEOUT + 1
+		local staleIn = Diplomacy.viewFor(state, b.slot)
+		local staleOut = Diplomacy.viewFor(state, a.slot)
+		if staleIn.incoming[a.slot] then
+			fail("viewFor expiry — proposition perimee encore en incoming")
+		end
+		if staleOut.outgoing[b.slot] then
+			fail("viewFor expiry — proposition perimee encore en outgoing")
+		end
+		print("viewFor expiry : proposition perimee masquee")
+	end
+end
+
+do
+	-- areAllied honore l'expiry AVANT Diplomacy.step (flush tourne avant).
+	local state = GameState.new(5155)
+	local a = state:addPlayer(nil, "Alpha", Random.new(91), 0)
+	local b = state:addPlayer(nil, "Beta", Random.new(92), 0)
+	if not a or not b then
+		fail("areAllied expiry — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		if not Diplomacy.accept(state, a.slot, b.slot) then
+			fail("areAllied expiry — accept refuse")
+		else
+			state.tick = Config.ALLIANCE_DURATION - 1
+			if not state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte vivant refuse avant terme")
+			end
+			local liveView = Diplomacy.viewFor(state, a.slot)
+			if not liveView.allies[b.slot] then
+				fail("areAllied expiry — HUD masque un pacte vivant")
+			end
+			state.tick = Config.ALLIANCE_DURATION
+			if state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte perime encore honore avant Diplomacy.step")
+			end
+			local staleView = Diplomacy.viewFor(state, a.slot)
+			if staleView.allies[b.slot] then
+				fail("areAllied expiry — HUD expose un pacte perime")
+			end
+			print("areAllied expiry : pacte perime refuse avant step")
+		end
+	end
+end
+
+do
+	-- Debarquement sur une cote deja prise : restitution integrale, pas le malus.
+	local state = GameState.new(6161)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(61), 0)
+	if not invader then
+		fail("boat own-tile — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat own-tile — tuile terrestre introuvable")
+		else
+			state:setOwner(landing, invader.slot)
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			Navy.step(state, Random.new(3))
+			local expected = 1000 + committed
+			if math.abs(invader.troops - expected) > 0.01 then
+				fail(`boat own-tile — troupes {invader.troops} attendu {expected} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat own-tile — {leftover} transport(s) encore en mer`)
+			end
+			print("boat own-tile : restitution integrale, pas de malus")
+		end
+	end
+end
+
+do
+	-- removePlayer purge les embargoes / propositions inbound (slot recycle).
+	local state = GameState.new(7171)
+	local a = state:addPlayer(nil, "Reste", Random.new(71), 0)
+	local b = state:addPlayer(nil, "Part", Random.new(72), 0)
+	if not a or not b then
+		fail("removePlayer inbound — spawn impossible")
+	else
+		Diplomacy.setEmbargo(state, a.slot, b.slot, true)
+		Diplomacy.request(state, a.slot, b.slot)
+		Diplomacy.setTargetMark(state, a.slot, b.slot)
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.embargoes[a.slot] and state.embargoes[a.slot][gone] then
+			fail("removePlayer inbound — embargo vers slot recycle")
+		end
+		if state.requests[a.slot] and state.requests[a.slot][gone] then
+			fail("removePlayer inbound — proposition vers slot recycle")
+		end
+		if state.targetMarks[a.slot] == gone then
+			fail("removePlayer inbound — marque de cible vers slot recycle")
+		end
+		print("removePlayer inbound : embargo, proposition et marque purges")
+	end
+end
+
+do
+	-- Terre + tete de pont vs la meme cible : un seul ordre marque le couple.
+	local state = GameState.new(8282)
+	local a = state:addPlayer(nil, "Terre", Random.new(82), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(83), 0)
+	if not a or not b then
+		fail("retraite couple — spawn impossible")
+	else
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = 400,
+			frontier = { size = 0 },
+			queued = {},
+		})
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = 200,
+			frontier = { size = 0 },
+			queued = {},
+			isBeachhead = true,
+		})
+		if not state:retreatAttack(a.slot, b.slot) then
+			fail("retraite couple — le premier ordre est refuse")
+		end
+		for _, front in state.attacks do
+			if front.attacker == a.slot and front.target == b.slot and not front.retreatAt then
+				fail("retraite couple — un front du meme couple sans echeance")
+			end
+		end
+		if state:retreatAttack(a.slot, b.slot) then
+			fail("retraite couple — un second ordre est accepte")
+		end
+		print("retraite couple : tous les fronts du meme adversaire marques")
+	end
+end
+
+do
+	-- Cadran : removePlayer purge doomWarnedAt / doomUnderSince (slot recycle).
+	local state = GameState.new(9090)
+	local leader = state:addPlayer(nil, "Chef", Random.new(90), 0)
+	local victim = state:addPlayer(nil, "Marque", Random.new(91), 0)
+	if not leader or not victim then
+		fail("doomsday recycle — spawn impossible")
+	else
+		state.doomWarnedAt = state.doomWarnedAt or {}
+		state.doomUnderSince = state.doomUnderSince or {}
+		state.doomWarnedAt[victim.slot] = 999
+		state.doomUnderSince[victim.slot] = 50
+		local gone = victim.slot
+		state:removePlayer(gone)
+		if state.doomWarnedAt[gone] ~= nil then
+			fail("doomsday recycle — doomWarnedAt survit a removePlayer")
+		end
+		if state.doomUnderSince[gone] ~= nil then
+			fail("doomsday recycle — doomUnderSince survit a removePlayer")
+		end
+		local heir = state:addPlayer(nil, "Heritier", Random.new(92), 0)
+		if not heir then
+			fail("doomsday recycle — reuse de slot impossible")
+		elseif heir.slot == gone and state.doomWarnedAt[heir.slot] ~= nil then
+			fail("doomsday recycle — le nouvel occupant herite du cadran")
+		end
+		print("doomsday recycle : timers cadran purges au recycle de slot")
+	end
+end
+
+do
+	-- AFK strip / tiles=0 : stepDoomsday doit EFFACER les timers, pas seulement skip.
+	local Doomsday = __require("Doomsday")
+	local state = GameState.new(9091)
+	state.mode = GameModes.get("blitz")
+	local leader = state:addPlayer(nil, "Chef", Random.new(93), 0)
+	local afk = state:addPlayer(nil, "Afk", Random.new(94), 0)
+	if not leader or not afk then
+		fail("doomsday AFK clear — spawn impossible")
+	else
+		local ChantierB = __require("ChantierB")
+		state.doomWarnedAt = state.doomWarnedAt or {}
+		state.doomUnderSince = state.doomUnderSince or {}
+		state.doomWarnedAt[afk.slot] = 1
+		state.doomUnderSince[afk.slot] = 40
+		ChantierB.stripTerritory(state, afk)
+		state.tick = math.floor((state.mode.duration * 0.55) / Config.TICK_DT)
+		if not Doomsday.waveState(state.mode.duration, state.tick * Config.TICK_DT).armed then
+			fail("doomsday AFK clear — vague non armee")
+		elseif GameState.stepDoomsday then
+			GameState.stepDoomsday(state)
+			if state.doomWarnedAt[afk.slot] ~= nil or state.doomUnderSince[afk.slot] ~= nil then
+				fail("doomsday AFK clear — timers conserves pendant awaitingSpawn")
+			end
+			print("doomsday AFK clear : timers effaces pendant strip / spawn")
+		else
+			fail("doomsday AFK clear — stepDoomsday absent")
+		end
+	end
+end
+
+do
+	-- Colis d'un disparu : removePlayer purge avant qu'un slot recycle encaisse.
+	local state = GameState.new(9192)
+	local a = state:addPlayer(nil, "Reste", Random.new(95), 0)
+	local b = state:addPlayer(nil, "Livreur", Random.new(96), 0)
+	if not a or not b then
+		fail("trade inbound — spawn impossible")
+	else
+		local factoryTile = b.capitalTile or 0
+		state.tradeDeliveries[factoryTile] = {
+			to = factoryTile,
+			slot = b.slot,
+			level = 1,
+			links = 1,
+			distance = 4,
+			arrivalTick = state.tick + 10,
+		}
+		state.tradeCooldowns[factoryTile] = state.tick + 20
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.tradeDeliveries[factoryTile] ~= nil then
+			fail("trade inbound — colis du slot recycle encore en route")
+		end
+		if state.tradeCooldowns[factoryTile] ~= nil then
+			fail("trade inbound — cooldown usine detruite encore pose")
+		end
+		print("trade inbound : colis purges au recycle de slot")
+	end
+end
+
+do
+	-- Grace humaine : Bots.humanTargetProtected, et les tribus l'honorent.
+	local bot = nil
+	local human = nil
+	local state = GameState.new(9293)
+	bot = state:addPlayer(nil, "Bot", Random.new(97), 0)
+	human = state:addPlayer(nil, "Humain", Random.new(98), 0)
+	if not bot or not human then
+		fail("human grace — spawn impossible")
+	else
+		human.isBot = false
+		bot.isBot = true
+		state.tick = 0
+		if not Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — humain non protege pendant BOT_HUMAN_GRACE_DURATION")
+		end
+		state.tick = math.floor(Config.BOT_HUMAN_GRACE_DURATION * Config.TICK_RATE) + 10
+		human.tiles = 200
+		bot.tiles = 50
+		if Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — protection encore active au-dela des tuiles")
+		end
+		human.tiles = 50
+		bot.tiles = 200
+		if not Bots.humanTargetProtected(state, bot, human) then
+			fail("human grace — petit humain non protege apres la grace")
+		end
+		print("human grace : BOT_HUMAN_GRACE_DURATION et protection tuiles")
+	end
+end
+
+do
+	-- Tribu pendant la grace : ne lance pas sur un humain, meme encercle.
+	local Tribes = __require("Tribes")
+	local state = GameState.new(9394)
+	state.combatUnlocked = true
+	Tribes.spawnAll(state, Random.new(99), 1)
+	local tribe: any = nil
+	for _, ps in state.players do
+		if ps.isTribe then
+			tribe = ps
+			break
+		end
+	end
+	local human = state:addPlayer(nil, "Cible", Random.new(100), 0)
+	if not tribe or not human then
+		fail("tribe grace — spawn impossible")
+	else
+		human.isBot = false
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local owner = buffer.readu8(state.owner, index)
+				if owner ~= tribe.slot then
+					state:setOwner(index, human.slot)
+				end
+			end
+		end
+		local tick = 0
+		while (tick + tribe.slot * 5) % 12 ~= 0 do
+			tick += 1
+		end
+		state.tick = tick
+		Tribes.step(state, Random.new(1))
+		for _, atk in state.attacks do
+			if atk.attacker == tribe.slot and atk.target == human.slot then
+				fail("tribe grace — tribu attaque un humain pendant la grace")
+				break
+			end
+		end
+		print("tribe grace : tribu n'attaque pas l'humain pendant la grace")
+	end
+end
+
+do
+	-- Proposition bot : un pacte perime dans la table n'est plus "deja allie".
+	local state = GameState.new(9495)
+	local a = state:addPlayer(nil, "BotA", Random.new(101), 0)
+	local b = state:addPlayer(nil, "BotB", Random.new(102), 0)
+	if not a or not b then
+		fail("bot expiry ally — spawn impossible")
+	else
+		state.alliances[a.slot][b.slot] = 0
+		state.alliances[b.slot][a.slot] = 0
+		state.tick = 1
+		if state:areAllied(a.slot, b.slot) then
+			fail("bot expiry ally — areAllied honore encore expiry=0")
+		end
+		-- La table brute reste peuplee (Diplomacy.step n'a pas tourne) :
+		-- Bots.decideDiplomacy re-propose via areAllied, pas alliances[slot][other].
+		local ok = Diplomacy.request(state, a.slot, b.slot)
+		if not ok then
+			fail("bot expiry ally — request refuse malgre pacte perime en table")
+		end
+		print("bot expiry ally : areAllied + request ignorent un pacte perime en table")
+	end
+end
+
+do
+	-- Transports inbound : removePlayer restitue 100 % (pas BOAT_RETREAT_LOSS)
+	-- et empeche seedBeachhead vs NEUTRAL / slot recycle.
+	local state = GameState.new(9596)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(103), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(104), 0)
+	if not invader or not defender then
+		fail("boat inbound — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and buffer.readu8(state.owner, index) == defender.slot then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat inbound — cote defenseur introuvable")
+		else
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			local gone = defender.slot
+			state:removePlayer(gone)
+			if math.abs(invader.troops - (1000 + committed)) > 0.01 then
+				fail(`boat inbound — troupes {invader.troops} attendu {1000 + committed} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat inbound — {leftover} transport(s) encore en mer`)
+			end
+			local attacksBefore = #state.attacks
+			Navy.step(state, Random.new(5))
+			if #state.attacks ~= attacksBefore then
+				fail("boat inbound — seedBeachhead apres removePlayer")
+			end
+			print("boat inbound : transports restitues, pas de tete de pont vs disparu")
+		end
+	end
+end
+
+do
+	-- L'attaquant qui part perd ses transports (comme ses fronts terre).
+	local state = GameState.new(9597)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Part", Random.new(105), 0)
+	local defender = state:addPlayer(nil, "Reste", Random.new(106), 0)
+	if not invader or not defender then
+		fail("boat attacker leave — spawn impossible")
+	else
+		local landing = defender.capitalTile or 0
+		invader.troops = 1000
+		table.insert(state.boats, {
+			id = 2,
+			slot = invader.slot,
+			kind = Navy.KIND_TRANSPORT,
+			troops = 400,
+			x = 0,
+			y = 0,
+			path = { landing },
+			step = 1,
+			targetTile = landing,
+			homeTile = landing,
+			retreating = false,
+		})
+		local gone = invader.slot
+		state:removePlayer(gone)
+		for _, boat in state.boats do
+			if boat.slot == gone then
+				fail("boat attacker leave — transport du disparu encore en mer")
+				break
+			end
+		end
+		print("boat attacker leave : transports de l'attaquant detruits")
+	end
+end
+
+do
+	-- Demande croisee : une proposition inverse PERIMEE ne doit pas bloquer
+	-- une nouvelle request (Bots.step avant Diplomacy.step).
+	local state = GameState.new(9698)
+	local a = state:addPlayer(nil, "A", Random.new(107), 0)
+	local b = state:addPlayer(nil, "B", Random.new(108), 0)
+	if not a or not b then
+		fail("request stale reverse — spawn impossible")
+	else
+		local okLive = Diplomacy.request(state, b.slot, a.slot)
+		if not okLive then
+			fail("request stale reverse — proposition initiale refusee")
+		else
+			state.requests[b.slot][a.slot] = 0
+			state.tick = 1
+			local ok, message = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail(`request stale reverse — nouvelle demande refusee ({tostring(message)})`)
+			end
+			if state:areAllied(a.slot, b.slot) then
+				fail("request stale reverse — pacte signe sur une proposition perimee")
+			end
+			local fromA = state.requests[a.slot]
+			if not fromA or fromA[b.slot] == nil then
+				fail("request stale reverse — nouvelle demande non enfilee")
+			end
+			local fromB = state.requests[b.slot]
+			if fromB and fromB[a.slot] ~= nil then
+				fail("request stale reverse — proposition perimee encore en table")
+			end
+			print("request stale reverse : proposition perimee ignoree, nouvelle demande enfilee")
+		end
+	end
+end
+
+do
+	-- Demande croisee VIVANTE : toujours une acceptation.
+	local state = GameState.new(9699)
+	local a = state:addPlayer(nil, "A", Random.new(109), 0)
+	local b = state:addPlayer(nil, "B", Random.new(110), 0)
+	if not a or not b then
+		fail("request live reverse — spawn impossible")
+	else
+		if not Diplomacy.request(state, b.slot, a.slot) then
+			fail("request live reverse — proposition initiale refusee")
+		else
+			local ok = Diplomacy.request(state, a.slot, b.slot)
+			if not ok then
+				fail("request live reverse — croisement vivant refuse")
+			end
+			if not state:areAllied(a.slot, b.slot) then
+				fail("request live reverse — pacte non signe")
+			end
+			print("request live reverse : croisement vivant signe le pacte")
+		end
+	end
+end
+
+do
+	-- Missiles inbound : removePlayer annule une ogive visee sur le disparu
+	-- (contrat B). Pas de remboursement. Le slot recycle n'herite pas le crater.
+	local state = GameState.new(9800)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(111), 0)
+	local victim = state:addPlayer(nil, "Cible", Random.new(112), 0)
+	if not bomber or not victim then
+		fail("nuke inbound — spawn impossible")
+	else
+		local target = victim.capitalTile
+		if not target then
+			fail("nuke inbound — capitale victime introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			bomber.gold = 5000
+			bomber.troops = 8000
+			table.insert(state.missiles, {
+				id = 1,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.5,
+				speed = Config.MISSILE_SPEED,
+			})
+			local goldBefore = bomber.gold
+			local gone = victim.slot
+			state:removePlayer(gone)
+			if #state.missiles ~= 0 then
+				fail(`nuke inbound — {#state.missiles} missile(s) encore en vol`)
+			elseif bomber.gold ~= goldBefore then
+				fail(`nuke inbound — or du tireur {bomber.gold} (remboursement ?)`)
+			else
+				local heir = state:addPlayer(nil, "Heritier", Random.new(113), 0)
+				if not heir then
+					fail("nuke inbound — recycle impossible")
+				else
+					local troopsBefore = heir.troops
+					for _ = 1, 40 do
+						Nukes.step(state, Random.new(9), function() end)
+					end
+					if heir.troops < troopsBefore then
+						fail(`nuke inbound — heritier frappe ({troopsBefore} -> {heir.troops})`)
+					else
+						print("nuke inbound : ogive annulee, pas de remboursement, heritier intact")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- Une frappe deja visee sur un tiers survit au recycle d'un autre slot.
+	local state = GameState.new(9801)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Bomber", Random.new(114), 0)
+	local bystander = state:addPlayer(nil, "Temoin", Random.new(115), 0)
+	local marked = state:addPlayer(nil, "Marque", Random.new(116), 0)
+	if not bomber or not bystander or not marked then
+		fail("nuke third-party — spawn impossible")
+	else
+		local target = marked.capitalTile
+		if not target then
+			fail("nuke third-party — capitale introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			table.insert(state.missiles, {
+				id = 2,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = 0.2,
+				speed = Config.MISSILE_SPEED,
+			})
+			state:removePlayer(bystander.slot)
+			if #state.missiles ~= 1 then
+				fail(`nuke third-party — missile tiers retire ({#state.missiles} restant)`)
+			elseif state.missiles[1].slot ~= bomber.slot then
+				fail("nuke third-party — mauvais missile conserve")
+			else
+				print("nuke third-party : frappe visee sur un tiers conservee")
+			end
+		end
+	end
+end
+
+do
+	-- Le tireur qui part perd ses missiles (comme ses fronts terre).
+	local state = GameState.new(9802)
+	state.combatUnlocked = true
+	local bomber = state:addPlayer(nil, "Part", Random.new(117), 0)
+	local victim = state:addPlayer(nil, "Reste", Random.new(118), 0)
+	if not bomber or not victim then
+		fail("nuke attacker leave — spawn impossible")
+	else
+		local target = victim.capitalTile or 0
+		local tx, ty = MapGen.fromIndex(target)
+		table.insert(state.missiles, {
+			id = 3,
+			slot = bomber.slot,
+			kind = Config.NUKE.ATOM,
+			x = tx,
+			y = ty,
+			sx = tx,
+			sy = ty,
+			tx = tx,
+			ty = ty,
+			progress = 0.3,
+			speed = Config.MISSILE_SPEED,
+		})
+		local gone = bomber.slot
+		state:removePlayer(gone)
+		for _, missile in state.missiles do
+			if missile.slot == gone then
+				fail("nuke attacker leave — missile du disparu encore en vol")
+				break
+			end
+		end
+		print("nuke attacker leave : missiles du tireur detruits")
+	end
+end
+
+do
+	-- N31 : findSeaPath poole reste deterministe (meme trajet, appels successifs).
+	local seaState = GameState.new(31415)
+	local coastal: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1 do
+		if seaState:isLand(index) and MapGen.isCoastal(seaState.terrain, index) then
+			table.insert(coastal, index)
+			if #coastal >= 400 then
+				break
+			end
+		end
+	end
+	local fromTile: number? = nil
+	local toTile: number? = nil
+	for _, first in coastal do
+		for _, second in coastal do
+			if first ~= second then
+				local path = Navy.findSeaPath(seaState, first, second)
+				if path and #path >= 2 then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+		end
+		if fromTile then
+			break
+		end
+	end
+	if not fromTile or not toTile then
+		fail("findSeaPath pool — aucune paire cotiere reliee")
+	else
+		local p1 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p2 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p3 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local function same(a: { number }?, b: { number }?): boolean
+			if not a or not b or #a ~= #b then
+				return false
+			end
+			for i = 1, #a do
+				if a[i] ~= b[i] then
+					return false
+				end
+			end
+			return true
+		end
+		if not p1 or not same(p1, p2) or not same(p1, p3) then
+			fail("findSeaPath pool — trajet non deterministe entre appels successifs")
+		else
+			local back = Navy.findSeaPath(seaState, toTile, fromTile)
+			local again = Navy.findSeaPath(seaState, fromTile, toTile)
+			if not same(p1, again) then
+				fail("findSeaPath pool — parent scratch pollue apres un autre trajet")
+			elseif not back then
+				fail("findSeaPath pool — trajet inverse introuvable")
+			else
+				print(`findSeaPath pool : {#p1} tuiles, 4 appels identiques`)
+			end
+		end
+	end
+end
+
+do
+	local ChantierB = __require("ChantierB")
+	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
+	print(
+		`combat vivant : MAX_TILES_PER_TICK={Config.MAX_TILES_PER_TICK} (inutilise) attackTilesPerTick(10k,nil,1)={perTick} guard=80`
+	)
 end
 
 do
