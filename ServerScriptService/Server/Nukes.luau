@@ -27,6 +27,14 @@ local Nukes = {}
 
 local NEUTRAL = Config.NEUTRAL_SLOT
 
+-- N76 : snapshots crater recycles (pas un spatial hash). Maps, pas
+-- arrays — table.clear avant fill, pas de truncate. Distinct de
+-- samBuf / blastX (Bots) / destroyBuf. Non reentrant : Nukes.step
+-- detonne en serie, le clear au boom suivant est voulu. Un leftover
+-- hitTiles taxerait un camp non touche (autorite troupes).
+local tilesBeforeBuf: { [number]: number } = {}
+local hitTilesBuf: { [number]: number } = {}
+
 --=============================================================================
 -- Tir
 --=============================================================================
@@ -361,11 +369,12 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 	-- qu'une frappe sur un petit empire soit devastatrice et qu'une frappe sur
 	-- un geant ne soit qu'une morsure. Snapshot AVANT le crater : setOwner
 	-- reduit victim.tiles dans la boucle, ce qui faussait le denominateur.
-	local tilesBefore: { [number]: number } = {}
+	-- N76 : hashes module, table.clear avant fill. Formule share inchangee.
+	table.clear(tilesBeforeBuf)
 	for ownerSlot, ownerPs in state.players do
-		tilesBefore[ownerSlot] = ownerPs.tiles
+		tilesBeforeBuf[ownerSlot] = ownerPs.tiles
 	end
-	local hitTiles: { [number]: number } = {}
+	table.clear(hitTilesBuf)
 
 	for dy = -radius, radius do
 		for dx = -radius, radius do
@@ -382,7 +391,7 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 			local index = MapGen.toIndex(nx, ny)
 			local owner = buffer.readu8(state.owner, index)
 			if owner ~= NEUTRAL then
-				hitTiles[owner] = (hitTiles[owner] or 0) + 1
+				hitTilesBuf[owner] = (hitTilesBuf[owner] or 0) + 1
 			end
 
 			if state.buildings[index] then
@@ -399,10 +408,10 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 		end
 	end
 
-	for slot, tilesHit in hitTiles do
+	for slot, tilesHit in hitTilesBuf do
 		local victim = state.players[slot]
 		if victim then
-			local share = tilesHit / math.max(1, tilesBefore[slot] or victim.tiles)
+			local share = tilesHit / math.max(1, tilesBeforeBuf[slot] or victim.tiles)
 			local loss = victim.troops * troopKill * math.min(1, share * 3)
 			victim.troops = math.max(0, victim.troops - loss)
 			state:notify(`\u{2622} Ton territoire a ete frappe — {math.floor(loss)} pertes.`, "bad", slot)
@@ -455,5 +464,9 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 		end
 	end
 end
+
+-- Banc N76 : leftover ocean / rawequal. Pas replique.
+Nukes.tilesBeforeBuf = tilesBeforeBuf
+Nukes.hitTilesBuf = hitTilesBuf
 
 return Nukes
