@@ -369,6 +369,21 @@ type SettledRec = {
 }
 local settledRecPool: { [number]: SettledRec } = {}
 GameState.settledRecPool = settledRecPool
+-- N93 : index PORT recycle (leftover N40, recette deliveryPool N92 /
+-- settledRecPool N89). indexPort reecrit slot / level. Absent →
+-- portsByTile[index] = nil (pas un leftover vivant). Pool module survit
+-- a GameState.new / portsByTile = {}. Ne pas require Navy (cycle).
+-- Distinct de factoryRecPool (N94) : leftover croise = usine lue comme port.
+type PortRec = { slot: number, level: number }
+local portRecPool: { [number]: PortRec } = {}
+GameState.portRecPool = portRecPool
+-- N94 : index FACTORY recycle (leftover N45/N92, recette portRecPool N93).
+-- indexFactory reecrit slot / level. Absent → factoriesByTile[index] = nil.
+-- Pool module survit a GameState.new. Ne pas require Trade (cycle).
+-- Ne pas partager avec portRecPool (kinds distincts).
+type FactoryRec = { slot: number, level: number }
+local factoryRecPool: { [number]: FactoryRec } = {}
+GameState.factoryRecPool = factoryRecPool
 -- N83 : pool parallele. drainEvents / drainSounds nil les files
 -- (# == 0) sans detruire les records. notify / sound reecrivent
 -- eventPool[n] / soundPool[n]. Overlay HUD lit le payload tout de
@@ -1027,9 +1042,18 @@ local function indexBunker(self: GameState, slot: number, index: number, present
 end
 
 -- Index PORT : spawnTradeShips (ISSUE-N40). Pas _carriersDirty.
+-- N93 : recycle portRecPool[index] (recette deliveryPool N92).
 local function indexPort(self: GameState, index: number, slot: number, level: number, present: boolean)
 	if present then
-		self.portsByTile[index] = { slot = slot, level = level }
+		local rec = portRecPool[index]
+		if rec == nil then
+			rec = { slot = slot, level = level }
+			portRecPool[index] = rec
+		else
+			rec.slot = slot
+			rec.level = level
+		end
+		self.portsByTile[index] = rec
 	else
 		self.portsByTile[index] = nil
 	end
@@ -1064,9 +1088,18 @@ local function indexSilo(self: GameState, slot: number, index: number, present: 
 end
 
 -- Index FACTORY : Trade.step (ISSUE-N45). Recette portsByTile, pas _carriersDirty.
+-- N94 : recycle factoryRecPool[index] (recette portRecPool N93). Pools separes.
 local function indexFactory(self: GameState, index: number, slot: number, level: number, present: boolean)
 	if present then
-		self.factoriesByTile[index] = { slot = slot, level = level }
+		local rec = factoryRecPool[index]
+		if rec == nil then
+			rec = { slot = slot, level = level }
+			factoryRecPool[index] = rec
+		else
+			rec.slot = slot
+			rec.level = level
+		end
+		self.factoriesByTile[index] = rec
 	else
 		self.factoriesByTile[index] = nil
 	end
