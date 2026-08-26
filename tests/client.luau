@@ -909,7 +909,7 @@ check("pose et capture de chaque type de batiment", function()
 	-- V56 (unités) / V71 (roulis) / V73 (UnitModels radar/flag) restent
 	-- dans le check navires. V74 flame Size = API. V75 rot + V76 Size
 	-- rayon + V77 early-out hover dans le check apercu. V78 wakeRot
-	-- (check navires). Leftover V80 (DeliveryPulse). Voies encore vivantes ici ; la destruction
+	-- + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse). Voies encore vivantes ici ; la destruction
 	-- plus bas les vide (le check livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
@@ -1039,7 +1039,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V71 (check navires). Roues camion V72 (check pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
-	-- apercu. V78 wakeRot (check navires). Leftover V79 (LandingSplash).
+	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1087,8 +1087,8 @@ check("apercu de placement pour chaque batiment", function()
 	-- CFrame.Angles 60 Hz hover. V76 : Size pose dans setKind
 	-- (rayon = kind). V77 : early-out tuile+statut. Leftover V51/V53
 	-- (resolve) dans le check accrochage. Leftover V73 (radar/flag)
-	-- dans le check navires. V78 wakeRot (check navires). Hauteurs
-	-- +0.42 / +0.38.
+	-- dans le check navires. V78 wakeRot + V79 LandingSplash
+	-- (check navires). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1536,9 +1536,9 @@ end)
 
 check("navires, missiles et interpolation", function()
 	-- V78 : wakeRot cuit a new (recette V75 footprintRot / feel N130).
-	-- Plus de CFrame.Angles a chaque spawn navire. Leftover V79
-	-- (LandingSplash despawn) / V80 (DeliveryPulse). Leftover V77
-	-- (Preview hover) dans le check apercu.
+	-- Plus de CFrame.Angles a chaque spawn navire. V79 : LandingSplash
+	-- reutilise wakeRot au despawn (feel N131, Y + 0.14). Leftover V80
+	-- (DeliveryPulse). Leftover V77 (Preview hover) dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
 	local bakedWake = overlay.wakeRot
@@ -1580,7 +1580,7 @@ check("navires, missiles et interpolation", function()
 	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
 	-- Leftover V71 / V65 / V55 / V52. V74 flame Size = API. V75 rot
 	-- + V76 Size + V77 early-out dans le check apercu. V78 wakeRot
-	-- au-dessus. Leftover V79 (LandingSplash CFrame.Angles).
+	-- au-dessus. V79 LandingSplash plus bas (applyUnits vide).
 	local radarPiece, flagPiece
 	for _, piece in overlay.units[1].visual.pieces do
 		if piece.role == "radar" then
@@ -1638,7 +1638,7 @@ check("navires, missiles et interpolation", function()
 	-- dans le check pose/capture.
 	-- V73 : radar/flag fromEulerAnglesYXZ. V74 flame Size = API.
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
-	-- V78 wakeRot. Leftover V79 (LandingSplash CFrame.Angles).
+	-- V78 wakeRot. V79 LandingSplash juste apres applyUnits vide.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
@@ -1647,6 +1647,20 @@ check("navires, missiles et interpolation", function()
 	assert(rawequal(radarPiece.offset, radarOff), "offset radar mute")
 	assert(rawequal(flagPiece.offset, flagOff), "offset flag mute")
 	overlay:applyUnits({}, {})
+	-- V79 : 3 navires → 3 LandingSplash. Missile skip. Y = OCEAN + 0.14.
+	-- wakeRot rawequal (un seul champ, constante identique a V78).
+	local splashN = 0
+	local aSplash
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "LandingSplash" then
+			splashN += 1
+			aSplash = node
+		end
+	end
+	assert(splashN == 3, "LandingSplash count despawn")
+	assert(aSplash ~= nil and aSplash.CFrame, "splash sans CFrame")
+	assert(math.abs(aSplash.CFrame.Y - (Config.OCEAN_LEVEL + 0.14)) < 1e-6, "splash Y")
+	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree au despawn")
 	overlay:explosion(50, 50, 9)
 end)
 
@@ -1704,7 +1718,7 @@ check("camera strategique", function()
 	-- Roulis navire V71 (check navires). Roues camion V72 (pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
-	-- V78 wakeRot (check navires). Leftover V79 (LandingSplash).
+	-- V78 wakeRot + V79 LandingSplash (check navires). Leftover V80 (DeliveryPulse).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
