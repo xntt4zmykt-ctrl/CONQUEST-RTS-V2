@@ -62,8 +62,11 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- PLAINS + 0.5). V83 : SelectionRing reutilise le meme pulseRot
 	-- (geste selectTile, height = surface + 0.48, pas +0.8).
 	-- V125 : SelectedTerritory reuse self.selection (feel N155
-	-- inline, pas merger a72c / 0b3d / ba8a). clearSelection
-	-- Destroy conserve (feel N168 = leftover suivant).
+	-- inline, pas merger a72c / 0b3d / ba8a). V126 :
+	-- clearSelection Parent = nil, garder self.selection
+	-- (feel N168 inline, pas merger a72c). SelectionRing meme
+	-- traitement. clearActionPreview Destroy conserve
+	-- (feel N169 = leftover suivant).
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	-- V120 : free-list floatingText PAR Effects (pas goldFree Overlay /
@@ -123,8 +126,8 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 	-- tween Size feel). Color / CFrame reecrits au reuse. Tween
 	-- pulse conserve (pas recree). SelectionRing V83 reutilise
 	-- aussi (evite la fuite d'anneaux si on clique deux fois
-	-- sans clearSelection). clearSelection Destroy conserve
-	-- (feel N168 = leftover suivant). Distinct de V124 (feedFree
+	-- sans clearSelection). V126 : reparent self.root si Parent
+	-- nil (apres clearSelection park). Distinct de V124 (feedFree
 	-- HUD). Distinct de V123 (ringFree BuildingModels). Distinct
 	-- de V122 (pulseFree). Distinct de V83 (pulseRot deja).
 	-- Distinct de previewTile (ActionPreview, Y +0.42). Pas
@@ -147,6 +150,8 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 		TweenService:Create(marker, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 			Transparency = 0.62,
 		}):Play()
+	elseif marker.Parent == nil then
+		marker.Parent = self.root
 	end
 	marker.Color = color
 	marker.CFrame = CFrame.new(base.X, height + 0.58, base.Z)
@@ -178,26 +183,36 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 			Transparency = 0.78,
 			Size = Vector3.new(0.2, Config.TILE_SIZE * 1.75, Config.TILE_SIZE * 1.75),
 		}):Play()
+	elseif ring.Parent == nil then
+		ring.Parent = self.root
 	end
 	ring.Color = color
 	ring.CFrame = CFrame.new(base.X, height + 0.48, base.Z) * self.pulseRot
 end
 
 function Effects.clearSelection(self: Effects)
+	-- V126 : Parent = nil, garder self.selection. Recette analogique
+	-- V125 / feel N168 inline — ne PAS merger a72c. Pas Destroy,
+	-- pas self.selection = nil. SelectionRing meme traitement.
+	-- previewTile / clearActionPreview Destroy conserves
+	-- (feel N169 = leftover suivant). Pas de pool selectionFree.
+	-- Distinct de V125 (reuse pendant la vie). Distinct de V124
+	-- (feedFree HUD). Distinct de V83 (pulseRot deja). Pas
+	-- reentrant. Geste joueur, pas 60 Hz. Ne pas porter Size /
+	-- Transparency / Y feel. Ne pas geler Size flame (V74).
 	if self.selection then
-		self.selection:Destroy()
-		self.selection = nil
+		self.selection.Parent = nil
 	end
 	if self.selectionRing then
-		self.selectionRing:Destroy()
-		self.selectionRing = nil
+		self.selectionRing.Parent = nil
 	end
 end
 
 -- Apercu leger de l'action sous le curseur. V125 recycle deja
 -- SelectedTerritory entre deux clics (geste, pas 60 Hz) ;
--- `previewTile` reste le chemin 60 Hz (raycast). `clearSelection`
--- Destroy conserve (feel N168 = leftover).
+-- V126 parque clearSelection (Parent = nil). `previewTile`
+-- reste le chemin 60 Hz (raycast). `clearActionPreview`
+-- Destroy conserve (feel N169 = leftover).
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
 	local marker = self.actionPreview
 	if not marker then
