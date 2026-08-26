@@ -356,6 +356,18 @@ local collapseScratch = table.create(4, 0)
 -- collapseRemainBuf (N69, tuiles). Ne pas nommer `doomed`.
 local destroyBuf: { number } = table.create(16)
 GameState.destroyBuf = destroyBuf
+-- N83 : pool parallele. drainEvents / drainSounds nil les files
+-- (# == 0) sans detruire les records. notify / sound reecrivent
+-- eventPool[n] / soundPool[n]. Overlay HUD lit le payload tout de
+-- suite — ne pas tenir le record au-dela du prochain notify.
+-- Non reentrant — flushEvents unique / tick. Distinct de plunders
+-- (N85) et de intentPool (N82).
+type EventRec = { text: string, kind: string, only: number? }
+type SoundRec = { name: string, only: number? }
+local eventPool: { EventRec } = table.create(8)
+local soundPool: { SoundRec } = table.create(8)
+GameState.eventPool = eventPool
+GameState.soundPool = soundPool
 
 --=============================================================================
 -- Construction
@@ -436,17 +448,64 @@ end
 --[[
 	File un message a destination des clients. `only` restreint a un slot, sinon
 	c'est diffuse a tout le monde.
+
+	N83 contrat B : reecrit un record recycle. Truncate leftover = drainEvents,
+	pas ici. Un event fantome apres drain = double FireClient.
 ]]
 function GameState.notify(self: GameState, text: string, kind: string, only: number?)
-	table.insert(self.events, { text = text, kind = kind, only = only })
+	local n = #self.events + 1
+	local rec = eventPool[n]
+	if rec == nil then
+		rec = { text = text, kind = kind, only = only }
+		eventPool[n] = rec
+	else
+		rec.text = text
+		rec.kind = kind
+		rec.only = only
+	end
+	self.events[n] = rec
 end
 
 --[[
 	File un effet sonore. `only` le restreint a un joueur ; sinon tout le monde
 	l'entend, avec l'attenuation par distance geree cote client.
+
+	N83 : meme pool que notify. name / only reecrits. Pas de pool de strings
+	(internes Luau).
 ]]
 function GameState.sound(self: GameState, name: string, only: number?)
-	table.insert(self.sounds, { name = name, only = only })
+	local n = #self.sounds + 1
+	local rec = soundPool[n]
+	if rec == nil then
+		rec = { name = name, only = only }
+		soundPool[n] = rec
+	else
+		rec.name = name
+		rec.only = only
+	end
+	self.sounds[n] = rec
+end
+
+--[[
+	N83 : #events == 0, records conserves dans eventPool. init.server itere
+	puis appelle ceci a la place de table.clear (hors bundle). Le banc
+	appelle le drain directement.
+]]
+function GameState.drainEvents(self: GameState)
+	local n = #self.events
+	for i = 1, n do
+		self.events[i] = nil
+	end
+end
+
+--[[
+	N83 : #sounds == 0, records conserves dans soundPool.
+]]
+function GameState.drainSounds(self: GameState)
+	local n = #self.sounds
+	for i = 1, n do
+		self.sounds[i] = nil
+	end
 end
 
 --[[

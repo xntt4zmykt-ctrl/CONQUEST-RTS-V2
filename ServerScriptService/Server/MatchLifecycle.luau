@@ -83,4 +83,49 @@ function MatchLifecycle.endMatchRecords(
 	return out
 end
 
+export type RosterRec = {
+	name: string,
+	isBot: boolean,
+	doctrine: number,
+	betrayals: number,
+}
+
+-- N84 : roster 1 Hz recycle (recette playerStatsForReplicate N57).
+-- players en argument — ne pas require GameState (cycle). Slot disparu
+-- absent (table.clear puis refill). Slot 99 / map vide = table vide
+-- recyclee. Quatre champs seulement : pas gold / troops / tiles.
+local rosterBuf: { [number]: RosterRec } = {}
+local rosterRecPool: { [number]: RosterRec } = {}
+
+function MatchLifecycle.buildRoster(players: any): { [number]: RosterRec }
+	table.clear(rosterBuf)
+	if players then
+		for slot, ps in players do
+			if ps then
+				local rec = rosterRecPool[slot]
+				if rec == nil then
+					rec = {
+						name = ps.name,
+						isBot = ps.isBot,
+						doctrine = ps.doctrine,
+						betrayals = ps.betrayals,
+					}
+					rosterRecPool[slot] = rec
+				else
+					rec.name = ps.name
+					rec.isBot = ps.isBot
+					rec.doctrine = ps.doctrine
+					rec.betrayals = ps.betrayals
+				end
+				rosterBuf[slot] = rec
+			end
+		end
+	end
+	return rosterBuf
+end
+
+-- Banc N84 : rawequal porteuse + record slot. Pas replique.
+MatchLifecycle.rosterBuf = rosterBuf
+MatchLifecycle.rosterRecPool = rosterRecPool
+
 return MatchLifecycle

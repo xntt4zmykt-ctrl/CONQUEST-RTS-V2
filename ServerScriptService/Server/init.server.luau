@@ -126,16 +126,8 @@ end
 --=============================================================================
 
 local function buildRoster()
-	local roster = {}
-	for slot, ps in state.players do
-		roster[slot] = {
-			name = ps.name,
-			isBot = ps.isBot,
-			doctrine = ps.doctrine,
-			betrayals = ps.betrayals,
-		}
-	end
-	return roster
+	-- N84 : helper bundle (MatchLifecycle). FireAllClients reste ici.
+	return MatchLifecycle.buildRoster(state.players)
 end
 
 local function broadcastRoster()
@@ -244,7 +236,8 @@ local function flushEvents()
 			notify:FireAllClients(event.text, event.kind)
 		end
 	end
-	table.clear(state.events)
+	-- N83 : truncate sans detruire le pool (pas table.clear).
+	state:drainEvents()
 
 	for _, event in state.sounds do
 		if event.only then
@@ -256,7 +249,7 @@ local function flushEvents()
 			sfx:FireAllClients(event.name)
 		end
 	end
-	table.clear(state.sounds)
+	state:drainSounds()
 
 	--[[
 		Butins de mise a mort.
