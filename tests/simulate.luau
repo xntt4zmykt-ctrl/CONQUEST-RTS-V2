@@ -20,6 +20,8 @@ local Navy = __require("Navy")
 local Trade = __require("Trade")
 local Nukes = __require("Nukes")
 local Diplomacy = __require("Diplomacy")
+local SystemsBootstrap = __require("SystemsBootstrap")
+SystemsBootstrap.install()
 local Bots = __require("Bots")
 local GreedyMesh = __require("GreedyMesh")
 local WorldBuilder = __require("WorldBuilder")
@@ -30,6 +32,9 @@ local RailPath = __require("RailPath")
 local Format = __require("Format")
 local Leaderstats = __require("Leaderstats")
 local QuickChat = __require("QuickChat")
+local IntentValidator = __require("IntentValidator")
+local TickMetrics = __require("TickMetrics")
+local Research = __require("Research")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -252,6 +257,8 @@ local function runMatch(seed, ticks)
 	end
 
 	Bots.spawnAll(state, rng)
+	-- Headless : pas de phase de spawn humain — liberer les bots tout de suite.
+	SystemsBootstrap.flushPendingBots(state)
 
 	local spawned = 0
 	for _ in state.players do
@@ -272,8 +279,10 @@ local function runMatch(seed, ticks)
 	local firstEra = {}
 
 	local startClock = os.clock()
+	TickMetrics.reset()
 
 	for tick = 1, ticks do
+		local t0 = os.clock()
 		Bots.step(state, rng)
 		Navy.step(state, rng)
 		Nukes.step(state, rng, onExplosion)
@@ -283,10 +292,12 @@ local function runMatch(seed, ticks)
 
 		-- Le serveur vide ces files a chaque tick ; sans ca elles croissent
 		-- indefiniment et le test mesurerait une fuite qui n'existe pas en jeu.
-		state:flushOwnerDelta()
+		local delta = state:flushOwnerDelta()
 		state:flushBuildingDelta()
 		table.clear(state.events)
 		table.clear(state.sounds)
+		local changed = if delta then buffer.len(delta) // 5 else 0
+		TickMetrics.record(tick, changed, delta, (os.clock() - t0) * 1000)
 
 		for _, ps in state.players do
 			if not firstEra[ps.era] then
@@ -388,9 +399,9 @@ do
 			fail("evolution urbaine — la faction de test n'a pas de capitale")
 		else
 			local ccx, ccy = MapGen.fromIndex(capital)
-			for dy = -14, 14 do
-				for dx = -14, 14 do
-					if dx * dx + dy * dy <= 196 then
+			for dy = -16, 16 do
+				for dx = -16, 16 do
+					if dx * dx + dy * dy <= 256 then
 						local nx, ny = ccx + dx, ccy + dy
 						if MapGen.inBounds(nx, ny) then
 							local index = MapGen.toIndex(nx, ny)
@@ -1503,7 +1514,11 @@ end
 ]]
 do
 	local troopState = GameState.new(777)
-	local ps = troopState:addPlayer(nil, "Mesure", Random.new(777), 0)
+	-- Joueur humain (pas bot) : le bonus urbain doit rester integral.
+	local human = __newInstance("Player")
+	human.Name = "Mesure"
+	human.UserId = 7771
+	local ps = troopState:addPlayer(human, "Mesure", Random.new(777), 0)
 	if not ps then
 		fail("plafond de troupes — impossible de creer la faction de test")
 	else
@@ -1669,16 +1684,18 @@ do
 						fail("retraite — le front se degage avant la fin du delai")
 					end
 
-					-- A l'echeance, les survivants rentrent au pays.
+					-- A l'echeance, les survivants rentrent au pays (moins la perte de retraite).
 					atk = retreatState.attacks[1]
 					local survivors = atk and atk.troops or 0
+					local retreatLoss = Config.RETREAT_LOSS or 0
+					local expectedReturn = math.max(0, survivors) * (1 - retreatLoss)
 					local before = a.troops
 					retreatState.tick = retreatAt
 					retreatState:stepAttacks()
 					if #retreatState.attacks ~= 0 then
 						fail("retraite — le front n'est pas dissous a echeance")
 					end
-					if math.abs((a.troops - before) - math.max(0, survivors)) > 0.001 then
+					if math.abs((a.troops - before) - expectedReturn) > 0.001 then
 						fail("retraite — les survivants ne sont pas restitues a l'attaquant")
 					end
 				end
@@ -1824,10 +1841,12 @@ do
 			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
 			a.gold = 5000
 			b.troops = 10000
+			-- Hors de l'immunite de deploiement OF (5 s).
+			mirvState.tick = (Config.SPAWN_NUKE_IMMUNITY or 5) * Config.TICK_RATE + 1
 
-			local ok = Nukes.launch(mirvState, a.slot, targetTile, Config.NUKE.MIRV)
+			local ok, reason = Nukes.launch(mirvState, a.slot, targetTile, Config.NUKE.MIRV)
 			if not ok then
-				fail("mirv — le tir est refuse")
+				fail("mirv — le tir est refuse: " .. tostring(reason))
 			elseif a.gold ~= 5000 - Config.NUKE_STATS[Config.NUKE.MIRV].cost then
 				fail("mirv — le cout du tir n'est pas preleve")
 			else
@@ -2219,6 +2238,132 @@ end
 ]]
 if serverBlocks > 1500 then
 	fail(`{serverBlocks} blocs de collision : replication initiale trop lourde`)
+end
+
+--=============================================================================
+-- P0 — hash carte, intentions, capacite, metrics
+--=============================================================================
+
+print("")
+print("--- P0 contrats ---")
+
+do
+	local a = MapGen.generate(4242)
+	local b = MapGen.generate(4242)
+	local ha, hb = MapGen.terrainHash(a), MapGen.terrainHash(b)
+	if ha ~= hb then
+		fail(`hash carte non deterministe : {ha} vs {hb}`)
+	end
+	local meta = MapGen.mapMeta(4242, a)
+	if meta.mapId ~= Config.MAP_ID or meta.terrainHash ~= ha then
+		fail("mapMeta incoherent")
+	end
+	local counts = MapGen.countByBiome(a)
+	local sum = 0
+	for _, n in counts do
+		sum += n
+	end
+	if sum ~= Config.TILE_COUNT then
+		fail(`compte biomes {sum} != TILE_COUNT`)
+	end
+	print(`hash carte seed 4242 : {ha}`)
+end
+
+do
+	if Config.MAX_HUMAN_PLAYERS > Config.MAX_TOTAL_FACTIONS then
+		fail("MAX_HUMAN_PLAYERS > MAX_TOTAL_FACTIONS")
+	end
+	if Config.PUBLIC_MATCH_CAPACITY > Config.MAX_TOTAL_FACTIONS then
+		fail("PUBLIC_MATCH_CAPACITY > MAX_TOTAL_FACTIONS")
+	end
+	if Config.RENDER_MODE ~= "Blocks" then
+		fail(`RENDER_MODE de production doit etre Blocks, pas {Config.RENDER_MODE}`)
+	end
+	print(
+		`capacite : humans={Config.MAX_HUMAN_PLAYERS} bots={Config.MAX_BOTS} public={Config.PUBLIC_MATCH_CAPACITY} slots={Config.MAX_TOTAL_FACTIONS}`
+	)
+end
+
+do
+	IntentValidator.reset()
+	local state = GameState.new(99)
+	state.mode = GameModes.get("classic")
+	local fakePlayer = __newInstance("Player")
+	fakePlayer.Name = "Tester"
+	fakePlayer.UserId = 42
+	local ps = state:addPlayer(fakePlayer, "Testland", Random.new(1), 0)
+	if not ps then
+		fail("intentions — spawn joueur impossible")
+	else
+		local replies = {}
+		local refuses = {}
+		local ctx = {
+			state = state,
+			matchPhase = "playing",
+			matchId = "test",
+			slotOf = function(p)
+				return if p == fakePlayer then ps.slot else nil
+			end,
+			doctrineLockAt = os.clock() + 999,
+			now = os.clock,
+			buildings = Buildings,
+			navy = Navy,
+			nukes = Nukes,
+			diplomacy = Diplomacy,
+			research = Research,
+			reply = function(_p, ok, msg)
+				table.insert(replies, { ok = ok, msg = msg })
+			end,
+			refuse = function(_p, reason, detail)
+				table.insert(refuses, { reason = reason, detail = detail })
+			end,
+			broadcastRoster = function() end,
+		}
+
+		local ok1 = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = 0.4 })
+		local okDup, reasonDup = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = 0.5 })
+		if not ok1 then
+			fail("intentions — premiere sequence refusee")
+		end
+		if okDup or reasonDup ~= "DuplicateSequence" then
+			fail(`intentions — doublon non detecte ({tostring(reasonDup)})`)
+		end
+		-- Feel OF : application immediate a l'enqueue, pas au flush.
+		if ps.attackRatio < 0.39 or ps.attackRatio > 0.41 then
+			fail(`intentions — ratio non applique immediatement ({ps.attackRatio})`)
+		end
+		if IntentValidator.flush(ctx) ~= 0 then
+			fail("intentions — la file aurait du rester vide apres apply immediat")
+		end
+
+		-- Rate limit
+		IntentValidator.reset()
+		local limited = false
+		for i = 1, (Config.INTENT_RATE_LIMIT_PER_SEC or 20) + 5 do
+			local ok, reason = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", i, { ratio = 0.2 })
+			if not ok and reason == "RateLimited" then
+				limited = true
+				break
+			end
+		end
+		if not limited then
+			fail("intentions — rate limit non declenche")
+		end
+		print("intentions : sequence, idempotence, apply immediat, rate limit OK")
+	end
+end
+
+do
+	local report = TickMetrics.formatReport()
+	print(`metrics run principal : {report}`)
+	local snap = TickMetrics.snapshot()
+	if snap.totals.ticks < 100 then
+		fail("metrics — pas assez d'echantillons sur le run principal")
+	end
+	-- Ne change PAS MAX_TILES_PER_TICK ici : on journalise seulement.
+	print(
+		`MAX_TILES_PER_TICK reste {Config.MAX_TILES_PER_TICK} (p95 changed={snap.p95.changedTiles}, p95 deltaB={snap.p95.deltaBytes})`
+	)
 end
 
 print("")

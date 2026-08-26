@@ -1,8 +1,8 @@
 --!strict
 --[[
-	Menu radial, modele OpenFront.
+	Menu radial, regle CONQUEST.
 
-	C'est la piece qui organise toute l'interface du jeu de reference, et la
+	C'est la piece qui organise toute l'interface CONQUEST, et la
 	raison pour laquelle son ecran reste vide : **aucun bouton d'action n'est
 	affiche en permanence**. On clique droit sur la case qu'on regarde deja, et
 	les actions viennent a l'endroit ou l'oeil se trouve — au lieu d'obliger a
@@ -13,7 +13,7 @@
 	propre territoire, alors qu'une barre permanente doit rester generique et
 	laisse le joueur decouvrir l'erreur apres coup.
 
-	Deux niveaux, comme dans OpenFront : l'anneau racine porte les modes, et
+	Deux niveaux, comme dans CONQUEST : l'anneau racine porte les modes, et
 	"Construire" remplace l'anneau par la liste des batiments sans fermer le
 	menu ni perdre la case visee.
 
@@ -81,7 +81,9 @@ local function petal(parent: GuiObject): Petal
 	b.Visible = false
 	b.Parent = parent
 	Theme.corner(b, PETAL_RADIUS)
-	Theme.stroke(b, C.line, 1)
+	local edge = Theme.stroke(b, C.lineGlow, 1.5)
+	edge.Transparency = 0.35
+	Theme.gradient(b, C.surfaceBright, C.surfaceRaised, 135)
 
 	local icon = Theme.label(b, "", T.body, C.text)
 	icon.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -119,7 +121,8 @@ function RadialMenu.new(parent: Instance): RadialMenu
 	local veil = Instance.new("TextButton")
 	veil.Name = "RadialMenu"
 	veil.Size = UDim2.fromScale(1, 1)
-	veil.BackgroundTransparency = 1
+	veil.BackgroundColor3 = C.void
+	veil.BackgroundTransparency = 0.45
 	veil.Text = ""
 	veil.AutoButtonColor = false
 	veil.Visible = false

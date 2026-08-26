@@ -38,9 +38,10 @@ PlacementPreview.__index = PlacementPreview
 
 export type PlacementPreview = typeof(setmetatable({} :: any, PlacementPreview))
 
-local VALID = Color3.fromRGB(110, 235, 160)
-local SNAPPED = Color3.fromRGB(120, 200, 255)
-local INVALID = Color3.fromRGB(255, 105, 95)
+local VALID = Color3.fromRGB(82, 230, 168)
+local SNAPPED = Color3.fromRGB(96, 196, 255)
+local INVALID = Color3.fromRGB(255, 96, 96)
+local UPGRADE = Color3.fromRGB(255, 210, 96)
 
 function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPreview
 	local self = setmetatable({}, PlacementPreview) :: any
@@ -70,6 +71,20 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	footprint.Size = Vector3.new(0.3, 10, 10)
 	footprint.Parent = root
 	self.footprint = footprint
+
+	local pulse = Instance.new("Part")
+	pulse.Name = "Pulse"
+	pulse.Anchored = true
+	pulse.CanCollide = false
+	pulse.CanTouch = false
+	pulse.CanQuery = false
+	pulse.CastShadow = false
+	pulse.Shape = Enum.PartType.Cylinder
+	pulse.Material = Enum.Material.Neon
+	pulse.Transparency = 1
+	pulse.Size = Vector3.new(0.15, 8, 8)
+	pulse.Parent = root
+	self.pulse = pulse
 
 	return self
 end
@@ -157,6 +172,7 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 	local model = self.model
 	if not self.kind or not model or not tile then
 		self.footprint.Transparency = 1
+		self.pulse.Transparency = 1
 		if model then
 			for _, part in model:GetChildren() do
 				if part:IsA("BasePart") then
@@ -169,7 +185,8 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 
 	local color = if status == "exact"
 		then VALID
-		elseif status == "snap" or status == "upgrade" then SNAPPED
+		elseif status == "upgrade" then UPGRADE
+		elseif status == "snap" then SNAPPED
 		else INVALID
 	local base = WorldSpace.indexToWorld(tile)
 	local ground = WorldSpace.surfaceHeight(self.terrain, tile)
@@ -204,10 +221,16 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 		then Config.DEFENSE_RADIUS * Config.TILE_SIZE * 2
 		else Config.TILE_SIZE * 3
 
-	self.footprint.Transparency = 0.6
+	self.footprint.Transparency = 0.52
 	self.footprint.Color = color
-	self.footprint.Size = Vector3.new(0.3, radius, radius)
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.4, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	self.footprint.Size = Vector3.new(0.35, radius, radius)
+	self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+
+	self.pulse.Transparency = 0.72
+	self.pulse.Color = color
+	local pulseSize = radius * 1.08
+	self.pulse.Size = Vector3.new(0.12, pulseSize, pulseSize)
+	self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * CFrame.Angles(0, 0, math.rad(90))
 end
 
 function PlacementPreview.hide(self: PlacementPreview)

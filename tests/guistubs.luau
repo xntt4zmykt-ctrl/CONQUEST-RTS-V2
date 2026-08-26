@@ -597,11 +597,17 @@ end
 ColorSequence = { new = function()
 	return {}
 end }
+ColorSequenceKeypoint = { new = function(time, color)
+	return { Time = time, Color = color }
+end }
 NumberSequence = { new = function()
 	return {}
 end }
 NumberSequenceKeypoint = { new = function(time, value, envelope)
 	return { Time = time, Value = value, Envelope = envelope }
+end }
+NumberRange = { new = function(min, max)
+	return { Min = min, Max = max or min }
 end }
 TweenInfo = { new = function()
 	return {}

@@ -1,63 +1,39 @@
 --!strict
 --[[
-	Jetons de design.
-
-	Toute valeur visuelle repetee vit ici : couleurs, espacements, tailles de
-	texte, durees d'animation. Aucun nombre magique de style ne doit apparaitre
-	dans les fichiers d'interface — sinon l'ensemble derive et l'ecran finit par
-	avoir six gris legerement differents.
-
-	L'echelle typographique et l'echelle d'espacement sont volontairement
-	courtes : moins de choix possibles, plus de coherence.
+	Jetons de design CONQUEST — palette premium sombre, surfaces vitrees,
+	accents lumineux. Toute valeur visuelle repetee vit ici.
 ]]
 
 local Theme = {}
 
---=============================================================================
--- Couleurs
---=============================================================================
-
---[[
-	Palette du jeu de reference (OpenFront), relevee dans sa base de code
-	publique : gris ardoise Tailwind pour les surfaces, et les deux bleus de
-	sa charte — "malibu" pour l'action, "aquarius" pour l'information.
-
-	Les noms de jetons ne changent pas : seules les valeurs bougent, donc
-	aucun ecran n'a a etre reecrit pour suivre le nouveau style.
-]]
 Theme.color = {
-	-- Fonds, du plus profond au plus clair
-	void = Color3.fromRGB(3, 7, 18), -- derriere la carte (gray-950)
-	surface = Color3.fromRGB(31, 41, 55), -- panneaux (gray-800, pose a 92 %)
-	surfaceRaised = Color3.fromRGB(55, 65, 81), -- boutons, lignes (gray-700)
-	surfaceHover = Color3.fromRGB(75, 85, 99), -- survol (gray-600)
-	surfaceBright = Color3.fromRGB(107, 114, 128), -- (gray-500)
-	glass = Color3.fromRGB(17, 24, 39), -- rails de jauge (gray-900)
+	void = Color3.fromRGB(6, 10, 20),
+	surface = Color3.fromRGB(18, 24, 38),
+	surfaceRaised = Color3.fromRGB(28, 36, 54),
+	surfaceHover = Color3.fromRGB(42, 52, 72),
+	surfaceBright = Color3.fromRGB(58, 68, 88),
+	glass = Color3.fromRGB(12, 18, 30),
 
-	-- Bordures
-	line = Color3.fromRGB(75, 85, 99), -- gray-600
-	lineStrong = Color3.fromRGB(100, 116, 139), -- slate-500
+	line = Color3.fromRGB(58, 72, 96),
+	lineStrong = Color3.fromRGB(88, 108, 132),
+	lineGlow = Color3.fromRGB(56, 189, 248),
 
-	-- Texte
-	text = Color3.fromRGB(255, 255, 255),
-	textMuted = Color3.fromRGB(209, 213, 219), -- gray-300
-	textFaint = Color3.fromRGB(156, 163, 175), -- gray-400
+	text = Color3.fromRGB(248, 250, 252),
+	textMuted = Color3.fromRGB(203, 213, 225),
+	textFaint = Color3.fromRGB(148, 163, 184),
 
-	-- Accents semantiques
-	accent = Color3.fromRGB(0, 132, 209), -- malibu : action active, selection
-	accentSoft = Color3.fromRGB(14, 78, 126), -- malibu assombri : fonds actifs
-	gold = Color3.fromRGB(250, 204, 21), -- yellow-400 : ressource
-	ally = Color3.fromRGB(74, 222, 128), -- green-400 : diplomatie positive
-	danger = Color3.fromRGB(248, 113, 113), -- red-400
-	warning = Color3.fromRGB(251, 146, 60), -- orange-400
-	info = Color3.fromRGB(63, 169, 245), -- aquarius : information, troupes
-	nuclear = Color3.fromRGB(163, 230, 53), -- lime-400
+	accent = Color3.fromRGB(56, 189, 248),
+	accentSoft = Color3.fromRGB(12, 74, 110),
+	accentGlow = Color3.fromRGB(125, 211, 252),
+	gold = Color3.fromRGB(250, 204, 21),
+	goldSoft = Color3.fromRGB(180, 130, 20),
+	ally = Color3.fromRGB(52, 211, 153),
+	danger = Color3.fromRGB(248, 113, 113),
+	warning = Color3.fromRGB(251, 146, 60),
+	info = Color3.fromRGB(96, 165, 250),
+	nuclear = Color3.fromRGB(163, 230, 53),
+	construct = Color3.fromRGB(255, 200, 120),
 }
-
---=============================================================================
--- Espacement
---=============================================================================
--- Echelle de 4 px. Utiliser exclusivement ces valeurs.
 
 Theme.space = {
 	xs = 4,
@@ -67,48 +43,27 @@ Theme.space = {
 	xl = 24,
 }
 
--- Rayons plus serres : un grand arrondi sur un petit panneau fait "application
--- mobile gratuite". Les interfaces de strategie sont anguleuses.
 Theme.radius = {
 	sm = 6,
-	md = 8,
-	lg = 12,
+	md = 10,
+	lg = 14,
 	pill = 999,
 }
 
---=============================================================================
--- Typographie
---=============================================================================
-
 Theme.font = {
-	display = Font.fromEnum(Enum.Font.GothamBlack), -- chiffres vedettes
+	display = Font.fromEnum(Enum.Font.GothamBlack),
 	bold = Font.fromEnum(Enum.Font.GothamBold),
 	medium = Font.fromEnum(Enum.Font.GothamMedium),
 	regular = Font.fromEnum(Enum.Font.Gotham),
 }
 
---[[
-	Echelle typographique resserree.
-
-	Les tailles precedentes (hero 34, body 14) donnaient une interface qui
-	mangeait un tiers de l'ecran et faisait, de l'aveu du testeur, "cheap".
-	Une interface de strategie doit etre dense : beaucoup d'information, petits
-	caracteres, hierarchie portee par le contraste et la graisse plutot que par
-	la taille.
-]]
 Theme.textSize = {
-	hero = 28, -- compteur de troupes
-	title = 15,
+	hero = 30,
+	title = 16,
 	body = 13,
 	small = 11,
 	tiny = 10,
 }
-
---=============================================================================
--- Animation
---=============================================================================
--- Trois durees seulement. Les transitions d'interface doivent etre percues
--- comme instantanees : au-dela de ~200 ms, le jeu parait mou.
 
 Theme.motion = {
 	instant = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
@@ -116,10 +71,6 @@ Theme.motion = {
 	smooth = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 	dramatic = TweenInfo.new(0.8, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 }
-
---=============================================================================
--- Helpers d'instanciation
---=============================================================================
 
 function Theme.corner(parent: GuiObject, radius: number): UICorner
 	local c = Instance.new("UICorner")
@@ -132,7 +83,7 @@ function Theme.stroke(parent: GuiObject, color: Color3?, thickness: number?): UI
 	local s = Instance.new("UIStroke")
 	s.Color = color or Theme.color.line
 	s.Thickness = thickness or 1
-	s.Transparency = 0.18
+	s.Transparency = 0.12
 	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	s.Parent = parent
 	return s
@@ -157,22 +108,56 @@ function Theme.list(parent: GuiObject, direction: Enum.FillDirection, gap: numbe
 	return l
 end
 
---[[
-	Panneau standard : fond sombre translucide, coin arrondi, liseré discret.
-	C'est la brique de base de toute l'interface.
-]]
+function Theme.gradient(parent: GuiObject, top: Color3, bottom: Color3, rotation: number?): UIGradient
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, top),
+		ColorSequenceKeypoint.new(1, bottom),
+	})
+	g.Rotation = rotation or 90
+	g.Parent = parent
+	return g
+end
+
 function Theme.panel(name: string, parent: GuiObject): Frame
 	local frame = Instance.new("Frame")
 	frame.Name = name
 	frame.BackgroundColor3 = Theme.color.surface
-	frame.BackgroundTransparency = 0.08
+	frame.BackgroundTransparency = 0.06
 	frame.BorderSizePixel = 0
 	frame.Parent = parent
 	Theme.corner(frame, Theme.radius.md)
 	local stroke = Theme.stroke(frame, Theme.color.line, 1)
 	frame:SetAttribute("PanelStroke", true)
-	stroke.Transparency = 0.22
+	stroke.Transparency = 0.18
+	Theme.gradient(frame, Color3.fromRGB(36, 46, 66), Theme.color.surface, 90)
 	return frame
+end
+
+function Theme.glassPanel(name: string, parent: GuiObject): Frame
+	local frame = Theme.panel(name, parent)
+	frame.BackgroundTransparency = 0.22
+	for _, child in frame:GetChildren() do
+		if child.ClassName == "UIStroke" then
+			child.Color = Theme.color.lineGlow
+			child.Transparency = 0.55
+			break
+		end
+	end
+	return frame
+end
+
+function Theme.accentBar(parent: GuiObject, color: Color3?): Frame
+	local bar = Instance.new("Frame")
+	bar.Name = "AccentBar"
+	bar.BackgroundColor3 = color or Theme.color.accent
+	bar.BorderSizePixel = 0
+	bar.Size = UDim2.new(1, 0, 0, 2)
+	bar.Position = UDim2.fromScale(0, 0)
+	bar.ZIndex = 2
+	bar.Parent = parent
+	Theme.gradient(bar, Theme.color.accentGlow, color or Theme.color.accent, 0)
+	return bar
 end
 
 function Theme.label(parent: GuiObject, text: string, size: number, color: Color3): TextLabel
@@ -186,10 +171,6 @@ function Theme.label(parent: GuiObject, text: string, size: number, color: Color
 	l.Parent = parent
 	return l
 end
-
---=============================================================================
--- Couleurs de faction
---=============================================================================
 
 local Config = require(script.Parent.Config)
 

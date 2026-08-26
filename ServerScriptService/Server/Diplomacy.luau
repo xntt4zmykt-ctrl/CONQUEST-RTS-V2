@@ -157,7 +157,7 @@ function Diplomacy.startCooldown(state: GameState, a: number, b: number)
 end
 
 --[[
-	Prolonge un pacte avant son terme, modele OpenFront : la prolongation est
+	Prolonge un pacte avant son terme, regle CONQUEST : la prolongation est
 	MUTUELLE. Le premier camp marque son intention ; le pacte n'est repousse
 	que quand le second marque la sienne. Une prolongation unilaterale
 	permettrait a un camp d'enfermer l'autre dans une alliance dont il ne
@@ -437,7 +437,7 @@ end
 
 --[[
 	Designe une faction comme cible de l'alliance, modele des coordonnees
-	partagees du jeu de reference : une offensive a trois n'a de poids que si
+	partagees CONQUEST : une offensive a trois n'a de poids que si
 	tout le monde frappe au meme endroit. La marque est propre a chaque joueur,
 	visible de ses allies, et remplace la precedente — une seule priorite a la
 	fois, sinon elle ne priorise plus rien.

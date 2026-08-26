@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Marine : debarquements, commerce, retraite en mer (OpenFront).
+	Marine : debarquements, commerce, retraite en mer .
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -275,7 +275,15 @@ local function resolveLanding(state: GameState, boat)
 end
 
 local function tradeValue(distance: number): number
-	return Config.TRADE_GOLD_BASE + distance * Config.TRADE_GOLD_PER_TILE
+	local scale = Config.TRADE_GOLD_SCALE or 0.002
+	local sigmoid = 75000 / (1 + math.exp(-0.03 * (distance - 300)))
+	return (sigmoid + 50 * distance) * scale
+end
+
+local function manhattan(a: number, b: number): number
+	local ax, ay = MapGen.fromIndex(a)
+	local bx, by = MapGen.fromIndex(b)
+	return math.abs(ax - bx) + math.abs(by - by)
 end
 
 local function canTrade(state: GameState, a: number, b: number): boolean
@@ -329,10 +337,35 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			continue
 		end
 		local candidates: { number } = {}
-		for i, other in ports do
-			if canTrade(state, source.slot, other.slot) then
-				for _ = 1, other.level do
-					table.insert(candidates, i)
+		local foreign: { { index: number, slot: number, level: number, dist: number } } = {}
+		for _, other in ports do
+			if other.index ~= source.index and canTrade(state, source.slot, other.slot) then
+				table.insert(foreign, {
+					index = other.index,
+					slot = other.slot,
+					level = other.level,
+					dist = manhattan(source.index, other.index),
+				})
+			end
+		end
+		table.sort(foreign, function(a, b)
+			return a.dist < b.dist
+		end)
+		local foreignCount = #foreign
+		for rank, other in foreign do
+			local weight = other.level
+			if other.dist >= 300 and rank <= math.clamp(math.floor(foreignCount / 3), 4, foreignCount) then
+				weight += other.level
+			end
+			if state:areAllied(source.slot, other.slot) then
+				weight += other.level
+			end
+			for _ = 1, weight do
+				for i, port in ports do
+					if port.index == other.index then
+						table.insert(candidates, i)
+						break
+					end
 				end
 			end
 		end
@@ -436,8 +469,8 @@ end
 	Warships (porte-avions / bases navales) — port OF WarshipExecution.
 
 	Priorité cibles : Transport > Warship > TradeShip.
-	Portée : WARSHIP_TARGET_RANGE (OF 130).
-	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (OF 20).
+	Portée : WARSHIP_TARGET_RANGE (130).
+	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (20).
 	Pas pilotable : orbite autour de la base (design Conquest).
 ]]
 local function stepCarriers(state: GameState)

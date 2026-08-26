@@ -74,6 +74,8 @@ export type PlayerState = {
 	capitalsCaptured: number,
 	buildingsBuilt: number,
 	attacksLaunched: number,
+	-- Tick de pose de capitale (immunite nucleaire OF).
+	spawnTick: number?,
 }
 
 export type Attack = {
@@ -772,8 +774,10 @@ end
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
 	local check = radius + 3
+	local minDist = Config.SPAWN_MIN_PLAYER_DISTANCE or 30
+	local minDist2 = minDist * minDist
 
-	for _ = 1, 6000 do
+	for _ = 1, 15000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
 		local y = rng:NextInteger(check, Config.MAP_HEIGHT - check - 1)
 		local center = MapGen.toIndex(x, y)
@@ -792,6 +796,19 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 				end
 				if not ok then
 					break
+				end
+			end
+			if ok then
+				for _, ps in self.players do
+					local other = ps.spawnCenter
+					if other then
+						local ox, oy = MapGen.fromIndex(other)
+						local dx, dy = ox - x, oy - y
+						if dx * dx + dy * dy < minDist2 then
+							ok = false
+							break
+						end
+					end
 				end
 			end
 			if ok then
@@ -848,6 +865,7 @@ function GameState.addPlayer(
 		capitalsCaptured = 0,
 		buildingsBuilt = 0,
 		attacksLaunched = 0,
+		spawnTick = 0,
 	}
 	self.players[slot] = state
 	self.alliances[slot] = {}
@@ -881,6 +899,7 @@ function GameState.addPlayer(
 	-- La capitale est posee par le moteur, jamais achetee.
 	self:placeBuilding(center, B.CAPITAL, slot)
 	state.capitalTile = center
+	state.spawnTick = self.tick
 
 	return state
 end
@@ -1083,7 +1102,7 @@ end
 	qui donne l'impression que le jeu prend des blocs au hasard, parce que c'est
 	exactement ce qu'il faisait.
 
-	Trois termes, repris du jeu de reference, et chacun produit un comportement
+	Trois termes, propres a CONQUEST, et chacun produit un comportement
 	que le joueur peut lire sur la carte :
 
 	  - **`+ tick`** — une tuile entree tot dans la file passe avant une tuile
@@ -1215,7 +1234,7 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 end
 
 --[[
-	Rappelle une offensive en cours, modele OpenFront : l'ordre n'est pas
+	Rappelle une offensive en cours, regle CONQUEST : l'ordre n'est pas
 	honore immediatement mais apres un delai (RETREAT_DELAY ticks), pendant
 	lequel le front continue de se battre. Une retraite instantanee ferait de
 	chaque engagement un essai sans risque ; le delai rend la decision
