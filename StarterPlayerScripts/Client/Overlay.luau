@@ -238,8 +238,13 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			local centre = segment.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction) + Vector3.new(0, layer.lift, 0)
+			-- V61 : centre depuis layer.origin (lift cuit a la construction).
+			-- Plus de + Vector3.new(0, layer.lift, 0) 60 Hz. LookAt conserve
+			-- (sinon la chaussee perd son orientation). Size inchange (API).
+			-- Cable / feuillage / houle / camion / unites inchanges
+			-- (V60/V59/V58/V57/V56).
+			local centre = layer.origin + segment.direction * (visible - shown / 2)
+			part.CFrame = CFrame.lookAt(centre, centre + segment.direction)
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -329,10 +334,12 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
 			-- la chaussee qui la porte.
+			-- V61 : lift cuit dans origin par calque (une fois). applyRouteProgress
+			-- n'ajoute plus Vector3.new(0, lift, 0) a 60 Hz.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, lift = 0, ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, lift = 0.08 * k, ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, lift = 0.18 * k, ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, 0.08 * k, 0), ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, 0.18 * k, 0), ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,

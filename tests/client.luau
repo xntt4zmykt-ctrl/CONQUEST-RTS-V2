@@ -826,6 +826,23 @@ check("pose et capture de chaque type de batiment", function()
 		)
 	end
 
+	-- V61 : lift cuit dans layer.origin. Deux frames → Parts Road/Shoulder/
+	-- CenterMark stables, Y asphalt ≠ shoulder. Leftover V57 (camion) plus
+	-- bas. Leftover V60 (câble) dans le check modeles.
+	assert(sample.construction, "pas de chantier pour tester le lift")
+	local firstSeg = sample.construction.segments[1]
+	assert(firstSeg and firstSeg.layers[1] and firstSeg.layers[2] and firstSeg.layers[3], "calques absents")
+	local shoulderPart = firstSeg.layers[1].part
+	local roadPart = firstSeg.layers[2].part
+	local stripePart = firstSeg.layers[3].part
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(firstSeg.layers[1].part, shoulderPart), "Part Shoulder recreee")
+	assert(rawequal(firstSeg.layers[2].part, roadPart), "Part Road recreee")
+	assert(rawequal(firstSeg.layers[3].part, stripePart), "Part CenterMark recreee")
+	assert(roadPart.CFrame.Y ~= shoulderPart.CFrame.Y, "lift asphalt = shoulder")
+	assert(stripePart.CFrame.Y ~= roadPart.CFrame.Y, "lift bande = asphalt")
+
 	--[[
 		La voie se construit progressivement, elle n'apparait pas d'un bloc.
 
