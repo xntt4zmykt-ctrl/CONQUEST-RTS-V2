@@ -185,7 +185,17 @@ function WorldRenderer.buildOcean(self: WorldRenderer)
 		glint.Transparency = 0.74
 		glint.Size = Vector3.new(4 + i % 8, 0.05, 0.18 + (i % 3) * 0.08)
 		local angle = math.rad(-18 + (i % 9) * 4)
-		glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.Angles(0, angle, 0)
+		-- N135 : OceanGlint construction. Plus de CFrame.Angles.
+		-- fromEulerAnglesYXZ(0, angle, 0) ≡ Angles(0, angle, 0).
+		-- Yaw `angle` variable — ne pas figer a 0. Offset Y
+		-- OCEAN_LEVEL + 0.08 inchange. Boucle 54 / probe ocean inchanges.
+		-- table.insert oceanRipples { part, base, phase } inchange.
+		-- Plan Ocean / SeaFloor translation inchanges. step non (N108).
+		-- Distinct Effects ring N134 (Y = 3, Z=90). Distinct Overlay
+		-- Shockwave N133 (PLAINS + 0.5). Distinct BuildRing leftover N136.
+		-- Distinct trunks leftover (buildDecorations). Overlay / Effects
+		-- / BuildingModels inchanges.
+		glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.fromEulerAnglesYXZ(0, angle, 0)
 		glint.Parent = self.root
 		table.insert(self.oceanRipples, {
 			part = glint,

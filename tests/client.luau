@@ -712,6 +712,12 @@ check("construction du monde 3D", function()
 	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
 	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
 	-- (partCount) reste au-dessus. Recette visual V58/V59, pas merger.
+	-- N135 : OceanGlint fromEulerAnglesYXZ (pas CFrame.Angles). Yaw `angle`
+	-- variable. Offset Y OCEAN_LEVEL + 0.08. Leftover N114 compact, leftover
+	-- N112 dirtyHead, leftover N108 feuillage Y, leftover N107 houle
+	-- doivent rester verts. Check vagues leftover N134 ring. Check navires
+	-- leftover N133 shockwave. Recette leftover N134, pas merger visual.
+	-- Overlay / Effects / BuildingModels inchanges. step inchange.
 	local nRipple = #world.oceanRipples
 	assert(nRipple > 0, "aucun reflet ocean")
 	local first = world.oceanRipples[1]
