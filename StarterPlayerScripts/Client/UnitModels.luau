@@ -219,7 +219,7 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- feel c62f. Ne PAS retoucher LandingRamp (V94 deja). Ne PAS
 	-- retoucher MissileBody (V95 deja). Ne PAS retoucher Fin
 	-- (V96 deja). Ne PAS retoucher le mesh carrier (V97 deja).
-	-- V98 CityWindows rest.X (BuildingModels.animate). V99 beacons rest.Z (BuildingModels.animate). V100 trail offset.Z (UnitModels.place).
+	-- V98 CityWindows rest.X (BuildingModels.animate). V99 beacons rest.Z (BuildingModels.animate). V100 trail offset.Z (UnitModels.place). V101 dirtyHead (WorldRenderer.stepRebuilds).
 	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)

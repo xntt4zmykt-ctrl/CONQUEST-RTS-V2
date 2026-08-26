@@ -40,6 +40,7 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 
 -- V48 : applyDelta recycle gains / losses / others (recette V47 candBuf).
 -- Distinct de V14b (filaire buffer.create) et de V26 (boatSnapBuf).
+-- Distinct de V101 (dirtyHead file, pas applyDelta).
 -- Non reentrant — applyDelta synchrone unique par frame. Truncate leftover
 -- AVANT return (vague A rejouerait un splash sur une tuile de vague B).
 -- Early-out count == 0 : truncate a 0, retourner les pools (JAMAIS {}).
@@ -67,6 +68,13 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	self.chunkFolders = {} :: { [number]: Folder }
 	self.dirty = {} :: { [number]: boolean }
 	self.dirtyQueue = {} :: { number }
+	-- V101 : curseur de consommation. table.remove(1) decalait tout le
+	-- tableau a chaque rebuild (budget 3 / frame). Recette feel N112
+	-- inline — ne PAS merger 04e7. Truncate seulement quand la file
+	-- est consommee. Compact prefix (feel N114, seuil 32) leftover.
+	-- Recycle Ground/Border (feel N106) non porte. Trail offset.Z
+	-- (V100) inchange. FactoryOutput / SiloWarning leftover separe.
+	self.dirtyHead = 1
 	self.partCount = 0
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une
 	-- allocation par reconstruction.
@@ -632,15 +640,31 @@ end
 function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 	local budget = Config.CHUNK_REBUILDS_PER_FRAME
 	local done = 0
+	local queue = self.dirtyQueue
+	local head = self.dirtyHead
 
-	while done < budget and #self.dirtyQueue > 0 do
-		local chunk = table.remove(self.dirtyQueue, 1)
+	-- V101 : curseur + truncate. Plus de table.remove(1). markDirty /
+	-- table.insert inchanges. Stale (dirty deja nil) saute sans compter
+	-- le budget, comme avant. Recette feel N112 inline — ne PAS merger
+	-- 04e7. Distinct de V100 (trail offset.Z, UnitModels.place).
+	-- Distinct de V48 (applyDelta pools). Compact prefix leftover
+	-- (feel N114). Recycle Ground/Border (feel N106) non porte.
+	-- Houle / feuillage inchanges (V58/V59). Pas de RemoteFunction.
+	while done < budget and head <= #queue do
+		local chunk = queue[head]
+		head += 1
 		if chunk and self.dirty[chunk] then
 			self.dirty[chunk] = nil
 			self:rebuildChunk(chunk)
 			done += 1
 		end
 	end
+
+	if head > #queue then
+		table.clear(queue)
+		head = 1
+	end
+	self.dirtyHead = head
 
 	return done
 end
