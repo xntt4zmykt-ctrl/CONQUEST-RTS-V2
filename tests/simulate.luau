@@ -3122,6 +3122,122 @@ end
 
 print("passe 17 : bunkersBySlot, spawnCenter, diplo expiry, nuke kind, beachhead, delta, samRange OK")
 
+--[[
+	Nightly passe 18 — revue PR #50 : aura morte, CAPTURE_GUARD, samsBySlot.
+]]
+do
+	if ChantierB.CAPTURE_GUARD ~= 80 then
+		fail(`CAPTURE_GUARD — {tostring(ChantierB.CAPTURE_GUARD)} (attendu 80)`)
+	elseif Config.MAX_TILES_PER_TICK == ChantierB.CAPTURE_GUARD then
+		fail("CAPTURE_GUARD — MAX_TILES_PER_TICK coincide avec le debit vivant")
+	end
+end
+
+do
+	local aura = GameState.new(1801)
+	local a = aura:addPlayer(nil, "Attaquant", Random.new(81), 0)
+	local b = aura:addPlayer(nil, "Defenseur", Random.new(82), 0)
+	if not a or not b then
+		fail("aura morte — factions impossibles")
+	else
+		local tile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(aura.owner, index) == b.slot and not aura.buildings[index] then
+				tile = index
+				break
+			end
+		end
+		if not tile then
+			fail("aura morte — aucune tuile libre")
+		else
+			aura:placeBuilding(tile, Config.BUILDING.DEFENSE, b.slot)
+			if buffer.readu8(aura.defense, tile) ~= 0 then
+				fail("aura morte — pose DEFENSE ecrit encore le buffer")
+			end
+			a.troops = 20000
+			b.troops = 20000
+			local postedLoss = select(1, ChantierB.attackLogic(aura, 10000, a, b, tile))
+			aura:setOwner(tile, a.slot)
+			if aura.bunkersBySlot[b.slot] and aura.bunkersBySlot[b.slot][tile] then
+				fail("aura morte — capture laisse l'index chez le defenseur")
+			elseif not (aura.bunkersBySlot[a.slot] and aura.bunkersBySlot[a.slot][tile]) then
+				fail("aura morte — capture n'indexe pas chez l'attaquant")
+			end
+			local capturedLoss = select(1, ChantierB.attackLogic(aura, 10000, b, a, tile))
+			if capturedLoss < postedLoss * 0.9 then
+				fail(`aura morte — posted apres capture {capturedLoss} vs {postedLoss}`)
+			end
+			aura:destroyBuilding(tile)
+			if buffer.readu8(aura.defense, tile) ~= 0 then
+				fail("aura morte — destroy DEFENSE ecrit encore le buffer")
+			end
+		end
+	end
+end
+
+do
+	local samState = GameState.new(1802)
+	local a = samState:addPlayer(nil, "Frappe", Random.new(91), 0)
+	local b = samState:addPlayer(nil, "Batterie", Random.new(92), 0)
+	if not a or not b then
+		fail("samsBySlot — factions impossibles")
+	else
+		local tile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(samState.owner, index) == b.slot and not samState.buildings[index] then
+				tile = index
+				break
+			end
+		end
+		if not tile then
+			fail("samsBySlot — aucune tuile libre")
+		else
+			samState:placeBuilding(tile, Config.BUILDING.SAM, b.slot)
+			local listed = Buildings.samsOf(samState, b.slot)
+			if #listed ~= 1 or listed[1] ~= tile then
+				fail("samsBySlot — pose SAM non indexee")
+			end
+			local bx, by = MapGen.fromIndex(tile)
+			table.insert(samState.missiles, {
+				id = 1,
+				slot = a.slot,
+				kind = Config.NUKE.ATOM,
+				x = bx,
+				y = by,
+				sx = bx,
+				sy = by,
+				tx = bx + 1,
+				ty = by,
+				progress = 0,
+				speed = 1,
+			})
+			Nukes.step(samState, Random.new(1), function() end)
+			if #samState.missiles ~= 0 then
+				fail("samsBySlot — missile non intercepte via l'index")
+			end
+			samState:setOwner(tile, a.slot)
+			if samState.samsBySlot[b.slot] and samState.samsBySlot[b.slot][tile] then
+				fail("samsBySlot — capture laisse l'index chez le defenseur")
+			elseif not (samState.samsBySlot[a.slot] and samState.samsBySlot[a.slot][tile]) then
+				fail("samsBySlot — capture n'indexe pas chez l'attaquant")
+			end
+			local slotB = b.slot
+			samState:removePlayer(slotB)
+			if samState.samsBySlot[slotB] ~= nil then
+				fail("samsBySlot — removePlayer laisse l'index du slot recycle")
+			end
+			samState:destroyBuilding(tile)
+			if samState.samsBySlot[a.slot] and samState.samsBySlot[a.slot][tile] then
+				fail("samsBySlot — destroy laisse l'index")
+			elseif #Buildings.samsOf(samState, a.slot) ~= 0 then
+				fail("samsOf — destroy encore visible")
+			end
+		end
+	end
+end
+
+print("passe 18 : aura morte, CAPTURE_GUARD, samsBySlot OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
