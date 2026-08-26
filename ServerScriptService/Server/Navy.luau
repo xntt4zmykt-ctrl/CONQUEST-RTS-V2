@@ -28,6 +28,8 @@ local scratch = table.create(4, 0)
 local visitBuf = buffer.create(Config.TILE_COUNT)
 local parentScratch: { [number]: number } = {}
 local queueScratch: { number } = table.create(512)
+-- syncCarriers : table `seen` recyclee (ISSUE-N38). Pas d'alloc par tick.
+local carrierSeen: { [number]: boolean } = {}
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -399,8 +401,17 @@ local function resolveTrade(state: GameState, boat)
 end
 
 local function syncCarriers(state: GameState)
+	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
+	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
+	-- (ISSUE-N38). Le spawn/despawn reste identique ; N22 (shells) inchange.
+	if not state._carriersDirty then
+		return
+	end
+	state._carriersDirty = false
+
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
-	local seen: { [number]: boolean } = {}
+	table.clear(carrierSeen)
+	local seen = carrierSeen
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
 		if boat.kind ~= KIND_CARRIER then

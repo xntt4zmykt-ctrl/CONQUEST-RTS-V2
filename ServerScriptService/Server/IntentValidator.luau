@@ -121,7 +121,7 @@ local function isInteger(value: any): boolean
 		and math.abs(value) ~= math.huge
 end
 
-local applyOne: (Context, Intent) -> ()
+local applyOne: (Context, Intent) -> boolean
 
 local function checkRate(userId: number, now: number): boolean
 	local limit = Config.INTENT_RATE_LIMIT_PER_SEC or 20
@@ -302,10 +302,6 @@ function IntentValidator.enqueue(
 		end
 	end
 
-	if sequence ~= nil then
-		lastSequence[userId] = sequence
-	end
-
 	local intent: Intent = {
 		player = player,
 		userId = userId,
@@ -317,7 +313,13 @@ function IntentValidator.enqueue(
 
 	-- Feel OpenFront : l'intention est resolue tout de suite apres validation.
 	-- La file ne sert que si un appelant demande un flush differe.
-	applyOne(ctx, intent)
+	-- Sequence committee APRES apply reussi (ISSUE-N29) : un refus metier
+	-- (ocean, or, cible) ne brule pas le numero. Les doublons d'un succes
+	-- restent DuplicateSequence.
+	local applied = applyOne(ctx, intent)
+	if sequence ~= nil and applied then
+		lastSequence[userId] = sequence
+	end
 	return true, nil
 end
 
@@ -413,7 +415,7 @@ local function applyOneImpl(ctx: Context, intent: Intent)
 		else
 			bumpRefuse("UnknownAction")
 			ctx.refuse(player, "UnknownAction", nil)
-			return
+			return false
 		end
 	elseif intent.actionType == "QuickChat" then
 		local entry = QuickChat.get(payload.messageId)
@@ -453,6 +455,7 @@ local function applyOneImpl(ctx: Context, intent: Intent)
 			bumpRefuse("InvalidTarget")
 		end
 	end
+	return ok
 end
 
 applyOne = applyOneImpl

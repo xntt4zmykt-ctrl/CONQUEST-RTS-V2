@@ -18,6 +18,11 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+-- tryAnnex : pools module-level (ISSUE-N39). Meme pattern que findSeaPath N37.
+-- Cap poche 280 inchange ; oceán = abort (enclave terrestre only).
+local annexVisitBuf = buffer.create(Config.TILE_COUNT)
+local annexQueue: { number } = table.create(280)
+local annexPocket: { number } = table.create(280)
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -97,11 +102,34 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
-	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	buffer.fill(annexVisitBuf, 0, 0)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
+	local visited = annexVisitBuf
+	local queue = annexQueue
+	local pocket = annexPocket
+
+	-- Le combat vivant appelle tryAnnex APRES setOwner : `seed` appartient
+	-- deja a l'attaquant. L'ancienne file `{ seed }` marquait visited puis
+	-- `continue` (owner ~= defender) sans jamais etendre les voisins — BFS
+	-- mort, aucune enclave annexee. On part des voisins defenseur du seed
+	-- (seed = coupe). Si seed est encore defenseur (appel avant setOwner),
+	-- on l'enfile comme avant.
+	buffer.writeu8(visited, seed, 1)
+	if buffer.readu8(state.owner, seed) == defenderSlot then
+		table.insert(queue, seed)
+	else
+		local n0 = MapGen.neighbors(seed, annexScratch)
+		for i = 1, n0 do
+			local nb = annexScratch[i]
+			if buffer.readu8(state.owner, nb) == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
 	local head = 1
-	local pocket: { number } = {}
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -122,8 +150,8 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
+			if owner == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
 				table.insert(queue, nb)
 			end
 		end

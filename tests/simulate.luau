@@ -2481,6 +2481,40 @@ do
 				fail(`intentions — sequence inf acceptee ({tostring(reasonInf)})`)
 			end
 			print("intentions : diplomatie self et sequence inf refusees")
+
+			-- N29 : apply metier rate (attaque ocean) ne brule pas la sequence.
+			IntentValidator.reset()
+			table.clear(replies)
+			local oceanTile: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if not state:isLand(index) then
+					oceanTile = index
+					break
+				end
+			end
+			if not oceanTile then
+				fail("intentions — aucune tuile ocean pour N29")
+			else
+				ctx.matchPhase = "playing"
+				local okOcean = IntentValidator.enqueue(ctx, fakePlayer, "Attack", 50, { index = oceanTile })
+				if not okOcean then
+					fail("intentions — attack ocean refusee au schema (N29 attend un apply-fail)")
+				end
+				local okRetry = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 50, { ratio = 0.55 })
+				if not okRetry then
+					fail("intentions — sequence brulee apres apply rate (N29)")
+				elseif ps.attackRatio < 0.54 or ps.attackRatio > 0.56 then
+					fail(`intentions — retry seq 50 n'a pas applique le ratio ({ps.attackRatio})`)
+				else
+					local okDup50, reasonDup50 =
+						IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 50, { ratio = 0.7 })
+					if okDup50 or reasonDup50 ~= "DuplicateSequence" then
+						fail(`intentions — succes N29 non idempotent ({tostring(reasonDup50)})`)
+					else
+						print("intentions : sequence committee apres apply reussi (N29)")
+					end
+				end
+			end
 		end
 	end
 end
@@ -3417,6 +3451,301 @@ do
 	end
 	if math.abs((Config.TRAIN_STOP_BONUS or 0) - 0.12) > 1e-9 then
 		fail(`TRAIN_STOP_BONUS={Config.TRAIN_STOP_BONUS} attendu 0.12`)
+	end
+end
+
+do
+	-- N38 : syncCarriers evenementiel (dirty flag). Pose → 1 carrier ;
+	-- second tick sans mutation → pas de duplicata ; capture → slot suit ;
+	-- destroy → carrier retire.
+	local carState = GameState.new(4242)
+	local owner = carState:addPlayer(nil, "Amiral", Random.new(1), 0)
+	local rival = carState:addPlayer(nil, "Corsaire", Random.new(2), 0)
+	if not owner or not rival then
+		fail("syncCarriers — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(carState.owner, index) == owner.slot and not carState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("syncCarriers — tuile libre introuvable")
+		else
+			carState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, owner.slot)
+			if not carState._carriersDirty then
+				fail("syncCarriers — pose NAVAL_BASE n'a pas leve _carriersDirty")
+			end
+			local before = 0
+			for _, boat in carState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					before += 1
+				end
+			end
+			if before ~= 0 then
+				fail("syncCarriers — carrier spawn avant Navy.step")
+			end
+			Navy.step(carState, Random.new(9))
+			local carriers = {}
+			for _, boat in carState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					table.insert(carriers, boat)
+				end
+			end
+			if #carriers ~= 1 then
+				fail(`syncCarriers — {#carriers} carrier(s) apres pose, attendu 1`)
+			elseif carriers[1].slot ~= owner.slot or carriers[1].homeTile ~= site then
+				fail("syncCarriers — carrier mal attache")
+			elseif carState._carriersDirty then
+				fail("syncCarriers — dirty encore vrai apres sync")
+			else
+				Navy.step(carState, Random.new(9))
+				local still = 0
+				for _, boat in carState.boats do
+					if boat.kind == Navy.KIND_CARRIER then
+						still += 1
+					end
+				end
+				if still ~= 1 then
+					fail(`syncCarriers — second tick a duplique ({still})`)
+				else
+					carState:setOwner(site, rival.slot)
+					if not carState._carriersDirty then
+						fail("syncCarriers — capture n'a pas leve dirty")
+					end
+					Navy.step(carState, Random.new(9))
+					local captured = nil
+					for _, boat in carState.boats do
+						if boat.kind == Navy.KIND_CARRIER and boat.homeTile == site then
+							captured = boat
+						end
+					end
+					if not captured or captured.slot ~= rival.slot then
+						fail("syncCarriers — slot carrier ne suit pas la capture")
+					else
+						carState:destroyBuilding(site)
+						if not carState._carriersDirty then
+							fail("syncCarriers — destroy n'a pas leve dirty")
+						end
+						Navy.step(carState, Random.new(9))
+						local leftover = 0
+						for _, boat in carState.boats do
+							if boat.kind == Navy.KIND_CARRIER and boat.homeTile == site then
+								leftover += 1
+							end
+						end
+						if leftover ~= 0 then
+							fail("syncCarriers — carrier survivant apres destroy")
+						else
+							print("syncCarriers dirty : pose / capture / destroy OK")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N39 : poche terrestre close annexee ; poche touchant l'ocean refusee.
+	-- Le seed est la tuile deja capturee (owner = attaquant), comme le combat vivant.
+	local ChantierB = __require("ChantierB")
+	local annexState = GameState.new(7777)
+	local att = annexState:addPlayer(nil, "Enclaveur", Random.new(1), 0)
+	local def = annexState:addPlayer(nil, "Enclave", Random.new(2), 0)
+	if not att or not def then
+		fail("tryAnnex — spawn impossible")
+	else
+		local originX: number? = nil
+		local originY: number? = nil
+		for y = 1, Config.MAP_HEIGHT - 7 do
+			for x = 1, Config.MAP_WIDTH - 7 do
+				local ok = true
+				for dy = 0, 4 do
+					for dx = 0, 4 do
+						local idx = MapGen.toIndex(x + dx, y + dy)
+						if not annexState:isLand(idx) or buffer.readu8(annexState.owner, idx) ~= Config.NEUTRAL_SLOT then
+							ok = false
+							break
+						end
+					end
+					if not ok then
+						break
+					end
+				end
+				if ok then
+					originX, originY = x, y
+					break
+				end
+			end
+			if originX then
+				break
+			end
+		end
+		if not originX or not originY then
+			fail("tryAnnex — bloc 5x5 terrestre neutre introuvable")
+		else
+			for dy = 0, 4 do
+				for dx = 0, 4 do
+					annexState:setOwner(MapGen.toIndex(originX + dx, originY + dy), att.slot)
+				end
+			end
+			local inner = {}
+			for dy = 1, 3 do
+				for dx = 1, 3 do
+					local idx = MapGen.toIndex(originX + dx, originY + dy)
+					annexState:setOwner(idx, def.slot)
+					table.insert(inner, idx)
+				end
+			end
+			local seed = MapGen.toIndex(originX + 2, originY + 2)
+			annexState:setOwner(seed, att.slot)
+			ChantierB.tryAnnex(annexState, att.slot, def.slot, seed)
+			local leftover = 0
+			for _, idx in inner do
+				if idx ~= seed and buffer.readu8(annexState.owner, idx) ~= att.slot then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`tryAnnex — poche terrestre non annexee ({leftover} tuiles restantes)`)
+			else
+				-- Second appel (pool reuse) : une autre poche 3x3 ailleurs.
+				local origin2X: number? = nil
+				local origin2Y: number? = nil
+				for y = 1, Config.MAP_HEIGHT - 7 do
+					for x = 1, Config.MAP_WIDTH - 7 do
+						local ok = true
+						for dy = 0, 4 do
+							for dx = 0, 4 do
+								local idx = MapGen.toIndex(x + dx, y + dy)
+								if not annexState:isLand(idx)
+									or buffer.readu8(annexState.owner, idx) ~= Config.NEUTRAL_SLOT
+								then
+									ok = false
+									break
+								end
+							end
+							if not ok then
+								break
+							end
+						end
+						if ok then
+							origin2X, origin2Y = x, y
+							break
+						end
+					end
+					if origin2X then
+						break
+					end
+				end
+				if not origin2X or not origin2Y then
+					fail("tryAnnex — second bloc 5x5 introuvable (pool)")
+				else
+					for dy = 0, 4 do
+						for dx = 0, 4 do
+							annexState:setOwner(MapGen.toIndex(origin2X + dx, origin2Y + dy), att.slot)
+						end
+					end
+					for dy = 1, 3 do
+						for dx = 1, 3 do
+							annexState:setOwner(MapGen.toIndex(origin2X + dx, origin2Y + dy), def.slot)
+						end
+					end
+					local seed2 = MapGen.toIndex(origin2X + 2, origin2Y + 2)
+					annexState:setOwner(seed2, att.slot)
+					ChantierB.tryAnnex(annexState, att.slot, def.slot, seed2)
+					local leftover2 = 0
+					for dy = 1, 3 do
+						for dx = 1, 3 do
+							local idx = MapGen.toIndex(origin2X + dx, origin2Y + dy)
+							if idx ~= seed2 and buffer.readu8(annexState.owner, idx) ~= att.slot then
+								leftover2 += 1
+							end
+						end
+					end
+					if leftover2 ~= 0 then
+						fail(`tryAnnex — pool pollue, seconde poche ratee ({leftover2})`)
+					else
+						print("tryAnnex poche terrestre : 8 tuiles annexees, pool reutilise")
+					end
+				end
+			end
+		end
+
+		-- Poche cotiere : un voisin ocean doit abort (pas d'annexion).
+		local coastal: number? = nil
+		local landSeed: number? = nil
+		local nbScratch = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if annexState:isLand(index)
+				and MapGen.isCoastal(annexState.terrain, index)
+				and buffer.readu8(annexState.owner, index) == Config.NEUTRAL_SLOT
+			then
+				local n = MapGen.neighbors(index, nbScratch)
+				for i = 1, n do
+					local nb = nbScratch[i]
+					if annexState:isLand(nb) then
+						coastal = index
+						landSeed = nb
+						break
+					end
+				end
+				if coastal then
+					break
+				end
+			end
+		end
+		if not coastal or not landSeed then
+			fail("tryAnnex — tuile cotiere neutre introuvable")
+		else
+			annexState:setOwner(landSeed, att.slot)
+			annexState:setOwner(coastal, def.slot)
+			ChantierB.tryAnnex(annexState, att.slot, def.slot, landSeed)
+			if buffer.readu8(annexState.owner, coastal) ~= def.slot then
+				fail("tryAnnex — poche cotiere annexee (ocean devrait abort)")
+			else
+				print("tryAnnex ocean : poche cotiere refusee")
+			end
+		end
+	end
+end
+
+do
+	-- N40 : removePlayer snapshotte l'humain elimine ; un bot ne l'est pas.
+	local settledState = GameState.new(404)
+	local fake = __newInstance("Player")
+	fake.Name = "Elimine"
+	fake.UserId = 99
+	local human = settledState:addPlayer(fake :: any, "Elimine", Random.new(1), 0)
+	local bot = settledState:addPlayer(nil, "BotMort", Random.new(2), 0)
+	if not human or not bot then
+		fail("settledHumans — spawn impossible")
+	else
+		human.betrayals = 4
+		human.capturedTiles = 12
+		human.capitalsCaptured = 1
+		human.buildingsBuilt = 3
+		local hSlot = human.slot
+		local bSlot = bot.slot
+		settledState:removePlayer(hSlot)
+		settledState:removePlayer(bSlot)
+		local settled = settledState.settledHumans[hSlot]
+		if not settled then
+			fail("settledHumans — snapshot absent apres removePlayer")
+		elseif settled.betrayals ~= 4 or settled.capturedTiles ~= 12 then
+			fail(
+				`settledHumans — stats {settled.betrayals}/{settled.capturedTiles} attendu 4/12`
+			)
+		elseif settledState.players[hSlot] then
+			fail("settledHumans — PlayerState encore vivant")
+		elseif settledState.settledHumans[bSlot] then
+			fail("settledHumans — bot snapshotte")
+		else
+			print("settledHumans : snapshot humain elimine, bot ignore")
+		end
 	end
 end
 

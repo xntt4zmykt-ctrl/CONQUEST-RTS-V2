@@ -395,8 +395,14 @@ local function endMatch(slot: number?)
 	end
 
 	-- On grave la reputation et le resultat de chaque joueur humain.
+	-- Les elimines n'ont plus state.players[slot] : settledHumans porte
+	-- betrayals / XP (ISSUE-N40). Sans ca, rester jusqu'a l'ecran de victoire
+	-- n'inscrivait ni defaite ni trahison.
 	for player, slot in slotByPlayer do
-		local ps = state.players[slot]
+		if resultRecorded[player] then
+			continue
+		end
+		local ps = state.players[slot] or state.settledHumans[slot]
 		if ps then
 			local gain = experienceFor(ps, slot == winnerSlot)
 			local profile = Persistence.record(player.UserId, ps.betrayals, slot == winnerSlot, gain)
@@ -530,11 +536,15 @@ end)
 local function onPlayerRemoving(player: Player)
 	local slot = slotByPlayer[player]
 	if slot then
-		local ps = state.players[slot]
+		local ps = state.players[slot] or state.settledHumans[slot]
 		if ps and not resultRecorded[player] then
-			Persistence.record(player.UserId, ps.betrayals, false)
+			local gain = experienceFor(ps, false)
+			Persistence.record(player.UserId, ps.betrayals, false, gain)
+			resultRecorded[player] = true
 		end
-		state:removePlayer(slot)
+		if state.players[slot] then
+			state:removePlayer(slot)
+		end
 		slotByPlayer[player] = nil
 		broadcastRoster()
 	end

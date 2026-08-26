@@ -176,6 +176,19 @@ export type GameState = typeof(setmetatable(
 		mode: any,
 		events: { { text: string, kind: string, only: number? } },
 		combatUnlocked: boolean,
+		-- Navy.syncCarriers : leve par place/destroy/transfer NAVAL_BASE.
+		_carriersDirty: boolean,
+		-- Snapshot humain elimine (removePlayer) pour Persistence.record
+		-- a endMatch / disconnect. Sans ca les elimines n'ont ni defaite ni XP.
+		settledHumans: {
+			[number]: {
+				player: Player?,
+				betrayals: number,
+				capturedTiles: number,
+				capitalsCaptured: number,
+				buildingsBuilt: number,
+			},
+		},
 	},
 	GameState
 ))
@@ -239,6 +252,8 @@ function GameState.new(seed: number): GameState
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
 	self.combatUnlocked = true
+	self._carriersDirty = false
+	self.settledHumans = {}
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -695,6 +710,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
 	end
+	if kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[kind] then
 		self:refreshRailNetwork(slot)
 	end
@@ -742,6 +760,9 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -761,6 +782,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
+	if previousKind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[previousKind] then
 		self:refreshRailNetwork(previousSlot)
 	end
@@ -856,6 +880,7 @@ function GameState.addPlayer(
 		spawnTick = 0,
 	}
 	self.players[slot] = state
+	self.settledHumans[slot] = nil
 	self.alliances[slot] = {}
 	self.allianceCooldowns[slot] = {}
 	self.requests[slot] = {}
@@ -896,6 +921,19 @@ function GameState.removePlayer(self: GameState, slot: number)
 	local state = self.players[slot]
 	if not state then
 		return
+	end
+
+	-- Humain elimine : graver les stats avant de detruire le PlayerState.
+	-- endMatch / onPlayerRemoving lisent settledHumans quand players[slot]
+	-- est deja nil (ISSUE-N40).
+	if not state.isBot and state.player then
+		self.settledHumans[slot] = {
+			player = state.player,
+			betrayals = state.betrayals,
+			capturedTiles = state.capturedTiles,
+			capitalsCaptured = state.capitalsCaptured,
+			buildingsBuilt = state.buildingsBuilt,
+		}
 	end
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
