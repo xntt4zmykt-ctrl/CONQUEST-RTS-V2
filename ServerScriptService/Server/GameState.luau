@@ -156,6 +156,11 @@ export type GameState = typeof(setmetatable(
 		boats: { Boat },
 		missiles: { Missile },
 		buildings: { [number]: Building },
+		-- Index O(1) des bunkers par camp. attackLogic (hot path) ne scanne
+		-- plus le hash buildings entier (ISSUE-N36 / feel N42). Le buffer
+		-- `defense` reste alloue (HUD / tileCost hors install) mais n'est
+		-- plus ecrit a la pose (Option A).
+		bunkersBySlot: { [number]: { [number]: true } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -183,6 +188,18 @@ export type GameState = typeof(setmetatable(
 		-- Navy.syncCarriers : leve par place/destroy/transfer NAVAL_BASE
 		-- seulement (ISSUE-N34). Pas de scan O(buildings) a 10 Hz a vide.
 		_carriersDirty: boolean,
+		-- Snapshot humain elimine (removePlayer) pour Persistence.record
+		-- a endMatch / disconnect. Sans ca les elimines n'ont ni defaite ni XP
+		-- (ISSUE-N37 / feel N40).
+		settledHumans: {
+			[number]: {
+				player: Player?,
+				betrayals: number,
+				capturedTiles: number,
+				capitalsCaptured: number,
+				buildingsBuilt: number,
+			},
+		},
 	},
 	GameState
 ))
@@ -217,6 +234,7 @@ function GameState.new(seed: number): GameState
 	self.boats = {}
 	self.missiles = {}
 	self.buildings = {}
+	self.bunkersBySlot = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -246,6 +264,7 @@ function GameState.new(seed: number): GameState
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
 	self.combatUnlocked = true
+	self.settledHumans = {}
 	-- Ceinture : premier Navy.step synchronise (buildings encore vide).
 	-- Ensuite le flag ne se leve que sur une mutation NAVAL_BASE.
 	self._carriersDirty = true
@@ -408,7 +427,9 @@ end
 -- Batiments
 --=============================================================================
 
--- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+-- Aura falloff du buffer `defense`. Morte apres ChantierB.install() :
+-- attackLogic lit bunkersBySlot (N36), plus ce buffer. Les appels pose/destroy
+-- ont ete retires (Option A / feel N45). Conservee pour tileCost hors install.
 function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
 	local cx, cy = MapGen.fromIndex(index)
 	local radius = Config.DEFENSE_RADIUS
@@ -691,6 +712,20 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+-- Index bunker : pose / capture / destroy seulement, jamais dans le tick.
+local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.bunkersBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.bunkersBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -700,7 +735,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self:countBuilding(slot, kind, 1, 1)
 
 	if kind == B.DEFENSE then
-		self:applyDefenseAura(index, 1)
+		indexBunker(self, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -755,6 +790,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
+	if building.kind == B.DEFENSE then
+		indexBunker(self, previousSlot, index, false)
+		indexBunker(self, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -769,7 +808,7 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousSlot = building.slot
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
-		self:applyDefenseAura(index, -1)
+		indexBunker(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -871,6 +910,7 @@ function GameState.addPlayer(
 		attacksLaunched = 0,
 	}
 	self.players[slot] = state
+	self.settledHumans[slot] = nil
 	self.alliances[slot] = {}
 	self.allianceCooldowns[slot] = {}
 	self.requests[slot] = {}
@@ -931,6 +971,19 @@ function GameState.removePlayer(self: GameState, slot: number)
 	local state = self.players[slot]
 	if not state then
 		return
+	end
+
+	-- Humain elimine : graver les stats avant de detruire le PlayerState.
+	-- endMatch / onPlayerRemoving lisent settledHumans quand players[slot]
+	-- est deja nil (ISSUE-N37).
+	if not state.isBot and state.player then
+		self.settledHumans[slot] = {
+			player = state.player,
+			betrayals = state.betrayals,
+			capturedTiles = state.capturedTiles,
+			capitalsCaptured = state.capitalsCaptured,
+			buildingsBuilt = state.buildingsBuilt,
+		}
 	end
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
@@ -1089,6 +1142,8 @@ function GameState.removePlayer(self: GameState, slot: number)
 			end
 		end
 	end
+
+	self.bunkersBySlot[slot] = nil
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)

@@ -38,6 +38,7 @@ local Trade = require(script.Trade)
 local SystemsBootstrap = require(script.SystemsBootstrap)
 local IntentValidator = require(script.IntentValidator)
 local TickMetrics = require(script.TickMetrics)
+local MatchLifecycle = require(script.MatchLifecycle)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
 
 SystemsBootstrap.install()
@@ -374,14 +375,6 @@ local function startMatch()
 	)
 end
 
-local function experienceFor(ps, won: boolean): number
-	return Config.XP_PER_MATCH
-		+ (if won then Config.XP_PER_WIN else 0)
-		+ math.floor(ps.capturedTiles / Config.XP_TILE_DIVISOR)
-		+ ps.capitalsCaptured * Config.XP_PER_CAPITAL
-		+ ps.buildingsBuilt * Config.XP_PER_BUILDING
-end
-
 local function endMatch(slot: number?)
 	winnerSlot = slot
 	matchPhase = "ended"
@@ -398,13 +391,21 @@ local function endMatch(slot: number?)
 	end
 
 	-- On grave la reputation et le resultat de chaque joueur humain.
-	for player, slot in slotByPlayer do
-		local ps = state.players[slot]
-		if ps then
-			local gain = experienceFor(ps, slot == winnerSlot)
-			local profile = Persistence.record(player.UserId, ps.betrayals, slot == winnerSlot, gain)
-			resultRecorded[player] = true
-			profileUpdate:FireClient(player, profilePacket(profile, gain))
+	-- Les elimines n'ont plus state.players[slot] : settledHumans porte
+	-- betrayals / XP (ISSUE-N37). Sans ca, rester jusqu'a l'ecran de victoire
+	-- n'inscrivait ni defaite ni trahison.
+	for _, rec in MatchLifecycle.endMatchRecords(
+		slotByPlayer,
+		state.players,
+		state.settledHumans,
+		resultRecorded
+	) do
+		local ps = rec.stats
+		local gain = MatchLifecycle.experienceFor(ps, rec.slot == winnerSlot)
+		local profile = Persistence.record(rec.player.UserId, ps.betrayals, rec.slot == winnerSlot, gain)
+		resultRecorded[rec.player] = true
+		if rec.player.Parent then
+			profileUpdate:FireClient(rec.player, profilePacket(profile, gain))
 		end
 	end
 end
@@ -534,11 +535,22 @@ end)
 local function onPlayerRemoving(player: Player)
 	local slot = slotByPlayer[player]
 	if slot then
-		local ps = state.players[slot]
+		local live = state.players[slot]
+		local ps = MatchLifecycle.lookupStats(state.players, state.settledHumans, slot)
 		if ps and not resultRecorded[player] then
-			Persistence.record(player.UserId, ps.betrayals, false)
+			if live then
+				-- Encore vivant : 0 XP (chemin distinct de N37, P3 note).
+				Persistence.record(player.UserId, ps.betrayals, false)
+			else
+				-- Deja elimine : graver le snapshot avant que slotByPlayer parte.
+				local gain = MatchLifecycle.experienceFor(ps, false)
+				Persistence.record(player.UserId, ps.betrayals, false, gain)
+			end
+			resultRecorded[player] = true
 		end
-		state:removePlayer(slot)
+		if live then
+			state:removePlayer(slot)
+		end
 		slotByPlayer[player] = nil
 		broadcastRoster()
 	end
