@@ -83,11 +83,17 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 
 	-- V113 : free-list Blast PAR overlay (pas global). Recette feel N165
 	-- inline — ne PAS merger 6512. Leftover Parent = nil, pas Destroy.
-	-- PointLight enfant FindFirstChildWhichIsA. BlastSmoke / Shockwave
-	-- Destroy conserves (leftover V114 / V115). Distinct de V112
+	-- PointLight enfant FindFirstChildWhichIsA. Distinct de V112
 	-- (Ground/Border par chunk, WorldRenderer). Distinct de V81
 	-- (Shockwave wakeRot). Pas reentrant.
 	self.blastFree = {} :: { Part }
+
+	-- V114 : free-list BlastSmoke PAR overlay (pas blastFree). Recette
+	-- feel N164 inline — ne PAS merger f293. Leftover Parent = nil,
+	-- pas Destroy. Name BlastSmoke. Boucle i=1..5. Shockwave Destroy
+	-- conserve (leftover V115). Distinct de V113 (Blast). Distinct de
+	-- V81 (Shockwave wakeRot). Pas reentrant.
+	self.smokeFree = {} :: { Part }
 
 	return self
 end
@@ -1048,7 +1054,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Recette feel N133 — ne pas merger bfcc. Distinct de V78 (spawn,
 	-- Y + 0.12) / V79 (despawn, Y + 0.14) / V80 (arrivee camion).
 	-- Distinct de Effects conquestPulse (leftover V82). Y = PLAINS + 0.5.
-	-- Sphere Blast recyclee (V113). Fumee inchangee (leftover V114).
+	-- Sphere Blast recyclee (V113). Fumee recyclee (V114). Shockwave
+	-- Destroy conserve (leftover V115).
 	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * self.wakeRot
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
@@ -1057,20 +1064,47 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Colonne de fumee en volumes superposes. Elle est courte et stylisee pour
 	-- rester lisible de loin sans texture de particules externe.
+	-- V114 : recycler BlastSmoke. Size (5+i) + Transparency 0.22+i*0.07
+	-- + Color + CFrame AVANT Tween (un leftover Size = tween * 2.1 de
+	-- la frappe precedente). Recette feel N164 inline — ne PAS merger
+	-- f293. Name BlastSmoke conserve. Pas de pool partage avec Blast /
+	-- Shockwave. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
+	-- Distinct de V113 (Blast blastFree). Distinct de V81 (Shockwave
+	-- wakeRot, Destroy conserve leftover V115). Flame Size (V111)
+	-- inchangee.
+	local smokeFree = self.smokeFree
 	for i = 1, 5 do
-		local smoke = routePart(self.root, "BlastSmoke", Vector3.new(5 + i, 5 + i, 5 + i), Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5), Enum.Material.SmoothPlastic)
-		smoke.Shape = Enum.PartType.Ball
+		local sn = #smokeFree
+		local smoke = if sn > 0 then smokeFree[sn] else nil
+		if smoke then
+			smokeFree[sn] = nil
+		else
+			smoke = Instance.new("Part")
+			smoke.Name = "BlastSmoke"
+			smoke.Shape = Enum.PartType.Ball
+			smoke.Anchored = true
+			smoke.CanCollide = false
+			smoke.CanTouch = false
+			smoke.CanQuery = false
+			smoke.CastShadow = false
+			smoke.Material = Enum.Material.SmoothPlastic
+			smoke.TopSurface = Enum.SurfaceType.Smooth
+			smoke.BottomSurface = Enum.SurfaceType.Smooth
+		end
+		smoke.Name = "BlastSmoke"
+		smoke.Color = Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5)
 		smoke.Transparency = 0.22 + i * 0.07
+		smoke.Size = Vector3.new(5 + i, 5 + i, 5 + i)
 		smoke.CFrame = CFrame.new(ground.X + math.sin(i * 2.1) * 2, 7 + i * 5, ground.Z + math.cos(i * 1.7) * 2)
+		smoke.Parent = self.root
 		TweenService:Create(smoke, TweenInfo.new(1.7 + i * 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			CFrame = smoke.CFrame + Vector3.new(0, 18 + i * 3, 0),
 			Size = smoke.Size * 2.1,
 			Transparency = 1,
 		}):Play()
 		task.delay(2.5, function()
-			if smoke.Parent then
-				smoke:Destroy()
-			end
+			smoke.Parent = nil
+			smokeFree[#smokeFree + 1] = smoke
 		end)
 	end
 
@@ -1082,7 +1116,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- V113 : PointLight enfant reutilise. FindFirstChildWhichIsA, pas
 	-- Instance.new a chaque frappe. Brightness / Range / Color
 	-- reecrits (leftover Brightness = 0 apres Tween). Recette feel
-	-- N165. BlastSmoke / Shockwave Destroy conserves.
+	-- N165. BlastSmoke recyclee (V114). Shockwave Destroy conserve
+	-- (leftover V115).
 	local light = sphere:FindFirstChildWhichIsA("PointLight")
 	if not light then
 		light = Instance.new("PointLight")
