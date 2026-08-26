@@ -15,6 +15,11 @@ local Heap = require(ReplicatedStorage.Shared.Heap)
 local BoatFront = {}
 
 local priorityScratch = table.create(4, 0)
+-- V44 : wrap launchAttack recycle la liste des tetes de pont (recette
+-- collapsingBuf / V41). Attack live, pas des copies. Truncate leftover
+-- AVANT origLaunch — un leftover reinserait un pont fantome. Non reentrant
+-- (launchAttack synchrone). Distinct de seedBeachhead / AimFront / V29 HUD.
+local parkedBuf: { any } = table.create(8)
 
 local function frontPriority(state, index: number, attackerSlot: number): number
 	local n = MapGen.neighbors(index, priorityScratch)
@@ -75,19 +80,23 @@ function BoatFront.install(GameState)
 	-- launchAttack ne doit fusionner qu'avec des fronts terre (pas isBeachhead).
 	local origLaunch = GameState.launchAttack
 	function GameState.launchAttack(self, attackerSlot: number, targetSlot: number)
-		local parked = {}
+		local n = 0
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
 			if atk.isBeachhead then
-				table.insert(parked, atk)
+				n += 1
+				parkedBuf[n] = atk
 				table.remove(self.attacks, i)
 			end
+		end
+		for i = #parkedBuf, n + 1, -1 do
+			parkedBuf[i] = nil
 		end
 
 		local ok, message = origLaunch(self, attackerSlot, targetSlot)
 
-		for _, atk in parked do
-			table.insert(self.attacks, atk)
+		for i = 1, n do
+			table.insert(self.attacks, parkedBuf[i])
 		end
 
 		return ok, message
