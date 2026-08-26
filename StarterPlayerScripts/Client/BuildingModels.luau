@@ -28,13 +28,13 @@ local BuildingModels = {}
 
 local B = Config.BUILDING
 
-local CONCRETE = Color3.fromRGB(158, 160, 165)
-local DARK = Color3.fromRGB(62, 66, 74)
-local GLASS = Color3.fromRGB(140, 210, 255)
-local PARK = Color3.fromRGB(76, 170, 112)
-local STEEL = Color3.fromRGB(104, 116, 132)
-local WARNING = Color3.fromRGB(255, 190, 60)
-local MISSILE = Color3.fromRGB(226, 232, 238)
+local CONCRETE = Color3.fromRGB(172, 176, 184)
+local DARK = Color3.fromRGB(48, 54, 64)
+local GLASS = Color3.fromRGB(150, 220, 255)
+local PARK = Color3.fromRGB(86, 186, 122)
+local STEEL = Color3.fromRGB(118, 130, 148)
+local WARNING = Color3.fromRGB(255, 196, 72)
+local MISSILE = Color3.fromRGB(236, 242, 250)
 
 --=============================================================================
 -- Helpers
@@ -444,7 +444,7 @@ end
 	l'animation n'est que la mise en scene de ce qui a deja eu lieu.
 ]]
 function BuildingModels.playConstruction(model: Model, ground: Vector3, duration: number?)
-	local total = duration or 2.5
+	local total = duration or 2.8
 	model:SetAttribute("ConstructionUntil", os.clock() + total)
 
 	local parts: { BasePart } = {}
@@ -454,32 +454,39 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 		end
 	end
 
-	-- Trie du plus bas au plus haut : un batiment se construit par le bas.
 	table.sort(parts, function(a, b)
 		return a.Position.Y < b.Position.Y
 	end)
 
+	-- Echafaudage temporaire autour du chantier.
+	local scaffold = Instance.new("Model")
+	scaffold.Name = "Scaffold"
+	scaffold.Parent = model
+	local poleColor = Color3.fromRGB(255, 186, 86)
+	for angle = 0, 3 do
+		local rad = angle * math.pi / 2
+		local px = math.cos(rad) * 4.2
+		local pz = math.sin(rad) * 4.2
+		local pole = block(scaffold, Vector3.new(0.35, 8, 0.35), Vector3.new(px, 4, pz), poleColor, Enum.Material.Metal)
+		pole.Material = Enum.Material.Metal
+	end
+	block(scaffold, Vector3.new(9.5, 0.25, 9.5), Vector3.new(0, 7.8, 0), poleColor, Enum.Material.Metal)
+
 	for i, part in parts do
 		local final = part.CFrame
-		local drop = part.Size.Y + 4
-
+		local drop = part.Size.Y + 5
 		part.CFrame = final - Vector3.new(0, drop, 0)
 		part.Transparency = 1
-
-		local delay = (i - 1) / #parts * total * 0.55
-		local rise = TweenInfo.new(total * 0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delay)
-
+		local delay = (i - 1) / #parts * total * 0.5
+		local rise = TweenInfo.new(total * 0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, delay)
 		TweenService:Create(part, rise, { CFrame = final }):Play()
-		-- La transparence revient plus vite que la position : le bloc est
-		-- visible pendant sa montee, sinon il apparait deja en place.
 		TweenService:Create(
 			part,
-			TweenInfo.new(total * 0.2, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, delay),
+			TweenInfo.new(total * 0.22, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, 0, false, delay),
 			{ Transparency = part.Name == "Dome" and 0.35 or 0 }
 		):Play()
 	end
 
-	-- Bague de chantier au sol
 	local ring = Instance.new("Part")
 	ring.Name = "BuildRing"
 	ring.Anchored = true
@@ -489,20 +496,57 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.CastShadow = false
 	ring.Shape = Enum.PartType.Cylinder
 	ring.Material = Enum.Material.Neon
-	ring.Color = Color3.fromRGB(255, 214, 130)
-	ring.Transparency = 0.4
-	ring.Size = Vector3.new(0.4, 3, 3)
+	ring.Color = Color3.fromRGB(255, 200, 110)
+	ring.Transparency = 0.25
+	ring.Size = Vector3.new(0.5, 4, 4)
 	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
 	ring.Parent = model
 
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 100)
+	light.Brightness = 2.2
+	light.Range = 22
+	light.Parent = ring
+
 	TweenService:Create(ring, TweenInfo.new(total, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = Vector3.new(0.4, 16, 16),
+		Size = Vector3.new(0.5, 18, 18),
 		Transparency = 1,
 	}):Play()
 
-	task.delay(total + 0.2, function()
+	local dust = Instance.new("Part")
+	dust.Anchored = true
+	dust.CanCollide = false
+	dust.CanTouch = false
+	dust.CanQuery = false
+	dust.Transparency = 1
+	dust.Size = Vector3.new(1, 1, 1)
+	dust.CFrame = CFrame.new(ground)
+	dust.Parent = model
+	local particles = Instance.new("ParticleEmitter")
+	particles.Color = ColorSequence.new(Color3.fromRGB(210, 180, 130))
+	particles.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.2),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	particles.Lifetime = NumberRange.new(0.6, 1.2)
+	particles.Rate = 18
+	particles.Speed = NumberRange.new(2, 6)
+	particles.SpreadAngle = Vector2.new(180, 180)
+	particles.Parent = dust
+
+	task.delay(total * 0.85, function()
+		particles.Enabled = false
+	end)
+
+	task.delay(total + 0.3, function()
 		if ring.Parent then
 			ring:Destroy()
+		end
+		if dust.Parent then
+			dust:Destroy()
+		end
+		if scaffold.Parent then
+			scaffold:Destroy()
 		end
 	end)
 end

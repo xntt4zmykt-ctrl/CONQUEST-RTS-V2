@@ -399,9 +399,9 @@ do
 			fail("evolution urbaine — la faction de test n'a pas de capitale")
 		else
 			local ccx, ccy = MapGen.fromIndex(capital)
-			for dy = -14, 14 do
-				for dx = -14, 14 do
-					if dx * dx + dy * dy <= 196 then
+			for dy = -16, 16 do
+				for dx = -16, 16 do
+					if dx * dx + dy * dy <= 256 then
 						local nx, ny = ccx + dx, ccy + dy
 						if MapGen.inBounds(nx, ny) then
 							local index = MapGen.toIndex(nx, ny)

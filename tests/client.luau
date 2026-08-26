@@ -934,9 +934,11 @@ check("accrochage du placement et bascule en amelioration", function()
 	local MINE = 1
 
 	local owned: { [number]: true } = {}
-	for dy = -8, 8 do
-		for dx = -8, 8 do
-			owned[(oy + dy) * Config.MAP_WIDTH + (ox + dx)] = true
+	for dy = -18, 18 do
+		for dx = -18, 18 do
+			if dx * dx + dy * dy <= 324 then
+				owned[(oy + dy) * Config.MAP_WIDTH + (ox + dx)] = true
+			end
 		end
 	end
 

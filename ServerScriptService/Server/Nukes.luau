@@ -145,15 +145,18 @@ end
 	Choix = plus proche batterie prete dans SAM_RANGE (defaultSamRange 70).
 	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
+local function samRange(level: number): number
+	return 150 - 480 / (level + 5)
+end
+
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean
 	if missile.engaged then
 		return false
 	end
 
-	local range = Config.SAM_RANGE or 70
-	local range2 = range * range
 	local best = nil
 	local bestDist = math.huge
+	local bestRange = 0
 
 	for index, building in state.buildings do
 		if building.kind ~= Config.BUILDING.SAM then
@@ -169,6 +172,8 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 			continue
 		end
 
+		local range = samRange(building.level or 1)
+		local range2 = range * range
 		local x, y = MapGen.fromIndex(index)
 		local dx, dy = x - missile.x, y - missile.y
 		local d2 = dx * dx + dy * dy
@@ -178,6 +183,7 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 		if d2 < bestDist then
 			best = building
 			bestDist = d2
+			bestRange = range
 		end
 	end
 
@@ -294,27 +300,28 @@ end
 -- Detonation
 --=============================================================================
 
-function Nukes.detonate(state: GameState, missile: GameState.Missile)
+function Nukes.detonate(state: GameState, missile: GameState.Missile, rng: Random?)
 	local stats = Config.NUKE_STATS[missile.kind]
 	if not stats then
 		return
 	end
 
-	-- Une ogive porte sa propre puissance ; un missile complet celle de sa
-	-- fiche. Voir splitMirv.
 	local radius = missile.radius or stats.radius
+	local outerRadius = stats.outerRadius or radius
 	local troopKill = missile.troopKill or stats.troopKill
 	local cx, cy = math.floor(missile.tx), math.floor(missile.ty)
+	local inner2 = radius * radius
+	local outer2 = outerRadius * outerRadius
 
-	-- Pertes humaines : proportionnelles a la part du territoire touche, pour
-	-- qu'une frappe sur un petit empire soit devastatrice et qu'une frappe sur
-	-- un geant ne soit qu'une morsure.
 	local hitTiles: { [number]: number } = {}
+	local weightedAllies = 0
+	local allyStructureHit = false
+	local launcher = missile.slot
 
-	for dy = -radius, radius do
-		for dx = -radius, radius do
+	for dy = -outerRadius, outerRadius do
+		for dx = -outerRadius, outerRadius do
 			local dist2 = dx * dx + dy * dy
-			if dist2 > radius * radius then
+			if dist2 > outer2 then
 				continue
 			end
 
@@ -325,20 +332,30 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 
 			local index = MapGen.toIndex(nx, ny)
 			local owner = buffer.readu8(state.owner, index)
-			if owner ~= NEUTRAL then
-				hitTiles[owner] = (hitTiles[owner] or 0) + 1
+			local inInner = dist2 <= inner2
+			local inOuter = not inInner
+			if inOuter and rng and rng:NextNumber() > 0.5 then
+				continue
 			end
 
-			if state.buildings[index] then
+			if owner ~= NEUTRAL then
+				local weight = if inInner then 1 else 0.5
+				hitTiles[owner] = (hitTiles[owner] or 0) + weight
+				if state:areAllied(launcher, owner) then
+					weightedAllies += weight
+				end
+			end
+
+			local building = state.buildings[index]
+			if building then
+				if state:areAllied(launcher, building.slot) then
+					allyStructureHit = true
+				end
 				state:destroyBuilding(index)
 			end
 
-			-- Le coeur du cratere est rase et redevient neutre ; la peripherie
-			-- est seulement depeuplee.
-			if dist2 <= (radius * 0.55) * (radius * 0.55) then
-				if state:isLand(index) and owner ~= NEUTRAL then
-					state:setOwner(index, NEUTRAL)
-				end
+			if inInner and state:isLand(index) and owner ~= NEUTRAL then
+				state:setOwner(index, NEUTRAL)
 			end
 		end
 	end
@@ -346,10 +363,30 @@ function Nukes.detonate(state: GameState, missile: GameState.Missile)
 	for slot, tilesHit in hitTiles do
 		local victim = state.players[slot]
 		if victim then
-			local share = tilesHit / math.max(1, victim.tiles + tilesHit)
-			local loss = victim.troops * troopKill * math.min(1, share * 3)
-			victim.troops = math.max(0, victim.troops - loss)
+			local humans = victim.troops
+			local maxT = state:maxTroops(victim)
+			local loss
+			if missile.warhead or missile.kind == Config.NUKE.MIRV then
+				local floorTroops = 0.03 * maxT
+				local excess = math.max(0, humans - floorTroops)
+				loss = 500 * (1 - math.exp(-2 * excess / math.max(1, maxT))) * (troopKill or 0.14) * 0.002
+				victim.troops = math.max(floorTroops, humans - loss)
+			else
+				local densityFactor = 5 * humans / math.max(1, victim.tiles)
+				loss = densityFactor * (troopKill or 0.38) * 0.01
+				victim.troops = math.max(0, humans - loss)
+			end
 			state:notify(`\u{2622} Ton territoire a ete frappe — {math.floor(loss)} pertes.`, "bad", slot)
+		end
+	end
+
+	local breakThreshold = Config.NUKE_ALLIANCE_BREAK_TILES or 100
+	if weightedAllies >= breakThreshold or allyStructureHit then
+		local Diplomacy = require(script.Parent.Diplomacy)
+		for slot in hitTiles do
+			if slot ~= launcher and state:areAllied(launcher, slot) then
+				Diplomacy.breakAlliance(state, launcher, slot)
+			end
 		end
 	end
 end
@@ -393,7 +430,7 @@ function Nukes.step(state: GameState, rng: Random, onExplosion: (number, number,
 
 		if missile.progress >= 1 then
 			local stats = Config.NUKE_STATS[missile.kind]
-			Nukes.detonate(state, missile)
+			Nukes.detonate(state, missile, rng)
 			onExplosion(missile.tx, missile.ty, missile.radius or (if stats then stats.radius else 8))
 			table.remove(state.missiles, i)
 		end

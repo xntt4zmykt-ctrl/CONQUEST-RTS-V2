@@ -470,7 +470,7 @@ end
 	clique un territoire au lieu d'une ligne), la suite est identique.
 ]]
 function HUD.buildDiplomacySheet(self: HUD)
-	local drawer = Theme.panel("Diplomatie", self.layers.sheets)
+	local drawer = Theme.glassPanel("Diplomatie", self.layers.sheets)
 	drawer.AnchorPoint = Vector2.new(0.5, 1)
 	drawer.Position = UDim2.new(0.5, 0, 1, -S.md)
 	drawer.Size = UDim2.fromOffset(340, 118)
@@ -555,11 +555,12 @@ end
 	opaques cote a cote feraient un semafor, trois contours restent des puces.
 ]]
 function HUD.buildControlPanel(self: HUD)
-	local panel = Theme.panel("ControlPanel", self.layers.top)
+	local panel = Theme.glassPanel("ControlPanel", self.layers.top)
 	panel.AnchorPoint = Vector2.new(0.5, 1)
 	panel.Position = UDim2.new(0.5, 0, 1, -S.sm)
 	panel.Size = UDim2.fromOffset(CONTROL_WIDTH, CONTROL_HEIGHT)
 	self.controlPanel = panel
+	Theme.accentBar(panel, C.accent)
 
 	local row1Y = PANEL_PAD
 	local row2Y = PANEL_PAD + CONTROL_ROW_H + ROW_GAP
@@ -749,7 +750,7 @@ end
 	seconde fois ici demanderait au joueur lequel des deux dit vrai.
 ]]
 function HUD.buildIdentityPanel(self: HUD)
-	local panel = Theme.panel("Identity", self.layers.top)
+	local panel = Theme.glassPanel("Identity", self.layers.top)
 	panel.Position = UDim2.fromOffset(S.md, S.md)
 	panel.Size = UDim2.fromOffset(IDENTITY_WIDTH, IDENTITY_HEIGHT)
 	self.identityPanel = panel
@@ -967,7 +968,7 @@ end
 	separe ni clic pour savoir ou on en est.
 ]]
 function HUD.buildSessionBar(self: HUD)
-	local bar = Theme.panel("Session", self.layers.top)
+	local bar = Theme.glassPanel("Session", self.layers.top)
 	bar.AnchorPoint = Vector2.new(1, 0)
 	bar.Position = UDim2.new(1, -S.md, 0, S.md)
 	bar.Size = UDim2.fromOffset(SESSION_WIDTH, SESSION_HEIGHT)

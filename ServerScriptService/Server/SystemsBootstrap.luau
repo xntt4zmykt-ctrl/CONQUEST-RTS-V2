@@ -18,6 +18,7 @@ local Nukes = require(script.Parent.Nukes)
 local Navy = require(script.Parent.Navy)
 local Tribes = require(script.Parent.Tribes)
 local Bots = require(script.Parent.Bots)
+local Diplomacy = require(script.Parent.Diplomacy)
 
 local SystemsBootstrap = {}
 
@@ -92,6 +93,10 @@ function SystemsBootstrap.install()
 			end
 
 			local ok, message = origLaunch(self, attackerSlot, targetSlot)
+			if ok and targetSlot ~= Config.NEUTRAL_SLOT then
+				Diplomacy.setEmbargo(self, attackerSlot, targetSlot, true)
+				Diplomacy.setEmbargo(self, targetSlot, attackerSlot, true)
+			end
 			if ok and typeof(aim) == "number" and not already then
 				for _, atk in self.attacks do
 					if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then

@@ -74,15 +74,34 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 	marker.CastShadow = false
 	marker.Material = Enum.Material.Neon
 	marker.Color = color
-	marker.Transparency = 0.38
-	marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
-	marker.CFrame = CFrame.new(base.X, height + 0.55, base.Z)
+	marker.Transparency = 0.32
+	marker.Size = Vector3.new(Config.TILE_SIZE * 1.22, 0.32, Config.TILE_SIZE * 1.22)
+	marker.CFrame = CFrame.new(base.X, height + 0.58, base.Z)
 	marker.Parent = self.root
 	self.selection = marker
 
-	TweenService:Create(marker, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
-		Transparency = 0.68,
-		Size = Vector3.new(Config.TILE_SIZE * 0.82, 0.28, Config.TILE_SIZE * 0.82),
+	local ring = Instance.new("Part")
+	ring.Name = "SelectionRing"
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.CastShadow = false
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Material = Enum.Material.Neon
+	ring.Color = color
+	ring.Transparency = 0.55
+	ring.Size = Vector3.new(0.2, Config.TILE_SIZE * 1.5, Config.TILE_SIZE * 1.5)
+	ring.CFrame = CFrame.new(base.X, height + 0.48, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = self.root
+	self.selectionRing = ring
+
+	TweenService:Create(marker, TweenInfo.new(0.85, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+		Transparency = 0.62,
+	}):Play()
+	TweenService:Create(ring, TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+		Transparency = 0.78,
+		Size = Vector3.new(0.2, Config.TILE_SIZE * 1.75, Config.TILE_SIZE * 1.75),
 	}):Play()
 end
 
@@ -90,6 +109,10 @@ function Effects.clearSelection(self: Effects)
 	if self.selection then
 		self.selection:Destroy()
 		self.selection = nil
+	end
+	if self.selectionRing then
+		self.selectionRing:Destroy()
+		self.selectionRing = nil
 	end
 end
 

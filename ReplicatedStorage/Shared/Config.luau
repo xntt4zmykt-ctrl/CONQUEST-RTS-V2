@@ -220,7 +220,7 @@ Config.HUMAN_GOLD_MULTIPLIER = 1.12
 -- devient une formalite — mesure en simulation, un revenu lineaire produisait
 -- 4,4 millions d'or morts en dix minutes.
 Config.GOLD_TILE_EXPONENT = 0.8
-Config.GOLD_TILE_SCALE = 0.0042 -- par tick
+Config.GOLD_TILE_SCALE = 0 -- or territorial desactive en mode ChantierB
 
 Config.GOLD_PER_PORT = 0.22 -- par tick, par port possede
 Config.GOLD_PER_CITY = 0.08 -- par tick, par ville possedee
@@ -285,8 +285,16 @@ Config.MAX_TRADE_SHIPS = 24
 	en milieu de partie, mesure en simulation) pour que le passage aux colis
 	ne change ni le rythme de partie ni la course aux eres.
 ]]
-Config.TRUCK_GOLD_BASE = 10 -- or verse a l'arrivee d'un colis, avant distance
-Config.TRUCK_GOLD_PER_TILE = 1.2 -- supplement par tuile de liaison
+Config.FLAT_GOLD_HUMAN = 1.2
+Config.FLAT_GOLD_BOT = 0.6
+Config.TRADE_GOLD_SCALE = 0.002
+Config.TRAIN_GOLD_SELF = 20
+Config.TRAIN_GOLD_ALLY = 70
+Config.TRAIN_GOLD_OTHER = 50
+Config.SPAWN_MIN_PLAYER_DISTANCE = 30
+Config.NUKE_ALLIANCE_BREAK_TILES = 100
+Config.TRUCK_GOLD_BASE = 20
+Config.TRUCK_GOLD_PER_TILE = 0.05
 Config.TRUCK_SPEED = 4 -- tuiles parcourues par tick
 Config.TRUCK_COOLDOWN = 60 -- ticks de rechargement entre deux expeditions
 
@@ -455,7 +463,7 @@ Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
-Config.MAX_BOATS_PER_PLAYER = 6
+Config.MAX_BOATS_PER_PLAYER = 3
 
 --=============================================================================
 -- Batiments
@@ -538,7 +546,7 @@ Config.DEFENSE_STRENGTH = 55 -- points de defense au centre, degressif vers le b
 	batiment constructible dans le territoire de depart, qui n'est qu'un disque
 	de rayon SPAWN_RADIUS.
 ]]
-Config.BUILD_MIN_SPACING = 3
+Config.BUILD_MIN_SPACING = 15
 
 --[[
 	Rayon d'accrochage du placement.
@@ -558,10 +566,8 @@ Config.BUILD_MIN_SPACING = 3
 	atteignable, meme si elle est proche a vol d'oiseau. Le placement respecte la
 	topologie du front.
 ]]
-Config.BUILD_SNAP_RADIUS = Config.BUILD_MIN_SPACING + 2
--- Un port doit trouver une cote : sa recherche porte plus loin, sinon cliquer a
--- deux tuiles du rivage echouerait sans raison lisible.
-Config.BUILD_SNAP_RADIUS_COASTAL = 9
+Config.BUILD_SNAP_RADIUS = Config.BUILD_MIN_SPACING
+Config.BUILD_SNAP_RADIUS_COASTAL = 20
 --[[
 	Reseau logistique.
 
@@ -704,7 +710,7 @@ Config.MIRV_SEPARATION = 0.55
 
 Config.ALLIANCE_REQUEST_TIMEOUT = 300 -- ticks avant expiration d'une demande
 Config.BETRAYAL_REPUTATION_COST = 1
-Config.TRAITOR_MARK_DURATION = 1800 -- ticks pendant lesquels la trahison est affichee
+Config.TRAITOR_MARK_DURATION = 300
 
 --[[
 	Une alliance expire.
@@ -863,7 +869,7 @@ Config.INTENT_RATE_LIMIT_PER_SEC = 20
 Config.SNAPSHOT_COOLDOWN_SEC = 5
 Config.MAX_SNAPSHOTS_PER_MATCH = 12
 
-Config.VICTORY_LAND_RATIO = 0.65 -- part des terres a controler pour gagner
+Config.VICTORY_LAND_RATIO = 0.80
 Config.MATCH_DURATION = 25 * 60 -- secondes
 Config.POST_MATCH_DELAY = 20 -- secondes avant relance
 

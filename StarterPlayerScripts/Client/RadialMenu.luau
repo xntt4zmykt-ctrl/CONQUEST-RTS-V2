@@ -81,7 +81,9 @@ local function petal(parent: GuiObject): Petal
 	b.Visible = false
 	b.Parent = parent
 	Theme.corner(b, PETAL_RADIUS)
-	Theme.stroke(b, C.line, 1)
+	local edge = Theme.stroke(b, C.lineGlow, 1.5)
+	edge.Transparency = 0.35
+	Theme.gradient(b, C.surfaceBright, C.surfaceRaised, 135)
 
 	local icon = Theme.label(b, "", T.body, C.text)
 	icon.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -119,7 +121,8 @@ function RadialMenu.new(parent: Instance): RadialMenu
 	local veil = Instance.new("TextButton")
 	veil.Name = "RadialMenu"
 	veil.Size = UDim2.fromScale(1, 1)
-	veil.BackgroundTransparency = 1
+	veil.BackgroundColor3 = C.void
+	veil.BackgroundTransparency = 0.45
 	veil.Text = ""
 	veil.AutoButtonColor = false
 	veil.Visible = false

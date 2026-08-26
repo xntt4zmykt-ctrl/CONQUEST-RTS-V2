@@ -774,6 +774,8 @@ end
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
 	local check = radius + 3
+	local minDist = Config.SPAWN_MIN_PLAYER_DISTANCE or 30
+	local minDist2 = minDist * minDist
 
 	for _ = 1, 6000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
@@ -794,6 +796,19 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 				end
 				if not ok then
 					break
+				end
+			end
+			if ok then
+				for _, ps in self.players do
+					local other = ps.spawnCenter
+					if other then
+						local ox, oy = MapGen.fromIndex(other)
+						local dx, dy = ox - x, oy - y
+						if dx * dx + dy * dy < minDist2 then
+							ok = false
+							break
+						end
+					end
 				end
 			end
 			if ok then

@@ -60,12 +60,18 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 		local tiles = math.max(1, defender.tiles)
 		local defenderTroopLoss = defender.troops / tiles
 		local ratio = within(defender.troops / math.max(1, attackTroops), 0.6, 2)
-		local traitorMod = if defender.traitorUntil and state.tick < defender.traitorUntil then 0.8 else 1
+		local marked = defender.traitorUntil and state.tick < defender.traitorUntil
+		local traitorMod = if marked then 0.5 else 1
+		local traitorSpeed = if marked then (1 / 0.8) else 1
 		local largeDef = state:sizeDefenseFactor(defender)
+		local _, costFactor = state:sizeAttackFactors(attacker)
 		local current = ratio * mag * 0.8 * largeDef * traitorMod
 		local alt = 1.3 * defenderTroopLoss * (mag / 100) * traitorMod
-		local attackerTroopLoss = 0.6 * current + 0.4 * alt
-		local tilesPerTickUsed = within(defender.troops / (5 * math.max(1, attackTroops)), 0.2, 1.5) * speed * largeDef
+		local attackerTroopLoss = (0.6 * current + 0.4 * alt) * costFactor
+		local tilesPerTickUsed = within(defender.troops / (5 * math.max(1, attackTroops)), 0.2, 1.5)
+			* speed
+			* largeDef
+			* traitorSpeed
 		if posted then
 			attackerTroopLoss *= (Config.DEFENSE_POST_BONUS or 5)
 			tilesPerTickUsed *= (Config.DEFENSE_POST_SPEED_BONUS or 3)
@@ -140,10 +146,26 @@ function ChantierB.apply(cfg)
 	cfg.START_TROOPS = 8000
 	cfg.HUMAN_START_TROOPS = 12000
 	cfg.BASE_MAX_TROOPS = 0
-	cfg.MAX_TROOPS_TILE_SCALE = 200
+	cfg.MAX_TROOPS_TILE_SCALE = 1000
 	cfg.MAX_TROOPS_TILE_EXPONENT = 0.6
-	cfg.MAX_TROOPS_LAND_BASE = 10000
-	cfg.CITY_TROOP_INCREASE = 50000
+	cfg.MAX_TROOPS_LAND_BASE = 50000
+	cfg.CITY_TROOP_INCREASE = 250000
+	cfg.FLAT_GOLD_HUMAN = 1.2
+	cfg.FLAT_GOLD_BOT = 0.6
+	cfg.GOLD_TILE_SCALE = 0
+	cfg.GOLD_PER_PORT = 0
+	cfg.GOLD_PER_CAPITAL = 0
+	cfg.TRADE_GOLD_SCALE = 0.002
+	cfg.TRAIN_GOLD_SELF = 20
+	cfg.TRAIN_GOLD_ALLY = 70
+	cfg.TRAIN_GOLD_OTHER = 50
+	cfg.BUILD_MIN_SPACING = 15
+	cfg.BUILD_SNAP_RADIUS = 15
+	cfg.BUILD_SNAP_RADIUS_COASTAL = 20
+	cfg.SPAWN_MIN_PLAYER_DISTANCE = 30
+	cfg.MAX_BOATS_PER_PLAYER = 3
+	cfg.VICTORY_LAND_RATIO = 0.80
+	cfg.TRAITOR_MARK_DURATION = 300
 	cfg.GROWTH_RATE = 0
 	cfg.MIN_GROWTH = 0
 	cfg.TILE_BASE_COST = 18
@@ -156,16 +178,16 @@ function ChantierB.apply(cfg)
 	cfg.DEFENSE_POST_BONUS = 5
 	cfg.DEFENSE_POST_SPEED_BONUS = 3
 	cfg.DEFENSE_COST_DIVISOR = 42
-	cfg.WARSHIP_PATROL_RANGE = 40
-	cfg.WARSHIP_TARGET_RANGE = 65
+	cfg.WARSHIP_PATROL_RANGE = 100
+	cfg.WARSHIP_TARGET_RANGE = 100
 	cfg.WARSHIP_SHELL_RATE = 20
-	cfg.WARSHIP_MAX_HEALTH = 100
-	cfg.WARSHIP_SHELL_DAMAGE = 22
+	cfg.WARSHIP_MAX_HEALTH = 1000
+	cfg.WARSHIP_SHELL_DAMAGE = 250
 	cfg.WARSHIP_TRANSPORT_DAMAGE = 0.28
 	cfg.WARSHIP_TRADE_SINK = true
 	cfg.WARSHIP_RESPAWN_TICKS = 300
-	cfg.CARRIER_PATROL_RADIUS = 40
-	cfg.CARRIER_INTERCEPT_RANGE = 65
+	cfg.CARRIER_PATROL_RADIUS = 100
+	cfg.CARRIER_INTERCEPT_RANGE = 100
 	cfg.RETREAT_LOSS = 0.25 -- malusForRetreat contre joueur ; neutre = 0 (voir stepAttacks)
 	cfg.RETREAT_LOSS_NEUTRAL = 0
 	cfg.COLLAPSE_MIN_TILES = 100
@@ -182,11 +204,23 @@ function ChantierB.apply(cfg)
 	cfg.SPAWN_NUKE_IMMUNITY = 5
 	cfg.PREPARATION_DURATION = 0
 	cfg.MISSILE_SPEED = 14
-	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
-	cfg.SAM_COOLDOWN = 75
-	cfg.NUKE_STATS[1] = { radius = 12, troopKill = 0.38, cost = 550, name = "Bombe atomique" }
-	cfg.NUKE_STATS[2] = { radius = 32, troopKill = 0.62, cost = 1400, name = "Bombe H" }
+	cfg.SAM_COOLDOWN = 90
+	cfg.NUKE_ALLIANCE_BREAK_TILES = 100
+	cfg.NUKE_STATS[1] = {
+		radius = 12,
+		outerRadius = 30,
+		troopKill = 0.38,
+		cost = 550,
+		name = "Bombe atomique",
+	}
+	cfg.NUKE_STATS[2] = {
+		radius = 80,
+		outerRadius = 100,
+		troopKill = 0.62,
+		cost = 1400,
+		name = "Bombe H",
+	}
 	cfg.NUKE_STATS[3].warheads = 8
 	cfg.NUKE_STATS[3].warheadRadius = 6
 	cfg.NUKE_STATS[3].warheadTroopKill = 0.14
@@ -194,19 +228,33 @@ function ChantierB.apply(cfg)
 	cfg.DOOMSDAY.ROT_DEATH_SECONDS = 120
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
+	cfg.SPAWN_RADIUS = 18
 	cfg.DEPLOY_DURATION = 15
 	-- Tribus PvE (TribeSpawner)
 	cfg.TRIBE_COUNT = 6
 	cfg.TRIBE_START_TROOPS = 4000
 	-- Trains / commerce (TrainExecution feel)
-	cfg.TRUCK_GOLD_BASE = 14
-	cfg.TRUCK_GOLD_PER_TILE = 1.5
+	cfg.TRUCK_GOLD_BASE = cfg.TRAIN_GOLD_SELF
+	cfg.TRUCK_GOLD_PER_TILE = 0.05
 	cfg.TRAIN_STOP_BONUS = 0.12
 	if cfg.CITY_LEVELS then
-		cfg.CITY_LEVELS[1].popCapBonus = 50000
-		cfg.CITY_LEVELS[2].popCapBonus = 100000
-		cfg.CITY_LEVELS[3].popCapBonus = 150000
+		cfg.CITY_LEVELS[1].popCapBonus = 250000
+		cfg.CITY_LEVELS[1].goldBonus = 0
+		cfg.CITY_LEVELS[2].popCapBonus = 500000
+		cfg.CITY_LEVELS[2].goldBonus = 0
+		cfg.CITY_LEVELS[3].popCapBonus = 750000
+		cfg.CITY_LEVELS[3].goldBonus = 0
 	end
+end
+
+local function terrainMag(terrain: number): number
+	if terrain == Config.TERRAIN.MOUNTAIN or terrain == Config.TERRAIN.PEAK then
+		return 2
+	end
+	if terrain == Config.TERRAIN.HILLS or terrain == Config.TERRAIN.HIGHLAND then
+		return 1.5
+	end
+	return 1
 end
 
 local function frontPriority(state, index, attackerSlot): number
@@ -217,10 +265,9 @@ local function frontPriority(state, index, attackerSlot): number
 			owned += 1
 		end
 	end
-	local terrain = buffer.readu8(state.terrain, index)
-	local roughness = Config.TERRAIN_COST[terrain] or 1
+	local mag = terrainMag(buffer.readu8(state.terrain, index))
 	local noise = (index * 2654435761 + state.tick * 40503) % 8
-	return (noise + 10) * (1 - owned * 0.5 + roughness / 2) + state.tick
+	return (noise + 10) * (1 - owned * 0.5 + mag / 2) + state.tick
 end
 
 local function enqueueFront(state, atk, index)
@@ -305,6 +352,7 @@ function ChantierB.placeDisk(state, slot, center)
 	local ps = state.players[slot]
 	if ps then
 		ps.capitalTile = center
+		ps.spawnCenter = center
 		ps.awaitingSpawn = false
 		ps.spawnTick = state.tick
 	end
@@ -350,11 +398,10 @@ function ChantierB.install(GameState, Nukes)
 				local humanGrowth = if ps.isBot then 1 else (Config.HUMAN_GROWTH_MULTIPLIER or 1.18)
 				ps.troops = math.min(maxTroops, ps.troops + toAdd * doctrine.growth * era.growth * humanGrowth)
 			end
-			local territorial = ps.tiles ^ Config.GOLD_TILE_EXPONENT * Config.GOLD_TILE_SCALE
-			local income = territorial + ps.cityGoldBonus + ps.portLevels * Config.GOLD_PER_PORT + ps.capitalCount * Config.GOLD_PER_CAPITAL
+			local flat = if ps.isBot then (Config.FLAT_GOLD_BOT or 0.6) else (Config.FLAT_GOLD_HUMAN or 1.2)
 			local modeGold = if self.mode then self.mode.goldMultiplier else 1
 			local humanGold = if ps.isBot then 1 else (Config.HUMAN_GOLD_MULTIPLIER or 1)
-			ps.gold += income * doctrine.goldRate * era.gold * modeGold * humanGold
+			ps.gold += flat * doctrine.goldRate * era.gold * modeGold * humanGold
 		end
 		local _ = origStepEconomy
 	end
@@ -625,8 +672,8 @@ function ChantierB.installFallout(GameState, Nukes)
 	end
 	GameState.__chantierFallout = true
 	local orig = Nukes.detonate
-	function Nukes.detonate(state, missile)
-		orig(state, missile)
+	function Nukes.detonate(state, missile, rng)
+		orig(state, missile, rng)
 		state.fallout = state.fallout or {}
 		local stats = Config.NUKE_STATS[missile.kind]
 		local radius = missile.radius or (if stats then stats.radius else 8)
