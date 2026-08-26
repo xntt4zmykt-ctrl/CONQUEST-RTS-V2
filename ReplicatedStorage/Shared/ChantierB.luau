@@ -18,6 +18,11 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+-- tryAnnex : pools module-level (ISSUE-N21). Meme pattern que findSeaPath N31.
+-- Cap poche 280 inchange ; ocean = abort (enclave terrestre only).
+local annexVisitBuf = buffer.create(Config.TILE_COUNT)
+local annexQueue: { number } = table.create(280)
+local annexPocket: { number } = table.create(280)
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -98,11 +103,34 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
-	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	buffer.fill(annexVisitBuf, 0, 0)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
+	local visited = annexVisitBuf
+	local queue = annexQueue
+	local pocket = annexPocket
+
+	-- Le combat vivant appelle tryAnnex APRES setOwner : `seed` appartient
+	-- deja a l'attaquant. L'ancienne file `{ seed }` marquait visited puis
+	-- `continue` (owner ~= defender) sans jamais etendre les voisins — BFS
+	-- mort, aucune enclave annexee. On part des voisins defenseur du seed
+	-- (seed = coupe). Si seed est encore defenseur (appel avant setOwner),
+	-- on l'enfile comme avant.
+	buffer.writeu8(visited, seed, 1)
+	if buffer.readu8(state.owner, seed) == defenderSlot then
+		table.insert(queue, seed)
+	else
+		local n0 = MapGen.neighbors(seed, annexScratch)
+		for i = 1, n0 do
+			local nb = annexScratch[i]
+			if buffer.readu8(state.owner, nb) == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
 	local head = 1
-	local pocket: { number } = {}
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -123,8 +151,8 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
+			if owner == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
 				table.insert(queue, nb)
 			end
 		end
@@ -265,7 +293,9 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
@@ -371,7 +401,12 @@ function ChantierB.install(GameState, Nukes)
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				self:returnCommittedTroops(atk)
 				table.remove(self.attacks, i)
 				continue
 			end
@@ -380,6 +415,9 @@ function ChantierB.install(GameState, Nukes)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
@@ -469,6 +507,14 @@ function ChantierB.install(GameState, Nukes)
 		end
 		for slot, ps in self.players do
 			if slot == leaderSlot or ps.tiles >= required then
+				self.doomWarnedAt[slot] = nil
+				self.doomUnderSince[slot] = nil
+				continue
+			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une
+			-- armee fantome. On EFFACE les timers : sinon un AFK strip puis
+			-- claimSpawn herite d'un warn deja ecoule et saigne au premier tick.
+			if ps.awaitingSpawn or ps.tiles == 0 then
 				self.doomWarnedAt[slot] = nil
 				self.doomUnderSince[slot] = nil
 				continue
