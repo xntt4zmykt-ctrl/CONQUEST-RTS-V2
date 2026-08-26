@@ -7074,7 +7074,7 @@ do
 	-- detonations → rawequal. Boom sur A → hitTilesBuf[A] >= 1,
 	-- tilesBeforeBuf[A] == snapshot avant crater. Boom ocean / hors
 	-- carte → next(hitTilesBuf) == nil (un leftover taxerait A).
-	-- Leftover splitMirv targets = N77. Pas N33 / N30 / N50 / N75.
+	-- Leftover splitMirv targets = N77 (ferme plus bas). Pas N33 / N30 / N50 / N75.
 	local state = GameState.new(3104)
 	state.combatUnlocked = true
 	local a = state:addPlayer(nil, "BoomA", Random.new(121), 0)
@@ -7132,6 +7132,85 @@ do
 					fail(`detonate hashes — leftover tax {a.troops} vs {troopsAfter}`)
 				else
 					print("detonate hashes : ocean leftover 0, rawequal (N76)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N77 : splitMirv recycle mirvTxBuf / mirvTyBuf. Deux scissions
+	-- (porteur, pas ogive, progress >= MIRV_SEPARATION) → rawequal.
+	-- Leftover ocean / hors carte → # == 1 (fallback point vise), pas
+	-- de Vector2 du premier. Banc MIRV existant + N76 restent verts.
+	-- Pas N33 / N30 / N75 / N78.
+	local state = GameState.new(3105)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "MirvA", Random.new(131), 0)
+	local b = state:addPlayer(nil, "MirvB", Random.new(132), 0)
+	if not a or not b then
+		fail("splitMirv hashes — spawn impossible")
+	else
+		local target = a.capitalTile
+		if not target then
+			fail("splitMirv hashes — capitale A introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			local tx0, ty0 = Nukes.mirvTxBuf, Nukes.mirvTyBuf
+			table.insert(state.missiles, {
+				id = 50,
+				slot = b.slot,
+				kind = Config.NUKE.MIRV,
+				warhead = false,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx,
+				ty = ty,
+				progress = Config.MIRV_SEPARATION,
+				speed = Config.MISSILE_SPEED,
+			})
+			Nukes.step(state, Random.new(7), function() end)
+			local nLand = #Nukes.mirvTxBuf
+			local warheads = 0
+			for _, missile in state.missiles do
+				if missile.warhead then
+					warheads += 1
+				end
+			end
+			if not rawequal(tx0, Nukes.mirvTxBuf) or not rawequal(ty0, Nukes.mirvTyBuf) then
+				fail("splitMirv hashes — rawequal premier porteur")
+			elseif nLand < 1 then
+				fail("splitMirv hashes — 0 cible land")
+			elseif warheads ~= nLand then
+				fail(`splitMirv hashes — ogives {warheads} != {nLand}`)
+			else
+				print("splitMirv hashes : porteur land, rawequal (N77)")
+				table.clear(state.missiles)
+				table.insert(state.missiles, {
+					id = 51,
+					slot = b.slot,
+					kind = Config.NUKE.MIRV,
+					warhead = false,
+					x = -1000,
+					y = -1000,
+					sx = -1000,
+					sy = -1000,
+					tx = -1000,
+					ty = -1000,
+					progress = Config.MIRV_SEPARATION,
+					speed = Config.MISSILE_SPEED,
+				})
+				Nukes.step(state, Random.new(8), function() end)
+				if not rawequal(tx0, Nukes.mirvTxBuf) or not rawequal(ty0, Nukes.mirvTyBuf) then
+					fail("splitMirv hashes — rawequal ocean")
+				elseif #Nukes.mirvTxBuf ~= 1 or #Nukes.mirvTyBuf ~= 1 then
+					fail(`splitMirv hashes — leftover ocean #{#Nukes.mirvTxBuf}`)
+				elseif Nukes.mirvTxBuf[1] ~= -1000 or Nukes.mirvTyBuf[1] ~= -1000 then
+					fail("splitMirv hashes — fallback hors point vise")
+				else
+					print("splitMirv hashes : ocean leftover 1, rawequal (N77)")
 				end
 			end
 		end
@@ -7821,6 +7900,53 @@ do
 	print(
 		`MAX_TILES_PER_TICK reste {Config.MAX_TILES_PER_TICK} (p95 changed={snap.p95.changedTiles}, p95 deltaB={snap.p95.deltaBytes})`
 	)
+end
+
+do
+	-- N78 : TickMetrics recycle seenBuf + Sample ring. Deux
+	-- dirtyChunksFromDelta → rawequal seenBuf. 601 record →
+	-- #history == HISTORY_CAP, rawequal d'un Sample (pas 601 tables).
+	-- formatReport encore parseable. Apres formatReport du run
+	-- principal — reset ici ne fausse pas ticks=6000. Leftover
+	-- snapshot arrays = N79. Pas N76 / N77 / N53 / N2.
+	local delta = buffer.create(5)
+	buffer.writeu32(delta, 0, 1234)
+	buffer.writeu8(delta, 4, 1)
+	local seen0 = TickMetrics.seenBuf
+	local n1 = TickMetrics.dirtyChunksFromDelta(delta)
+	if not rawequal(seen0, TickMetrics.seenBuf) then
+		fail("metrics hashes — rawequal seenBuf")
+	elseif n1 ~= 1 then
+		fail(`metrics hashes — chunks {n1}`)
+	else
+		local n2 = TickMetrics.dirtyChunksFromDelta(delta)
+		if not rawequal(seen0, TickMetrics.seenBuf) or n2 ~= 1 then
+			fail("metrics hashes — rawequal 2e delta")
+		elseif TickMetrics.dirtyChunksFromDelta(nil) ~= 0 then
+			fail("metrics hashes — early-out nil")
+		elseif next(TickMetrics.seenBuf) == nil then
+			fail("metrics hashes — nil a clear seenBuf")
+		else
+			print("metrics hashes : seenBuf rawequal, nil sans clear (N78)")
+			TickMetrics.reset()
+			TickMetrics.record(1, 1, delta, 0.25)
+			local s1 = TickMetrics.history[1]
+			local cap = TickMetrics.HISTORY_CAP
+			for i = 2, cap + 1 do
+				TickMetrics.record(i, 0, nil, 0)
+			end
+			local report = TickMetrics.formatReport()
+			if #TickMetrics.history ~= cap then
+				fail(`metrics hashes — history #{#TickMetrics.history}`)
+			elseif not rawequal(s1, TickMetrics.history[1]) then
+				fail("metrics hashes — Sample non recycle")
+			elseif not string.find(report, "ticks=", 1, true) then
+				fail("metrics hashes — formatReport illisible")
+			else
+				print("metrics hashes : ring 601, Sample recycle, ticks= (N78)")
+			end
+		end
+	end
 end
 
 print("")
