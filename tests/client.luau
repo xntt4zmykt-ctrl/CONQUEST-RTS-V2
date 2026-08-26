@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	os.exit(1)
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -427,7 +427,7 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 end)
 
 --[[
-	Disposition OpenFront.
+	Disposition CONQUEST.
 
 	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
 	choses, et c'est exactement ce qui casse quand on deplace une interface :
@@ -501,7 +501,7 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		"la bille du curseur n'est pas dans le panneau de controle"
 	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
-	-- jeu de reference — la puce dit combien part, le curseur decide.
+	-- CONQUEST — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
@@ -668,6 +668,76 @@ check("calques d'entites, effets et apercu", function()
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
+end)
+
+check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
+	local SpawnHint = __require("SpawnHint")
+	local Theme = __require("Theme")
+	local OCEAN = Config.TERRAIN.OCEAN
+	local owner = world.owner
+
+	local land: number? = nil
+	local ocean: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) == OCEAN then
+			if not ocean then
+				ocean = index
+			end
+		else
+			if not land then
+				land = index
+			end
+		end
+		if land and ocean then
+			break
+		end
+	end
+	assert(land ~= nil, "aucune terre")
+	assert(ocean ~= nil, "aucun ocean")
+	assert(SpawnHint.looksClaimable(terrain, owner, land), "disque isole encore rouge")
+	assert(not SpawnHint.looksClaimable(terrain, owner, ocean), "ocean colore comme spawn")
+
+	-- Peint tout le terre comme un empire sauf une lisiere (meme recette N55).
+	local occupier = 1
+	local pocket: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(owner, index, occupier)
+		end
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			local x, y = MapGen.fromIndex(index)
+			local adj = false
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					if dx ~= 0 or dy ~= 0 then
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local ni = MapGen.toIndex(nx, ny)
+							if buffer.readu8(terrain, ni) ~= OCEAN and buffer.readu8(owner, ni) == occupier then
+								adj = true
+							end
+						end
+					end
+				end
+			end
+			if adj then
+				buffer.writeu8(owner, index, 0)
+				pocket = index
+				break
+			end
+		end
+	end
+	assert(pocket ~= nil, "lisiere introuvable")
+	assert(not SpawnHint.looksClaimable(terrain, owner, pocket), "lisiere encore verte")
+	effects:previewTile(pocket, Theme.color.danger, false)
+	effects:clearActionPreview()
+
+	-- Restaure le buffer owner du monde (tout NEUTRAL) pour les checks suivants.
+	for index = 0, Config.TILE_COUNT - 1 do
+		buffer.writeu8(owner, index, 0)
+	end
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -1250,7 +1320,7 @@ end)
 
 check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
-		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
 		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
 	}, {
@@ -1296,7 +1366,7 @@ check("camera strategique", function()
 	camera:step(1 / 60)
 
 	--[[
-		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Panoramique libre au clic du milieu, le geste CONQUEST.
 		Les faux InputObject sont de simples tables : le code ne lit que
 		UserInputType, Position et Delta.
 	]]
@@ -1413,7 +1483,7 @@ end)
 	Barre d'action tactile.
 
 	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
-	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	que personne ne la force — c'est le contrat de la disposition CONQUEST. On
 	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
 	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
 
@@ -1471,4 +1541,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	os.exit(1)
 end
