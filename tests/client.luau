@@ -1169,6 +1169,13 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- leftover N140 toits FACTORY, leftover N124 radar doivent
 	-- rester verts. Recette leftover N141, pas merger visual.
 	-- WorldRenderer / Overlay / UnitModels inchanges.
+	-- N149 : CityWindows rest.X (pas child.Position.X). Phase
+	-- depuis RestCFrame. Amplitude / frequence inchangees.
+	-- Leftover N142 Interceptor, leftover N141 portes, leftover
+	-- N140 toits, leftover N139 cylinder, leftover N124 radar
+	-- doivent rester verts. Recette leftover N148, pas merger
+	-- visual. Beacons leftover N150 non touches. UnitModels /
+	-- Overlay inchanges.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)

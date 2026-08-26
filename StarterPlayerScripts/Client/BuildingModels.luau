@@ -603,7 +603,19 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 				rest.Z
 			)
 		elseif child.Name == "CityWindows" then
-			child.Transparency = 0.06 + (math.sin(time * 0.7 + child.Position.X * 0.1) + 1) * 0.08
+			-- N149 : phase depuis rest.X. Plus de child.Position.X 60 Hz
+			-- (BasePart.Position alloue un Vector3). rest est deja le
+			-- RestCFrame (block() pose CFrame.new(offset) — translation
+			-- pure). rest.X ≡ Position.X pour une fenetre non tournee
+			-- dans animate. Amplitude 0.06 + (sin + 1) * 0.08 /
+			-- frequence time * 0.7 / coeff 0.1 inchanges. Name
+			-- "CityWindows" inchange. Distinct beacons leftover N150
+			-- (rest.Z). Distinct trail UnitModels leftover
+			-- (offset.Position.Z). Distinct cable Y N109. Distinct
+			-- Radar/Flag/Boom N124. Recette leftover N148, pas merger
+			-- visual. Mesh N148 / Fin N147 / Overlay / UnitModels /
+			-- place inchanges.
+			child.Transparency = 0.06 + (math.sin(time * 0.7 + rest.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
 			child.Transparency = 0.05 + (math.sin(time * 2.8 + child.Position.Z * 0.05) + 1) * 0.18
 		elseif child.Name == "FactoryOutput" then
