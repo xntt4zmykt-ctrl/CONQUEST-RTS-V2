@@ -102,6 +102,9 @@ export type Boat = {
 	path: { number },
 	step: number,
 	targetTile: number,
+	-- Faction visee au lancement (N49). Distingue l'intention du proprio actuel.
+	targetOwner: number?,
+	retreating: boolean?,
 	-- Porte-avions uniquement : base d'attache et angle d'orbite.
 	homeTile: number?,
 	angle: number?,
@@ -236,6 +239,8 @@ function GameState.new(seed: number): GameState
 	self.tradeCooldowns = {}
 	self.mode = nil
 	self.settledHumans = {}
+	-- syncCarriers ne rescanne les bases navales que si ce drapeau est vrai.
+	self._carriersDirty = true
 	-- L'etat brut reste immediatement jouable pour les simulations et les
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
@@ -342,6 +347,9 @@ end
 function GameState.setOwner(self: GameState, index: number, slot: number)
 	local previous = buffer.readu8(self.owner, index)
 	if previous == slot then
+		return
+	end
+	if slot ~= NEUTRAL and not self.players[slot] then
 		return
 	end
 
@@ -693,6 +701,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
 	end
+	if kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[kind] then
 		self:refreshRailNetwork(slot)
 	end
@@ -740,6 +751,9 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -759,6 +773,17 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
+	if previousKind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
+	if previousKind == B.FACTORY then
+		if self.tradeDeliveries then
+			self.tradeDeliveries[index] = nil
+		end
+		if self.tradeCooldowns then
+			self.tradeCooldowns[index] = nil
+		end
+	end
 	if IS_STATION[previousKind] then
 		self:refreshRailNetwork(previousSlot)
 	end
@@ -961,6 +986,10 @@ function GameState.removePlayer(self: GameState, slot: number)
 
 	for i = #self.missiles, 1, -1 do
 		local missile = self.missiles[i]
+		if missile.slot == slot then
+			table.remove(self.missiles, i)
+			continue
+		end
 		local tx = math.floor(missile.tx or 0)
 		local ty = math.floor(missile.ty or 0)
 		if MapGen.inBounds(tx, ty) and buffer.readu8(self.owner, MapGen.toIndex(tx, ty)) == slot then
@@ -1081,7 +1110,7 @@ function GameState.areAllied(self: GameState, a: number, b: number): boolean
 		return true
 	end
 	if typeof(expA) ~= "number" or typeof(expB) ~= "number" then
-		return true
+		return false
 	end
 	return self.tick < expA and self.tick < expB
 end
@@ -1720,6 +1749,10 @@ function GameState.stepElimination(self: GameState): { number }
 	local doomed: { number } = {}
 
 	for slot, ps in self.players do
+		-- Humain en attente de clic spawn : zero tuile, pas une elimination.
+		if ps.awaitingSpawn then
+			continue
+		end
 		if ps.tiles > 0 then
 			continue
 		end

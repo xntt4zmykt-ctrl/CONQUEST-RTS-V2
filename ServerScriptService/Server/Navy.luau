@@ -22,12 +22,18 @@ local KIND_CARRIER = 3
 local MAX_BFS_NODES = 24000
 
 local scratch = table.create(4, 0)
+local visitBuf = buffer.create(Config.TILE_COUNT)
+local parentPool: { [number]: number } = {}
+local queuePool = table.create(512)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
-	local visited = buffer.create(Config.TILE_COUNT)
-	local parent: { [number]: number } = {}
-	local queue = table.create(512)
+	buffer.fill(visitBuf, 0, 0)
+	table.clear(parentPool)
+	table.clear(queuePool)
+	local visited = visitBuf
+	local parent = parentPool
+	local queue = queuePool
 	local head = 1
 	local explored = 0
 
@@ -156,7 +162,8 @@ function Navy.retreatBoats(state: GameState, slot: number, targetOwner: number?)
 			continue
 		end
 		local destOwner = buffer.readu8(state.owner, boat.targetTile)
-		if targetOwner == nil or destOwner == targetOwner then
+		local intent = boat.targetOwner
+		if targetOwner == nil or intent == targetOwner or destOwner == targetOwner then
 			if Navy.beginRetreat(state, boat) then
 				n += 1
 			end
@@ -230,6 +237,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 		path = path,
 		step = 1,
 		targetTile = targetTile,
+		targetOwner = targetOwner,
 		homeTile = origin,
 		retreating = false,
 	})
@@ -352,9 +360,10 @@ local function spawnTradeShips(state: GameState, rng: Random)
 			return a.dist < b.dist
 		end)
 		local foreignCount = #foreign
+		local longCap = if foreignCount >= 4 then math.clamp(math.floor(foreignCount / 3), 4, foreignCount) else 0
 		for rank, other in foreign do
 			local weight = other.level
-			if other.dist >= 300 and rank <= math.clamp(math.floor(foreignCount / 3), 4, foreignCount) then
+			if other.dist >= 300 and rank <= longCap then
 				weight += other.level
 			end
 			if state:areAllied(source.slot, other.slot) then
@@ -395,6 +404,8 @@ local function spawnTradeShips(state: GameState, rng: Random)
 end
 
 local function resolveTrade(state: GameState, boat)
+	-- PORT detruit : no-op, le bateau est retire par Navy.step (pas d'or).
+	-- PORT capture : le nouveau proprio recoit (destination.slot a jour).
 	local destination = state.buildings[boat.targetTile]
 	if not destination or destination.kind ~= Config.BUILDING.PORT then
 		return
@@ -419,9 +430,15 @@ local function resolveTrade(state: GameState, boat)
 	state:notify(`\u{1F6A2} Convoi de {seller.name} accoste : +{rounded} or.`, "good", buyer.slot)
 end
 
+local carrierSeen: { [number]: boolean } = {}
+
 local function syncCarriers(state: GameState)
+	if state._carriersDirty == false then
+		return
+	end
+	state._carriersDirty = false
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
-	local seen: { [number]: boolean } = {}
+	table.clear(carrierSeen)
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
 		if boat.kind ~= KIND_CARRIER then
@@ -440,10 +457,10 @@ local function syncCarriers(state: GameState)
 		if boat.lastShellTick == nil then
 			boat.lastShellTick = 0
 		end
-		seen[boat.homeTile] = true
+		carrierSeen[boat.homeTile] = true
 	end
 	for index, building in state.buildings do
-		if building.kind == Config.BUILDING.NAVAL_BASE and not seen[index] then
+		if building.kind == Config.BUILDING.NAVAL_BASE and not carrierSeen[index] then
 			local x, y = MapGen.fromIndex(index)
 			table.insert(state.boats, {
 				id = state:nextId(),
@@ -644,7 +661,17 @@ function Navy.step(state: GameState, rng: Random)
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then
 			local destOwner = buffer.readu8(state.owner, boat.targetTile)
 			local destLand = state:isLand(boat.targetTile)
-			if destOwner == boat.slot or not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+			local ps = state.players[boat.slot]
+			if destOwner == boat.slot or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+				if ps then
+					ps.troops += math.max(0, boat.troops)
+				end
+				table.remove(state.boats, i)
+				continue
+			end
+			local intent = boat.targetOwner
+			local flipped = intent ~= nil and destOwner ~= intent
+			if not destLand or flipped then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
 					table.remove(state.boats, i)

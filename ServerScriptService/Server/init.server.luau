@@ -357,6 +357,7 @@ local function endMatch(slot: number?)
 			profileUpdate:FireClient(player, profilePacket(profile, gain))
 		end
 	end
+	Persistence.flush()
 end
 
 --[[
@@ -433,6 +434,7 @@ end
 
 joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
 	if matchPhase == "ended" then
+		notify:FireClient(player, "Partie terminee — nouvelle carte dans quelques secondes.", "info")
 		return
 	end
 	if typeof(nationId) ~= "number" then
@@ -481,7 +483,11 @@ end
 -- ici : IntentValidator enfile, puis flush en tete de tick.
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value ~= math.huge
+		and value ~= -math.huge
+		and value == math.floor(value)
 end
 
 local function slotOf(player: Player): number?
@@ -640,6 +646,10 @@ end)
 --=============================================================================
 
 local function replicate()
+	-- Lobby / fin de partie : 1 Hz. Le 10 Hz playing n'est pas touche.
+	if (matchPhase == "waiting" or matchPhase == "ended") and state.tick % Config.TICK_RATE ~= 0 then
+		return 0, nil
+	end
 	local ownerDelta = state:flushOwnerDelta()
 	local changedTiles = if ownerDelta then buffer.len(ownerDelta) // 5 else 0
 
@@ -821,6 +831,7 @@ local function stepOnce()
 				break
 			end
 		end
+		Persistence.flush()
 		checkVictory()
 	else -- ended
 		state.tick += 1

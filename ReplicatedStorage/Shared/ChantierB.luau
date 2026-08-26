@@ -18,6 +18,9 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+local annexVisited: { [number]: boolean } = {}
+local annexQueue: { number } = {}
+local annexPocket: { number } = {}
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -105,29 +108,29 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	end
 	-- Apres setOwner, `seed` appartient deja a l'attaquant. Le BFS part des
 	-- voisins encore detenus par le defenseur (sinon la poche n'est jamais vue).
-	local visited: { [number]: boolean } = {}
-	local queue: { number } = {}
+	table.clear(annexVisited)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
 	local n0 = MapGen.neighbors(seed, annexScratch)
 	for i = 1, n0 do
 		local nb = annexScratch[i]
-		if buffer.readu8(state.owner, nb) == defenderSlot and not visited[nb] then
-			visited[nb] = true
-			table.insert(queue, nb)
+		if buffer.readu8(state.owner, nb) == defenderSlot and not annexVisited[nb] then
+			annexVisited[nb] = true
+			table.insert(annexQueue, nb)
 		end
 	end
-	if #queue == 0 then
+	if #annexQueue == 0 then
 		return
 	end
 	local head = 1
-	local pocket: { number } = {}
-	while head <= #queue do
-		local cur = queue[head]
+	while head <= #annexQueue do
+		local cur = annexQueue[head]
 		head += 1
 		if buffer.readu8(state.owner, cur) ~= defenderSlot then
 			continue
 		end
-		table.insert(pocket, cur)
-		if #pocket > 280 then
+		table.insert(annexPocket, cur)
+		if #annexPocket > 280 then
 			return
 		end
 		local n = MapGen.neighbors(cur, annexScratch)
@@ -140,16 +143,16 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
-				table.insert(queue, nb)
+			if owner == defenderSlot and not annexVisited[nb] then
+				annexVisited[nb] = true
+				table.insert(annexQueue, nb)
 			end
 		end
 	end
-	if #pocket == 0 then
+	if #annexPocket == 0 then
 		return
 	end
-	for _, index in pocket do
+	for _, index in annexPocket do
 		state:setOwner(index, attackerSlot)
 	end
 end
@@ -169,8 +172,8 @@ function ChantierB.apply(cfg)
 	cfg.GOLD_PER_CAPITAL = 0
 	cfg.TRADE_GOLD_SCALE = 0.002
 	cfg.TRAIN_GOLD_SELF = 20
-	cfg.TRAIN_GOLD_ALLY = 70
-	cfg.TRAIN_GOLD_OTHER = 50
+	cfg.TRAIN_GOLD_ALLY = 70 -- mort apres install (Trade lit TRUCK_GOLD_*)
+	cfg.TRAIN_GOLD_OTHER = 50 -- mort apres install
 	cfg.BUILD_MIN_SPACING = 15
 	cfg.BUILD_SNAP_RADIUS = 15
 	cfg.BUILD_SNAP_RADIUS_COASTAL = 20
@@ -183,13 +186,13 @@ function ChantierB.apply(cfg)
 	cfg.TILE_BASE_COST = 18
 	cfg.NEUTRAL_COST_MULT = 0.88
 	cfg.DEFENSE_DENSITY_K = 1.15
-	cfg.MAX_TILES_PER_TICK = 56
-	cfg.FRONT_TILES_PER_CONTACT = 2.4
+	cfg.MAX_TILES_PER_TICK = 56 -- mort apres install : debit = guard < 80
+	cfg.FRONT_TILES_PER_CONTACT = 2.4 -- mort apres install
 	cfg.DEFENSE_RADIUS = 30
 	cfg.DEFENSE_STRENGTH = 200
 	cfg.DEFENSE_POST_BONUS = 5
 	cfg.DEFENSE_POST_SPEED_BONUS = 3
-	cfg.DEFENSE_COST_DIVISOR = 42
+	cfg.DEFENSE_COST_DIVISOR = 42 -- mort apres install (buffer defense ignore)
 	cfg.WARSHIP_PATROL_RANGE = 100
 	cfg.WARSHIP_TARGET_RANGE = 100
 	cfg.WARSHIP_SHELL_RATE = 20
@@ -337,7 +340,7 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
@@ -398,6 +401,9 @@ function ChantierB.install(GameState, Nukes)
 	local origStepEconomy = GameState.stepEconomy
 	function GameState.stepEconomy(self)
 		for _, ps in self.players do
+			if ps.awaitingSpawn then
+				continue
+			end
 			local doctrine = Doctrines.get(ps.doctrine)
 			local era = Eras.accumulate(ps.era)
 			local maxTroops = self:maxTroops(ps)

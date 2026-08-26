@@ -39,12 +39,14 @@ export type Effects = typeof(setmetatable({} :: any, Effects))
 -- Au-dela, les eclats se chevauchent et ne se lisent plus de toute facon.
 local MAX_FLASHES_PER_WAVE = 28
 local MAX_LIVE_FLASHES = 90
+local MAX_LIVE_PULSES = 8
 
 function Effects.new(parent: Instance, terrain: buffer): Effects
 	local self = setmetatable({}, Effects) :: any
 
 	self.terrain = terrain
 	self.live = 0
+	self.livePulses = 0
 
 	local root = Instance.new("Folder")
 	root.Name = "Effects"
@@ -196,6 +198,10 @@ end
 --=============================================================================
 
 function Effects.conquestPulse(self: Effects, x: number, y: number, radius: number, color: Color3)
+	if (self.livePulses or 0) >= MAX_LIVE_PULSES then
+		return
+	end
+	self.livePulses += 1
 	local ground = WorldSpace.tileToWorld(x, y)
 	local height = 3
 	if self.terrain and MapGen.inBounds(x, y) then
@@ -224,6 +230,7 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 
 	task.delay(1, function()
 		ring:Destroy()
+		self.livePulses = math.max(0, (self.livePulses or 1) - 1)
 	end)
 end
 

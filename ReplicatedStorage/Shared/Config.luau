@@ -289,8 +289,8 @@ Config.FLAT_GOLD_HUMAN = 1.2
 Config.FLAT_GOLD_BOT = 0.6
 Config.TRADE_GOLD_SCALE = 0.002
 Config.TRAIN_GOLD_SELF = 20
-Config.TRAIN_GOLD_ALLY = 70
-Config.TRAIN_GOLD_OTHER = 50
+Config.TRAIN_GOLD_ALLY = 70 -- mort apres ChantierB.install (Trade lit TRUCK_GOLD_*)
+Config.TRAIN_GOLD_OTHER = 50 -- mort apres install
 Config.SPAWN_MIN_PLAYER_DISTANCE = 30
 Config.NUKE_ALLIANCE_BREAK_TILES = 100
 Config.TRUCK_GOLD_BASE = 20
@@ -312,7 +312,7 @@ Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
 Config.DEFENDER_LOSS_RATIO = 0.55
-Config.MAX_TILES_PER_TICK = 400
+Config.MAX_TILES_PER_TICK = 400 -- mort apres install : combat vivant = guard < 80
 
 -- Ouverture lisible : on peut coloniser et construire immediatement, mais les
 -- guerres entre nations attendent quelques secondes. Deux fronts simultanes
@@ -462,7 +462,7 @@ Config.BOAT_SPEED = 0.85 -- tuiles par tick
 Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
-Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
+Config.BOAT_LANDING_BONUS = 1.35 -- mort apres install : Navy n'applique plus ce surcout
 Config.MAX_BOATS_PER_PLAYER = 3
 
 --=============================================================================

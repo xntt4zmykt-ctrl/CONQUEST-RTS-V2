@@ -74,11 +74,6 @@ function SystemsBootstrap.install()
 		local origLaunch = GameState.launchAttack
 		function GameState.launchAttack(self, attackerSlot, targetSlot)
 			local ps = self.players[attackerSlot]
-			if ps and ps.justClaimed then
-				ps.justClaimed = false
-				return true, nil
-			end
-
 			local aim = if ps then ps.aimTile else nil
 			if ps then
 				ps.aimTile = nil

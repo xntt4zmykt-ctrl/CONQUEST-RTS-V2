@@ -12,7 +12,6 @@
 ]]
 
 local DataStoreService = game:GetService("DataStoreService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -47,6 +46,7 @@ end
 -- Cache en memoire : fait aussi office de source de verite quand les
 -- DataStores ne repondent pas.
 local cache: { [number]: Profile } = {}
+local dirty: { [number]: boolean } = {}
 
 local function keyFor(userId: number): string
 	return `player_{userId}`
@@ -109,6 +109,8 @@ function Persistence.save(userId: number)
 
 	if not ok then
 		warn(`[CONQUEST RTS] Sauvegarde de reputation echouee pour {userId}`)
+	else
+		dirty[userId] = nil
 	end
 end
 
@@ -122,21 +124,33 @@ function Persistence.record(userId: number, betrayals: number, won: boolean, xpG
 	local gain = math.max(0, math.floor(xpGain or 0))
 	profile.xp += gain
 	profile.level = levelForXp(profile.xp)
+	dirty[userId] = true
 	Persistence.save(userId)
 	return profile, gain
 end
 
+function Persistence.flush()
+	local pending: { number } = {}
+	for userId in dirty do
+		table.insert(pending, userId)
+	end
+	for _, userId in pending do
+		Persistence.save(userId)
+	end
+end
+
 function Persistence.release(userId: number)
-	Persistence.save(userId)
+	if dirty[userId] then
+		Persistence.save(userId)
+	end
 	cache[userId] = nil
+	dirty[userId] = nil
 end
 
 -- Filet de securite a l'arret du serveur : sans ca, les dernieres parties
 -- d'une session sont perdues.
 game:BindToClose(function()
-	for _, player in Players:GetPlayers() do
-		Persistence.save(player.UserId)
-	end
+	Persistence.flush()
 end)
 
 Persistence.DEFAULT = DEFAULT

@@ -35,6 +35,7 @@ local QuickChat = __require("QuickChat")
 local IntentValidator = __require("IntentValidator")
 local TickMetrics = __require("TickMetrics")
 local Research = __require("Research")
+local ChantierB = __require("ChantierB")
 
 local TICKS = tonumber(_G.TICKS) or 6000
 local CHECK_EVERY = 500
@@ -2567,6 +2568,336 @@ do
 			fail(`intentions — retry seq 2 n'a pas applique le ratio ({ps.attackRatio})`)
 		end
 		print("intentions : sequence, idempotence, apply immediat, rate limit, N41/N29 OK")
+	end
+end
+
+--[[
+	Nightly passe 16 — revue PR #44 : autorite, recycle, perf.
+]]
+do
+	local corrupt = GameState.new(1601)
+	local a = corrupt:addPlayer(nil, "A", Random.new(11), 0)
+	local b = corrupt:addPlayer(nil, "B", Random.new(12), 0)
+	if not a or not b then
+		fail("areAllied — factions impossibles")
+	else
+		corrupt.alliances[a.slot][b.slot] = "oops"
+		corrupt.alliances[b.slot][a.slot] = "oops"
+		if corrupt:areAllied(a.slot, b.slot) then
+			fail("areAllied — expiry corrompue traitee comme pacte")
+		end
+		corrupt.alliances[a.slot][b.slot] = true
+		corrupt.alliances[b.slot][a.slot] = true
+		if not corrupt:areAllied(a.slot, b.slot) then
+			fail("areAllied — true legacy casse")
+		end
+	end
+end
+
+do
+	IntentValidator.reset()
+	local state = GameState.new(1602)
+	state.mode = GameModes.get("classic")
+	local fakePlayer = __newInstance("Player")
+	fakePlayer.Name = "InfRatio"
+	fakePlayer.UserId = 1602
+	local ps = state:addPlayer(fakePlayer, "InfRatio", Random.new(2), 0)
+	if not ps then
+		fail("ratio inf — spawn impossible")
+	else
+		local ctx = {
+			state = state,
+			matchPhase = "playing",
+			matchId = "inf",
+			slotOf = function(p)
+				return if p == fakePlayer then ps.slot else nil
+			end,
+			doctrineLockAt = os.clock() + 999,
+			now = os.clock,
+			buildings = Buildings,
+			navy = Navy,
+			nukes = Nukes,
+			diplomacy = Diplomacy,
+			research = Research,
+			reply = function() end,
+			refuse = function() end,
+			broadcastRoster = function() end,
+		}
+		local okHuge, reasonHuge = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = math.huge })
+		if okHuge or reasonHuge ~= "InvalidSchema" then
+			fail(`ratio inf — ±inf encore accepte ({tostring(reasonHuge)})`)
+		end
+	end
+end
+
+do
+	local missState = GameState.new(1603)
+	local a = missState:addPlayer(nil, "Lanceur", Random.new(31), 0)
+	local b = missState:addPlayer(nil, "Cible", Random.new(32), 0)
+	if not a or not b then
+		fail("missiles outbound — factions impossibles")
+	else
+		table.insert(missState.missiles, {
+			id = 1,
+			slot = a.slot,
+			kind = 1,
+			x = 0,
+			y = 0,
+			sx = 0,
+			sy = 0,
+			tx = 10,
+			ty = 10,
+		})
+		missState:removePlayer(a.slot)
+		if #missState.missiles ~= 0 then
+			fail("missiles outbound — frappe du joueur parti encore en vol")
+		end
+	end
+end
+
+do
+	local waitState = GameState.new(1604)
+	local fake = __newInstance("Player")
+	fake.Name = "Attente"
+	fake.UserId = 1604
+	local ps = waitState:addPlayer(fake, "Attente", Random.new(41), 0)
+	if not ps then
+		fail("spawn wait — joueur impossible")
+	else
+		ChantierB.stripTerritory(waitState, ps)
+		if not ps.awaitingSpawn then
+			fail("spawn wait — stripTerritory n'a pas arme awaitingSpawn")
+		end
+		if ps.tiles ~= 0 then
+			fail(`spawn wait — tiles={ps.tiles} (attendu 0, pas de sentinelle 1)`)
+		end
+		local goldBefore = ps.gold
+		waitState:stepEconomy()
+		if ps.gold ~= goldBefore then
+			fail("spawn wait — or verse avant le clic spawn")
+		end
+		waitState:stepElimination()
+		if not waitState.players[ps.slot] then
+			fail("spawn wait — humain en attente elimine")
+		end
+	end
+end
+
+do
+	local claimState = GameState.new(1605)
+	claimState.combatUnlocked = true
+	local fake = __newInstance("Player")
+	fake.Name = "Colon"
+	fake.UserId = 1605
+	local colon = claimState:addPlayer(fake, "Colon", Random.new(51), 0)
+	local foe = claimState:addPlayer(nil, "Voisin", Random.new(52), 0)
+	if not colon or not foe then
+		fail("justClaimed — factions impossibles")
+	else
+		ChantierB.stripTerritory(claimState, colon)
+		local land: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if claimState:isLand(index) and buffer.readu8(claimState.owner, index) == 0 then
+				land = index
+				break
+			end
+		end
+		if not land then
+			fail("justClaimed — aucune terre libre")
+		else
+			local claimed = claimState:claimSpawn(colon.slot, land)
+			if not claimed then
+				fail("justClaimed — claimSpawn refuse")
+			else
+				local scratch = table.create(4, 0)
+				local contact: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if buffer.readu8(claimState.owner, index) == colon.slot then
+						local n = MapGen.neighbors(index, scratch)
+						for i = 1, n do
+							local nb = scratch[i]
+							if claimState:isLand(nb) and buffer.readu8(claimState.owner, nb) == 0 then
+								contact = nb
+								break
+							end
+						end
+					end
+					if contact then
+						break
+					end
+				end
+				if contact then
+					claimState:setOwner(contact, foe.slot)
+					colon.troops = 20000
+					colon.attackRatio = 0.5
+					local ok = claimState:launchAttack(colon.slot, foe.slot)
+					if not ok then
+						fail("justClaimed — le premier vrai Attack est encore avale")
+					elseif #claimState.attacks == 0 then
+						fail("justClaimed — succes sans front")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	local boatState = GameState.new(1606)
+	local a = boatState:addPlayer(nil, "Marin", Random.new(61), 0)
+	if not a then
+		fail("own-tile boat — faction impossible")
+	else
+		local home: number? = nil
+		for index in a.coast do
+			home = index
+			break
+		end
+		if not home then
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(boatState.owner, index) == a.slot then
+					home = index
+					break
+				end
+			end
+		end
+		if home then
+			local before = a.troops
+			table.insert(boatState.boats, {
+				id = 99,
+				slot = a.slot,
+				kind = 1,
+				troops = 400,
+				x = 0,
+				y = 0,
+				path = { home },
+				step = 1,
+				targetTile = home,
+				targetOwner = 0,
+				homeTile = home,
+				retreating = false,
+			})
+			Navy.step(boatState, Random.new(7))
+			local still = false
+			for _, boat in boatState.boats do
+				if boat.id == 99 then
+					still = true
+					break
+				end
+			end
+			if still then
+				fail("own-tile boat — transport encore en mer")
+			end
+			if math.abs(a.troops - (before + 400)) > 0.001 then
+				fail(`own-tile boat — restitution {a.troops - before} (attendu 400, pas 75 %)`)
+			end
+		else
+			fail("own-tile boat — aucune tuile a soi")
+		end
+	end
+end
+
+do
+	local flipState = GameState.new(1607)
+	local a = flipState:addPlayer(nil, "Envahisseur", Random.new(71), 0)
+	local b = flipState:addPlayer(nil, "Cote", Random.new(72), 0)
+	local c = flipState:addPlayer(nil, "Tiers", Random.new(73), 0)
+	if not a or not b or not c then
+		fail("targetSlot — factions impossibles")
+	else
+		local coastB: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if flipState:isLand(index) and MapGen.isCoastal(flipState.terrain, index) then
+				coastB = index
+				break
+			end
+		end
+		if coastB then
+			flipState:setOwner(coastB, c.slot)
+			table.insert(flipState.boats, {
+				id = 77,
+				slot = a.slot,
+				kind = 1,
+				troops = 200,
+				x = 0,
+				y = 0,
+				path = { coastB },
+				step = 1,
+				targetTile = coastB,
+				targetOwner = b.slot,
+				homeTile = coastB,
+				retreating = false,
+			})
+			local n = Navy.retreatBoats(flipState, a.slot, b.slot)
+			if n < 1 then
+				fail("targetSlot — retreatBoats rate le transport apres flip")
+			end
+		else
+			fail("targetSlot — aucune cote")
+		end
+	end
+end
+
+do
+	local sea = GameState.new(1608)
+	local fromTile: number? = nil
+	local toTile: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(sea.terrain, index) == Config.TERRAIN.OCEAN then
+			if not fromTile then
+				fromTile = index
+			elseif not toTile and index ~= fromTile then
+				toTile = index
+			end
+		end
+		if fromTile and toTile then
+			break
+		end
+	end
+	if fromTile and toTile then
+		local p1 = Navy.findSeaPath(sea, fromTile, toTile)
+		local p2 = Navy.findSeaPath(sea, fromTile, toTile)
+		if (p1 == nil) ~= (p2 == nil) then
+			fail("findSeaPath pool — second appel diverge")
+		end
+		if p1 and p2 and #p1 ~= #p2 then
+			fail("findSeaPath pool — longueurs divergentes")
+		end
+	end
+end
+
+do
+	local carrierState = GameState.new(1609)
+	local a = carrierState:addPlayer(nil, "Amiral", Random.new(81), 0)
+	if not a then
+		fail("carriers dirty — faction impossible")
+	else
+		local coastal: number? = nil
+		for index in a.coast do
+			if not carrierState.buildings[index] then
+				coastal = index
+				break
+			end
+		end
+		if coastal then
+			carrierState:placeBuilding(coastal, Config.BUILDING.NAVAL_BASE, a.slot)
+			if carrierState._carriersDirty ~= true then
+				fail("carriers dirty — placeBuilding NAVAL_BASE n'a pas sale")
+			end
+			Navy.step(carrierState, Random.new(9))
+			if carrierState._carriersDirty ~= false then
+				fail("carriers dirty — sync n'a pas consomme le drapeau")
+			end
+			local n = 0
+			for _, boat in carrierState.boats do
+				if boat.kind == 3 then
+					n += 1
+				end
+			end
+			if n < 1 then
+				fail("carriers dirty — aucun porte-avions apres pose")
+			end
+		end
 	end
 end
 
