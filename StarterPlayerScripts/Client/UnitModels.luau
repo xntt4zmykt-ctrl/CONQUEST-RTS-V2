@@ -368,22 +368,30 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- V73 : offset * yaw. Plus de CFrame.Angles 60 Hz.
 			-- fromEulerAnglesYXZ(0, time*2.2, 0) ≡ Angles(0, yaw, 0)
 			-- (rx=0, rz=0 → Y seul). Frequence 2.2 inchangee.
-			-- Flag : fromEulerAnglesYXZ(sin(time*5)*0.06, 0, 0) ≡
-			-- Angles(pitch, 0, 0) (ry=0, rz=0 → X seul). Amplitude
+			-- Flag : fromEulerAnglesYXZ(sin(time*5+offset.X*0.1)*0.06, 0, 0)
+			-- ≡ Angles(pitch, 0, 0) (ry=0, rz=0 → X seul). Amplitude
 			-- 0.06 / frequence 5 inchangees. Overlay roulis inchange
 			-- (V71). Roues camion inchangees (V72). BuildingModels
 			-- Radar/Flag/Boom inchanges (V70). Flame Size inchange
 			-- (V74). Trail offset.Z inchange (V100). Feux offset.X
 			-- (V105). Wake offset.X (V106, elseif plus bas). Flag
-			-- leftover V107.
+			-- offset.X (V107, elseif suivant). CapitalFlag leftover
+			-- V108 (BuildingModels, autre fichier).
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
-			-- Leftover V107 : pitch synchrone sin(time * 5), sans
-			-- offset.X. Amplitude 0.06 / frequence 5 inchangees.
-			-- Distinct de V106 (wake Transparency, elseif suivant).
-			-- Distinct de V73 (fromEulerAnglesYXZ deja). Un flag par
-			-- navire. Carrier X=3.05 / transport X=0.
-			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5) * 0.06, 0, 0)
+			-- V107 : phase depuis offset.X. Plus de lockstep
+			-- sin(time * 5) sans phase. offset est deja un CFrame
+			-- pose a createBoat / buildCarrier. Carrier Flag
+			-- X == 3.05 / transport/cargo X == 0. Amplitude 0.06,
+			-- frequence 5, * 0.1 inchanges (famille V98/V105/V106).
+			-- Pas de Position. Recette analogique V106 — ne PAS
+			-- merger c450 / ee71. Distinct de V106 (wake
+			-- Transparency, elseif suivant). Distinct de V73
+			-- (fromEulerAnglesYXZ deja, pas CFrame.Angles). Distinct
+			-- de leftover V108 (CapitalFlag, BuildingModels). Un
+			-- elseif, role == "flag" inchange. Name Flag inchange.
+			-- Construction Flag inchangee. Pas de flagPhase.
+			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0, 0)
 		elseif piece.role == "wake" then
 			-- V106 : phase depuis offset.X. Plus de lockstep
 			-- sin(time * 5) sans phase. offset est deja un CFrame
@@ -394,10 +402,10 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- V98/V104/V105). Pas de Position. Recette analogique
 			-- V105 — ne PAS merger c450 / ee71. Distinct de V105
 			-- (feux offset.X, elseif plus bas). Distinct de V100
-			-- (trail offset.Z). Distinct de leftover V107 (flag
-			-- pitch, pas Transparency). Un elseif, role == "wake"
-			-- inchange. Name Wake inchange. Construction addWake
-			-- inchangee (V92).
+			-- (trail offset.Z). Distinct de V107 (flag pitch, pas
+			-- Transparency). Un elseif, role == "wake" inchange.
+			-- Name Wake inchange. Construction addWake inchangee
+			-- (V92).
 			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
@@ -428,8 +436,8 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- ee71. Distinct de V100 (trail offset.Z, elseif
 			-- precedent). Distinct de V104 (FactoryOutput /
 			-- SiloWarning, BuildingModels.animate — autre fichier).
-			-- Distinct de V106 (wake Transparency). Distinct de leftover
-			-- V107 (flag pitch). Un elseif, role == "light" inchange.
+			-- Distinct de V106 (wake Transparency). Distinct de V107
+			-- (flag pitch). Un elseif, role == "light" inchange.
 			-- Names PortLight / StarboardLight inchanges.
 			piece.part.Transparency = if math.sin(time * 3 + piece.offset.X * 0.1) > -0.2 then 0 else 0.45
 		end
