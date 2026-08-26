@@ -1350,6 +1350,10 @@ check("navires, missiles et interpolation", function()
 	assert(overlay.units[1].extra == nil, "un navire ne doit pas porter extra")
 	local extra = overlay.units[3].extra
 	assert(extra ~= nil and extra.tx == 60 and extra.ty == 60, "extra missile initial absent")
+	-- N101 : insert pose des nombres, plus de Vector2.
+	assert(type(overlay.units[1].targetX) == "number" and type(overlay.units[1].currentX) == "number", "navire target pas un nombre")
+	assert(overlay.units[1].targetX == 10 and overlay.units[1].targetY == 10, "navire target insert")
+	assert(overlay.units[3].targetX == 40 and overlay.units[3].currentY == 40, "missile target insert")
 	overlay:applyUnits({
 		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
@@ -1359,7 +1363,20 @@ check("navires, missiles et interpolation", function()
 	})
 	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "extra missile non mute")
 	assert(rawequal(extra, overlay.units[3].extra), "record extra missile remplace")
+	-- N101 : meme missile, x/y differents → mute target, rawequal du record.
+	local missileUnit = overlay.units[3]
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 50, y = 55, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].targetX == 50 and overlay.units[3].targetY == 55, "missile target non mute")
+	assert(rawequal(overlay.units[3], missileUnit), "record unite missile remplace")
+	local beforeX = overlay.units[3].currentX
 	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
