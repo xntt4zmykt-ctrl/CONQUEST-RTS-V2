@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 21)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 22)
 
-Déclencheur : ouverture de la **PR #59** (`cursor/analyse-nocturne-du-codebase-5bf6`) — blastBuf, boatSnapBuf, specs N71–N72.
+Déclencheur : ouverture de la **PR #62** (`cursor/analyse-nocturne-du-codebase-741d`) — missileSnapBuf, dirtyIndexBuf, specs N73–N74.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-741d`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#59.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-55ba`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#63.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted (bunker / SAM / silo / usine / tous / PORT / NAVAL_BASE) ne sont pas répliqués. `missileSnapBuf` et `dirtyIndexBuf` sont des pools module-level, pas de l’état répliqué.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted (bunker / SAM / silo / usine / tous / PORT / NAVAL_BASE) ne sont pas répliqués. `buildingSnapBuf` et les maps HUD (`activeAttackBuf` / `committedTroopBuf` / `attackTargetBuf`) sont des pools module-level, pas de l’état répliqué.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #59 (passe 20) : claims vérifiés.** `fillBlastBuf`/`scoreBlast` (N69) ; `boatSnapBuf` truncate (N70). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #62 (passe 21) : claims vérifiés.** `missileSnapBuf` (N71) ; `dirtyIndexBuf` (N72). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #59 a documenté (N71, N72)**.
+Cette passe a **livré ce que #62 a documenté (N73, N74)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #59
+## 2. Revue PR #62
 
-| Claim #59 | Réalité à l’ouverture |
+| Claim #62 | Réalité à l’ouverture |
 |---|---|
-| `fillBlastBuf` / `scoreBlast` (N69) | Oui. Index présent + set nil = score 0. SAM shield inchangé. |
-| `boatSnapBuf` (N70) | Oui. Inner records réécrits. Truncate 2→1→0. Pas de `path` / `homeTile`. |
-| Specs N71–N72 | **Corrigés ici.** |
+| `missileSnapBuf` (N71) | Oui. Inner records réécrits. Truncate 1→0→1. Champs uniquement `Types.MissileSnapshot`. |
+| `dirtyIndexBuf` (N72) | Oui. Early-out dirty vide → `nil` sans allouer. Format 5 octets / tuile. |
+| Specs N73–N74 | **Corrigés ici.** |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #58, feel jusqu’à #59, plus #39/#44/#47/#50/#54/#57 visuelles. **#59 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#43←#46←#49←#52←#55←#58) reste distincte.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #60, feel jusqu’à #62, plus visuelles #39/#44/#47/#50/#54/#57/#61, et #63 (autre ligne nightly). **#62 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#43←#46←#49←#52←#55←#58←#60) reste distincte.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N71–N72 du rapport #59.
+Feel #19 inchangé. Pas de réinvention : N73–N74 du rapport #62.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `replicate()` alloue table missiles + N payloads / tick (N71) | `GameState.luau` (`snapshotMissiles` / `missileSnapBuf`), `init.server.luau` (`replicate`), `tests/simulate.luau` | Recette `boatSnapBuf` / N70. Inner records réécrits, pas recréés. Truncate 1→0→1. Champs **uniquement** `Types.MissileSnapshot` (`id, slot, x, y, tx, ty, kind`). Pas de `sx` / `sy` / `progress` / `speed`. Overlay lit `tx`/`ty`, pas l’identité de table. Helper dans `GameState` car `init.server` est hors bundle. |
-| `flushOwnerDelta` alloue `indices` chaque tick (N72) | `GameState.luau` (`dirtyIndexBuf`), `tests/simulate.luau` | Recette `factoryBuf` / N66. Early-out `next(dirty)==nil` → `nil` sans allouer. `buffer.create` outbound **neuf** (RemoteEvent). Format 5 octets / tuile inchangé. `buildPrices` → N2. |
+| `flushBuildingDelta` alloue `out` + N payloads / tick (N73) | `GameState.luau` (`flushBuildingDelta` / `buildingSnapBuf`), `tests/simulate.luau` | Recette `missileSnapBuf` / N71. Early-out dirty vide sans allouer. Inner records réécrits, pas recréés. Truncate. Champs identiques `{index, kind, slot, level, links}`. Destruction `kind=0` / `links=nil`. **`links` = référence live** (pas `table.clone`). Overlay lit les champs tout de suite. `init.server` inchangé (`if buildings then fireDeployed`). |
+| `replicate()` alloue `activeAttacks` / `committedTroops` / `attackTargets` / tick (N74) | `GameState.luau` (`frontHudForReplicate`), `init.server.luau` (`replicate`), `tests/simulate.luau` | Recette N71 (helper `GameState`, `init.server` hors bundle). Trois maps `table.clear` + inner listes `attackTargetPool`. Slots sans front **absents** (`nil`, pas `{}`). `stats[slot]` / `buildPrices` **non touchés** (N2 / N75–N76). Chaque tas compte (terre et `isBeachhead` séparés). |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats (N2), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `flushBuildingDelta` (N73), maps HUD fronts (N74).
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence stats/`buildPrices` (N2 / N75–N76), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `Research.progress` ratios, `Diplomacy.viewFor` 1 Hz.
 
 ---
 
@@ -60,7 +60,9 @@ init.server  → IntentValidator.enqueue (seq obligatoire en playing, apply imm�
                launch via silosBySlot) → Trade.step (factoriesBySlot + factoryBuf)
               → Diplomacy.step → GameState.step → replicate(
                 flushOwnerDelta via dirtyIndexBuf,
-                fireDeployed, snapshotBoats, snapshotMissiles)
+                frontHudForReplicate,
+                fireDeployed, snapshotBoats, snapshotMissiles,
+                flushBuildingDelta via buildingSnapBuf)
 SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), BoatFront, AimFront, tribus, spawn bots différé 15 s
 ```
 
@@ -76,51 +78,51 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 - **Score nuke bots** = flatten `buildingsBySlot` une fois (N69), puis 90 `scoreBlast`.
 - **Inbound `removePlayer`** = snapshot `buildingsBySlot` → destroy → diplo + transports `kind==1` (100 %, lit **`owner[targetTile]`**) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`.
 - **Hover spawn** = `SpawnHint` (Shared) si `tiles==0`. Serveur = `claimSpawn` (N52+N55).
-- **Réplication :** StateDelta (`dirtyIndexBuf` N72) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta / plunder / trade / explosions / notify&sfx déployés. `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `flushBuildingDelta` alloue encore `out` + N payloads (**N73**). `replicate()` alloue encore `activeAttacks` / `committedTroops` / `attackTargets` (**N74**) et `buildPrices` 10 Hz × slots (**N2**).
+- **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés. `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `stats[slot]` + `buildPrices` encore alloués 10 Hz × slots (**N75–N76** / N2). `Research.progress` alloue `ratios` 10 Hz × slots. `Diplomacy.viewFor` 1 Hz × humains.
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N73–N74)
+## 5. Issues worker-ready (nouveaux, N75–N76)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N72 = faits. N22 = **N67 fait**. N27 = doc only. N56 champ = fait ; alloc bateaux = **N70 fait**. Alloc missiles = **N71 fait**. Owner indices = **N72 fait**.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N74 = faits. N22 = **N67 fait**. N27 = doc only. N56 champ = fait ; alloc bateaux = **N70 fait**. Alloc missiles = **N71 fait**. Owner indices = **N72 fait**. Bâtiments = **N73 fait**. HUD fronts = **N74 fait**.
 
 ---
 
-### ISSUE-N73 — `flushBuildingDelta` alloue `out` + N payloads chaque tick (feel)
+### ISSUE-N75 — `buildPrices` alloué 10 Hz × slots (feel)
 
-**Priorité :** P3 alloc réplication. Suite de N72 (owner indices) **sans** toucher `dirtyIndexBuf` ni le format BuildingDelta. Distinct de N2 (`stats` / `buildPrices`), de N70/N71 (UnitSnapshot) et de N72 (owner 5 octets).
+**Priorité :** P3 alloc réplication. Suite de N74 (HUD fronts) **sans** toucher `stats[slot]` (N76) ni `frontHudForReplicate`. Distinct de N2 restant (`stats` records + dirty), de N73 (BuildingDelta) et de N70–N72 (déjà faits). **8** kinds `BuildingDefs.BUILDABLE`.
 
-**Problème :** `GameState.flushBuildingDelta` fait `local out = {}` puis `table.insert` d’un **nouvel** enregistrement `{index, kind, slot, level, links}` pour chaque tuile `buildingDirty`, **chaque tick** — y compris le banc 6000 ticks qui flush pour ne pas fuiter. Si `buildingDirty` est vide, `out` est quand même alloué puis jeté (`return nil`). `links` est aujourd’hui la **table live** de l’usine (pas une copie) : Overlay / `applyBuildingDelta` lit `entry.index` / `kind` / `slot` / `level` / `links` tout de suite, pas l’identité de `out`. Le client ne reçoit le delta que si `buildings` est truthy (`init.server` : `if buildings then fireDeployed`).
+**Problème :** `init.server` `replicate()` fait `local buildPrices = {}` puis `Buildings.priceFor` pour chaque def BUILDABLE, **chaque tick, chaque slot vivant** (10 Hz playing × jusqu’à 18 Classique). Le HUD copie `mine.buildPrices` et lit `buildPrices[id]` ; Overlay / radial ne font aucun `rawequal`. Les prix ne changent que si `buildingCounts` / doctrine changent, mais aujourd’hui on alloue la map même idle. `Buildings` require déjà `GameState` : le helper peut vivre dans `Buildings`. `GameState` ne doit **pas** require `Buildings` (cycle).
 
-**Pourquoi 20K CCU :** 10 Hz × shards, empilé avec N70–N72 déjà recyclés. Pas d’autorité (delta dérivé de `buildings` / `buildingDirty`). Un `table.create(16)` recyclé + truncate + early-out vide élimine l’alloc courte du hot path sans changer le wire `{index, kind, slot, level, links}`.
+**Pourquoi 20K CCU :** 10 Hz × 18 slots × 8 insertions, empilé avec `stats[slot]` encore chaud (N76). Pas d’autorité (dérivé de `buildingCounts` + doctrine). Un pool par slot + `table.clear` élimine l’alloc courte du hot path sans changer le wire `{ [kind]: number }`.
 
 **Worker :**
 
-1. `buildingSnapBuf = table.create(16)` module-level dans `GameState.luau` (à côté de `dirtyIndexBuf`). Early-out `next(self.buildingDirty) == nil` → `table.clear(self.buildingDirty)` + return nil **sans** allouer. Remplir par index (`n += 1`), recycle inner records (créer seulement si `buildingSnapBuf[n] == nil`, sinon réécrire les champs). Truncate `#buildingSnapBuf`. Champs **identiques** à aujourd’hui : `index, kind, slot, level, links`. Destruction (`buildings[index] == nil`) : `kind=0`, `slot=0`, `level=0`, `links=nil`. **`links` reste la référence live** (ne pas `table.clone` — extra alloc). Return `buildingSnapBuf` si `n > 0`, sinon nil.
-2. `init.server` `replicate()` : ne pas changer l’appel `state:flushBuildingDelta()` ni le `if buildings then`. Ne pas toucher N72 `dirtyIndexBuf`. Ne pas toucher N2 `buildPrices`. Ne pas toucher N70/N71. Pas de RemoteFunction.
-3. Test : `placeBuilding` CITY → `flushBuildingDelta` length 1, `kind` / `slot` / `index` honorés. Second flush immédiat → `nil`. `destroyBuilding` → length 1, `kind==0`, `links==nil`. 6000 ticks (le run principal flush déjà chaque tick). Client 35/35 (`applyBuildingDelta` lit les champs).
-4. Fichiers : `GameState.luau` (`flushBuildingDelta`), `tests/simulate.luau` (bloc court, recette N72).
+1. Ajouter `Buildings.pricesFor(state, slot)` (nom libre). Map module-level `priceBuf[slot]` (créer si nil). `table.clear` puis remplir `BUILDABLE` via `priceFor` existant (ne **pas** dupliquer `Placement.priceFor`). Slot inconnu → `{}` vide recyclé ou map vide, **pas** `math.huge` magique hors `priceFor`. Ne pas dirty-flagger : les counts bougent souvent en combat ; le recycle suffit. Pas de RemoteFunction.
+2. `init.server` `replicate()` : `local buildPrices = Buildings.pricesFor(state, slot)` à la place du `local buildPrices = {}` + boucle. Le `stats[slot] = { … }` **inchangé** (N76). Ne pas toucher N73/N74. Ne pas require Buildings depuis GameState.
+3. Test : `addPlayer` → `pricesFor` égal à `priceFor` pour chaque `BUILDABLE` (CITY / PORT / etc.). Second appel **immédiat** → `rawequal` la même map, valeurs identiques. `placeBuilding` CITY (tuile libre) → prix CITY **augmente** (doublement `2^units`). Client 35/35 (HUD lit `buildPrices[id]`, pas l’identité serveur — RemoteEvent sérialise). 6000 ticks.
+4. Fichiers : `Buildings.luau` (`pricesFor`), `init.server.luau` (`replicate`), `tests/simulate.luau` (bloc court, recette N74).
 
-**Contraintes :** pas de RemoteFunction. Recette `missileSnapBuf` / N71, **pas** un dirty flag supplémentaire. **N73 feel ≠ N72 (owner indices, déjà fait) ≠ N2 (stats) ≠ N70/N71 (unités) ≠ visual V14 (autre ligne).** `buildingSnapBuf` n’est pas réentrant — un seul `flushBuildingDelta` par tick. Overlay / tests doivent lire les champs tout de suite. Ne **pas** copier `links` : le contrat actuel est la référence ; une copie changerait l’identité vue par un test qui comparerait `rawequal`.
+**Contraintes :** pas de RemoteFunction. Recette `factoryBuf` / N66 (clear + refill), **pas** un dirty flag. **N75 feel ≠ N76 (records stats) ≠ N74 (HUD fronts, déjà fait) ≠ N2 restant (coalescence / skip si inchangé).** `priceBuf` n’est pas réentrant — un seul `replicate()` par tick. Ne pas merger les slots dans une seule map. HUD client reçoit une copie désérialisée : recycle serveur OK. Ne **pas** porter un cache « prix inchangés » qui sauterait le doublement après pose (le test CITY l’attrape).
 
 ---
 
-### ISSUE-N74 — `replicate()` alloue `activeAttacks` / `committedTroops` / `attackTargets` chaque tick (feel)
+### ISSUE-N76 — `stats[slot]` alloué 10 Hz × slots (feel)
 
-**Priorité :** P3 alloc réplication HUD. Précision de N2 (StateDelta) **sans** toucher `stats[slot]` ni `buildPrices` (reste N2). Distinct de N73 (BuildingDelta) et de N70–N72 (déjà faits). `init.server` est hors bundle : extraire un helper `GameState` testable, comme N71.
+**Priorité :** P3 alloc réplication HUD. Reste de N2 **sans** `buildPrices` (N75) ni HUD fronts (N74 déjà fait). `init.server` est hors bundle : extraire un helper testable. **Cycle interdit :** `Buildings` et `Research` require déjà `GameState` — le helper **ne doit pas** require ces modules.
 
-**Problème :** `init.server` `replicate()` fait `local activeAttacks = {}` / `committedTroops = {}` / `attackTargets = {}` puis, pour chaque front, `table.insert` d’une **nouvelle** liste de cibles, **chaque tick** (10 Hz playing) — même à 0 front (trois tables vides jetées). Le HUD lit `activeAttacks`, `committedTroops`, `attackTargets` pour le curseur d’engagement ; ce n’est pas de l’autorité (dérivé de `state.attacks`). `attackTargets[slot]` est `nil` si le camp n’a aucun front (pas `{}`). Le banc 6000 ticks n’exerce pas `replicate()` (`init.server` hors bundle) : sans helper `GameState`, le recycle n’est pas testable.
+**Problème :** `replicate()` fait `local stats = {}` puis un **nouvel** enregistrement `PlayerStats` par slot, chaque tick, même à 0 front et 0 dirty owner. Champs : `troops, tiles, gold, maxTroops, era, eraProgress, capturedTiles, lostTiles, capitalsCaptured, buildingsBuilt, attacksLaunched, activeAttacks, committedTroops, attackTargets, buildPrices, logisticsRoutes, logisticsIncome`. Le client remplace `stats = newStats` à chaque StateDelta (init.client) ; HUD lit les champs, pas `rawequal`. `eraProgress` vient de `Research.progress` (alloue encore `ratios` — hors scope, laisser l’appel). `buildPrices` vient de N75 / boucle actuelle.
 
-**Pourquoi 20K CCU :** 10 Hz × 8 humains × 18 slots Classique, empilé avec `buildPrices` encore chaud (N2). 0–quelques fronts / camp d’habitude, mais l’alloc courte des trois maps est payée même idle. Pas d’autorité.
+**Pourquoi 20K CCU :** 10 Hz × 18 records + table `stats` porteuse, empilé avec N75. Pas d’autorité. Recycle des records (créer seulement si `statsBuf[slot] == nil`, sinon réécrire les champs) + `table.clear` des slots disparus élimine l’alloc courte. Les maps HUD N74 sont déjà des références recyclées : les poser sur le record recyclé est le contrat actuel (`attackTargets[slot]` nil si pas de front).
 
 **Worker :**
 
-1. Ajouter `GameState.frontHudForReplicate` (nom libre, un seul helper) calqué sur N71 : trois maps module-level `activeAttackBuf` / `committedTroopBuf` / `attackTargetBuf`. `table.clear` les trois au début de l’appel (pas de nouvelle table). Pour chaque `state.attacks` : incrémenter compteurs ; inner liste de cibles = `attackTargetPool[attacker]` recyclé (`table.clear` puis `table.insert` / index). Slots sans front : **absents** des trois maps (`nil`, pas `{}`) — `replicate()` garde `activeAttacks[slot] or 0` et `attackTargets[slot]` nil. Ne **pas** allouer de `stats` / `buildPrices` ici.
-2. `init.server` `replicate()` : `local activeAttacks, committedTroops, attackTargets = state:frontHudForReplicate()` à la place des trois `local … = {}` + boucle. Le reste de `stats[slot] = { … }` **inchangé** (N2). Pas de RemoteFunction.
-3. Test : 0 front → les trois maps vides (`next(...) == nil`). `launchAttack` 1 front → `activeAttacks[slot]==1`, `committedTroops[slot]` = floor(troupes), `attackTargets[slot]` length 1 égal à `atk.target`. `retreatAttack` jusqu’à disparition du front → maps vides à nouveau (pas de fuite de slot). Client 35/35 (HUD lit les champs, pas `rawequal` des maps). 6000 ticks.
-4. Fichiers : `GameState.luau` (`frontHudForReplicate`), `init.server.luau` (`replicate`), `tests/simulate.luau` (nouveau bloc N74).
+1. Ajouter `GameState.playerStatsForReplicate` (nom libre) **ou** un fill sur `statsBuf` module-level. `table.clear(statsBuf)` au début. Pour chaque `state.players` : réécrire un record recyclé. Champs **lus de `PlayerState` + `logisticsFor` + `maxTroops` + résultat de `frontHudForReplicate`** (appeler N74 **une** fois, ne pas recounter les fronts). Laisser `eraProgress` et `buildPrices` à `nil` dans le helper ; `init.server` les écrit ensuite (`rec.eraProgress = Research.progress(...)`, `rec.buildPrices = Buildings.pricesFor(...)` ou boucle actuelle si N75 pas encore mergé). Slots sans joueur : **absents** (`nil`, pas `{}`). Ne pas require Research / Buildings depuis GameState.
+2. `init.server` `replicate()` : `local stats = state:playerStatsForReplicate()` (ou équivalent) puis boucle courte pour poser `eraProgress` / `buildPrices` sur `stats[slot]`. Garder `activeAttacks[slot] or 0`. Pas de RemoteFunction. Ne pas toucher N73 BuildingDelta.
+3. Test : 1 joueur 0 front → `stats[slot].troops` / `tiles` / `gold` honorés, `activeAttacks==0`, `attackTargets==nil`, `next(stats)` uniquement ce slot. `launchAttack` 1 front → `activeAttacks==1` (via N74). `removePlayer` → `stats[gone]==nil` (pas de fuite de slot). Second appel immédiat → `rawequal(stats, stats)` la map porteuse (pas forcément les inner si tu clear+repose ; si inner recyclés, `rawequal(stats[slot], previousRecord)`). Client 35/35. 6000 ticks.
+4. Fichiers : `GameState.luau` (helper), `init.server.luau` (`replicate`), `tests/simulate.luau` (nouveau bloc N76).
 
-**Contraintes :** pas de RemoteFunction. Recette N71 (helper `GameState` + pools module-level), **pas** un dirty flag (les troupes commises bougent chaque tick). **N74 feel ≠ N2 (stats/buildPrices, ouvert) ≠ N73 (bâtiments) ≠ N22/N67 (warships, déjà fait).** Les trois maps ne sont pas réentrantes — `replicate()` est unique par tick. HUD / tests lisent les champs tout de suite. Ne pas merger un beachhead et un front terre dans le décompte : itérer `state.attacks` comme aujourd’hui (chaque tas compte).
+**Contraintes :** pas de RemoteFunction. Recette N74 (helper GameState + pools). **N76 feel ≠ N75 (prix) ≠ N74 (déjà fait) ≠ N2 dirty/skip si inchangé (ouvert, plus large).** Les records ne sont pas réentrants. HUD / tests lisent les champs tout de suite. Ne **pas** cloner `attackTargets` : c’est la liste N74. Ne pas merger N75 dans ce helper (cycle si priceFor entre dans GameState). `Research.progress` `ratios` reste un leftover (table de 3–4 nombres) — ne pas l’absorber ici.
 
 ---
 
@@ -129,7 +131,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` reconstruit 10 Hz × slots ; bateaux → **N70 fait** ; missiles → **N71 fait** ; owner indices → **N72 fait** ; bâtiments → **N73** ; HUD fronts → **N74**) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75** ; records stats → **N76** ; bateaux → **N70 fait** ; missiles → **N71 fait** ; owner indices → **N72 fait** ; bâtiments → **N73 fait** ; HUD fronts → **N74 fait**) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas) |
@@ -198,12 +200,14 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom), B
 | N68 | `samsOf` alloc table 10 Hz bots | P3 | **fait** passe 19 (`samBuf`) |
 | N69 | `blastValue` × 90 tuiles frontière | P3 | **fait** passe 20 (`fillBlastBuf`) |
 | N70 | `snapshotBoats` alloc 10 Hz | P2 | **fait** passe 20 (`boatSnapBuf`) |
-| N71 | `snapshotMissiles` alloc 10 Hz | P2 | **fait** cette passe (`missileSnapBuf`) |
-| N72 | `flushOwnerDelta` indices alloc | P3 | **fait** cette passe (`dirtyIndexBuf`) |
-| N73 | `flushBuildingDelta` alloc 10 Hz | P3 | **nouveau** (BuildingDelta, pas owner) |
-| N74 | HUD fronts `replicate()` alloc 10 Hz | P3 | **nouveau** (précision N2, pas `buildPrices`) |
+| N71 | `snapshotMissiles` alloc 10 Hz | P2 | **fait** passe 21 (`missileSnapBuf`) |
+| N72 | `flushOwnerDelta` indices alloc | P3 | **fait** passe 21 (`dirtyIndexBuf`) |
+| N73 | `flushBuildingDelta` alloc 10 Hz | P3 | **fait** cette passe (`buildingSnapBuf`) |
+| N74 | HUD fronts `replicate()` alloc 10 Hz | P3 | **fait** cette passe (`frontHudForReplicate`) |
+| N75 | `buildPrices` alloc 10 Hz × slots | P3 | **nouveau** (Buildings, pas GameState) |
+| N76 | `stats[slot]` alloc 10 Hz × slots | P3 | **nouveau** (helper GameState, pas priceFor) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -253,24 +257,27 @@ boatSnapBuf : truncate 2→1→0 (N70)
 missileSnapBuf : 1 ogive, tx/ty, pas de progress (N71)
 missileSnapBuf : truncate 1→0→1 (N71)
 dirtyIndexBuf : spawn>0, second nil, 1 tuile (N72)
+buildingSnapBuf : CITY, second nil, destroy kind=0 (N73)
+frontHud : 0 vide, 1 front slot/troupes/cible (N74)
+frontHud : retraite → maps vides (N74)
 removePlayer index : snapshot buildingsBySlot, rien ne reste
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=7.6 p95Changed=8 maxChanged=479 avgTickMs=0.38 p95TickMs=0.90
+metrics : ticks=6000 avgChanged=7.6 p95Changed=8 maxChanged=479 avgTickMs=0.38 p95TickMs=0.91
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `hover spawn isolation : lisiere rouge, disque isole vert (N58)` et `navires, missiles et interpolation`. Overlay `previewTile(valid=false)` ne lève pas.
+Client : **35/35 OK** — dont `hover spawn isolation : lisiere rouge, disque isole vert (N58)` et `navires, missiles et interpolation`. Overlay `previewTile(valid=false)` ne lève pas. `applyBuildingDelta` lit les champs (N73). HUD lit `activeAttacks` / `committedTroops` (N74).
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass21.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass22.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N71–N72 sont serveur / pools, pas un Play Solo.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). Les correctifs N73–N74 sont serveur / pools, pas un Play Solo.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N71–N72 n’ajoutent **pas** de remote ni de `require` croisé (`snapshotMissiles` ne require pas Nukes ; `dirtyIndexBuf` ne require pas Overlay).
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N73–N74 n’ajoutent **pas** de remote ni de `require` croisé (`flushBuildingDelta` / `frontHudForReplicate` restent dans `GameState`).
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -290,3 +297,7 @@ Piège N70 : `boatSnapBuf` n’est pas réentrant et est **partagé entre toutes
 Piège N71 : `missileSnapBuf` n’est pas réentrant et est **partagé entre toutes les instances** `GameState`. Overlay copie `tx`/`ty` dans `extra` à `applyUnits` — ne pas garder l’enregistrement du buffer. Truncate obligatoire : Overlay itère `for _, missile in missiles`. Ne **pas** répliquer `progress` : le client interpolé n’en a pas besoin.
 
 Piège N72 : `dirtyIndexBuf` n’est pas réentrant. Un seul `flushOwnerDelta` par tick (`replicate` + banc). Le `buffer.create` outbound **doit** rester neuf — RemoteEvent. Early-out vide ne doit **pas** allouer le buffer. Ne pas itérer `dirty` deux fois.
+
+Piège N73 : `buildingSnapBuf` n’est pas réentrant et est **partagé entre toutes les instances** `GameState`. Overlay / tests lisent `entry.index` / `kind` / `slot` / `level` / `links` tout de suite. Truncate obligatoire : Overlay itère `for _, entry in deltas`. Early-out dirty vide ne doit **pas** allouer. Ne **pas** cloner `links` : Overlay.syncFactoryRoutes itère immédiatement ; un `table.clone` casserait un test `rawequal` éventuel et allouerait. `refreshRailNetwork` ne dirty que les FACTORY dont les liens changent — poser une CITY seule flush length 1.
+
+Piège N74 : `activeAttackBuf` / `committedTroopBuf` / `attackTargetBuf` / `attackTargetPool` ne sont pas réentrants. `replicate()` est unique par tick. HUD / tests lisent les champs tout de suite (le radial client itère `mine.attackTargets` après StateDelta désérialisé). Slots sans front : **absents**, pas `{}` — `replicate()` garde `activeAttacks[slot] or 0`. Ne pas merger beachhead et terre : chaque tas dans `state.attacks` compte. Inner listes : `table.clear` au premier front du slot ce tick, puis `table.insert`.
