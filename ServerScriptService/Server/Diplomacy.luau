@@ -501,13 +501,16 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if typeof(expiry) == "number" and state.tick < expiry and state.players[other] then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if typeof(expiry) == "number" and state.tick < expiry and state.players[other] then
 			incoming[other] = true
 		end
 	end

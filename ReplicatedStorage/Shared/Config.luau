@@ -208,7 +208,8 @@ Config.HUMAN_GROWTH_MULTIPLIER = 1.18
 --=============================================================================
 -- L'or achete les batiments. Il vient du territoire et surtout du commerce
 -- maritime : c'est ce qui donne un poids economique a la diplomatie, puisqu'un
--- embargo coupe litteralement les revenus de l'autre.
+-- embargo coupe les routes maritimes (`Navy.canTrade`). Le reseau ferre
+-- (`Trade`) est intra-faction : un embargo n'y change rien. ISSUE-N27.
 
 Config.START_GOLD = 120
 Config.HUMAN_START_GOLD = 320 -- permet de construire une ville des le deploiement
@@ -289,6 +290,8 @@ Config.TRUCK_GOLD_BASE = 10 -- or verse a l'arrivee d'un colis, avant distance
 Config.TRUCK_GOLD_PER_TILE = 1.2 -- supplement par tuile de liaison
 Config.TRUCK_SPEED = 4 -- tuiles parcourues par tick
 Config.TRUCK_COOLDOWN = 60 -- ticks de rechargement entre deux expeditions
+-- Bonus par arret extra du train (plafonne a +80 %). ChantierB.apply reecrit 0.12.
+Config.TRAIN_STOP_BONUS = 0.12
 
 --=============================================================================
 -- Attaque
@@ -460,6 +463,7 @@ Config.BOAT_TROOP_RATIO = 0.2 -- part max de la reserve embarquee
 Config.BOAT_RETREAT_LOSS = 0.25 -- part perdue si le transport rentre au port
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
+-- Mort : Navy.resolveLanding n'applique pas ce multiplicateur. ISSUE-N33.
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
 Config.MAX_BOATS_PER_PLAYER = 6
 
@@ -663,8 +667,9 @@ Config.FACTORY_MAX_LEVEL = 3
 
 Config.MISSILE_SPEED = 1.6 -- tuiles par tick
 Config.SAM_RANGE = 34
-Config.SAM_INTERCEPT_CHANCE = 0.55
--- ChantierB.apply ecrase a 1.0 (interception certaine dans le rayon). ISSUE-N26.
+-- OF / apply : interception certaine dans SAM_RANGE. SAM_RANGE et cooldown
+-- restent ecrases par ChantierB.apply (70 / 75). ISSUE-N1.
+Config.SAM_INTERCEPT_CHANCE = 1.0
 Config.SAM_COOLDOWN = 90 -- ticks
 --[[
 	Rechargement d'un silo.

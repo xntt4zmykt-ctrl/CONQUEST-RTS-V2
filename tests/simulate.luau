@@ -2830,6 +2830,66 @@ do
 end
 
 do
+	-- HUD railIncome doit inclure TRAIN_STOP_BONUS des qu'il y a 2+ liaisons.
+	local landState = GameState.new(2721)
+	local a = landState:addPlayer(nil, "RailHud", Random.new(23), 0)
+	if not a then
+		fail("railIncome bonus — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		local cityA: number? = nil
+		local cityB: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if landState:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				local c1 = if MapGen.inBounds(fx + 4, fy) then MapGen.toIndex(fx + 4, fy) else nil
+				local c2 = if MapGen.inBounds(fx + 8, fy) then MapGen.toIndex(fx + 8, fy) else nil
+				if c1 and c2 and landState:isLand(c1) and landState:isLand(c2) then
+					factoryTile, cityA, cityB = index, c1, c2
+					break
+				end
+			end
+		end
+		if not factoryTile or not cityA or not cityB then
+			fail("railIncome bonus — triplet terrestre introuvable")
+		else
+			landState:setOwner(factoryTile, a.slot)
+			landState:setOwner(cityA, a.slot)
+			landState:setOwner(cityB, a.slot)
+			landState:placeBuilding(factoryTile, Config.BUILDING.FACTORY, a.slot)
+			landState:placeBuilding(cityA, Config.BUILDING.CITY, a.slot)
+			landState:placeBuilding(cityB, Config.BUILDING.CITY, a.slot)
+			local links = landState.buildings[factoryTile] and landState.buildings[factoryTile].links or {}
+			if #links < 2 then
+				fail(`railIncome bonus — {#links} liaisons (attendu >= 2)`)
+			else
+				local goldSum = 0
+				local periodSum = 0
+				local fx, fy = MapGen.fromIndex(factoryTile)
+				for _, other in links do
+					local ox, oy = MapGen.fromIndex(other)
+					local dx, dy = fx - ox, fy - oy
+					local d = math.sqrt(dx * dx + dy * dy)
+					goldSum += Config.TRUCK_GOLD_BASE + d * Config.TRUCK_GOLD_PER_TILE
+					periodSum += math.max(1, math.ceil(d / Config.TRUCK_SPEED)) + Config.TRUCK_COOLDOWN
+				end
+				local n = #links
+				local stopBonus = 1 + math.min(0.8, (n - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+				local expected = (goldSum * 1 * stopBonus) / (periodSum / n)
+				if math.abs(a.railIncome - expected) > 0.01 then
+					fail(`railIncome bonus — {a.railIncome} attendu {expected}`)
+				end
+				local withoutBonus = (goldSum * 1) / (periodSum / n)
+				if math.abs(a.railIncome - withoutBonus) < 0.01 then
+					fail("railIncome bonus — stopBonus absent du HUD")
+				end
+				print("railIncome bonus : TRAIN_STOP_BONUS dans l'estime HUD")
+			end
+		end
+	end
+end
+
+do
 	-- Proposition expiree : refus meme si Diplomacy.step n'a pas encore nettoye.
 	local state = GameState.new(5153)
 	local a = state:addPlayer(nil, "Offrant", Random.new(71), 0)
@@ -2839,6 +2899,14 @@ do
 	else
 		Diplomacy.request(state, a.slot, b.slot)
 		state.tick += Config.ALLIANCE_REQUEST_TIMEOUT + 1
+		local viewB = Diplomacy.viewFor(state, b.slot)
+		if viewB.incoming[a.slot] then
+			fail("viewFor expire — bouton Accepter fantome")
+		end
+		local viewA = Diplomacy.viewFor(state, a.slot)
+		if viewA.outgoing[b.slot] then
+			fail("viewFor expire — proposition sortante fantome")
+		end
 		if Diplomacy.accept(state, a.slot, b.slot) then
 			fail("accept expire — proposition perimee encore honoree")
 		end
@@ -2846,6 +2914,7 @@ do
 			fail("accept expire — pacte cree hors delai")
 		end
 		print("accept expire : proposition perimee refusee")
+		print("viewFor expire : request perimee absente du HUD")
 	end
 end
 
@@ -2965,11 +3034,96 @@ do
 end
 
 do
+	-- removePlayer doit casser les propositions *vers* le slot libere.
+	local state = GameState.new(5154)
+	local a = state:addPlayer(nil, "Restant", Random.new(81), 0)
+	local b = state:addPlayer(nil, "Partant", Random.new(82), 0)
+	if not a or not b then
+		fail("removePlayer GC — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.requests[a.slot] and state.requests[a.slot][gone] then
+			fail("removePlayer GC — proposition vers disparu conservee")
+		end
+		print("removePlayer GC : propositions vers disparu nettoyees")
+	end
+end
+
+do
+	-- Une tete de pont existante ne doit pas absorber un front terre.
+	local state = GameState.new(8080)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "MerPuisTerre", Random.new(31), 0)
+	local b = state:addPlayer(nil, "CoteDouble", Random.new(32), 0)
+	if not a or not b then
+		fail("beachhead merge — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contact: number? = nil
+		local inland: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) and buffer.readu8(state.owner, nb) ~= a.slot then
+					contact = index
+					inland = nb
+					break
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact or not inland then
+			fail("beachhead merge — pas de contact")
+		else
+			state:setOwner(inland, b.slot)
+			a.troops = 12000
+			a.attackRatio = 0.4
+			state:seedBeachhead(a.slot, b.slot, 800, contact)
+			local bhTroops = 0
+			for _, atk in state.attacks do
+				if atk.isBeachhead then
+					bhTroops = atk.troops
+				end
+			end
+			local launched = state:launchAttack(a.slot, b.slot)
+			local stillBh = 0
+			local fronts = 0
+			for _, atk in state.attacks do
+				if atk.attacker == a.slot and atk.target == b.slot then
+					fronts += 1
+					if atk.isBeachhead then
+						stillBh = atk.troops
+					end
+				end
+			end
+			if not launched or fronts < 2 then
+				fail(`beachhead merge — {fronts} fronts (attendu 2)`)
+			elseif stillBh ~= bhTroops then
+				fail(`beachhead merge — tete de pont {stillBh} attendu {bhTroops}`)
+			else
+				print("beachhead merge : front terre separe, troupes de pont intactes")
+			end
+		end
+	end
+end
+
+do
 	if math.abs((Config.RETREAT_LOSS or 0) - 0.25) > 1e-9 then
 		fail(`RETREAT_LOSS={Config.RETREAT_LOSS} attendu 0.25`)
 	end
 	if math.abs((Config.BOAT_RETREAT_LOSS or 0) - 0.25) > 1e-9 then
 		fail(`BOAT_RETREAT_LOSS={Config.BOAT_RETREAT_LOSS} attendu 0.25`)
+	end
+	if math.abs((Config.SAM_INTERCEPT_CHANCE or 0) - 1) > 1e-9 then
+		fail(`SAM_INTERCEPT_CHANCE={Config.SAM_INTERCEPT_CHANCE} attendu 1.0`)
+	end
+	if math.abs((Config.TRAIN_STOP_BONUS or 0) - 0.12) > 1e-9 then
+		fail(`TRAIN_STOP_BONUS={Config.TRAIN_STOP_BONUS} attendu 0.12`)
 	end
 end
 
