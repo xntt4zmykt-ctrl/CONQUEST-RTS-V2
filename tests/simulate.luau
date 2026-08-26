@@ -376,6 +376,35 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5h. Index navalBasesBySlot = NAVAL_BASE (ISSUE-N65).
+	do
+		local BASE = Config.BUILDING.NAVAL_BASE
+		local indexed = 0
+		local navalBasesBySlot = state.navalBasesBySlot or {}
+		for slot, set in navalBasesBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= BASE or building.slot ~= slot then
+					fail(`tick {tick} — navalBasesBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realBase = 0
+		for index, building in state.buildings do
+			if building.kind == BASE then
+				realBase += 1
+				local set = navalBasesBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — NAVAL_BASE {index} absent de navalBasesBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realBase then
+			fail(`tick {tick} — navalBasesBySlot count {indexed} != NAVAL_BASE {realBase}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5730,6 +5759,162 @@ do
 end
 
 do
+	-- N65 : navalBasesBySlot. 2 bases + 1 port → 2 carriers, pas de carrier PORT.
+	local state = GameState.new(1065)
+	local owner = state:addPlayer(nil, "Amirauté", Random.new(80), 0)
+	local heir = state:addPlayer(nil, "Prise", Random.new(81), 0)
+	if not owner or not heir then
+		fail("navalBasesBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("navalBasesBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.NAVAL_BASE, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.NAVAL_BASE, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.PORT, owner.slot)
+			local set = state.navalBasesBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 2 then
+				fail(`navalBasesBySlot — {count} bases indexees, attendu 2`)
+			elseif set and set[sites[3]] then
+				fail("navalBasesBySlot — PORT indexe comme base")
+			elseif not state._carriersDirty then
+				fail("navalBasesBySlot — pose n'a pas leve _carriersDirty")
+			else
+				Navy.step(state, Random.new(82))
+				local carriers = 0
+				local portCarrier = 0
+				for _, boat in state.boats do
+					if boat.kind == Navy.KIND_CARRIER then
+						carriers += 1
+						if boat.homeTile == sites[3] then
+							portCarrier += 1
+						end
+					end
+				end
+				if carriers ~= 2 then
+					fail(`syncCarriers index — {carriers} carrier(s), attendu 2`)
+				elseif portCarrier ~= 0 then
+					fail("syncCarriers index — carrier pose sur un PORT")
+				elseif state._carriersDirty then
+					fail("syncCarriers index — dirty encore vrai apres sync")
+				else
+					state:transferBuilding(sites[1], heir.slot)
+					local oldSet = state.navalBasesBySlot[owner.slot]
+					local newSet = state.navalBasesBySlot[heir.slot]
+					if oldSet and oldSet[sites[1]] then
+						fail("navalBasesBySlot — transfer laisse l'ancien camp")
+					elseif not (newSet and newSet[sites[1]]) then
+						fail("navalBasesBySlot — transfer n'indexe pas le nouvel camp")
+					else
+						state:destroyBuilding(sites[2])
+						if oldSet and oldSet[sites[2]] then
+							fail("navalBasesBySlot — destroy laisse un orphelin")
+						else
+							print("navalBasesBySlot : 2 bases, pas le port, transfer/destroy OK (N65)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N66 : 0 usine → lastFactoryVisits==0 ; 2 usines → visites=2, sort stable.
+	do
+		local empty = GameState.new(1066)
+		local owner = empty:addPlayer(nil, "SansUsine", Random.new(83), 0)
+		if not owner then
+			fail("factoryBuf — spawn impossible (0 usine)")
+		else
+			local function noop() end
+			Trade.step(empty, Random.new(84), noop)
+			if (Trade.lastFactoryVisits or -1) ~= 0 then
+				fail(`factoryBuf — 0 usine visites={Trade.lastFactoryVisits}, attendu 0`)
+			else
+				print("Trade.step : 0 usine, lastFactoryVisits=0 (N66)")
+			end
+		end
+	end
+	do
+		local state = GameState.new(1067)
+		local owner = state:addPlayer(nil, "DeuxUsines", Random.new(85), 0)
+		if not owner then
+			fail("factoryBuf — spawn impossible (2 usines)")
+		else
+			local sites: { number } = {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+					table.insert(sites, index)
+					if #sites >= 2 then
+						break
+					end
+				end
+			end
+			if #sites < 2 then
+				fail("factoryBuf — tuiles libres insuffisantes")
+			else
+				state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+				state:placeBuilding(sites[2], Config.BUILDING.FACTORY, owner.slot)
+				local a = state.buildings[sites[1]]
+				local b = state.buildings[sites[2]]
+				if a and (#a.links == 0) then
+					a.links = { owner.capitalTile }
+				end
+				if b and (#b.links == 0) then
+					b.links = { owner.capitalTile }
+				end
+				local function noop() end
+				local function snapshotDest()
+					local dest = {}
+					for index, delivery in state.tradeDeliveries do
+						dest[index] = delivery.to
+					end
+					return dest
+				end
+				Trade.step(state, Random.new(86), noop)
+				if (Trade.lastFactoryVisits or 0) ~= 2 then
+					fail(`factoryBuf — {Trade.lastFactoryVisits} visites, attendu 2`)
+				else
+					local first = snapshotDest()
+					table.clear(state.tradeDeliveries)
+					table.clear(state.tradeCooldowns)
+					Trade.step(state, Random.new(86), noop)
+					local second = snapshotDest()
+					local mismatch = false
+					for index, to in first do
+						if second[index] ~= to then
+							mismatch = true
+							break
+						end
+					end
+					if mismatch or first[sites[1]] ~= second[sites[1]] or first[sites[2]] ~= second[sites[2]] then
+						fail("factoryBuf — sort instable (destinations differentes a rng egal)")
+					else
+						print("Trade.step : 2 usines, sort stable (N66)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- removePlayer snapshot buildingsBySlot (N62), pas le hash global.
 	local state = GameState.new(1064)
 	local owner = state:addPlayer(nil, "Sortant", Random.new(77), 0)
@@ -5740,16 +5925,17 @@ do
 		for index = 0, Config.TILE_COUNT - 1 do
 			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
 				table.insert(sites, index)
-				if #sites >= 2 then
+				if #sites >= 3 then
 					break
 				end
 			end
 		end
-		if #sites < 2 then
+		if #sites < 3 then
 			fail("removePlayer index — tuiles libres insuffisantes")
 		else
 			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
 			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.NAVAL_BASE, owner.slot)
 			local gone = owner.slot
 			state:removePlayer(gone)
 			if state.buildingsBySlot[gone] then
@@ -5758,6 +5944,8 @@ do
 				fail("removePlayer index — factoriesBySlot[slot] encore pose")
 			elseif state.samsBySlot[gone] then
 				fail("removePlayer index — samsBySlot[slot] encore pose")
+			elseif state.navalBasesBySlot[gone] then
+				fail("removePlayer index — navalBasesBySlot[slot] encore pose")
 			else
 				local leftover = 0
 				for _, building in state.buildings do

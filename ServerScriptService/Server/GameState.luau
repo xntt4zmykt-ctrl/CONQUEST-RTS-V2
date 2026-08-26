@@ -171,6 +171,10 @@ export type GameState = typeof(setmetatable(
 		factoriesBySlot: { [number]: { [number]: true } },
 		-- Tous les batiments par camp. Bots upgrade + score nuke (N62).
 		buildingsBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des bases navales par camp. syncCarriers spawn (N65)
+		-- n'itere plus le hash buildings ; recette samsBySlot. Distinct de
+		-- portsByTile (PORT) et de _carriersDirty (garde le flag evenementiel).
+		navalBasesBySlot: { [number]: { [number]: true } },
 		-- PORT par tuile (slot + level). spawnTradeShips (N63), recette
 		-- hardening N40 / portsByTile. Distinct de _carriersDirty (NAVAL_BASE).
 		portsByTile: { [number]: { slot: number, level: number } },
@@ -250,6 +254,7 @@ function GameState.new(seed: number): GameState
 	self.silosBySlot = {}
 	self.factoriesBySlot = {}
 	self.buildingsBySlot = {}
+	self.navalBasesBySlot = {}
 	self.portsByTile = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
@@ -751,8 +756,8 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
--- Index bunker / SAM / silo / usine / tous : pose / capture / destroy
--- seulement, jamais dans le tick.
+-- Index bunker / SAM / silo / usine / tous / bases navales : pose / capture /
+-- destroy seulement, jamais dans le tick.
 local function indexPosted(
 	_self: GameState,
 	bySlot: { [number]: { [number]: true } },
@@ -792,6 +797,10 @@ local function indexBuilding(self: GameState, slot: number, index: number, prese
 	indexPosted(self, self.buildingsBySlot, slot, index, present)
 end
 
+local function indexNavalBase(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.navalBasesBySlot, slot, index, present)
+end
+
 -- N63 : PORT only. level vit ici pour ponderer spawnTradeShips sans relire
 -- le hash. Distinct de _carriersDirty (NAVAL_BASE).
 local function indexPort(self: GameState, index: number, slot: number, level: number, present: boolean)
@@ -827,6 +836,7 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 		indexPort(self, index, slot, 1, true)
 	end
 	if kind == B.NAVAL_BASE then
+		indexNavalBase(self, slot, index, true)
 		self._carriersDirty = true
 	end
 	if IS_STATION[kind] then
@@ -882,6 +892,8 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	indexBuilding(self, previousSlot, index, false)
 	indexBuilding(self, newSlot, index, true)
 	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, previousSlot, index, false)
+		indexNavalBase(self, newSlot, index, true)
 		self._carriersDirty = true
 	end
 	if building.kind == B.DEFENSE then
@@ -931,6 +943,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.PORT then
 		indexPort(self, index, building.slot, building.level, false)
+	end
+	if building.kind == B.NAVAL_BASE then
+		indexNavalBase(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1357,6 +1372,7 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.silosBySlot[slot] = nil
 	self.factoriesBySlot[slot] = nil
 	self.buildingsBySlot[slot] = nil
+	self.navalBasesBySlot[slot] = nil
 
 	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
 	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.

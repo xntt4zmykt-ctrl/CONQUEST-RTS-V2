@@ -33,6 +33,10 @@ Trade.lastFactoryVisits = 0
 
 local B = Config.BUILDING
 
+-- N66 : liste usines recyclee (recette portsBuf / N63). Trade.step tourne
+-- a 10 Hz : une table + sort jetes chaque tick saturait le GC pour rien.
+local factoryBuf: { number } = table.create(16)
+
 -- Les gares valides comme destination : tout ce qui appartient au reseau.
 local IS_DESTINATION = {
 	[B.CITY] = true,
@@ -128,25 +132,39 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	-- depend de l'ordre interne de la table, et deux serveurs partis de la
 	-- meme graine divergeraient des le premier colis.
 	-- N61 : index factoriesBySlot, pas le hash buildings (recette samsBySlot).
+	-- N66 : factoryBuf recycle ; early-out 0 usine avant sort ; sort si n>=2.
 	-- Si l'index existe, on n'y touche plus. Fallback hash si nil (tests partiels).
-	local factories: { number } = {}
+	local factories = factoryBuf
+	local n = 0
 	if state.factoriesBySlot then
 		for _, set in state.factoriesBySlot do
 			for index in set do
-				table.insert(factories, index)
+				n += 1
+				factories[n] = index
 			end
 		end
 	else
 		for index, building in state.buildings do
 			if building.kind == B.FACTORY then
-				table.insert(factories, index)
+				n += 1
+				factories[n] = index
 			end
 		end
 	end
-	table.sort(factories)
-	Trade.lastFactoryVisits = #factories
+	for i = #factories, n + 1, -1 do
+		factories[i] = nil
+	end
+	if n == 0 then
+		Trade.lastFactoryVisits = 0
+		return
+	end
+	if n >= 2 then
+		table.sort(factories)
+	end
+	Trade.lastFactoryVisits = n
 
-	for _, index in factories do
+	for i = 1, n do
+		local index = factories[i]
 		local factory = state.buildings[index]
 		if not factory or factory.kind ~= B.FACTORY then
 			continue
