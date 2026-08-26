@@ -241,8 +241,18 @@ function Buildings.nukesUnlocked(state: GameState, slot: number): boolean
 end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.
+-- N59 : index samsBySlot (recette N57), fallback hash si l'index est nil.
 function Buildings.samsOf(state: GameState, slot: number): { number }
 	local out = {}
+	if state.samsBySlot then
+		local set = state.samsBySlot[slot]
+		if set then
+			for index in set do
+				table.insert(out, index)
+			end
+		end
+		return out
+	end
 	for index, building in state.buildings do
 		if building.slot == slot and building.kind == B.SAM then
 			table.insert(out, index)
@@ -251,10 +261,38 @@ function Buildings.samsOf(state: GameState, slot: number): { number }
 	return out
 end
 
+-- N60 : SAM via samsBySlot. Les silos portent aussi un cooldown
+-- (Nukes.launch / SILO_COOLDOWN) — la spec N60 « aucun autre cooldown
+-- vivant » etait fausse ; sans silosBySlot un silo resterait arme a jamais.
 function Buildings.stepCooldowns(state: GameState)
-	for _, building in state.buildings do
-		if building.cooldown > 0 then
-			building.cooldown -= 1
+	local sams = state.samsBySlot
+	local silos = state.silosBySlot
+	if sams == nil and silos == nil then
+		for _, building in state.buildings do
+			if building.cooldown > 0 then
+				building.cooldown -= 1
+			end
+		end
+		return
+	end
+	if sams then
+		for _, set in sams do
+			for index in set do
+				local building = state.buildings[index]
+				if building and building.cooldown > 0 then
+					building.cooldown -= 1
+				end
+			end
+		end
+	end
+	if silos then
+		for _, set in silos do
+			for index in set do
+				local building = state.buildings[index]
+				if building and building.cooldown > 0 then
+					building.cooldown -= 1
+				end
+			end
 		end
 	end
 end

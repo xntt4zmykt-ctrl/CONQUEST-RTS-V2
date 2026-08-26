@@ -87,17 +87,36 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 	local bestSilo: number? = nil
 	local bestDist = math.huge
 	local anySilo = false
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == Config.BUILDING.SILO then
-			anySilo = true
-			if building.cooldown <= 0 then
-				local x, y = MapGen.fromIndex(index)
-				local dx, dy = x - tx, y - ty
-				local dist = dx * dx + dy * dy
-				if dist < bestDist then
-					bestDist = dist
-					bestSilo = index
-				end
+
+	local function consider(index: number, building: any)
+		if not building or building.kind ~= Config.BUILDING.SILO then
+			return
+		end
+		anySilo = true
+		if building.cooldown <= 0 then
+			local x, y = MapGen.fromIndex(index)
+			local dx, dy = x - tx, y - ty
+			local dist = dx * dx + dy * dy
+			if dist < bestDist then
+				bestDist = dist
+				bestSilo = index
+			end
+		end
+	end
+
+	-- N60 : index silosBySlot, pas le hash buildings (recette samsBySlot).
+	-- Si l'index existe, un slot sans silo (set nil) ne rescane PAS le hash.
+	if state.silosBySlot then
+		local silos = state.silosBySlot[slot]
+		if silos then
+			for index in silos do
+				consider(index, state.buildings[index])
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.slot == slot then
+				consider(index, building)
 			end
 		end
 	end

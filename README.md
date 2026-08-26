@@ -120,6 +120,7 @@ ReplicatedStorage/Shared/
   BuildingDefs.luau Définitions et coûts des bâtiments
   Remotes.luau      Création/récupération des RemoteEvents
   Types.luau        Types partagés serveur ↔ client
+  SpawnHint.luau    Hint hover spawn (isolation N58, pas une source de vérité)
 
 ServerScriptService/Server/
   init.server.luau  Orchestration : ordres, boucle de tick, réplication, match

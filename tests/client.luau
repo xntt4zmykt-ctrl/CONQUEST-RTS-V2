@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	os.exit(1)
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -668,6 +668,76 @@ check("calques d'entites, effets et apercu", function()
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
+end)
+
+check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
+	local SpawnHint = __require("SpawnHint")
+	local Theme = __require("Theme")
+	local OCEAN = Config.TERRAIN.OCEAN
+	local owner = world.owner
+
+	local land: number? = nil
+	local ocean: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) == OCEAN then
+			if not ocean then
+				ocean = index
+			end
+		else
+			if not land then
+				land = index
+			end
+		end
+		if land and ocean then
+			break
+		end
+	end
+	assert(land ~= nil, "aucune terre")
+	assert(ocean ~= nil, "aucun ocean")
+	assert(SpawnHint.looksClaimable(terrain, owner, land), "disque isole encore rouge")
+	assert(not SpawnHint.looksClaimable(terrain, owner, ocean), "ocean colore comme spawn")
+
+	-- Peint tout le terre comme un empire sauf une lisiere (meme recette N55).
+	local occupier = 1
+	local pocket: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(owner, index, occupier)
+		end
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			local x, y = MapGen.fromIndex(index)
+			local adj = false
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					if dx ~= 0 or dy ~= 0 then
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local ni = MapGen.toIndex(nx, ny)
+							if buffer.readu8(terrain, ni) ~= OCEAN and buffer.readu8(owner, ni) == occupier then
+								adj = true
+							end
+						end
+					end
+				end
+			end
+			if adj then
+				buffer.writeu8(owner, index, 0)
+				pocket = index
+				break
+			end
+		end
+	end
+	assert(pocket ~= nil, "lisiere introuvable")
+	assert(not SpawnHint.looksClaimable(terrain, owner, pocket), "lisiere encore verte")
+	effects:previewTile(pocket, Theme.color.danger, false)
+	effects:clearActionPreview()
+
+	-- Restaure le buffer owner du monde (tout NEUTRAL) pour les checks suivants.
+	for index = 0, Config.TILE_COUNT - 1 do
+		buffer.writeu8(owner, index, 0)
+	end
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -1471,4 +1541,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	os.exit(1)
 end

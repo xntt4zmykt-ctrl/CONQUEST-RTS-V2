@@ -34,6 +34,7 @@ local Theme = require(Shared:WaitForChild("Theme"))
 local WorldSpace = require(Shared:WaitForChild("WorldSpace"))
 local Config = require(Shared:WaitForChild("Config"))
 local MapGen = require(Shared:WaitForChild("MapGen"))
+local SpawnHint = require(Shared:WaitForChild("SpawnHint"))
 local BuildingDefs = require(Shared:WaitForChild("BuildingDefs"))
 local Doctrines = require(Shared:WaitForChild("Doctrines"))
 local Eras = require(Shared:WaitForChild("Eras"))
@@ -1058,8 +1059,18 @@ RunService.RenderStepped:Connect(function(dt: number)
 				local valid = false
 				local color = Theme.color.danger
 				if hud.mode == "attack" then
-					valid = land and owner ~= mySlot
-					color = if owner == 0 then Theme.color.accent else Theme.factionColor(owner)
+					-- N58 : en awaitingSpawn (tiles==0) le hover suit l'isolation
+					-- serveur (carre SPAWN_RADIUS+3 / r=6). Hint seulement :
+					-- splash/fallout restent un refus serveur possible.
+					local mine = stats[mySlot]
+					local awaitingSpawn = mine ~= nil and (mine.tiles or 0) == 0
+					if awaitingSpawn then
+						valid = SpawnHint.looksClaimable(w.terrain, w.owner, tile)
+						color = if valid then Theme.color.accent else Theme.color.danger
+					else
+						valid = land and owner ~= mySlot
+						color = if owner == 0 then Theme.color.accent else Theme.factionColor(owner)
+					end
 				elseif hud.mode == "boat" then
 					valid = land and owner ~= mySlot and MapGen.isCoastal(w.terrain, tile)
 					color = Theme.color.info

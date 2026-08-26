@@ -164,6 +164,9 @@ export type GameState = typeof(setmetatable(
 		-- Index O(1) des batteries SAM par camp. tryIntercept (N57) n'itere
 		-- plus le hash buildings entier ; recette bunkersBySlot.
 		samsBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des silos par camp. Nukes.launch / stepCooldowns (N60)
+		-- n'iterent plus le hash buildings ; recette samsBySlot.
+		silosBySlot: { [number]: { [number]: true } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -237,6 +240,7 @@ function GameState.new(seed: number): GameState
 	self.buildings = {}
 	self.bunkersBySlot = {}
 	self.samsBySlot = {}
+	self.silosBySlot = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -743,6 +747,10 @@ local function indexSam(self: GameState, slot: number, index: number, present: b
 	indexPosted(self, self.samsBySlot, slot, index, present)
 end
 
+local function indexSilo(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.silosBySlot, slot, index, present)
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -756,6 +764,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	end
 	if kind == B.SAM then
 		indexSam(self, slot, index, true)
+	end
+	if kind == B.SILO then
+		indexSilo(self, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -818,6 +829,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexSam(self, previousSlot, index, false)
 		indexSam(self, newSlot, index, true)
 	end
+	if building.kind == B.SILO then
+		indexSilo(self, previousSlot, index, false)
+		indexSilo(self, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -836,6 +851,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.SAM then
 		indexSam(self, building.slot, index, false)
+	end
+	if building.kind == B.SILO then
+		indexSilo(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1247,6 +1265,7 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	self.bunkersBySlot[slot] = nil
 	self.samsBySlot[slot] = nil
+	self.silosBySlot[slot] = nil
 
 	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
 	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.

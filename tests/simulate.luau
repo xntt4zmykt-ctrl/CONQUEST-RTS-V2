@@ -263,6 +263,35 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5d. Index silosBySlot = batiments SILO (ISSUE-N60).
+	do
+		local SILO = Config.BUILDING.SILO
+		local indexed = 0
+		local silosBySlot = state.silosBySlot or {}
+		for slot, set in silosBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= SILO or building.slot ~= slot then
+					fail(`tick {tick} — silosBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realSilo = 0
+		for index, building in state.buildings do
+			if building.kind == SILO then
+				realSilo += 1
+				local set = silosBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — SILO {index} absent de silosBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realSilo then
+			fail(`tick {tick} — silosBySlot count {indexed} != SILO {realSilo}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -1888,7 +1917,7 @@ do
 		local targetTile: number? = nil
 		for index = 0, Config.TILE_COUNT - 1 do
 			local owner = buffer.readu8(mirvState.owner, index)
-			if not siloTile and owner == a.slot then
+			if not siloTile and owner == a.slot and not mirvState.buildings[index] then
 				siloTile = index
 			elseif not targetTile and owner == b.slot then
 				targetTile = index
@@ -1897,9 +1926,7 @@ do
 		if not siloTile or not targetTile then
 			fail("mirv — territoires de test introuvables")
 		else
-			mirvState.buildings[siloTile] =
-				{ kind = Config.BUILDING.SILO, slot = a.slot, level = 1, links = {}, cooldown = 0 }
-			a.siloCount = 1
+			mirvState:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
 			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
 			a.gold = 5000
 			b.troops = 10000
@@ -5277,6 +5304,22 @@ do
 			elseif set and set[sites[4]] then
 				fail("samsBySlot — silo indexe comme SAM")
 			else
+				local listed = Buildings.samsOf(state, owner.slot)
+				local listedN = 0
+				local listedSilo = false
+				for _, tile in listed do
+					listedN += 1
+					if tile == sites[4] then
+						listedSilo = true
+					end
+				end
+				if listedN ~= 3 then
+					fail(`samsOf — {listedN} tuiles, attendu 3`)
+				elseif listedSilo then
+					fail("samsOf — silo renvoye comme SAM")
+				else
+					print("samsOf : 3 tuiles, pas le silo (N59)")
+				end
 				state:transferBuilding(sites[1], heir.slot)
 				local oldSet = state.samsBySlot[owner.slot]
 				local newSet = state.samsBySlot[heir.slot]
@@ -5292,6 +5335,57 @@ do
 						print("samsBySlot : pose / transfer / destroy OK")
 					end
 				end
+			end
+		end
+	end
+end
+
+do
+	-- N60 : stepCooldowns n'itere plus le hash. SAM + SILO tickent ;
+	-- une ville forcee a cooldown reste inchangee (plus de scan global).
+	local state = GameState.new(1059)
+	local owner = state:addPlayer(nil, "Batterie", Random.new(64), 0)
+	if not owner then
+		fail("stepCooldowns — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 2 then
+					break
+				end
+			end
+		end
+		if #sites < 2 then
+			fail("stepCooldowns — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SILO, owner.slot)
+			local sam = state.buildings[sites[1]]
+			local silo = state.buildings[sites[2]]
+			local capital = state.buildings[owner.capitalTile]
+			sam.cooldown = 3
+			silo.cooldown = 2
+			if capital then
+				capital.cooldown = 4
+			end
+			local rng = Random.new(65)
+			local function noop() end
+			for _ = 1, 3 do
+				Nukes.step(state, rng, noop)
+			end
+			local siloSet = state.silosBySlot[owner.slot]
+			if sam.cooldown ~= 0 then
+				fail(`stepCooldowns — SAM cooldown={sam.cooldown}, attendu 0`)
+			elseif silo.cooldown ~= 0 then
+				fail(`stepCooldowns — SILO cooldown={silo.cooldown}, attendu 0`)
+			elseif capital and capital.cooldown ~= 4 then
+				fail(`stepCooldowns — ville tickee (cooldown={capital.cooldown})`)
+			elseif not (siloSet and siloSet[sites[2]]) then
+				fail("silosBySlot — pose non indexee")
+			else
+				print("stepCooldowns : SAM+SILO tickent, ville intacte (N60)")
 			end
 		end
 	end
@@ -5323,4 +5417,5 @@ if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
 else
 	print(`\27[31m{failures} invariant(s) violes.\27[0m`)
+	os.exit(1)
 end
