@@ -300,35 +300,72 @@ end
 function Effects.floatingText(self: Effects, x: number, y: number, text: string, color: Color3)
 	local ground = WorldSpace.tileToWorld(x, y)
 
-	local anchor = Instance.new("Part")
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanTouch = false
-	anchor.CanQuery = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+	-- N158 : free-list textFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.3 s : Parent = nil + push. conquestPulse
+	-- reutilise deja (N157). tileFlash reutilise deja (N156).
+	-- selectTile reutilise deja (N155). previewTile reutilise
+	-- deja (N96 + N154 skip). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156 (flashFree, ne pas partager).
+	-- Distinct conquestPulse N157 (pulseFree, ne pas partager).
+	-- Distinct visual V82 ConquestPulse pulseRot (ne pas merger
+	-- 490f — ce n'est pas un Billboard). Arbre Billboard
+	-- conserve au reuse (Part + BillboardGui + TextLabel +
+	-- UIStroke). Reset TextTransparency / outline Transparency
+	-- a 0 (le tween les avait mises a 1). Pas de Name. Tween
+	-- Create conserve (CFrame Y=26 + TextTransparency restart).
+	-- Recette leftover N157, pas merger visual. HUD /
+	-- UnitModels / Overlay / PlacementPreview / conquestPulse /
+	-- tileFlash inchanges.
+	local free = self.textFree
+	if not free then
+		free = {}
+		self.textFree = free
+	end
+	local n = #free
+	local anchor
+	local label
+	local outline
+	if n > 0 then
+		anchor = free[n]
+		free[n] = nil
+		local billboard = anchor:FindFirstChildWhichIsA("BillboardGui") :: BillboardGui
+		label = billboard:FindFirstChildWhichIsA("TextLabel") :: TextLabel
+		outline = label:FindFirstChildWhichIsA("UIStroke") :: UIStroke
+	else
+		anchor = Instance.new("Part")
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanTouch = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Size = UDim2.fromOffset(120, 30)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = 900
+		billboard.Parent = anchor
+
+		label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.FontFace = Theme.font.display
+		label.TextSize = 20
+		label.Parent = billboard
+
+		outline = Instance.new("UIStroke")
+		outline.Color = Color3.fromRGB(6, 8, 14)
+		outline.Thickness = 2.5
+		outline.Parent = label
+	end
 	anchor.CFrame = CFrame.new(ground.X, 12, ground.Z)
-	anchor.Parent = self.root
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(120, 30)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 900
-	billboard.Parent = anchor
-
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.FontFace = Theme.font.display
-	label.TextSize = 20
-	label.TextColor3 = color
 	label.Text = text
-	label.Parent = billboard
-
-	local outline = Instance.new("UIStroke")
-	outline.Color = Color3.fromRGB(6, 8, 14)
-	outline.Thickness = 2.5
-	outline.Parent = label
+	label.TextColor3 = color
+	label.TextTransparency = 0
+	outline.Transparency = 0
+	anchor.Parent = self.root
 
 	TweenService:Create(anchor, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = CFrame.new(ground.X, 26, ground.Z),
@@ -337,7 +374,9 @@ function Effects.floatingText(self: Effects, x: number, y: number, text: string,
 	TweenService:Create(outline, TweenInfo.new(1.2), { Transparency = 1 }):Play()
 
 	task.delay(1.3, function()
-		anchor:Destroy()
+		anchor.Parent = nil
+		local pool = self.textFree
+		pool[#pool + 1] = anchor
 	end)
 end
 

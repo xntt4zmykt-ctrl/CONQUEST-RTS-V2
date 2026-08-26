@@ -1776,15 +1776,16 @@ check("navires, missiles et interpolation", function()
 end)
 
 check("vagues de conquete", function()
-	-- N157 : conquestPulse free-list. Flush → Parent nil + push pulseFree.
-	-- lossWave reparente le meme anneau (rawequal Parent root). Euler N134
-	-- inline Y=3 conserve. Pas de Name ConquestPulse. Caps 90/28 inchanges.
-	-- Tween Create conserve. Leftover N156 tileFlash reuse doit rester
-	-- vert. Leftover N155 selectTile reuse (check calques) doit rester
-	-- vert. Recette leftover N156, pas merger visual V82 pulseRot.
-	-- HUD / UnitModels / Overlay / PlacementPreview / selectTile /
-	-- previewTile / tileFlash / floatingText non touches. Flame leftover
-	-- N152 (check navires) et leftover N158 floatingText Destroy (non
+	-- N158 : floatingText free-list. Flush → Parent nil + push textFree.
+	-- lossWave (count ≥ 4) reparente la meme ancre (rawequal Parent root).
+	-- Arbre Billboard conserve (pas de recreate descendants). Pas de Name.
+	-- Tween Create conserve. Leftover N157 conquestPulse reuse doit rester
+	-- vert. Leftover N156 tileFlash reuse doit rester vert. Leftover N155
+	-- selectTile reuse (check calques) doit rester vert. Recette leftover
+	-- N157, pas merger visual V82 pulseRot. HUD / UnitModels / Overlay /
+	-- PlacementPreview / selectTile / previewTile / tileFlash /
+	-- conquestPulse non touches. Flame leftover N152 (check navires) et
+	-- leftover N159 Overlay goldPopup Destroy (check livraison, non
 	-- touche).
 	local wave = {}
 	for i = 1, 200 do
@@ -1795,6 +1796,7 @@ check("vagues de conquete", function()
 	assert(liveBefore > 0, "aucune plaque live")
 	assert(effects.flashFree == nil or #effects.flashFree == 0, "free-list trop tot")
 	assert(effects.pulseFree == nil or #effects.pulseFree == 0, "pulseFree trop tot")
+	assert(effects.textFree == nil or #effects.textFree == 0, "textFree trop tot")
 	testFlushDelays()
 	assert(effects.live == 0, "live pas decremente")
 	local free = effects.flashFree
@@ -1806,9 +1808,16 @@ check("vagues de conquete", function()
 	local pooledRing = pulsePool[#pulsePool]
 	assert(pooledRing.Parent == nil, "anneau encore parente")
 	assert(pooledRing.Name ~= "ConquestPulse", "Name visual V82 porte")
+	local textPool = effects.textFree
+	assert(textPool ~= nil and #textPool >= 1, "textes non poolees")
+	local pooledText = textPool[#textPool]
+	assert(pooledText.Parent == nil, "texte encore parente")
+	assert(pooledText.Name ~= "GoldPopup", "Name Overlay goldPopup porte")
 	effects:lossWave(wave, #wave)
 	assert(#pulsePool == 0, "anneau non reutilise")
 	assert(rawequal(pooledRing.Parent, effects.root), "anneau non reparente")
+	assert(#textPool == 0, "texte non reutilise")
+	assert(rawequal(pooledText.Parent, effects.root), "texte non reparente")
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
 	assert(#free == liveBefore - 1, "plaque non reutilisee")
 	assert(rawequal(pooled.Parent, effects.root), "plaque non reparentee")
