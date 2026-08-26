@@ -907,9 +907,10 @@ check("pose et capture de chaque type de batiment", function()
 	-- l'autre. V72 : roues fromEulerAnglesYXZ pendant la livraison (spin
 	-- π×20, garde Wheel). Leftover V63 (rot chantier) plus haut. Leftover
 	-- V56 (unités) / V71 (roulis) / V73 (UnitModels radar/flag) restent
-	-- dans le check navires. Leftover V74 (flame Size) separe. Voies
-	-- encore vivantes ici ; la destruction plus bas les vide (le check
-	-- livraison n'en a plus).
+	-- dans le check navires. V74 flame Size = API. Leftover V75
+	-- (footprint/pulse rot) dans le check apercu. Leftover V76 (Size
+	-- rayon preview) separe. Voies encore vivantes ici ; la destruction
+	-- plus bas les vide (le check livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
@@ -1036,7 +1037,9 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- via fromEulerAnglesYXZ, pas CFrame.Angles. Factory sans câble :
 	-- animate ne lève pas (0 câble = zéro alloc Vector3). Roulis navire
 	-- V71 (check navires). Roues camion V72 (check pose/capture).
-	-- UnitModels radar/flag V73 (check navires). Leftover V74 (flame Size).
+	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
+	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76
+	-- (Size rayon preview) separe.
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1080,7 +1083,19 @@ check("modeles procéduraux : le palier change la silhouette", function()
 end)
 
 check("apercu de placement pour chaque batiment", function()
+	-- V75 : rot cuit a new (recette V63 segment.rot). Plus de
+	-- CFrame.Angles 60 Hz hover. Leftover V51/V53 (resolve) dans le
+	-- check accrochage. Leftover V73 (radar/flag) dans le check navires.
+	-- Leftover V76 (Size rayon) separe. Hauteurs +0.42 / +0.38.
+	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
+	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
+	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
+	assert(preview.pulseRot.X == 0 and preview.pulseRot.Y == 0 and preview.pulseRot.Z == 0, "pulseRot n'est pas a l'origine")
+	local bakedFoot = preview.footprintRot
+	local bakedPulse = preview.pulseRot
+	local sampleKind: number? = nil
 	for _, def in BuildingDefs.BUILDABLE do
+		sampleKind = def.id
 		preview:setKind(def.id)
 		preview:update(1000, "exact")
 		preview:update(1200, "snap")
@@ -1088,6 +1103,19 @@ check("apercu de placement pour chaque batiment", function()
 		preview:update(1400, "invalid")
 		preview:update(nil, "invalid")
 	end
+	assert(rawequal(preview.footprintRot, bakedFoot), "footprintRot recree pendant hover")
+	assert(rawequal(preview.pulseRot, bakedPulse), "pulseRot recree pendant hover")
+	assert(sampleKind ~= nil, "aucun BUILDABLE pour tester les hauteurs")
+	preview:setKind(sampleKind :: number)
+	preview:update(1000, "exact")
+	assert(
+		math.abs(preview.footprint.CFrame.Y - preview.pulse.CFrame.Y - 0.04) < 1e-6,
+		"hauteurs +0.42/+0.38"
+	)
+	assert(preview.footprint.CFrame.X == preview.pulse.CFrame.X, "X footprint != pulse")
+	assert(preview.footprint.CFrame.Z == preview.pulse.CFrame.Z, "Z footprint != pulse")
+	assert(rawequal(preview.footprintRot, bakedFoot), "footprintRot recree au second hover")
+	assert(rawequal(preview.pulseRot, bakedPulse), "pulseRot recree au second hover")
 	preview:hide()
 end)
 
@@ -1474,7 +1502,8 @@ check("navires, missiles et interpolation", function()
 	overlay:stepInterpolation(1 / 60)
 	-- V73 : radar/flag fromEulerAnglesYXZ. Premier stepInterpolation
 	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
-	-- Leftover V71 / V65 / V55 / V52. Leftover V74 (flame Size).
+	-- Leftover V71 / V65 / V55 / V52. V74 flame Size = API. V75
+	-- (footprint/pulse rot) dans le check apercu. Leftover V76 (Size).
 	local radarPiece, flagPiece
 	for _, piece in overlay.units[1].visual.pieces do
 		if piece.role == "radar" then
@@ -1522,7 +1551,8 @@ check("navires, missiles et interpolation", function()
 	-- Garde mag / missile inchangee. Leftover V70 (radar/flag/boom)
 	-- reste dans le check modeles. Leftover V72 (roues camion) reste
 	-- dans le check pose/capture.
-	-- V73 : radar/flag fromEulerAnglesYXZ. Leftover V74 (flame Size).
+	-- V73 : radar/flag fromEulerAnglesYXZ. V74 flame Size = API.
+	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
@@ -1586,7 +1616,9 @@ check("camera strategique", function()
 	-- pitch=0 yaw=0 → Z == focusZ + distance. Leftover V66 (pose) /
 	-- V65 (yaw unites) / V64 (segRot) restent. Radar/flag V70 (modeles).
 	-- Roulis navire V71 (check navires). Roues camion V72 (pose/capture).
-	-- UnitModels radar/flag V73 (check navires). Leftover V74 (flame Size).
+	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
+	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76
+	-- (Size rayon preview) separe.
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")

@@ -104,6 +104,15 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	pulse.Parent = root
 	self.pulse = pulse
 
+	-- V75 : rotation cylindre plat cuite une fois (recette V63 segment.rot).
+	-- Plus de CFrame.Angles 60 Hz hover. fromEulerAnglesYXZ(0, 0, rad(90))
+	-- ≡ Angles(0, 0, 90°) (rx=0, ry=0 → Z seul). Hauteurs +0.42 / +0.38
+	-- inchangees. Size footprint/pulse inchange (API rayon, leftover V76).
+	-- Radar/flag unites inchanges (V73). Flame Size inchange (V74 API).
+	-- Overlay / BuildingModels / WorldCamera non edites.
+	self.footprintRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+
 	return self
 end
 
@@ -240,13 +249,13 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 	self.footprint.Transparency = 0.52
 	self.footprint.Color = color
 	self.footprint.Size = Vector3.new(0.35, radius, radius)
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * self.footprintRot
 
 	self.pulse.Transparency = 0.72
 	self.pulse.Color = color
 	local pulseSize = radius * 1.08
 	self.pulse.Size = Vector3.new(0.12, pulseSize, pulseSize)
-	self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * CFrame.Angles(0, 0, math.rad(90))
+	self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * self.pulseRot
 end
 
 function PlacementPreview.hide(self: PlacementPreview)
