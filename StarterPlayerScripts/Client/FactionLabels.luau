@@ -55,6 +55,16 @@ local MIN_TILES = 12
 
 local MAX_DISTANCE = 4000
 
+-- V49 : surveyTerritories recycle (recette V42 allyBuf hash table.clear).
+-- Distinct de V48 (gainBuf arrays) et de V35 (contactBuf serveur).
+-- Non reentrant — refresh synchrone unique. table.clear AVANT le scan
+-- (leftover slot A = etiquette fantome apres removePlayer). Hash
+-- slot→nombre : pas de truncate d'array. Retourner les pools. Overlay /
+-- WorldRenderer n'appellent pas surveyTerritories.
+local sumXBuf: { [number]: number } = {}
+local sumYBuf: { [number]: number } = {}
+local countBuf: { [number]: number } = {}
+
 --=============================================================================
 -- Construction
 --=============================================================================
@@ -144,23 +154,23 @@ end
 	sur la meme grille que le centre qu'il accompagne.
 ]]
 local function surveyTerritories(owner: buffer)
-	local sumX: { [number]: number } = {}
-	local sumY: { [number]: number } = {}
-	local counts: { [number]: number } = {}
+	table.clear(sumXBuf)
+	table.clear(sumYBuf)
+	table.clear(countBuf)
 
 	for y = 0, H - 1, SAMPLE_STRIDE do
 		local rowBase = y * W
 		for x = 0, W - 1, SAMPLE_STRIDE do
 			local slot = buffer.readu8(owner, rowBase + x)
 			if slot ~= Config.NEUTRAL_SLOT then
-				sumX[slot] = (sumX[slot] or 0) + x
-				sumY[slot] = (sumY[slot] or 0) + y
-				counts[slot] = (counts[slot] or 0) + 1
+				sumXBuf[slot] = (sumXBuf[slot] or 0) + x
+				sumYBuf[slot] = (sumYBuf[slot] or 0) + y
+				countBuf[slot] = (countBuf[slot] or 0) + 1
 			end
 		end
 	end
 
-	return sumX, sumY, counts
+	return sumXBuf, sumYBuf, countBuf
 end
 
 --[[

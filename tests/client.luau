@@ -1297,6 +1297,27 @@ check("deltas de terrain et conquetes classees", function()
 	local changed, gains, losses, others = world:applyDelta(delta, 1)
 	assert(changed == 4, "le nombre de tuiles modifiees est faux")
 	assert(gains ~= nil and losses ~= nil and others ~= nil, "conquetes non classees")
+
+	-- V48 : prise sur une faction puis delta vide → leftover truncate.
+	-- Coloniser du neutre ne classe rien ; occuper en 2 puis capturer en 1
+	-- produit un gain. Le second applyDelta (payload vide) doit renvoyer
+	-- les memes pools a # == 0, sinon un splash fantome rejouerait la tuile.
+	local occupy = buffer.create(5)
+	buffer.writeu32(occupy, 0, 2100)
+	buffer.writeu8(occupy, 4, 2)
+	world:applyDelta(occupy, 1)
+	local capture = buffer.create(5)
+	buffer.writeu32(capture, 0, 2100)
+	buffer.writeu8(capture, 4, 1)
+	local _, g2, l2, o2 = world:applyDelta(capture, 1)
+	assert(#g2 == 1 and g2[1] == 2100, "prise locale non classee en gain")
+	assert(#l2 == 0 and #o2 == 0, "prise locale mal classee")
+	local empty = buffer.create(0)
+	local changed0, g3, l3, o3 = world:applyDelta(empty, 1)
+	assert(changed0 == 0, "delta vide count")
+	assert(#g3 == 0 and #l3 == 0 and #o3 == 0, "leftover applyDelta non truncate")
+	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
+
 	world:stepRebuilds()
 end)
 
