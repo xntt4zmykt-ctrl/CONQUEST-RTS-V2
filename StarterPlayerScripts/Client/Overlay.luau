@@ -106,8 +106,18 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- merger 076b. Leftover Parent = nil, pas Destroy. Name
 	-- DeliveryPulse. Euler N132 deja (wakeRot V80). Distinct de
 	-- V113 (Blast). Distinct de V114 (BlastSmoke). Distinct de
-	-- V115 (Shockwave). Pas reentrant.
+	-- V115 (Shockwave). Distinct de V117 (LandingSplash). Pas
+	-- reentrant.
 	self.deliveryFree = {} :: { Part }
+
+	-- V117 : free-list LandingSplash PAR overlay (pas blastFree /
+	-- smokeFree / shockFree / deliveryFree). Recette feel N161
+	-- inline — ne PAS merger 41d3. Leftover Parent = nil, pas
+	-- Destroy. Name LandingSplash. Euler N131 deja (wakeRot V79).
+	-- Distinct de V113 (Blast). Distinct de V114 (BlastSmoke).
+	-- Distinct de V115 (Shockwave). Distinct de V116
+	-- (DeliveryPulse). Pas reentrant.
+	self.splashFree = {} :: { Part }
 
 	return self
 end
@@ -787,6 +797,7 @@ local function trackUnit(
 				Size = Vector3.new(0.16, 9, 9),
 				Transparency = 1,
 			}):Play()
+			-- Recycle LaunchWake leftover V118 (feel N160).
 			task.delay(0.8, function()
 				if wake.Parent then
 					wake:Destroy()
@@ -833,15 +844,48 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 		if not self.seen[id] then
 			if not unit.isMissile then
 				local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
-				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-				splash.Shape = Enum.PartType.Cylinder
+				-- V117 : recycler LandingSplash. Size (0.18, 3, 3) +
+				-- Transparency 0.18 + Color 202,239,247 + CFrame AVANT
+				-- Tween (un leftover Size = tween 15×15 / Transparency 1
+				-- du despawn precedent). Recette feel N161 inline —
+				-- ne PAS merger 41d3. Name LandingSplash conserve. Euler
+				-- N131 deja (wakeRot V79). Pas de pool partage avec
+				-- Blast / BlastSmoke / Shockwave / DeliveryPulse. Ne
+				-- pas nil les slots du pool (pop O(1) : [n] = nil).
+				-- Destroy modele navire conserve. Skip missiles
+				-- conserve. Distinct de V116 (deliveryFree). Distinct
+				-- de V115 (shockFree). Distinct de V113 (blastFree).
+				-- Distinct de V114 (smokeFree). Distinct de V81
+				-- (Shockwave wakeRot). Flame Size (V111) inchangee.
+				local splashFree = self.splashFree
+				local pn = #splashFree
+				local splash = if pn > 0 then splashFree[pn] else nil
+				if splash then
+					splashFree[pn] = nil
+				else
+					splash = Instance.new("Part")
+					splash.Name = "LandingSplash"
+					splash.Shape = Enum.PartType.Cylinder
+					splash.Anchored = true
+					splash.CanCollide = false
+					splash.CanTouch = false
+					splash.CanQuery = false
+					splash.CastShadow = false
+					splash.Material = Enum.Material.Neon
+					splash.TopSurface = Enum.SurfaceType.Smooth
+					splash.BottomSurface = Enum.SurfaceType.Smooth
+				end
+				splash.Name = "LandingSplash"
+				splash.Color = Color3.fromRGB(202, 239, 247)
 				splash.Transparency = 0.18
+				splash.Size = Vector3.new(0.18, 3, 3)
 				-- V79 : translation * rot cuit. Plus de CFrame.Angles despawn.
 				-- Recette feel N131. Y + 0.14 inchange. Distinct de V78 (spawn,
 				-- Y + 0.12). Distinct de DeliveryPulse (V80 + V116
-				-- recycle). Distinct de Shockwave (V81). Recycle
-				-- LandingSplash leftover V117 (feel N161).
+				-- recycle). Distinct de Shockwave (V81). Splash recycle
+				-- (V117).
 				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * self.wakeRot
+				splash.Parent = self.root
 				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 					Size = Vector3.new(0.18, 15, 15),
 					Transparency = 1,
@@ -850,9 +894,8 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
 				task.delay(0.95, function()
-					if splash.Parent then
-						splash:Destroy()
-					end
+					splash.Parent = nil
+					splashFree[#splashFree + 1] = splash
 					if unit.visual.model.Parent then
 						unit.visual.model:Destroy()
 					end
@@ -914,7 +957,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			-- du pool (pop O(1) : [n] = nil). Camion Parent = nil
 			-- conserve. Distinct de V115 (shockFree). Distinct de
 			-- V113 (blastFree). Distinct de V114 (smokeFree). Distinct
-			-- de V81 (Shockwave wakeRot). Flame Size (V111) inchangee.
+			-- de V81 (Shockwave wakeRot). Distinct de V117
+			-- (splashFree). Flame Size (V111) inchangee.
 			local deliveryFree = self.deliveryFree
 			local pn = #deliveryFree
 			local pulse = if pn > 0 then deliveryFree[pn] else nil
@@ -1068,7 +1112,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Ne pas nil les slots du pool (pop O(1) : [n] = nil). Distinct de
 	-- V112 (Ground/Border, WorldRenderer). Distinct de V81 (Shockwave
 	-- wakeRot). Distinct de V115 (shockFree). Distinct de V116
-	-- (DeliveryPulse deliveryFree). Flame Size (V111) inchangee.
+	-- (DeliveryPulse deliveryFree). Distinct de V117
+	-- (LandingSplash splashFree). Flame Size (V111) inchangee.
 	local free = self.blastFree
 	local n = #free
 	local sphere = if n > 0 then free[n] else nil
@@ -1102,7 +1147,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- les slots du pool (pop O(1) : [n] = nil). Distinct de V113
 	-- (Blast blastFree). Distinct de V114 (BlastSmoke smokeFree).
 	-- Distinct de V81 (wakeRot). Distinct de V116 (DeliveryPulse
-	-- deliveryFree). Flame Size (V111) inchangee.
+	-- deliveryFree). Distinct de V117 (LandingSplash splashFree).
+	-- Flame Size (V111) inchangee.
 	local shockFree = self.shockFree
 	local kn = #shockFree
 	local shockwave = if kn > 0 then shockFree[kn] else nil
@@ -1147,8 +1193,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Shockwave. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
 	-- Distinct de V113 (Blast blastFree). Distinct de V115 (Shockwave
 	-- shockFree). Distinct de V116 (DeliveryPulse deliveryFree).
-	-- Distinct de V81 (Shockwave wakeRot). Flame Size (V111)
-	-- inchangee.
+	-- Distinct de V117 (LandingSplash splashFree). Distinct de
+	-- V81 (Shockwave wakeRot). Flame Size (V111) inchangee.
 	local smokeFree = self.smokeFree
 	for i = 1, 5 do
 		local sn = #smokeFree
