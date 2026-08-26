@@ -76,23 +76,20 @@ function SystemsBootstrap.install()
 			-- (awaitingSpawn -> claimSpawn). Ne pas avaler l'offensive suivante.
 			local ps = self.players[attackerSlot]
 
-			local already = false
-			for _, atk in self.attacks do
-				if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
-					already = true
-					break
-				end
-			end
-
 			local aim = if ps then ps.aimTile else nil
 			if ps then
 				ps.aimTile = nil
 			end
 
 			local ok, message = origLaunch(self, attackerSlot, targetSlot)
-			if ok and typeof(aim) == "number" and not already then
+			-- Re-viser le front terre du couple (y compris s'il avait deja un
+			-- sourceTile). sourceTile == nil etait un faux proxy : apres le
+			-- premier AimFront.focus, le wrap ignorait toute visée suivante,
+			-- et un front sans visée bloquait la suivante. Jamais une tete
+			-- de pont (BoatFront pose sourceTile = landing).
+			if ok and typeof(aim) == "number" then
 				for _, atk in self.attacks do
-					if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
+					if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 						AimFront.focus(self, atk, math.floor(aim))
 						break
 					end

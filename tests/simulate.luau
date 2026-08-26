@@ -2790,7 +2790,117 @@ do
 						fail(`aim reinforce — fronts dupliques ({n1} -> {#state.attacks})`)
 					end
 					print("aim reinforce : un seul front apres deux lancers")
+
+					-- N36 : un second lancer avec visée re-ancre le front terre.
+					a.troops = 8000
+					a.aimTile = nil
+					state:launchAttack(a.slot, targetSlot)
+					local land: any = nil
+					for _, atk in state.attacks do
+						if atk.attacker == a.slot and atk.target == targetSlot and not atk.isBeachhead then
+							land = atk
+							break
+						end
+					end
+					if not land then
+						fail("aim re-vise — front terre introuvable")
+					else
+						land.sourceTile = nil
+						a.troops = 8000
+						a.aimTile = aimTile
+						local okAim, msgAim = state:launchAttack(a.slot, targetSlot)
+						if not okAim then
+							fail(`aim re-vise — lancer vise refuse ({tostring(msgAim)})`)
+						elseif land.sourceTile ~= aimTile then
+							fail(`aim re-vise — sourceTile={tostring(land.sourceTile)} attendu {aimTile}`)
+						else
+							print("aim re-vise : second lancer ancre sourceTile")
+						end
+
+						local altAim: number? = nil
+						local nAlt = MapGen.neighbors(aimTile, scratch)
+						for i = 1, nAlt do
+							local nb = scratch[i]
+							if state:isLand(nb) and buffer.readu8(state.owner, nb) == targetSlot and nb ~= aimTile then
+								altAim = nb
+								break
+							end
+						end
+						if altAim then
+							a.troops = 8000
+							a.aimTile = altAim
+							state:launchAttack(a.slot, targetSlot)
+							if land.sourceTile ~= altAim then
+								fail(`aim re-vise — seconde visée sourceTile={tostring(land.sourceTile)} attendu {altAim}`)
+							else
+								print("aim re-vise : seconde visée remplace la premiere")
+							end
+						end
+					end
 				end
+			end
+		end
+	end
+end
+
+do
+	-- N36 : AimFront.focus ne doit jamais re-viser une tete de pont.
+	local state = GameState.new(9090)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "Viseur", Random.new(41), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(42), 0)
+	if not a or not b then
+		fail("aim beachhead — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local landing: number? = nil
+		local inland: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) and buffer.readu8(state.owner, nb) ~= a.slot then
+					landing = index
+					inland = nb
+					break
+				end
+			end
+			if landing then
+				break
+			end
+		end
+		if not landing or not inland then
+			fail("aim beachhead — pas de contact")
+		else
+			state:setOwner(inland, b.slot)
+			a.troops = 12000
+			a.attackRatio = 0.4
+			state:seedBeachhead(a.slot, b.slot, 800, landing)
+			local bhSource: number? = nil
+			for _, atk in state.attacks do
+				if atk.isBeachhead then
+					bhSource = atk.sourceTile
+				end
+			end
+			a.aimTile = inland
+			state:launchAttack(a.slot, b.slot)
+			local bhNow: number? = nil
+			local landAimed = false
+			for _, atk in state.attacks do
+				if atk.attacker == a.slot and atk.target == b.slot then
+					if atk.isBeachhead then
+						bhNow = atk.sourceTile
+					elseif atk.sourceTile == inland then
+						landAimed = true
+					end
+				end
+			end
+			if bhNow ~= bhSource then
+				fail(`aim beachhead — sourceTile pont {tostring(bhNow)} attendu {tostring(bhSource)}`)
+			elseif not landAimed then
+				fail("aim beachhead — front terre non vise")
+			else
+				print("aim beachhead : tete de pont intacte, front terre vise")
 			end
 		end
 	end
@@ -3230,6 +3340,67 @@ do
 				fail(`boat own-tile — {leftover} transport(s) encore en mer`)
 			end
 			print("boat own-tile : restitution integrale, pas de malus")
+		end
+	end
+end
+
+do
+	-- N37 : findSeaPath poolé reste déterministe (même trajet, appels successifs).
+	local seaState = GameState.new(31415)
+	local coastal: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1 do
+		if seaState:isLand(index) and MapGen.isCoastal(seaState.terrain, index) then
+			table.insert(coastal, index)
+			if #coastal >= 400 then
+				break
+			end
+		end
+	end
+	local fromTile: number? = nil
+	local toTile: number? = nil
+	for _, first in coastal do
+		for _, second in coastal do
+			if first ~= second then
+				local path = Navy.findSeaPath(seaState, first, second)
+				if path and #path >= 2 then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+		end
+		if fromTile then
+			break
+		end
+	end
+	if not fromTile or not toTile then
+		fail("findSeaPath pool — aucune paire cotiere reliee")
+	else
+		local p1 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p2 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local p3 = Navy.findSeaPath(seaState, fromTile, toTile)
+		local function same(a: { number }?, b: { number }?): boolean
+			if not a or not b or #a ~= #b then
+				return false
+			end
+			for i = 1, #a do
+				if a[i] ~= b[i] then
+					return false
+				end
+			end
+			return true
+		end
+		if not p1 or not same(p1, p2) or not same(p1, p3) then
+			fail("findSeaPath pool — trajet non deterministe entre appels successifs")
+		else
+			local back = Navy.findSeaPath(seaState, toTile, fromTile)
+			local again = Navy.findSeaPath(seaState, fromTile, toTile)
+			if not same(p1, again) then
+				fail("findSeaPath pool — parent scratch pollue apres un autre trajet")
+			elseif not back then
+				fail("findSeaPath pool — trajet inverse introuvable")
+			else
+				print(`findSeaPath pool : {#p1} tuiles, 4 appels identiques`)
+			end
 		end
 	end
 end

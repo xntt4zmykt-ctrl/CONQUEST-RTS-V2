@@ -496,7 +496,10 @@ local function deployPlayer(player: Player, nationId: number)
 end
 
 joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
-	if typeof(nationId) ~= "number" then
+	-- Meme garde que IntentValidator.isInteger : typeof(inf)=="number" et
+	-- math.floor(inf)==inf ; math.clamp(inf, 1, n) tombe sur n, mais nan
+	-- traverse clamp et Nations.get.
+	if typeof(nationId) ~= "number" or nationId ~= nationId or math.abs(nationId) == math.huge then
 		return
 	end
 	-- Avant cooldown / pendingMode : un JoinRequest en phase ended ne doit
