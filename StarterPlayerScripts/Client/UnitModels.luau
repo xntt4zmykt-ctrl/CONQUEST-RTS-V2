@@ -436,6 +436,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (recycle Ground/Border, WorldRenderer — autre fichier).
 			-- Distinct de V113 (recycle Blast, Overlay — autre fichier).
 			-- Distinct de V114 (recycle BlastSmoke, Overlay — autre fichier).
+			-- Distinct de V115 (recycle Shockwave, Overlay — autre fichier).
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z

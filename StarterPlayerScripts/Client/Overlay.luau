@@ -90,10 +90,16 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 
 	-- V114 : free-list BlastSmoke PAR overlay (pas blastFree). Recette
 	-- feel N164 inline — ne PAS merger f293. Leftover Parent = nil,
-	-- pas Destroy. Name BlastSmoke. Boucle i=1..5. Shockwave Destroy
-	-- conserve (leftover V115). Distinct de V113 (Blast). Distinct de
-	-- V81 (Shockwave wakeRot). Pas reentrant.
+	-- pas Destroy. Name BlastSmoke. Boucle i=1..5. Distinct de V113
+	-- (Blast). Distinct de V81 (Shockwave wakeRot). Pas reentrant.
 	self.smokeFree = {} :: { Part }
+
+	-- V115 : free-list Shockwave PAR overlay (pas blastFree / smokeFree).
+	-- Recette feel N163 inline — ne PAS merger df45. Leftover Parent =
+	-- nil, pas Destroy. Name Shockwave. Euler N133 deja (wakeRot V81).
+	-- Distinct de V113 (Blast). Distinct de V114 (BlastSmoke). Pas
+	-- reentrant.
+	self.shockFree = {} :: { Part }
 
 	return self
 end
@@ -895,7 +901,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			-- V80 : translation * rot cuit. Plus de CFrame.Angles arrivee.
 			-- Recette feel N132 — ne pas merger 5aa9. Distinct de V78
 			-- (spawn, Y + 0.12) / V79 (despawn, Y + 0.14). Distinct de
-			-- Shockwave (V81). route.to deja un Vector3.
+			-- Shockwave (V81). Recycle DeliveryPulse leftover V116
+			-- (feel N162). route.to deja un Vector3.
 			pulse.CFrame = CFrame.new(route.to) * self.wakeRot
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
@@ -1021,7 +1028,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Name Blast conserve. Pas de pool partage avec Shockwave / fumee.
 	-- Ne pas nil les slots du pool (pop O(1) : [n] = nil). Distinct de
 	-- V112 (Ground/Border, WorldRenderer). Distinct de V81 (Shockwave
-	-- wakeRot, Destroy conserve). Flame Size (V111) inchangee.
+	-- wakeRot). Distinct de V115 (shockFree). Flame Size (V111)
+	-- inchangee.
 	local free = self.blastFree
 	local n = #free
 	local sphere = if n > 0 then free[n] else nil
@@ -1047,16 +1055,44 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Onde horizontale : elle communique la portee bien mieux qu'une simple
 	-- sphere et reste visible quand la camera regarde presque a la verticale.
-	local shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
-	shockwave.Shape = Enum.PartType.Cylinder
+	-- V115 : recycler Shockwave. Size (0.32, 5, 5) + Transparency 0.12 +
+	-- Color 255,229,181 + CFrame AVANT Tween (un leftover Size = rayon
+	-- de la frappe precedente). Recette feel N163 inline — ne PAS
+	-- merger df45. Name Shockwave conserve. Euler N133 deja (wakeRot
+	-- V81). Pas de pool partage avec Blast / BlastSmoke. Ne pas nil
+	-- les slots du pool (pop O(1) : [n] = nil). Distinct de V113
+	-- (Blast blastFree). Distinct de V114 (BlastSmoke smokeFree).
+	-- Distinct de V81 (wakeRot). Flame Size (V111) inchangee.
+	local shockFree = self.shockFree
+	local kn = #shockFree
+	local shockwave = if kn > 0 then shockFree[kn] else nil
+	if shockwave then
+		shockFree[kn] = nil
+	else
+		shockwave = Instance.new("Part")
+		shockwave.Name = "Shockwave"
+		shockwave.Shape = Enum.PartType.Cylinder
+		shockwave.Anchored = true
+		shockwave.CanCollide = false
+		shockwave.CanTouch = false
+		shockwave.CanQuery = false
+		shockwave.CastShadow = false
+		shockwave.Material = Enum.Material.Neon
+		shockwave.TopSurface = Enum.SurfaceType.Smooth
+		shockwave.BottomSurface = Enum.SurfaceType.Smooth
+	end
+	shockwave.Name = "Shockwave"
+	shockwave.Color = Color3.fromRGB(255, 229, 181)
 	shockwave.Transparency = 0.12
+	shockwave.Size = Vector3.new(0.32, 5, 5)
 	-- V81 : translation * rot cuit. Plus de CFrame.Angles explosion.
 	-- Recette feel N133 — ne pas merger bfcc. Distinct de V78 (spawn,
 	-- Y + 0.12) / V79 (despawn, Y + 0.14) / V80 (arrivee camion).
-	-- Distinct de Effects conquestPulse (leftover V82). Y = PLAINS + 0.5.
+	-- Distinct de Effects conquestPulse (V82). Y = PLAINS + 0.5.
 	-- Sphere Blast recyclee (V113). Fumee recyclee (V114). Shockwave
-	-- Destroy conserve (leftover V115).
+	-- recyclee (V115).
 	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * self.wakeRot
+	shockwave.Parent = self.root
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
 		Transparency = 1,
@@ -1069,9 +1105,9 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- la frappe precedente). Recette feel N164 inline — ne PAS merger
 	-- f293. Name BlastSmoke conserve. Pas de pool partage avec Blast /
 	-- Shockwave. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
-	-- Distinct de V113 (Blast blastFree). Distinct de V81 (Shockwave
-	-- wakeRot, Destroy conserve leftover V115). Flame Size (V111)
-	-- inchangee.
+	-- Distinct de V113 (Blast blastFree). Distinct de V115 (Shockwave
+	-- shockFree). Distinct de V81 (Shockwave wakeRot). Flame Size
+	-- (V111) inchangee.
 	local smokeFree = self.smokeFree
 	for i = 1, 5 do
 		local sn = #smokeFree
@@ -1116,8 +1152,7 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- V113 : PointLight enfant reutilise. FindFirstChildWhichIsA, pas
 	-- Instance.new a chaque frappe. Brightness / Range / Color
 	-- reecrits (leftover Brightness = 0 apres Tween). Recette feel
-	-- N165. BlastSmoke recyclee (V114). Shockwave Destroy conserve
-	-- (leftover V115).
+	-- N165. BlastSmoke recyclee (V114). Shockwave recyclee (V115).
 	local light = sphere:FindFirstChildWhichIsA("PointLight")
 	if not light then
 		light = Instance.new("PointLight")
@@ -1133,9 +1168,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		free[#free + 1] = sphere
 	end)
 	task.delay(1, function()
-		if shockwave.Parent then
-			shockwave:Destroy()
-		end
+		shockwave.Parent = nil
+		shockFree[#shockFree + 1] = shockwave
 	end)
 end
 
