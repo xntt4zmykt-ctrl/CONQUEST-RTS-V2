@@ -1000,7 +1000,7 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse.
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse. V126 clearSelection Parent=nil.
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
@@ -1070,7 +1070,39 @@ check("calques d'entites, effets et apercu", function()
 	end
 	assert(not ringLeft, "SelectionRing survit clearSelection")
 	assert(not markerLeft, "SelectedTerritory survit clearSelection")
-	assert(effects.selection == nil, "clearSelection ne Destroy pas le marqueur")
+	-- V126 : clearSelection parque (feel N168 inline — ne PAS
+	-- merger a72c). Parent = nil, garder self.selection /
+	-- self.selectionRing, pas Destroy. Leftover V125 deux
+	-- selectTile sans clear doit rester vert. Leftover V83
+	-- Y +0.48 doit rester vert. Leftover V124 feedFree
+	-- (check fil) doit rester vert.
+	assert(aMarker.Parent == nil, "SelectedTerritory pas parque")
+	assert(aRing.Parent == nil, "SelectionRing pas parque")
+	assert(rawequal(effects.selection, aMarker), "clearSelection nil le marqueur")
+	assert(rawequal(effects.selectionRing, aRing), "clearSelection nil le ring")
+	effects:selectTile(2002, Color3.fromRGB(46, 204, 113))
+	assert(rawequal(effects.selection, aMarker), "SelectedTerritory recree apres clear")
+	assert(aMarker.Parent == effects.root, "SelectedTerritory pas reparente")
+	assert(aMarker.Name == "SelectedTerritory", "Name SelectedTerritory perdu au reparent")
+	assert(math.abs(aMarker.Size.Y - 0.32) < 1e-6, "reparent Size Y visuel")
+	assert(
+		math.abs(aMarker.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2002) + 0.58)) < 1e-6,
+		"reparent marker Y visuel"
+	)
+	assert(rawequal(effects.selectionRing, aRing), "SelectionRing recree apres clear")
+	assert(aRing.Parent == effects.root, "SelectionRing pas reparente")
+	assert(
+		math.abs(aRing.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2002) + 0.48)) < 1e-6,
+		"reparent ring Y"
+	)
+	-- Re-parker pour ne pas polluer le check vagues (V121 compte
+	-- les Parts sans Name ConquestPulse / sans Billboard comme
+	-- tileFlash). Leftover V121 flashFree doit rester vert.
+	effects:clearSelection()
+	assert(aMarker.Parent == nil, "SelectedTerritory pas reparque")
+	assert(aRing.Parent == nil, "SelectionRing pas reparque")
+	assert(rawequal(effects.selection, aMarker), "2e clear nil le marqueur")
+	assert(rawequal(effects.selectionRing, aRing), "2e clear nil le ring")
 end)
 
 check("pose et capture de chaque type de batiment", function()

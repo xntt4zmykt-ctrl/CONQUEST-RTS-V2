@@ -614,7 +614,8 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	-- de Effects conquestPulse (feel N157, autre fichier — fermee V122). Distinct
 	-- de BuildingModels BuildRing (feel N166, autre fichier — fermee V123). Distinct
 	-- de HUD notify (feel N167, autre fichier — fermee V124). Distinct
-	-- de Effects selectTile (feel N155, autre fichier — fermee V125). Delay
+	-- de Effects selectTile (feel N155, autre fichier — fermee V125). Distinct
+	-- de Effects clearSelection (feel N168, autre fichier — fermee V126). Delay
 	-- 1.5 inchange. Tween lift + fade inchanges. ours = mine ~= false
 	-- inchange. Ne pas modifier routePart. Ne pas changer Overlay.clear.
 	local goldFree = self.goldFree

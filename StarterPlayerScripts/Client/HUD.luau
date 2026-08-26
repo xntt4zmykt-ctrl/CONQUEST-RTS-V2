@@ -1236,6 +1236,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- ringFree, BuildingModels). Distinct de V120 (floatingText
 	-- textFree, Effects). Distinct de V122 (conquestPulse pulseFree).
 	-- Distinct de V125 (selectTile SelectedTerritory, Effects).
+	-- Distinct de V126 (clearSelection Parent=nil, Effects).
 	-- Pas reentrant. Evenement fil, pas 60 Hz. Ne pas nil les slots
 	-- du pool. Ne pas geler Size flame (V74).
 	local feedFree = self.feedFree
