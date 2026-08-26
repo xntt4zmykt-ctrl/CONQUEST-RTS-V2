@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Sélection de cases = AttackExecution.addNeighbors / sourceTile OpenFront.
+	Sélection de cases = AttackExecution.addNeighbors / sourceTile CONQUEST.
 
 	Land click : on ancre UNE case source (la case cliquée si elle touche
 	notre bordure, sinon le contact le plus proche). Pas de disque, pas de

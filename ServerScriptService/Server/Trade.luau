@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Commerce terrestre, modele OpenFront — le pendant routier du commerce
+	Commerce terrestre, regle CONQUEST — le pendant routier du commerce
 	maritime de Navy.
 
 	Trois regles portent tout le systeme :
@@ -18,7 +18,7 @@
 	faction : contrairement aux navires, un colis ne paie qu'un camp. Pas de
 	fil de notifications non plus — une usine livre toutes les sept secondes,
 	le fil serait sature ; le "+X or" flottant au-dessus de la gare est le
-	seul retour, exactement comme dans le jeu de reference.
+	seul retour, selon les regles CONQUEST.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

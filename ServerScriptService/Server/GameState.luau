@@ -1083,7 +1083,7 @@ end
 	qui donne l'impression que le jeu prend des blocs au hasard, parce que c'est
 	exactement ce qu'il faisait.
 
-	Trois termes, repris du jeu de reference, et chacun produit un comportement
+	Trois termes, propres a CONQUEST, et chacun produit un comportement
 	que le joueur peut lire sur la carte :
 
 	  - **`+ tick`** — une tuile entree tot dans la file passe avant une tuile
@@ -1215,7 +1215,7 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 end
 
 --[[
-	Rappelle une offensive en cours, modele OpenFront : l'ordre n'est pas
+	Rappelle une offensive en cours, regle CONQUEST : l'ordre n'est pas
 	honore immediatement mais apres un delai (RETREAT_DELAY ticks), pendant
 	lequel le front continue de se battre. Une retraite instantanee ferait de
 	chaque engagement un essai sans risque ; le delai rend la decision
