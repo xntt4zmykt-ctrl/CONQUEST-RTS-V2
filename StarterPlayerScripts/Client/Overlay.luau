@@ -653,7 +653,11 @@ end
 -- Non reentrant — un seul applyUnits / lot. Navire : extra reste nil.
 -- Insert : poser { tx, ty } une fois (copie, jamais l'alias snapshot).
 -- Deja suivi : muter tx/ty, jamais remplacer unit.extra.
--- Pas de RemoteFunction. current / target Vector2 inchanges.
+-- V55 : targetX/Y + currentX/Y nombres (recette extra mute). Vector2 immuable
+-- aurait force un Vector2.new a chaque lot (10 Hz) et a chaque lerp (60 Hz).
+-- Insert : poser les quatre nombres une fois. Update : muter targetX/Y.
+-- Distinct de V52 (extra) / V54 (HUD sort) / Vector3-CFrame 60 Hz (hors passe).
+-- Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
 local function trackUnit(
 	self: Overlay,
 	id: number,
@@ -675,8 +679,10 @@ local function trackUnit(
 		end
 		unit = {
 			visual = visual,
-			current = Vector2.new(x, y),
-			target = Vector2.new(x, y),
+			currentX = x,
+			currentY = y,
+			targetX = x,
+			targetY = y,
 			isMissile = isMissile,
 			phase = (id % 31) / 31 * math.pi * 2,
 			extra = ownedExtra,
@@ -711,7 +717,8 @@ local function trackUnit(
 	else
 		unit.extra = nil
 	end
-	unit.target = Vector2.new(x, y)
+	unit.targetX = x
+	unit.targetY = y
 	self.seen[id] = true
 end
 
@@ -736,7 +743,7 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 	for id, unit in self.units do
 		if not self.seen[id] then
 			if not unit.isMissile then
-				local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
+				local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
 				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
 				splash.Shape = Enum.PartType.Cylinder
 				splash.Transparency = 0.18
@@ -837,9 +844,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 	end
 
 	for _, unit in self.units do
-		unit.current += (unit.target - unit.current) * alpha
+		-- V55 : lerp numerique. Vector2.current += aurait alloue 60 Hz.
+		unit.currentX += (unit.targetX - unit.currentX) * alpha
+		unit.currentY += (unit.targetY - unit.currentY) * alpha
 
-		local x, y = unit.current.X, unit.current.Y
+		local x, y = unit.currentX, unit.currentY
 		local ground = WorldSpace.tileToWorld(x, y)
 
 		local height
@@ -860,15 +869,17 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 
 		local bob = if unit.isMissile then 0 else math.sin(now * 2.4 + unit.phase) * 0.24
 		local position = Vector3.new(ground.X, height + bob, ground.Z)
-		local direction = unit.target - unit.current
+		local dx = unit.targetX - unit.currentX
+		local dy = unit.targetY - unit.currentY
+		local mag = math.sqrt(dx * dx + dy * dy)
 
-		if direction.Magnitude > 0.01 then
-			local look = Vector3.new(direction.X, 0, direction.Y).Unit
+		if mag > 0.01 then
+			local look = Vector3.new(dx, 0, dy).Unit
 			local frame = CFrame.lookAt(position, position + look)
 			if not unit.isMissile then
 				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
 			end
-			UnitModels.place(unit.visual, frame, now + unit.phase, direction.Magnitude)
+			UnitModels.place(unit.visual, frame, now + unit.phase, mag)
 		else
 			UnitModels.place(unit.visual, CFrame.new(position), now + unit.phase, 0)
 		end
