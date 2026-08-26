@@ -316,6 +316,61 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5f. Index silosBySlot = batiments SILO (ISSUE-N44).
+	do
+		local SILO = Config.BUILDING.SILO
+		local indexed = 0
+		local silosBySlot = state.silosBySlot or {}
+		for slot, set in silosBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= SILO or building.slot ~= slot then
+					fail(`tick {tick} — silosBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realSilo = 0
+		for index, building in state.buildings do
+			if building.kind == SILO then
+				realSilo += 1
+				local set = silosBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — SILO {index} absent de silosBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realSilo then
+			fail(`tick {tick} — silosBySlot count {indexed} != SILO {realSilo}`)
+		end
+	end
+
+	-- 5g. Index factoriesByTile = usines (ISSUE-N45).
+	if state.factoriesByTile then
+		local FACTORY = Config.BUILDING.FACTORY
+		local indexed = 0
+		for index, info in state.factoriesByTile do
+			indexed += 1
+			local building = state.buildings[index]
+			if not building or building.kind ~= FACTORY or building.slot ~= info.slot or building.level ~= info.level then
+				fail(`tick {tick} — factoriesByTile[{index}] orphelin`)
+			end
+		end
+		local realFactory = 0
+		for index, building in state.buildings do
+			if building.kind == FACTORY then
+				realFactory += 1
+				local info = state.factoriesByTile[index]
+				if not info or info.slot ~= building.slot or info.level ~= building.level then
+					fail(`tick {tick} — usine {index} absente de factoriesByTile`)
+				end
+			end
+		end
+		if indexed ~= realFactory then
+			fail(`tick {tick} — factoriesByTile count {indexed} != FACTORY {realFactory}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -1941,7 +1996,7 @@ do
 		local targetTile: number? = nil
 		for index = 0, Config.TILE_COUNT - 1 do
 			local owner = buffer.readu8(mirvState.owner, index)
-			if not siloTile and owner == a.slot then
+			if not siloTile and owner == a.slot and not mirvState.buildings[index] then
 				siloTile = index
 			elseif not targetTile and owner == b.slot then
 				targetTile = index
@@ -1950,9 +2005,7 @@ do
 		if not siloTile or not targetTile then
 			fail("mirv — territoires de test introuvables")
 		else
-			mirvState.buildings[siloTile] =
-				{ kind = Config.BUILDING.SILO, slot = a.slot, level = 1, links = {}, cooldown = 0 }
-			a.siloCount = 1
+			mirvState:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
 			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
 			a.gold = 5000
 			b.troops = 10000
@@ -5298,6 +5351,210 @@ do
 					else
 						print("tryIntercept : SAM meme slot skip")
 					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N44 : silosBySlot indexe les silos, pas les SAM. transfer change de camp.
+	-- Nukes.launch n'a plus besoin du hash buildings. armCooldown reste la
+	-- voie d'ecriture du cooldown (N43).
+	local state = GameState.new(1060)
+	state.combatUnlocked = true
+	local owner = state:addPlayer(nil, "Arsenal", Random.new(70), 0)
+	local heir = state:addPlayer(nil, "HeritierSilo", Random.new(71), 0)
+	local target = state:addPlayer(nil, "CibleSilo", Random.new(72), 0)
+	if not owner or not heir or not target then
+		fail("silosBySlot — spawn impossible")
+	else
+		owner.era = Eras.requiredForNuke(Config.NUKE.ATOM)
+		owner.gold = 99999
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 4 then
+					break
+				end
+			end
+		end
+		if #sites < 4 then
+			fail("silosBySlot — tuiles libres insuffisantes")
+		else
+			-- 0 silo : refus avant scan.
+			local ok0, msg0 = Nukes.launch(state, owner.slot, target.capitalTile, Config.NUKE.ATOM)
+			if ok0 then
+				fail("silosBySlot — tir sans silo accepte")
+			elseif not msg0 or not string.find(msg0, "silo", 1, true) then
+				fail(`silosBySlot — mauvais refus 0 silo ({tostring(msg0)})`)
+			else
+				state:placeBuilding(sites[1], Config.BUILDING.SILO, owner.slot)
+				state:placeBuilding(sites[2], Config.BUILDING.SILO, owner.slot)
+				state:placeBuilding(sites[3], Config.BUILDING.SAM, owner.slot)
+				state:placeBuilding(sites[4], Config.BUILDING.PORT, owner.slot)
+				local set = state.silosBySlot[owner.slot]
+				local count = 0
+				if set then
+					for _ in set do
+						count += 1
+					end
+				end
+				if count ~= 2 then
+					fail(`silosBySlot — {count} silos indexes, attendu 2`)
+				elseif set and (set[sites[3]] or set[sites[4]]) then
+					fail("silosBySlot — SAM/PORT indexes comme silo")
+				else
+					state:transferBuilding(sites[1], heir.slot)
+					local oldSet = state.silosBySlot[owner.slot]
+					local newSet = state.silosBySlot[heir.slot]
+					if oldSet and oldSet[sites[1]] then
+						fail("silosBySlot — transfer laisse l'ancien camp")
+					elseif not (newSet and newSet[sites[1]]) then
+						fail("silosBySlot — transfer n'indexe pas le nouvel camp")
+					else
+						state:destroyBuilding(sites[1])
+						if newSet and newSet[sites[1]] then
+							fail("silosBySlot — destroy laisse un orphelin")
+						else
+							print("silosBySlot : pose / transfer / destroy OK")
+						end
+					end
+				end
+
+				-- Silo restant pret → tir + armCooldown. SAM n'est jamais lanceur.
+				local okReady, msgReady = Nukes.launch(state, owner.slot, target.capitalTile, Config.NUKE.ATOM)
+				local silo = state.buildings[sites[2]]
+				if not okReady then
+					fail(`silosBySlot — tir refuse ({tostring(msgReady)})`)
+				elseif not silo or silo.cooldown ~= Config.SILO_COOLDOWN then
+					fail("silosBySlot — launch n'a pas arme le cooldown")
+				elseif not (state.coolingBuildings and state.coolingBuildings[sites[2]]) then
+					fail("silosBySlot — launch n'a pas leve coolingBuildings")
+				elseif #state.missiles ~= 1 then
+					fail(`silosBySlot — {#state.missiles} missile(s) apres tir`)
+				else
+					print("tryLaunch : silo pret → tir + armCooldown")
+				end
+
+				-- Silo en recharge + SAM pret : refus recharge, pas de second missile.
+				local okCd, msgCd = Nukes.launch(state, owner.slot, target.capitalTile, Config.NUKE.ATOM)
+				if okCd then
+					fail("silosBySlot — tir accepte pendant la recharge")
+				elseif not msgCd or not string.find(msgCd, "recharg", 1, true) then
+					fail(`silosBySlot — mauvais refus recharge ({tostring(msgCd)})`)
+				elseif #state.missiles ~= 1 then
+					fail("silosBySlot — SAM choisi comme lanceur")
+				else
+					print("tryLaunch : silo recharge refuse, SAM/PORT ignores")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N45 : factoriesByTile indexe les usines. Trade.step flatten depuis
+	-- l'index (un FACTORY injecte hors index n'expedie pas). Sort inchange.
+	local state = GameState.new(1061)
+	local owner = state:addPlayer(nil, "Usine", Random.new(73), 0)
+	local heir = state:addPlayer(nil, "HeritierUsine", Random.new(74), 0)
+	if not owner or not heir then
+		fail("factoriesByTile — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		local cityTile: number? = nil
+		local ghostTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				local cx, cy = fx + Config.TRUCK_SPEED + 3, fy
+				local gx, gy = fx + Config.TRUCK_SPEED + 6, fy
+				if MapGen.inBounds(cx, cy) and MapGen.inBounds(gx, gy) then
+					local candidate = MapGen.toIndex(cx, cy)
+					local ghost = MapGen.toIndex(gx, gy)
+					if state:isLand(candidate) and state:isLand(ghost) and not state.buildings[index] then
+						factoryTile, cityTile, ghostTile = index, candidate, ghost
+						break
+					end
+				end
+			end
+		end
+		if not factoryTile or not cityTile or not ghostTile then
+			fail("factoriesByTile — paire terrestre introuvable")
+		else
+			state:setOwner(factoryTile, owner.slot)
+			state:setOwner(cityTile, owner.slot)
+			state:setOwner(ghostTile, owner.slot)
+			state:placeBuilding(factoryTile, Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(cityTile, Config.BUILDING.CITY, owner.slot)
+			local rec = state.factoriesByTile[factoryTile]
+			if not rec or rec.slot ~= owner.slot or rec.level ~= 1 then
+				fail("factoriesByTile — pose n'a pas indexe")
+			else
+				state:upgradeBuilding(factoryTile)
+				local after = state.factoriesByTile[factoryTile]
+				if not after or after.level ~= state.buildings[factoryTile].level then
+					fail("factoriesByTile — upgrade n'a pas mis a jour le niveau")
+				else
+					state:transferBuilding(factoryTile, heir.slot)
+					local moved = state.factoriesByTile[factoryTile]
+					if not moved or moved.slot ~= heir.slot then
+						fail("factoriesByTile — transfer n'a pas change le camp")
+					else
+						state:transferBuilding(factoryTile, owner.slot)
+						print("factoriesByTile : pose / upgrade / transfer OK")
+					end
+				end
+			end
+
+			-- 0 usine hors index : pas de colis.
+			local empty = GameState.new(1062)
+			local ghostOwner = empty:addPlayer(nil, "FantomeUsine", Random.new(75), 0)
+			if not ghostOwner then
+				fail("trade factory empty — spawn impossible")
+			else
+				empty.tick += 1
+				Trade.step(empty, Random.new(7), function() end)
+				local n = 0
+				for _ in empty.tradeDeliveries do
+					n += 1
+				end
+				if n ~= 0 then
+					fail(`trade factory empty — {n} colis sans usine`)
+				else
+					print("trade factory empty : 0 usine, pas de colis")
+				end
+			end
+
+			state.tick += 1
+			Trade.step(state, Random.new(8), function() end)
+			if not state.tradeDeliveries[factoryTile] then
+				fail("trade factory index — usine indexee n'expedie pas")
+			else
+				-- Injection hors index : liens copies, pas de factoriesByTile.
+				local ghostFactory = {
+					kind = Config.BUILDING.FACTORY,
+					slot = owner.slot,
+					level = 1,
+					links = { cityTile },
+					cooldown = 0,
+				}
+				state.buildings[ghostTile] = ghostFactory
+				state.tick += 1
+				Trade.step(state, Random.new(9), function() end)
+				if state.tradeDeliveries[ghostTile] then
+					fail("trade factory index — FACTORY hors index a expedie")
+				else
+					print("trade factory index : flatten ignore le hash buildings")
+				end
+				state.buildings[ghostTile] = nil
+				state:destroyBuilding(factoryTile)
+				if state.factoriesByTile[factoryTile] ~= nil then
+					fail("factoriesByTile — destroy laisse l'index")
+				else
+					print("factoriesByTile : destroy OK")
 				end
 			end
 		end
