@@ -2472,8 +2472,19 @@ do
 		if okAim or reasonAim ~= "InvalidTarget" then
 			fail(`intentions — QuickChat slot 99 accepte ({tostring(reasonAim)})`)
 		end
+		local okSelf, reasonSelf = IntentValidator.enqueue(
+			ctx,
+			fakePlayer,
+			"Diplomacy",
+			13,
+			{ action = "request", targetSlot = ps.slot }
+		)
+		if okSelf or reasonSelf ~= "InvalidTarget" then
+			fail(`intentions — diplomatie vers soi acceptee ({tostring(reasonSelf)})`)
+		end
 		print("intentions : QuickChat cooldown honore")
 		print("intentions : ratio borne, QuickChat slot hors catalogue refuse")
+		print("intentions : diplomatie vers soi refusee")
 	end
 end
 
@@ -2952,6 +2963,114 @@ do
 			fail("viewFor expiry — proposition perimee encore en outgoing")
 		end
 		print("viewFor expiry : proposition perimee masquee")
+	end
+end
+
+do
+	-- areAllied honore l'expiry AVANT Diplomacy.step (flush tourne avant).
+	local state = GameState.new(5155)
+	local a = state:addPlayer(nil, "Alpha", Random.new(91), 0)
+	local b = state:addPlayer(nil, "Beta", Random.new(92), 0)
+	if not a or not b then
+		fail("areAllied expiry — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		if not Diplomacy.accept(state, a.slot, b.slot) then
+			fail("areAllied expiry — accept refuse")
+		else
+			state.tick = Config.ALLIANCE_DURATION - 1
+			if not state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte vivant refuse avant terme")
+			end
+			local liveView = Diplomacy.viewFor(state, a.slot)
+			if not liveView.allies[b.slot] then
+				fail("areAllied expiry — HUD masque un pacte vivant")
+			end
+			state.tick = Config.ALLIANCE_DURATION
+			if state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte perime encore honore avant Diplomacy.step")
+			end
+			local staleView = Diplomacy.viewFor(state, a.slot)
+			if staleView.allies[b.slot] then
+				fail("areAllied expiry — HUD expose un pacte perime")
+			end
+			print("areAllied expiry : pacte perime refuse avant step")
+		end
+	end
+end
+
+do
+	-- Debarquement sur une cote deja prise : restitution integrale, pas le malus.
+	local state = GameState.new(6161)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(61), 0)
+	if not invader then
+		fail("boat own-tile — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat own-tile — tuile terrestre introuvable")
+		else
+			state:setOwner(landing, invader.slot)
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			Navy.step(state, Random.new(3))
+			local expected = 1000 + committed
+			if math.abs(invader.troops - expected) > 0.01 then
+				fail(`boat own-tile — troupes {invader.troops} attendu {expected} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat own-tile — {leftover} transport(s) encore en mer`)
+			end
+			print("boat own-tile : restitution integrale, pas de malus")
+		end
+	end
+end
+
+do
+	-- removePlayer purge les embargoes / propositions inbound (slot recycle).
+	local state = GameState.new(7171)
+	local a = state:addPlayer(nil, "Reste", Random.new(71), 0)
+	local b = state:addPlayer(nil, "Part", Random.new(72), 0)
+	if not a or not b then
+		fail("removePlayer inbound — spawn impossible")
+	else
+		Diplomacy.setEmbargo(state, a.slot, b.slot, true)
+		Diplomacy.request(state, a.slot, b.slot)
+		local gone = b.slot
+		state:removePlayer(gone)
+		if state.embargoes[a.slot] and state.embargoes[a.slot][gone] then
+			fail("removePlayer inbound — embargo vers slot recycle")
+		end
+		if state.requests[a.slot] and state.requests[a.slot][gone] then
+			fail("removePlayer inbound — proposition vers slot recycle")
+		end
+		print("removePlayer inbound : embargo et proposition purges")
 	end
 end
 
