@@ -316,6 +316,13 @@ local clusterFactoryCount: { [number]: number } = {}
 local collapseRemainBuf: { number } = table.create(64)
 local collapseLeftBuf: { number } = table.create(64)
 local collapseScratch = table.create(4, 0)
+-- V46 : snapshot batiments de removePlayer (recette elimBuf / V37). Distinct
+-- de elimBuf (slots), doomedBuf Attack (V41) et collapseRemainBuf (tuiles).
+-- Ne pas nommer `doomed` : collision de vocabulaire. Non reentrant —
+-- removePlayer synchrone ; stepElimination peut enchainer plusieurs slots
+-- donc truncate A CHAQUE appel. Fallback hash conserve (tests partiels).
+-- Ne pas table.clone de buildingsBySlot[slot] : destroy mute l'index live.
+local destroyBuf: { number } = table.create(16)
 
 --=============================================================================
 -- Construction
@@ -1257,23 +1264,29 @@ function GameState.removePlayer(self: GameState, slot: number)
 		self.doomUnderSince[slot] = nil
 	end
 
-	-- V22 : snapshot buildingsBySlot[slot] (destroy mute l'index). Iterer le
-	-- hash pendant destroyBuilding peut sauter des cles. Fallback hash si
-	-- l'index est nil (tests partiels).
-	local doomed: { number } = {}
+	-- V22 / V46 : snapshot buildingsBySlot[slot] (destroy mute l'index).
+	-- Iterer le hash pendant destroyBuilding peut sauter des cles. Fallback
+	-- hash si l'index est nil (tests partiels). Truncate leftover AVANT
+	-- destroy : un fantome d'etat A detruirait un batiment d'etat B.
+	local n = 0
 	if self.buildingsBySlot and self.buildingsBySlot[slot] then
 		for index in self.buildingsBySlot[slot] do
-			table.insert(doomed, index)
+			n += 1
+			destroyBuf[n] = index
 		end
 	else
 		for index, building in self.buildings do
 			if building.slot == slot then
-				table.insert(doomed, index)
+				n += 1
+				destroyBuf[n] = index
 			end
 		end
 	end
-	for _, index in doomed do
-		self:destroyBuilding(index)
+	for i = #destroyBuf, n + 1, -1 do
+		destroyBuf[i] = nil
+	end
+	for i = 1, n do
+		self:destroyBuilding(destroyBuf[i])
 	end
 
 	for index = 0, Config.TILE_COUNT - 1 do
@@ -2328,5 +2341,9 @@ function GameState.step(self: GameState): { number }
 	self:stepAttacks()
 	return self:stepElimination()
 end
+
+-- Expose banc V46 (pas de filaire). Permet d'assert le truncate leftover
+-- inter-instances sans dependre d'une collision d'index de tuile.
+GameState.destroyBuf = destroyBuf
 
 return GameState

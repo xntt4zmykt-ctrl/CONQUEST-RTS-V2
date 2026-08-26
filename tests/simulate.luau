@@ -6130,6 +6130,180 @@ end
 
 print("passe 32 : parkedBuf, collapseRemainBuf recycle OK")
 
+--[[
+	Nightly passe 33 — revue PR #92 : GameState.removePlayer destroyBuf /
+	Placement.validTiles recycle (V46–V47).
+]]
+do
+	-- V46 : destroyBuf. Slot deja absent → return. Slot dont on a detruit
+	-- la capitale (0 batiment) → pas d'erreur, index du slot nil.
+	-- A (capitale + CITY, n=2) puis B (capitale seule, n=1) → #destroyBuf
+	-- == 1 (truncate leftover). CITY de B a un autre index survit.
+	-- Recette V37 (truncate leftover avant traitement). Pas d'elimBuf.
+	local absent = GameState.new(3301)
+	absent:removePlayer(99)
+	print("destroyBuf : slot absent, return (V46)")
+	local empty = GameState.new(3302)
+	local ghost = empty:addPlayer(nil, "DestEmpty", Random.new(81), 0)
+	if not ghost then
+		fail("destroyBuf — spawn empty impossible")
+	else
+		local gone = ghost.slot
+		local cap = ghost.capitalTile
+		if cap then
+			empty:destroyBuilding(cap)
+		end
+		empty:removePlayer(gone)
+		if empty.players[gone] ~= nil then
+			fail("destroyBuf — slot sans batiment encore vivant")
+		elseif empty.buildingsBySlot[gone] ~= nil then
+			fail("destroyBuf — index du slot sans batiment non nil")
+		else
+			print("destroyBuf : slot sans batiment, index nil (V46)")
+			local sA = GameState.new(3303)
+			local a = sA:addPlayer(nil, "DestA", Random.new(82), 0)
+			if not a then
+				fail("destroyBuf — spawn A impossible")
+			else
+				local cityA: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if buffer.readu8(sA.owner, index) == a.slot and not sA.buildings[index] and sA:isLand(index) then
+						cityA = index
+						break
+					end
+				end
+				if not cityA then
+					fail("destroyBuf — tuile CITY A introuvable")
+				else
+					sA:placeBuilding(cityA, Config.BUILDING.CITY, a.slot)
+					sA:removePlayer(a.slot)
+					local nA = #GameState.destroyBuf
+					if nA < 2 then
+						fail(`destroyBuf — A n={nA} (attendu >= 2 capitale+ville)`)
+					else
+						local sB = GameState.new(3304)
+						local keeper = sB:addPlayer(nil, "DestKeep", Random.new(83), 0)
+						local goneB = sB:addPlayer(nil, "DestGone", Random.new(84), 0)
+						if not keeper or not goneB then
+							fail("destroyBuf — spawn B impossible")
+						else
+							local cityB: number? = nil
+							for index = 0, Config.TILE_COUNT - 1 do
+								if
+									buffer.readu8(sB.owner, index) == keeper.slot
+									and not sB.buildings[index]
+									and sB:isLand(index)
+									and index ~= cityA
+								then
+									cityB = index
+									break
+								end
+							end
+							if not cityB then
+								fail("destroyBuf — tuile CITY B introuvable")
+							else
+								sB:placeBuilding(cityB, Config.BUILDING.CITY, keeper.slot)
+								sB:removePlayer(goneB.slot)
+								local nB = #GameState.destroyBuf
+								if nB ~= 1 then
+									fail(`destroyBuf — leftover A dans B (n={nB}, attendu 1)`)
+								elseif not sB.buildings[cityB] or sB.buildings[cityB].slot ~= keeper.slot then
+									fail("destroyBuf — CITY de B detruite par leftover")
+								else
+									print("destroyBuf : truncate A→B, CITY B survit (V46)")
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V47 : validTiles recycle. Kind non buildable / hors carte / tuile
+	-- etrangere → # == 0, rawequal emptyTileBuf. Deux resolve CITY sur
+	-- le meme ctx → tile identique. Recette V40 (pas de leftover).
+	-- Ne pas editer PlacementPreview / tests/client.luau.
+	local state = GameState.new(3305)
+	local owner = state:addPlayer(nil, "PlaceA", Random.new(91), 0)
+	if not owner then
+		fail("validTiles — spawn impossible")
+	else
+		local ctx = Buildings.contextFor(state, owner.slot)
+		if not ctx then
+			fail("validTiles — contextFor nil")
+		else
+			local capKind = Placement.validTiles(ctx, owner.capitalTile :: number, Config.BUILDING.CAPITAL)
+			local oob = Placement.validTiles(ctx, -1, Config.BUILDING.CITY)
+			local oob2 = Placement.validTiles(ctx, Config.TILE_COUNT, Config.BUILDING.CITY)
+			if #capKind ~= 0 or #oob ~= 0 or #oob2 ~= 0 then
+				fail(`validTiles — early-out # cap={#capKind} oob={#oob}/{#oob2}`)
+			elseif not rawequal(capKind, oob) or not rawequal(oob, oob2) then
+				fail("validTiles — early-out rawequal emptyTileBuf")
+			else
+				print("validTiles : CAPITAL/hors carte emptyTileBuf rawequal (V47)")
+				local foreign: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if buffer.readu8(state.owner, index) ~= owner.slot then
+						foreign = index
+						break
+					end
+				end
+				if not foreign then
+					fail("validTiles — tuile etrangere introuvable")
+				else
+					local first = Placement.validTiles(ctx, foreign, Config.BUILDING.CITY)
+					local again = Placement.validTiles(ctx, foreign, Config.BUILDING.CITY)
+					if #first ~= 0 or not rawequal(first, again) then
+						fail(`validTiles — etrangere #={#first} rawequal={tostring(rawequal(first, again))}`)
+					else
+						print("validTiles : tuile etrangere #0 rawequal (V47)")
+						owner.gold = 100000
+						-- Reposer ctx.gold : contextFor a capture l'or avant
+						-- le credit. resolve recopie depuis PlayerState.
+						local site: number? = nil
+						local cap = owner.capitalTile
+						if cap then
+							local around = Placement.validTiles(ctx, cap, Config.BUILDING.CITY)
+							if #around > 0 then
+								site = cap
+							end
+						end
+						if not site then
+							for index = 0, Config.TILE_COUNT - 1 do
+								if buffer.readu8(state.owner, index) == owner.slot and state:isLand(index) then
+									local tiles = Placement.validTiles(ctx, index, Config.BUILDING.CITY)
+									if #tiles > 0 then
+										site = index
+										break
+									end
+								end
+							end
+						end
+						if not site then
+							fail("validTiles — tuile avec candidats introuvable")
+						else
+							local res1, err1 = Buildings.resolve(state, owner.slot, site, Config.BUILDING.CITY)
+							local res2, err2 = Buildings.resolve(state, owner.slot, site, Config.BUILDING.CITY)
+							if not res1 or not res2 or err1 or err2 then
+								fail(`validTiles — resolve CITY casse ({tostring(err1)}/{tostring(err2)})`)
+							elseif res1.tile ~= res2.tile then
+								fail(`validTiles — leftover tile {res1.tile} vs {res2.tile}`)
+							else
+								print("validTiles : deux resolve CITY, tile identique (V47)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 33 : destroyBuf, validTiles recycle OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
