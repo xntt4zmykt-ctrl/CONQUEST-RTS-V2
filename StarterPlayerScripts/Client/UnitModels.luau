@@ -442,6 +442,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- Distinct de V118 (recycle LaunchWake, Overlay — autre fichier).
 			-- Distinct de V119 (recycle goldPopup, Overlay — autre fichier).
 			-- Distinct de V120 (recycle floatingText, Effects — autre fichier).
+			-- Distinct de V121 (recycle tileFlash, Effects — autre fichier).
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z

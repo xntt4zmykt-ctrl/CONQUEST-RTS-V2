@@ -65,7 +65,7 @@ local otherBuf: { number } = table.create(16)
 -- Overlay Shockwave recyclee (V115). Overlay DeliveryPulse recyclee
 -- (V116). Overlay LandingSplash recyclee (V117). Overlay LaunchWake
 -- recyclee (V118). Overlay goldPopup recyclee (V119). Effects
--- floatingText recyclee (V120).
+-- floatingText recyclee (V120). Effects tileFlash recyclee (V121).
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}

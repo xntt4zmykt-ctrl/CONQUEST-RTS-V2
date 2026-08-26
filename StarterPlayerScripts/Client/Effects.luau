@@ -69,9 +69,22 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- (≠ GoldPopup V119). Arbre Billboard conserve (anchor +
 	-- BillboardGui + TextLabel + UIStroke, pas recreer les enfants).
 	-- Distinct de V119 (goldPopup goldFree, Overlay). Distinct de V82
-	-- (ConquestPulse pulseRot). Distinct de V83 (SelectionRing). Pas
-	-- reentrant. Evenement vague mineure (count >= 4), pas 60 Hz.
+	-- (ConquestPulse pulseRot). Distinct de V83 (SelectionRing).
+	-- Distinct de V121 (tileFlash flashFree). Pas reentrant.
+	-- Evenement vague mineure (count >= 4), pas 60 Hz.
 	self.textFree = {} :: { Part }
+
+	-- V121 : free-list tileFlash PAR Effects (pas textFree / pulseFree /
+	-- goldFree / wakeFree). Recette feel N156 inline (rapport 102 :
+	-- analogique N157) — ne PAS merger 6cec. Leftover Parent = nil,
+	-- pas Destroy. PAS de Name (plaque Neon, ≠ ConquestPulse V82,
+	-- ≠ GoldPopup V119). Reset Color / Transparency 0.15 / Size
+	-- TILE×0.4×TILE / CFrame (base.X, height+0.3, base.Z) AVANT Tween.
+	-- Caps 90 live / 28 par vague inchanges. Distinct de V120
+	-- (floatingText textFree). Distinct de V82 (ConquestPulse
+	-- pulseRot, Y = surface+0.8). Distinct de V83 (SelectionRing).
+	-- Pas reentrant. Evenement eclat, pas 60 Hz.
+	self.flashFree = {} :: { Part }
 
 	return self
 end
@@ -194,13 +207,35 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 
-	local plate = Instance.new("Part")
-	plate.Anchored = true
-	plate.CanCollide = false
-	plate.CanTouch = false
-	plate.CanQuery = false
-	plate.CastShadow = false
-	plate.Material = Enum.Material.Neon
+	-- V121 : recycler tileFlash. Color + Transparency 0.15 + Size
+	-- TILE×0.4×TILE + CFrame (base.X, height+0.3, base.Z) AVANT Tween
+	-- (un leftover Size TILE*0.4 / Transparency 1 / CFrame lift +3.2
+	-- de l'eclat precedent). Recette feel N156 inline — ne PAS merger
+	-- 6cec. PAS de Name (≠ ConquestPulse V82, ≠ GoldPopup V119).
+	-- Pas de pool partage avec textFree / pulseFree / goldFree /
+	-- wakeFree. Ne pas nil les slots du pool (pop O(1) : [n] = nil).
+	-- Distinct de V120 (floatingText textFree, Billboard). Distinct
+	-- de V82 (ConquestPulse pulseRot, Y = surface+0.8). Distinct de
+	-- V83 (SelectionRing). Delay 0.7 inchange. Tween lift height+3.2
+	-- + fade Transparency 1 + shrink TILE*0.4 inchanges. Caps 90 / 28
+	-- inchanges. Early-out live >= MAX_LIVE_FLASHES inchange.
+	-- Echantillonnage step = count // 28 inchange. Ne pas changer
+	-- floatingText (V120 deja). Ne pas changer conquestPulse (V82).
+	-- Ne pas geler Size flame (V74).
+	local flashFree = self.flashFree
+	local pn = #flashFree
+	local plate = if pn > 0 then flashFree[pn] else nil
+	if plate then
+		flashFree[pn] = nil
+	else
+		plate = Instance.new("Part")
+		plate.Anchored = true
+		plate.CanCollide = false
+		plate.CanTouch = false
+		plate.CanQuery = false
+		plate.CastShadow = false
+		plate.Material = Enum.Material.Neon
+	end
 	plate.Color = color
 	plate.Transparency = 0.15
 	plate.Size = Vector3.new(Config.TILE_SIZE, 0.4, Config.TILE_SIZE)
@@ -216,7 +251,8 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	}):Play()
 
 	task.delay(0.7, function()
-		plate:Destroy()
+		plate.Parent = nil
+		flashFree[#flashFree + 1] = plate
 		self.live -= 1
 	end)
 end
@@ -286,9 +322,9 @@ function Effects.floatingText(self: Effects, x: number, y: number, text: string,
 	-- de V119 (goldPopup goldFree, Overlay, Name GoldPopup/Board).
 	-- Distinct de V82 (ConquestPulse pulseRot, Y = surface+0.8).
 	-- Distinct de V83 (SelectionRing). Distinct de V118 (wakeFree).
-	-- Delay 1.3 inchange. Tween lift Y=26 + fade label/outline
+	-- Distinct de V121 (tileFlash flashFree). Delay 1.3 inchange. Tween lift Y=26 + fade label/outline
 	-- inchanges. conquestWave n'affiche que si mine and count >= 4
-	-- inchange. Ne pas changer tileFlash. Ne pas changer
+	-- inchange. tileFlash recyclee (V121). Ne pas changer
 	-- conquestPulse. Ne pas geler Size flame (V74).
 	local textFree = self.textFree
 	local pn = #textFree
