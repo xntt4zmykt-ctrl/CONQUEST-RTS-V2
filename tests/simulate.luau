@@ -2014,7 +2014,7 @@ do
 		local targetTile: number? = nil
 		for index = 0, Config.TILE_COUNT - 1 do
 			local owner = buffer.readu8(mirvState.owner, index)
-			if not siloTile and owner == a.slot then
+			if not siloTile and owner == a.slot and not mirvState.buildings[index] then
 				siloTile = index
 			elseif not targetTile and owner == b.slot then
 				targetTile = index
@@ -2023,9 +2023,7 @@ do
 		if not siloTile or not targetTile then
 			fail("mirv — territoires de test introuvables")
 		else
-			mirvState.buildings[siloTile] =
-				{ kind = Config.BUILDING.SILO, slot = a.slot, level = 1, links = {}, cooldown = 0 }
-			a.siloCount = 1
+			mirvState:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
 			a.era = Eras.requiredForNuke(Config.NUKE.MIRV)
 			a.gold = 5000
 			b.troops = 10000
@@ -2697,13 +2695,17 @@ do
 		ChantierB.stripTerritory(claimState, colon)
 		local land: number? = nil
 		for index = 0, Config.TILE_COUNT - 1 do
-			if claimState:isLand(index) and buffer.readu8(claimState.owner, index) == 0 then
+			if
+				claimState:isLand(index)
+				and buffer.readu8(claimState.owner, index) == 0
+				and claimState:isSpawnIsolated(index)
+			then
 				land = index
 				break
 			end
 		end
 		if not land then
-			fail("justClaimed — aucune terre libre")
+			fail("justClaimed — aucune terre libre isolee")
 		else
 			local claimed = claimState:claimSpawn(colon.slot, land)
 			if not claimed then
@@ -3237,6 +3239,174 @@ do
 end
 
 print("passe 18 : aura morte, CAPTURE_GUARD, samsBySlot OK")
+
+--[[
+	Nightly passe 19 — revue PR #54 : silosBySlot, samsOf sans fallback hash,
+	isolation clic spawn.
+]]
+do
+	local ghost = GameState.new(1901)
+	local a = ghost:addPlayer(nil, "Frappe", Random.new(11), 0)
+	if not a then
+		fail("samsOf ghost — faction impossible")
+	else
+		local tile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(ghost.owner, index) == a.slot and not ghost.buildings[index] then
+				tile = index
+				break
+			end
+		end
+		if not tile then
+			fail("samsOf ghost — aucune tuile libre")
+		else
+			ghost.buildings[tile] = { kind = Config.BUILDING.SAM, slot = a.slot, level = 1, links = {}, cooldown = 0 }
+			a.samCount = 1
+			local listed = Buildings.samsOf(ghost, a.slot)
+			if #listed ~= 0 then
+				fail("samsOf — slot sans index rescane le hash (fantome)")
+			end
+		end
+	end
+end
+
+do
+	local siloState = GameState.new(1902)
+	local a = siloState:addPlayer(nil, "Arsenal", Random.new(21), 0)
+	local b = siloState:addPlayer(nil, "Cible", Random.new(22), 0)
+	if not a or not b then
+		fail("silosBySlot — factions impossibles")
+	else
+		local near: number? = nil
+		local far: number? = nil
+		local target: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			local owner = buffer.readu8(siloState.owner, index)
+			if owner == a.slot and not siloState.buildings[index] then
+				if not near then
+					near = index
+				elseif not far then
+					far = index
+				end
+			elseif not target and owner == b.slot then
+				target = index
+			end
+		end
+		if not near or not far or not target then
+			fail("silosBySlot — tuiles de test introuvables")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			local function dist2(index: number): number
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - tx, y - ty
+				return dx * dx + dy * dy
+			end
+			if dist2(far) < dist2(near) then
+				near, far = far, near
+			end
+			siloState:placeBuilding(near, Config.BUILDING.SILO, a.slot)
+			siloState:placeBuilding(far, Config.BUILDING.SILO, a.slot)
+			if not (siloState.silosBySlot[a.slot] and siloState.silosBySlot[a.slot][near] and siloState.silosBySlot[a.slot][far]) then
+				fail("silosBySlot — pose SILO non indexee")
+			end
+
+			-- Fantome hash : l'index est la source de verite.
+			local ghostTile: number? = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(siloState.owner, index) == a.slot and not siloState.buildings[index] then
+					ghostTile = index
+					break
+				end
+			end
+			if ghostTile then
+				siloState.buildings[ghostTile] =
+					{ kind = Config.BUILDING.SILO, slot = a.slot, level = 1, links = {}, cooldown = 0 }
+			end
+
+			a.era = Eras.requiredForNuke(Config.NUKE.ATOM)
+			a.gold = 5000
+			siloState.tick = (Config.SPAWN_NUKE_IMMUNITY or 5) * Config.TICK_RATE + 1
+			siloState.buildings[near].cooldown = Config.SILO_COOLDOWN
+			local goldBefore = a.gold
+			local ok, reason = Nukes.launch(siloState, a.slot, target, Config.NUKE.ATOM)
+			if not ok then
+				fail("silosBySlot — tir refuse: " .. tostring(reason))
+			elseif siloState.buildings[far].cooldown ~= Config.SILO_COOLDOWN then
+				fail("silosBySlot — le silo pret le plus proche n'est pas arme")
+			elseif siloState.buildings[near].cooldown ~= Config.SILO_COOLDOWN then
+				fail("silosBySlot — le silo en recharge a ete rearme")
+			elseif a.gold ~= goldBefore - Config.NUKE_STATS[Config.NUKE.ATOM].cost then
+				fail("silosBySlot — cout non preleve")
+			end
+			if ghostTile and siloState.buildings[ghostTile] and (siloState.buildings[ghostTile].cooldown or 0) > 0 then
+				fail("silosBySlot — silo fantome hors index arme")
+			end
+
+			siloState:setOwner(far, b.slot)
+			if siloState.silosBySlot[a.slot] and siloState.silosBySlot[a.slot][far] then
+				fail("silosBySlot — capture laisse l'index chez le lanceur")
+			elseif not (siloState.silosBySlot[b.slot] and siloState.silosBySlot[b.slot][far]) then
+				fail("silosBySlot — capture n'indexe pas chez le nouveau proprio")
+			end
+			local slotB = b.slot
+			siloState:removePlayer(slotB)
+			if siloState.silosBySlot[slotB] ~= nil then
+				fail("silosBySlot — removePlayer laisse l'index du slot recycle")
+			end
+			siloState:destroyBuilding(near)
+			if siloState.silosBySlot[a.slot] and siloState.silosBySlot[a.slot][near] then
+				fail("silosBySlot — destroy laisse l'index")
+			end
+		end
+	end
+end
+
+do
+	local iso = GameState.new(1903)
+	iso.combatUnlocked = true
+	local fake = __newInstance("Player")
+	fake.Name = "Colon"
+	fake.UserId = 1903
+	local colon = iso:addPlayer(fake, "Colon", Random.new(31), 0)
+	local foe = iso:addPlayer(nil, "Voisin", Random.new(32), 0)
+	if not colon or not foe then
+		fail("isolation clic — factions impossibles")
+	else
+		ChantierB.stripTerritory(iso, colon)
+		local glued: number? = nil
+		local isolated: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if iso:isLand(index) and buffer.readu8(iso.owner, index) == 0 then
+				if not glued and not iso:isSpawnIsolated(index) then
+					glued = index
+				elseif not isolated and iso:isSpawnIsolated(index) then
+					isolated = index
+				end
+			end
+			if glued and isolated then
+				break
+			end
+		end
+		if not glued then
+			fail("isolation clic — aucune terre collee a une capitale")
+		else
+			local claimed = iso:claimSpawn(colon.slot, glued)
+			if claimed then
+				fail("isolation clic — claimSpawn accepte une tuile collee")
+			end
+		end
+		if not isolated then
+			fail("isolation clic — aucune terre isolee")
+		elseif colon.awaitingSpawn then
+			local claimed = iso:claimSpawn(colon.slot, isolated)
+			if not claimed then
+				fail("isolation clic — claimSpawn refuse une tuile isolee")
+			end
+		end
+	end
+end
+
+print("passe 19 : silosBySlot, samsOf, isolation clic OK")
 
 do
 	local report = TickMetrics.formatReport()

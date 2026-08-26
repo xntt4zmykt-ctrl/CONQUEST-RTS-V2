@@ -178,6 +178,8 @@ export type GameState = typeof(setmetatable(
 		bunkersBySlot: { [number]: { [number]: true } },
 		-- Index SAM par camp (tryIntercept / samsOf, O(SAM) pas O(hash)).
 		samsBySlot: { [number]: { [number]: true } },
+		-- Index SILO par camp (Nukes.launch, O(silos) pas O(hash)).
+		silosBySlot: { [number]: { [number]: true } },
 		freeSlots: { number },
 		nextEntityId: number,
 		capitalEvents: number,
@@ -241,6 +243,7 @@ function GameState.new(seed: number): GameState
 	self.buildingDirty = {}
 	self.bunkersBySlot = {}
 	self.samsBySlot = {}
+	self.silosBySlot = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
 	self.sounds = {}
@@ -735,6 +738,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.SAM then
 		setSlotIndex(self.samsBySlot, slot, index, true)
 	end
+	if kind == B.SILO then
+		setSlotIndex(self.silosBySlot, slot, index, true)
+	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
@@ -796,6 +802,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		setSlotIndex(self.samsBySlot, previousSlot, index, false)
 		setSlotIndex(self.samsBySlot, newSlot, index, true)
 	end
+	if building.kind == B.SILO then
+		setSlotIndex(self.silosBySlot, previousSlot, index, false)
+		setSlotIndex(self.silosBySlot, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -814,6 +824,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	end
 	if building.kind == B.SAM then
 		setSlotIndex(self.samsBySlot, previousSlot, index, false)
+	end
+	if building.kind == B.SILO then
+		setSlotIndex(self.silosBySlot, previousSlot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -839,8 +852,34 @@ end
 --=============================================================================
 
 --[[
-	Cherche une zone de spawn : une tuile de terre dont le disque alentour est
-	entierement libre, pour ne jamais coller deux joueurs au demarrage.
+	Carre d'isolation spawn (SPAWN_RADIUS+3) : aucun proprio etranger.
+
+	Partage findSpawn / claimSpawn (V16b). Le disque de pose reste un cercle
+	de rayon SPAWN_RADIUS ; le carre est plus large pour ne pas coller deux
+	capitales sur les coins.
+]]
+function GameState.isSpawnIsolated(self: GameState, index: number): boolean
+	if index < 0 or index >= Config.TILE_COUNT then
+		return false
+	end
+	local x, y = MapGen.fromIndex(index)
+	local check = Config.SPAWN_RADIUS + 3
+	for dy = -check, check do
+		for dx = -check, check do
+			local nx, ny = x + dx, y + dy
+			if MapGen.inBounds(nx, ny) then
+				if buffer.readu8(self.owner, MapGen.toIndex(nx, ny)) ~= NEUTRAL then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+--[[
+	Cherche une zone de spawn : terre neutre, carre d'isolation libre, et
+	distance minimale aux capitales deja posees.
 ]]
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
@@ -853,32 +892,16 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 		local y = rng:NextInteger(check, Config.MAP_HEIGHT - check - 1)
 		local center = MapGen.toIndex(x, y)
 
-		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
+		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL and self:isSpawnIsolated(center) then
 			local ok = true
-			for dy = -check, check do
-				for dx = -check, check do
-					local nx, ny = x + dx, y + dy
-					if MapGen.inBounds(nx, ny) then
-						if buffer.readu8(self.owner, MapGen.toIndex(nx, ny)) ~= NEUTRAL then
-							ok = false
-							break
-						end
-					end
-				end
-				if not ok then
-					break
-				end
-			end
-			if ok then
-				for _, ps in self.players do
-					local other = ps.spawnCenter or ps.capitalTile
-					if other then
-						local ox, oy = MapGen.fromIndex(other)
-						local dx, dy = ox - x, oy - y
-						if dx * dx + dy * dy < minDist2 then
-							ok = false
-							break
-						end
+			for _, ps in self.players do
+				local other = ps.spawnCenter or ps.capitalTile
+				if other then
+					local ox, oy = MapGen.fromIndex(other)
+					local dx, dy = ox - x, oy - y
+					if dx * dx + dy * dy < minDist2 then
+						ok = false
+						break
 					end
 				end
 			end
@@ -1112,6 +1135,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	end
 	if self.samsBySlot then
 		self.samsBySlot[slot] = nil
+	end
+	if self.silosBySlot then
+		self.silosBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

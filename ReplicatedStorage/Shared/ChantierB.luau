@@ -648,9 +648,13 @@ function ChantierB.installSpawn(GameState)
 		if not self:isLand(index) then
 			return false, "Choisis une terre."
 		end
-		local best = index
-		if buffer.readu8(self.owner, index) ~= NEUTRAL then
-			best = nil
+		local best = nil
+		if buffer.readu8(self.owner, index) == NEUTRAL then
+			-- Terre libre collee a une capitale : refus, pas de snap r=6 (V16b).
+			if not self.isSpawnIsolated or self:isSpawnIsolated(index) then
+				best = index
+			end
+		else
 			local ox, oy = MapGen.fromIndex(index)
 			for r = 1, 6 do
 				for dy = -r, r do
@@ -658,7 +662,11 @@ function ChantierB.installSpawn(GameState)
 						local nx, ny = ox + dx, oy + dy
 						if MapGen.inBounds(nx, ny) then
 							local i = MapGen.toIndex(nx, ny)
-							if self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL then
+							if
+								self:isLand(i)
+								and buffer.readu8(self.owner, i) == NEUTRAL
+								and (not self.isSpawnIsolated or self:isSpawnIsolated(i))
+							then
 								best = i
 								break
 							end

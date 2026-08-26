@@ -77,21 +77,47 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 		Le joueur ne selectionne jamais un silo : il designe une cible, le moteur
 		choisit le lanceur. Un silo qui recharge est simplement ignore, ce qui
 		fait de la couverture geographique des silos une decision reelle.
+
+		Index `silosBySlot` : O(silos du camp), pas O(hash bâtiments).
 	]]
 	local tx, ty = MapGen.fromIndex(targetTile)
 	local bestSilo: number? = nil
 	local bestDist = math.huge
 	local anySilo = false
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == Config.BUILDING.SILO then
-			anySilo = true
-			if building.cooldown <= 0 then
-				local x, y = MapGen.fromIndex(index)
-				local dx, dy = x - tx, y - ty
-				local dist = dx * dx + dy * dy
-				if dist < bestDist then
-					bestDist = dist
-					bestSilo = index
+	local siloKind = Config.BUILDING.SILO
+	local silosBySlot = state.silosBySlot
+	if silosBySlot then
+		-- Index present : un slot sans silo ne rescane pas le hash.
+		local silos = silosBySlot[slot]
+		if silos then
+			for index in silos do
+				local building = state.buildings[index]
+				if building and building.kind == siloKind then
+					anySilo = true
+					if (building.cooldown or 0) <= 0 then
+						local x, y = MapGen.fromIndex(index)
+						local dx, dy = x - tx, y - ty
+						local dist = dx * dx + dy * dy
+						if dist < bestDist then
+							bestDist = dist
+							bestSilo = index
+						end
+					end
+				end
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == siloKind then
+				anySilo = true
+				if building.cooldown <= 0 then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - tx, y - ty
+					local dist = dx * dx + dy * dy
+					if dist < bestDist then
+						bestDist = dist
+						bestSilo = index
+					end
 				end
 			end
 		end
