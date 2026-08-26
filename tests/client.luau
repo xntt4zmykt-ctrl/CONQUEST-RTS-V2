@@ -666,6 +666,17 @@ check("construction du monde 3D", function()
 		guard += 1
 	end
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+	-- N106 : partCount = Ground+Border visibles, pas #GetChildren() d'orphelins.
+	local visible = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				visible += 1
+				assert(child.Parent == folder, "Ground/Border orphelin apres construction")
+			end
+		end
+	end
+	assert(world.partCount == visible, "partCount incoherent avec les Parts visibles")
 end)
 
 check("calques d'entites, effets et apercu", function()
@@ -873,6 +884,31 @@ check("pose et capture de chaque type de batiment", function()
 	overlay:applyBuildingDelta({ factoryEntry })
 	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
 	overlay:stepInterpolation(1 / 60)
+
+	-- N105 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
+	-- Leftover N103 (unités) reste dans le check navires. Voies encore vivantes
+	-- ici ; la destruction plus bas les vide (le check livraison n'en a plus).
+	-- Recette visual V57, portee pas mergee.
+	local _, liveRoute = routesOf(factoryEntry.index)
+	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
+	local pulseFound = false
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "DeliveryPulse" then
+			pulseFound = true
+			break
+		end
+	end
+	assert(pulseFound, "pas de pulse a l'arrivee")
 
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
@@ -1425,6 +1461,62 @@ check("deltas de terrain et conquetes classees", function()
 	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
 
 	world:stepRebuilds()
+	world:stepRebuilds()
+
+	-- N106 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
+	-- Parent = nil ; partCount = visibles. Recette N85, pas de pool global.
+	-- On prend un chunk TERRE (un chunk ocean n'a pas de Ground).
+	local sampleChunk: number? = nil
+	local sampleFolder = nil
+	local firstGround
+	for chunk, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" then
+				sampleChunk = chunk
+				sampleFolder = folder
+				firstGround = child
+				break
+			end
+		end
+		if sampleChunk then
+			break
+		end
+	end
+	assert(sampleChunk ~= nil and sampleFolder ~= nil and firstGround ~= nil, "aucun chunk terre")
+	world:rebuildChunk(sampleChunk)
+	local recycled
+	local groundKids = 0
+	for _, child in sampleFolder:GetChildren() do
+		if child.Name == "Ground" then
+			groundKids += 1
+			assert(child.Parent == sampleFolder, "Ground orphelin apres rebuild")
+			if not recycled then
+				recycled = child
+			end
+		elseif child.Name == "Border" then
+			assert(child.Parent == sampleFolder, "Border orphelin apres rebuild")
+		end
+	end
+	assert(rawequal(firstGround, recycled), "Ground non recycle")
+	local pool = world.chunkGround[sampleChunk]
+	assert(pool ~= nil and #pool >= groundKids, "pool Ground absent")
+	for i = 1, #pool do
+		local p = pool[i]
+		if i <= groundKids then
+			assert(p.Parent == sampleFolder, "Ground visible hors folder")
+		else
+			assert(p.Parent == nil, "leftover Ground encore parent")
+		end
+	end
+	local vis = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				vis += 1
+			end
+		end
+	end
+	assert(world.partCount == vis, "partCount incoherent apres recycle")
 end)
 
 check("camera strategique", function()
