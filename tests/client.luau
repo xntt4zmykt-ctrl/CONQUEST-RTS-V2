@@ -771,6 +771,14 @@ check("curseur d'engagement et doctrines", function()
 end)
 
 check("ecran de victoire", function()
+	-- N173 : show Parent=nil + valueFree, pas previewFree. Name Value
+	-- conservé. Reset TextXAlignment. Parent = row (self.rows[i]).
+	-- Early-out Visible conservé. hide inchangé. Pas de testFlushDelays.
+	-- Leftover N172 previewFree (check selection) et leftover N171
+	-- flagFree et leftover N170 chatFree et leftover N152 flame
+	-- doivent rester verts. Recette leftover N172, pas merger visual
+	-- V110. MainMenu / HUD / Effects / Overlay / UnitModels non
+	-- retouchés. Pas d'assert autre Name. Pas #valueFree == 5.
 	victory = VictoryScreen.new(screenGui)
 	local ranked = {}
 	for slot = 1, 8 do
@@ -786,8 +794,29 @@ check("ecran de victoire", function()
 			capturedTiles = 240, lostTiles = 20, capitalsCaptured = 2, buildingsBuilt = 7, attacksLaunched = 8 },
 	}
 	victory:show(1, "Valoria", ranked, roster, 1, summary, { xp = 900, level = 3, matches = 8, wins = 2, betrayals = 0, lastGain = 180 })
+	local snapshot = victory.rows[1]:FindFirstChild("Value")
+	assert(snapshot and snapshot:IsA("TextLabel"), "snapshot Value manquant")
 	victory:hide()
 	victory:show(2, "Kerensk", ranked, roster, 1)
+	if snapshot.Parent == nil then
+		local inFree = false
+		for _, value in VictoryScreen.valueFree do
+			if rawequal(value, snapshot) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "Value ni reparentee ni dans valueFree")
+	else
+		local onRow = false
+		for _, row in victory.rows do
+			if rawequal(snapshot.Parent, row) then
+				onRow = true
+				break
+			end
+		end
+		assert(onRow, "Value recree")
+	end
 	victory:setCountdown(12)
 	victory:hide()
 end)
