@@ -63,14 +63,15 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 	local marker = self.selection
 	-- N155 : reuse Part si deja creee. previewTile reutilise deja
-	-- (N96 + N154 skip). selectTile Destroy+recreate chaque clic.
-	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
-	-- V74 freeze). Distinct HUD N153. Distinct previewTile N154
-	-- skip. Distinct visual V83 SelectionRing pulseRot (ne pas
-	-- merger 0b3d). Name SelectedTerritory inchange. Tween Create
-	-- conserve (pulse Transparency/Size restart). Recette leftover
-	-- N154, pas merger visual. HUD / UnitModels / Overlay /
-	-- PlacementPreview inchanges.
+	-- (N96 + N154 skip). N168 : reparent si Parent nil apres
+	-- clearSelection (plus de Destroy). Name SelectedTerritory
+	-- inchange. Tween Create conserve (pulse Transparency/Size
+	-- restart). Distinct flame leftover N152 (Size = Vector3.new,
+	-- ≠ visual V74 freeze). Distinct HUD N167 (feedFree deja).
+	-- Distinct previewTile N154 skip. Distinct visual V83
+	-- SelectionRing pulseRot (ne pas merger 0b3d). Recette leftover
+	-- N167, pas merger visual. HUD / UnitModels / Overlay /
+	-- BuildingModels / PlacementPreview inchanges.
 	if not marker then
 		marker = Instance.new("Part")
 		marker.Name = "SelectedTerritory"
@@ -83,6 +84,9 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 		marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
 		marker.Parent = self.root
 		self.selection = marker
+	end
+	if marker.Parent == nil then
+		marker.Parent = self.root
 	end
 
 	marker.Color = color
@@ -97,9 +101,20 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 end
 
 function Effects.clearSelection(self: Effects)
-	if self.selection then
-		self.selection:Destroy()
-		self.selection = nil
+	-- N168 : Parent = nil, garder self.selection. Pas de Destroy,
+	-- pas self.selection = nil. Un second clear ne double-unparent
+	-- pas (garde Parent). selectTile reparent self.root si Parent
+	-- nil. N155 reuse inter-clics inchange (rawequal tant que
+	-- selection vit). Distinct flame leftover N152. Distinct HUD
+	-- N167 feedFree. Distinct previewTile N154. Distinct
+	-- clearActionPreview leftover N169 (Destroy conserve). Distinct
+	-- visual V83 pulseRot (ne pas merger 0b3d). Pas de free-list
+	-- tableau (un seul marqueur). Recette leftover N167, pas
+	-- merger visual. HUD / UnitModels / Overlay / BuildingModels
+	-- inchanges.
+	local marker = self.selection
+	if marker and marker.Parent then
+		marker.Parent = nil
 	end
 end
 

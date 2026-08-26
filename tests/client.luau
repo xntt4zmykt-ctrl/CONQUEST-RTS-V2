@@ -772,14 +772,18 @@ check("calques d'entites, effets et apercu", function()
 	-- N155 : selectTile reuse Part. 2000 puis 2001 sont deux indices
 	-- distincts — Color/CFrame/Transparency ecrits, Part reutilisee
 	-- (pas Instance.new au 2e). Name SelectedTerritory inchange.
-	-- Tween Create conserve. clearSelection Destroy+nil inchange.
-	-- Leftover N154 previewTile skip (2001 puis 2002 deux indices,
-	-- Part reutilisee) doit rester vert. Leftover N153 fil (check
-	-- notifications) et leftover N152 flame (check navires) doivent
-	-- rester verts. Recette leftover N154, pas merger visual V83
-	-- SelectionRing pulseRot. HUD / UnitModels / Overlay /
-	-- PlacementPreview non touches. tileFlash leftover N156 (check
-	-- vagues, free-list) doit rester vert.
+	-- Tween Create conserve. Leftover N154 previewTile skip (2001
+	-- puis 2002 deux indices, Part reutilisee) doit rester vert.
+	-- N168 : clearSelection Parent = nil, garder self.selection.
+	-- Reselect 2000 reparente (rawequal Parent root). Pas de
+	-- testFlushDelays ici. Leftover N167 fil (check notifications
+	-- sans flush + vagues reuse) et leftover N152 flame (check
+	-- navires) doivent rester verts. Recette leftover N167, pas
+	-- merger visual V83 SelectionRing pulseRot. HUD / UnitModels /
+	-- Overlay / PlacementPreview / BuildingModels non touches.
+	-- tileFlash leftover N156 (check vagues, free-list) doit
+	-- rester vert. clearActionPreview Destroy conserve (leftover
+	-- N169).
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
@@ -794,7 +798,12 @@ check("calques d'entites, effets et apercu", function()
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
 	effects:clearActionPreview()
 	effects:clearSelection()
-	assert(effects.selection == nil, "clearSelection n'a pas nile")
+	assert(rawequal(effects.selection, selection), "clearSelection a nile")
+	assert(selection.Parent == nil, "clearSelection n'a pas unparente")
+	assert(selection.Name == "SelectedTerritory", "Name selection perdu au clear")
+	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
+	assert(rawequal(effects.selection, selection), "Part selection recree apres clear")
+	assert(rawequal(selection.Parent, effects.root), "selection non reparentee")
 end)
 
 check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
