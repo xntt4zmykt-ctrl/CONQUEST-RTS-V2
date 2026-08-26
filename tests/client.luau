@@ -903,15 +903,25 @@ check("pose et capture de chaque type de batiment", function()
 	overlay:stepInterpolation(1 / 60)
 
 	-- V57 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
-	-- Leftover V56 (unités) reste dans le check navires. Voies encore vivantes
-	-- ici ; la destruction plus bas les vide (le check livraison n'en a plus).
+	-- V64 : segRot cuit (meme index que segmentIndex). rawequal d'un frame a
+	-- l'autre. Leftover V63 (rot chantier) plus haut. Leftover V56 (unités)
+	-- reste dans le check navires. Voies encore vivantes ici ; la destruction
+	-- plus bas les vide (le check livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
+	local firstSegRot = liveRoute.segRot[1]
+	assert(firstSegRot ~= nil and type(firstSegRot.X) == "number", "segRot[1] absent")
+	assert(firstSegRot.X == 0 and firstSegRot.Y == 0 and firstSegRot.Z == 0, "segRot n'est pas a l'origine")
 	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
 	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
 	overlay:stepInterpolation(1 / 60)
 	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
 	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree pendant la livraison")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue au second frame")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree au second frame")
 	for _ = 1, 12 do
 		overlay:stepInterpolation(0.02)
 	end
