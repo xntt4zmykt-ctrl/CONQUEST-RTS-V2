@@ -509,7 +509,16 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	-- Lissage exponentiel encadre : reste correct quel que soit le framerate,
 	-- contrairement a un simple `dt * k` qui devient instable sous 30 FPS.
 	local alpha = 1 - math.exp(-12 * dt)
-	self.focus += (self.targetFocus - self.focus) * alpha
+	-- N121 : lerp focus en nombres. Plus de += / - / * Vector3 60 Hz.
+	-- Un Vector3.new a l'ecriture (pan / clamp / minimap lisent encore
+	-- self.focus). Offset ox/oy/oz inchange (N120). Shake sx/sy/sz
+	-- inchange (N119). Pose CFrame.new * rotation inchangee (N118).
+	-- Champ focusX/Y/Z leftover N122. Recette visual V68 deja sur `0231`,
+	-- portee pas mergee.
+	local fx = self.focus.X + (self.targetFocus.X - self.focus.X) * alpha
+	local fy = self.focus.Y + (self.targetFocus.Y - self.focus.Y) * alpha
+	local fz = self.focus.Z + (self.targetFocus.Z - self.focus.Z) * alpha
+	self.focus = Vector3.new(fx, fy, fz)
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
@@ -529,8 +538,9 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	--   ox = d * cos(pitch) * sin(yaw)
 	--   oy = d * sin(pitch)
 	--   oz = d * cos(pitch) * cos(yaw)
-	-- Recette visual V67 deja sur `b2f1`, portee pas mergee. Lerp focus
-	-- leftover N121. Overlay unites / camion inchanges (N117 / N116 / N115).
+	-- Recette visual V67 deja sur `b2f1`, portee pas mergee.
+	-- N121 : oeil depuis fx/fy/fz (pas self.focus.X apres le write).
+	-- Overlay unites / camion inchanges (N117 / N116 / N115).
 	local d = self.distance
 	local pitch, yaw = self.pitch, self.yaw
 	local cosPitch, sinPitch = math.cos(pitch), math.sin(pitch)
@@ -541,9 +551,9 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	local sx = math.sin(self.clock * 31) * self.shake * 0.65
 	local sy = math.cos(self.clock * 37) * self.shake * 0.42
 	local sz = math.sin(self.clock * 23) * self.shake * 0.5
-	local ex = self.focus.X + ox + sx
-	local ey = self.focus.Y + oy + sy
-	local ez = self.focus.Z + oz + sz
+	local ex = fx + ox + sx
+	local ey = fy + oy + sy
+	local ez = fz + oz + sz
 	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
