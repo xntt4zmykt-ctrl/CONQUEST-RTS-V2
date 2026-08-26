@@ -3062,6 +3062,7 @@ do
 	else
 		Diplomacy.setEmbargo(state, a.slot, b.slot, true)
 		Diplomacy.request(state, a.slot, b.slot)
+		Diplomacy.setTargetMark(state, a.slot, b.slot)
 		local gone = b.slot
 		state:removePlayer(gone)
 		if state.embargoes[a.slot] and state.embargoes[a.slot][gone] then
@@ -3070,7 +3071,48 @@ do
 		if state.requests[a.slot] and state.requests[a.slot][gone] then
 			fail("removePlayer inbound — proposition vers slot recycle")
 		end
-		print("removePlayer inbound : embargo et proposition purges")
+		if state.targetMarks[a.slot] == gone then
+			fail("removePlayer inbound — marque de cible vers slot recycle")
+		end
+		print("removePlayer inbound : embargo, proposition et marque purges")
+	end
+end
+
+do
+	-- Terre + tete de pont vs la meme cible : un seul ordre marque le couple.
+	local state = GameState.new(8282)
+	local a = state:addPlayer(nil, "Terre", Random.new(82), 0)
+	local b = state:addPlayer(nil, "Cible", Random.new(83), 0)
+	if not a or not b then
+		fail("retraite couple — spawn impossible")
+	else
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = 400,
+			frontier = { size = 0 },
+			queued = {},
+		})
+		table.insert(state.attacks, {
+			attacker = a.slot,
+			target = b.slot,
+			troops = 200,
+			frontier = { size = 0 },
+			queued = {},
+			isBeachhead = true,
+		})
+		if not state:retreatAttack(a.slot, b.slot) then
+			fail("retraite couple — le premier ordre est refuse")
+		end
+		for _, front in state.attacks do
+			if front.attacker == a.slot and front.target == b.slot and not front.retreatAt then
+				fail("retraite couple — un front du meme couple sans echeance")
+			end
+		end
+		if state:retreatAttack(a.slot, b.slot) then
+			fail("retraite couple — un second ordre est accepte")
+		end
+		print("retraite couple : tous les fronts du meme adversaire marques")
 	end
 end
 
