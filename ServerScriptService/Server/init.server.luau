@@ -19,7 +19,6 @@ local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
 local Nations = require(ReplicatedStorage.Shared.Nations)
 local GameModes = require(ReplicatedStorage.Shared.GameModes)
 local WorldSpace = require(ReplicatedStorage.Shared.WorldSpace)
-local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local QuickChat = require(ReplicatedStorage.Shared.QuickChat)
 
 -- init.server.luau devient le Script "Server" ; les modules voisins en sont
@@ -653,35 +652,13 @@ local function replicate()
 	local ownerDelta = state:flushOwnerDelta()
 	local changedTiles = if ownerDelta then buffer.len(ownerDelta) // 5 else 0
 
-	-- V29 : HUD fronts recyclees (helper GameState, init.server hors bundle).
-	local activeAttacks, committedTroops, attackTargets = state:frontHudForReplicate()
-
-	local stats = {}
-	for slot, ps in state.players do
-		local logisticsRoutes, logisticsIncome = state:logisticsFor(slot)
-		local buildPrices = {}
-		for _, def in BuildingDefs.BUILDABLE do
-			buildPrices[def.id] = Buildings.priceFor(state, slot, def.id)
-		end
-		stats[slot] = {
-			troops = math.floor(ps.troops),
-			tiles = ps.tiles,
-			gold = math.floor(ps.gold),
-			maxTroops = math.floor(state:maxTroops(ps)),
-			era = ps.era,
-			eraProgress = Research.progress(state, slot),
-			capturedTiles = ps.capturedTiles,
-			lostTiles = ps.lostTiles,
-			capitalsCaptured = ps.capitalsCaptured,
-			buildingsBuilt = ps.buildingsBuilt,
-			attacksLaunched = ps.attacksLaunched,
-			activeAttacks = activeAttacks[slot] or 0,
-			committedTroops = committedTroops[slot] or 0,
-			attackTargets = attackTargets[slot],
-			buildPrices = buildPrices,
-			logisticsRoutes = logisticsRoutes,
-			logisticsIncome = math.floor(logisticsIncome * 100) / 100,
-		}
+	-- V31 : records stats recyclees (helper GameState). V30 : prix via
+	-- Buildings.pricesFor. eraProgress / buildPrices poses ici pour eviter
+	-- un cycle GameState → Research / Buildings. FireAllClients visuel.
+	local stats = state:playerStatsForReplicate()
+	for slot, rec in stats do
+		rec.eraProgress = Research.progress(state, slot)
+		rec.buildPrices = Buildings.pricesFor(state, slot)
 	end
 	stateDelta:FireAllClients(ownerDelta, stats)
 
