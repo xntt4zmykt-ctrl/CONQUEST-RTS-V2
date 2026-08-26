@@ -59,6 +59,91 @@ WorldRenderer.__index = WorldRenderer
 
 export type WorldRenderer = typeof(setmetatable({} :: any, WorldRenderer))
 
+-- N184 : parkWorld / takeWorld / parkWorldChild hoistes pour new()
+-- sans Destroy du leftover ConquestWorld. Skip Parent nil (deja
+-- parke par un second new()). Push worldFree (Folder, pas ghostFree /
+-- labelFree / chunkGround). take n'importe quel Folder, Name
+-- ConquestWorld, Parent Workspace. Enfants leftover detaches AVANT
+-- buildOcean (Ground/Border → N106 existant, sinon worldChildFree).
+-- Recette leftover N183. Pas merger visual V112. Distinct leftover
+-- N152 flame. Distinct leftover N183 ghostFree. Overlay non touche.
+-- PlacementPreview non touche. rebuildChunk N106 inchange. destroy()
+-- self.root:Destroy inchange (N185). Ne pas vider worldFree. Pas de delay.
+local worldFree: { Folder } = {}
+local worldChildFree: { Instance } = {}
+
+local function parkWorld(root: Folder)
+	if not root.Parent then
+		return
+	end
+	root.Parent = nil
+	worldFree[#worldFree + 1] = root
+end
+
+local function takeWorld(): Folder?
+	local n = #worldFree
+	if n == 0 then
+		return nil
+	end
+	local last = worldFree[n]
+	worldFree[n] = nil
+	return last
+end
+
+local function parkWorldChild(child: Instance)
+	if not child.Parent then
+		return
+	end
+	child.Parent = nil
+	worldChildFree[#worldChildFree + 1] = child
+end
+
+local function parkWorldChildren(self: WorldRenderer, root: Folder)
+	for _, child in root:GetChildren() do
+		local chunkId = tonumber(string.match(child.Name, "^Chunk(%d+)$"))
+		if chunkId ~= nil then
+			self.chunkFolders[chunkId] = child
+			local grounds = self.chunkGround[chunkId]
+			if not grounds then
+				grounds = {}
+				self.chunkGround[chunkId] = grounds
+			end
+			local borders = self.chunkBorder[chunkId]
+			if not borders then
+				borders = {}
+				self.chunkBorder[chunkId] = borders
+			end
+			for _, part in child:GetChildren() do
+				if part.Name == "Ground" then
+					if part.Parent then
+						part.Parent = nil
+						grounds[#grounds + 1] = part
+					end
+				elseif part.Name == "Border" then
+					if part.Parent then
+						part.Parent = nil
+						borders[#borders + 1] = part
+					end
+				else
+					parkWorldChild(part)
+				end
+			end
+			if child.Parent then
+				child.Parent = nil
+			end
+		elseif child:IsA("BasePart") then
+			parkWorldChild(child)
+		else
+			for _, nested in child:GetChildren() do
+				parkWorldChild(nested)
+			end
+			if child.Parent then
+				child.Parent = nil
+			end
+		end
+	end
+end
+
 --=============================================================================
 -- Construction
 --=============================================================================
@@ -95,14 +180,23 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	self.builtCount = 0
 	self.totalChunks = Config.CHUNKS_X * Config.CHUNKS_Y
 
-	local root = Workspace:FindFirstChild("ConquestWorld")
-	if root then
-		root:Destroy()
+	-- N184 : take Folder leftover avant create. Name ConquestWorld /
+	-- Parent Workspace reposes au reuse (Play Solo / LocalScript).
+	-- Enfants parkés AVANT buildOcean (sinon Ocean dupliqué).
+	local leftover = Workspace:FindFirstChild("ConquestWorld")
+	if leftover and leftover:IsA("Folder") then
+		parkWorld(leftover :: Folder)
+	elseif leftover then
+		leftover.Parent = nil
 	end
-	root = Instance.new("Folder")
+	local root = takeWorld()
+	if not root then
+		root = Instance.new("Folder")
+	end
 	root.Name = "ConquestWorld"
 	root.Parent = Workspace
 	self.root = root
+	parkWorldChildren(self, root)
 
 	self:buildOcean()
 	self:buildDecorations()

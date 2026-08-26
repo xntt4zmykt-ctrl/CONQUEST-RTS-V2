@@ -830,6 +830,13 @@ local world, overlay, effects, preview
 
 check("construction du monde 3D", function()
 	world = WorldRenderer.new(4242)
+	-- N184 : leftover ConquestWorld Folder recycle (pas Destroy).
+	-- Pas de second new() — volerait world.root aux checks overlay / pose /
+	-- navires / etiquettes. Leftover N106 (partCount) reste plus bas.
+	-- destroy() self.root:Destroy conserve (N185). PlacementPreview N183
+	-- inchange. Overlay inchange. rebuildChunk N106 inchange.
+	assert(world.root.Name == "ConquestWorld", "ConquestWorld N184 absent")
+	assert(world.root.Parent ~= nil, "ConquestWorld N184 non parente")
 	-- Vide toute la file de reconstruction, comme le ferait le chargement.
 	local guard = 0
 	while world:initialProgress() < 1 and guard < 5000 do
