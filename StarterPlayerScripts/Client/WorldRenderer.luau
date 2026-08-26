@@ -192,9 +192,9 @@ function WorldRenderer.buildOcean(self: WorldRenderer)
 		-- table.insert oceanRipples { part, base, phase } inchange.
 		-- Plan Ocean / SeaFloor translation inchanges. step non (N108).
 		-- Distinct Effects ring N134 (Y = 3, Z=90). Distinct Overlay
-		-- Shockwave N133 (PLAINS + 0.5). Distinct BuildRing leftover N136.
-		-- Distinct trunks leftover (buildDecorations). Overlay / Effects
-		-- / BuildingModels inchanges.
+		-- Shockwave N133 (PLAINS + 0.5). Distinct BuildRing N136.
+		-- Distinct trunks leftover N137 (buildDecorations). Overlay /
+		-- Effects / BuildingModels inchanges.
 		glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.fromEulerAnglesYXZ(0, angle, 0)
 		glint.Parent = self.root
 		table.insert(self.oceanRipples, {
@@ -245,13 +245,27 @@ function WorldRenderer.buildDecorations(self: WorldRenderer)
 
 			if terrain == Config.TERRAIN.FOREST then
 				local height = 3.8 + ((px + py) % 4) * 0.45
-				local trunk = decorationPart(folder, "Part", "TreeTrunk", Vector3.new(height, 0.55, 0.55), Color3.fromRGB(91, 67, 47), CFrame.new(base.X, ground + height / 2, base.Z) * CFrame.Angles(0, 0, math.rad(90)), Enum.Material.Wood)
+				-- N137 : TreeTrunk / SavannaTrunk construction. Plus de
+				-- CFrame.Angles. fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡
+				-- Angles(0, 0, π/2). Cylindre Z=90 — ne pas omettre
+				-- (le cylindre se dresserait). height / Shape Cylinder
+				-- inchanges. Couronnes Ball translation inchangees.
+				-- table.insert animatedFoliage inchange. step non (N108).
+				-- Distinct OceanGlint N135 (yaw `angle`, buildOcean).
+				-- Distinct BuildRing N136 (playConstruction). Distinct
+				-- Rock leftover (yaw `phase`). Overlay / Effects /
+				-- BuildingModels inchanges.
+				local trunk = decorationPart(folder, "Part", "TreeTrunk", Vector3.new(height, 0.55, 0.55), Color3.fromRGB(91, 67, 47), CFrame.new(base.X, ground + height / 2, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90)), Enum.Material.Wood)
 				trunk.Shape = Enum.PartType.Cylinder
 				local crown = decorationPart(folder, "Part", "TreeCrown", Vector3.new(3.2, 3.8, 3.2), Color3.fromRGB(48 + (px % 3) * 6, 104 + (py % 4) * 6, 69), CFrame.new(base.X, ground + height + 1.1, base.Z), Enum.Material.LeafyGrass)
 				crown.Shape = Enum.PartType.Ball
 				table.insert(self.animatedFoliage, { part = crown, base = crown.CFrame, phase = phase })
 			elseif terrain == Config.TERRAIN.SAVANNA and (px + py) % 3 == 0 then
-				local trunk = decorationPart(folder, "Part", "SavannaTrunk", Vector3.new(3.2, 0.45, 0.45), Color3.fromRGB(100, 70, 44), CFrame.new(base.X, ground + 1.6, base.Z) * CFrame.Angles(0, 0, math.rad(90)), Enum.Material.Wood)
+				-- N137 : meme euler Z=90 que TreeTrunk, offset Y
+				-- ground + 1.6 inchange. Shape Cylinder inchange.
+				-- Couronne Ball / animatedFoliage inchanges. Rock
+				-- leftover non touche.
+				local trunk = decorationPart(folder, "Part", "SavannaTrunk", Vector3.new(3.2, 0.45, 0.45), Color3.fromRGB(100, 70, 44), CFrame.new(base.X, ground + 1.6, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90)), Enum.Material.Wood)
 				trunk.Shape = Enum.PartType.Cylinder
 				local crown = decorationPart(folder, "Part", "SavannaCrown", Vector3.new(4.2, 1.5, 3.7), Color3.fromRGB(103, 131, 67), CFrame.new(base.X, ground + 3.5, base.Z), Enum.Material.LeafyGrass)
 				crown.Shape = Enum.PartType.Ball

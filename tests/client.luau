@@ -718,6 +718,11 @@ check("construction du monde 3D", function()
 	-- doivent rester verts. Check vagues leftover N134 ring. Check navires
 	-- leftover N133 shockwave. Recette leftover N134, pas merger visual.
 	-- Overlay / Effects / BuildingModels inchanges. step inchange.
+	-- N137 : TreeTrunk / SavannaTrunk fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Cylindre Z=90. buildDecorations seulement. Leftover N135 OceanGlint
+	-- yaw, leftover N114 compact, leftover N108 feuillage Y doivent rester
+	-- verts. Check pose leftover N136 BuildRing. Rock leftover N138 non
+	-- touche. Recette leftover N136, pas merger visual.
 	local nRipple = #world.oceanRipples
 	assert(nRipple > 0, "aucun reflet ocean")
 	local first = world.oceanRipples[1]
