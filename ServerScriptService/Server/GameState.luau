@@ -323,6 +323,12 @@ type StatsRec = {
 }
 local statsBuf: { [number]: StatsRec } = {}
 local statsRecPool: { [number]: StatsRec } = {}
+-- N63 : slots elimines recycles (recette boatSnapBuf / N51, feel N82).
+-- Partage entre toutes les instances GameState — truncate leftover
+-- obligatoire. Ne pas nommer `doomed` : removePlayer a deja un snapshot
+-- batiments. Non reentrant — step() unique / tick. Ne pas truncate a 0
+-- apres return.
+local elimBuf: { number } = table.create(8)
 
 --=============================================================================
 -- Construction
@@ -2388,7 +2394,7 @@ end
 	joueurs concernes.
 ]]
 function GameState.stepElimination(self: GameState): { number }
-	local doomed: { number } = {}
+	local n = 0
 
 	for slot, ps in self.players do
 		if ps.tiles > 0 then
@@ -2417,12 +2423,18 @@ function GameState.stepElimination(self: GameState): { number }
 			continue
 		end
 
-		table.insert(doomed, slot)
+		n += 1
+		elimBuf[n] = slot
+	end
+
+	for i = #elimBuf, n + 1, -1 do
+		elimBuf[i] = nil
 	end
 
 	-- On collecte avant de supprimer : removePlayer mute self.players, et le
 	-- muter en cours d'iteration est un comportement indefini.
-	for _, slot in doomed do
+	for i = 1, n do
+		local slot = elimBuf[i]
 		local ps = self.players[slot]
 		if ps then
 			-- Seules les eliminations de joueurs humains sont publiques : voir
@@ -2434,7 +2446,7 @@ function GameState.stepElimination(self: GameState): { number }
 		end
 	end
 
-	return doomed
+	return elimBuf
 end
 
 function GameState.step(self: GameState): { number }

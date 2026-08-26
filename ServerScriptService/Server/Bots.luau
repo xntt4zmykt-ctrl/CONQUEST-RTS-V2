@@ -59,6 +59,11 @@ local scratch = table.create(4, 0)
 -- jamais imbriques. Map, pas array : table.clear, pas de truncate.
 -- Slot sans joueur / sans frontiere → vide.
 local contactBuf: { [number]: number } = {}
+-- N62 : emplacements de pose recycles (recette feel 2f5d/b62d N81).
+-- Unique appelant synchrone (decideBuild). Array + truncate (recette
+-- N49), pas table.clear. Cap DEFENSE = 60. Non reentrant — decideBuild
+-- lit puis abandonne.
+local siteBuf: { number } = table.create(60)
 -- N50 : flatten buildingsBySlot une fois par visée (pas × 90 tuiles).
 -- Arrays parallèles, pas un spatial hash. Non réentrant — decideNuke
 -- est unique par bot par tick. blastValue (banc N46) réutilise le même pool.
@@ -195,21 +200,27 @@ end
 	tuiles frontieres ne marche pas, car l'ordre de parcours d'une table est
 	stable et un bot dont ces 60 tuiles sont a l'interieur des terres ne
 	construit alors *jamais* de port. On filtre donc sur le critere reel.
+
+	N62 : Bots.gatherSites + siteBuf (recette samsOf / N49, feel N81).
+	Caps 40/60/45 inchanges. Pas de shuffle — l'ordre de hash coast/border
+	est la loi.
 ]]
-local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: number, rng: Random): { number }
-	local sites: { number } = {}
+function Bots.gatherSites(state: GameState, ps: GameState.PlayerState, kind: number, rng: Random): { number }
+	local n = 0
 
 	if kind == B.PORT or kind == B.NAVAL_BASE then
 		for index in ps.coast do
-			table.insert(sites, index)
-			if #sites >= 40 then
+			n += 1
+			siteBuf[n] = index
+			if n >= 40 then
 				break
 			end
 		end
 	elseif kind == B.DEFENSE then
 		for index in ps.border do
-			table.insert(sites, index)
-			if #sites >= 60 then
+			n += 1
+			siteBuf[n] = index
+			if n >= 60 then
 				break
 			end
 		end
@@ -222,12 +233,16 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 			local y = rng:NextInteger(0, Config.MAP_HEIGHT - 1)
 			local index = MapGen.toIndex(x, y)
 			if buffer.readu8(state.owner, index) == ps.slot then
-				table.insert(sites, index)
+				n += 1
+				siteBuf[n] = index
 			end
 		end
 	end
 
-	return sites
+	for i = #siteBuf, n + 1, -1 do
+		siteBuf[i] = nil
+	end
+	return siteBuf
 end
 
 local function lowestUpgradable(state: GameState, slot: number): number?
@@ -427,7 +442,7 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 		return -- on epargne plutot que de depenser au coup par coup
 	end
 
-	for _, index in gatherSites(state, ps, wanted, rng) do
+	for _, index in Bots.gatherSites(state, ps, wanted, rng) do
 		if Buildings.build(state, ps.slot, index, wanted) then
 			return
 		end
