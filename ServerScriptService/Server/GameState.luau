@@ -246,6 +246,21 @@ local borderScratch = table.create(4, 0)
 -- Troisieme tampon : frontPriority est appele depuis la boucle de stepAttacks,
 -- qui itere deja sur `scratch`. Le partager ecraserait la liste en cours.
 local priorityScratch = table.create(4, 0)
+-- N51 : UnitSnapshot bateaux recycle (recette factoriesBuf / N45, feel N70).
+-- Inner payloads reecrits, pas recrees. Non reentrant — replicate() unique
+-- / tick. Pas de champ retreating (feel N56) : Overlay de cette ligne
+-- ne le lit pas (Types.BoatSnapshot, client 34/34).
+local boatSnapBuf: {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+	}
+} =
+	table.create(48)
 
 --=============================================================================
 -- Construction
@@ -2041,6 +2056,50 @@ end
 --=============================================================================
 -- Replication
 --=============================================================================
+
+--[[
+	Payload UnitSnapshot bateaux (10 Hz). Pas de path / homeTile (intention +
+	bandwidth). Pas de retreating (feel N56) : Overlay de cette ligne n'en a
+	pas besoin. init.server est hors bundle : ce helper est le contrat testable.
+	N51 : recycle boatSnapBuf + inner records. Truncate apres remplissage.
+]]
+function GameState.snapshotBoats(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+	}
+}
+	local n = 0
+	for _, boat in self.boats do
+		n += 1
+		local rec = boatSnapBuf[n]
+		if rec == nil then
+			boatSnapBuf[n] = {
+				id = boat.id,
+				slot = boat.slot,
+				x = boat.x,
+				y = boat.y,
+				troops = math.floor(boat.troops),
+				kind = boat.kind,
+			}
+		else
+			rec.id = boat.id
+			rec.slot = boat.slot
+			rec.x = boat.x
+			rec.y = boat.y
+			rec.troops = math.floor(boat.troops)
+			rec.kind = boat.kind
+		end
+	end
+	for i = #boatSnapBuf, n + 1, -1 do
+		boatSnapBuf[i] = nil
+	end
+	return boatSnapBuf
+end
 
 --[[
 	Serialise les changements de proprietaire depuis le dernier appel, au format

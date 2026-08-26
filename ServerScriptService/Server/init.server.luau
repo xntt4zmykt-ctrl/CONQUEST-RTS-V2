@@ -791,17 +791,9 @@ local function replicate()
 	-- Unites : peu nombreuses, donc envoyees en clair. L'instantane vide est
 	-- important lui aussi : c'est lui qui retire le dernier navire du client et
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
-	local boats = {}
-	for _, boat in state.boats do
-		table.insert(boats, {
-			id = boat.id,
-			slot = boat.slot,
-			x = boat.x,
-			y = boat.y,
-			troops = math.floor(boat.troops),
-			kind = boat.kind,
-		})
-	end
+	-- snapshotBoats (N51) recycle boatSnapBuf ; jamais path / homeTile /
+	-- retreating (Overlay de cette ligne ne lit pas retreating).
+	local boats = state:snapshotBoats()
 
 	local missiles = {}
 	for _, missile in state.missiles do
