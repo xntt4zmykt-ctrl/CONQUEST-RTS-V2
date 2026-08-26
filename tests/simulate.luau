@@ -9178,6 +9178,387 @@ do
 	end
 end
 
+do
+	-- N97 : Nukes recycle missileFree (contrat A). Launch ATOM →
+	-- detonation → 2e launch → rawequal record, kind/slot/tx a jour,
+	-- engaged == nil. MIRV : despawn porteur puis split → ogive
+	-- rawequal porteur, warhead == true ; 2e porteur warhead == nil.
+	-- Banc N76 / N77 / inbound / N52 inchanges. Pas de require
+	-- GameState→Nukes. Overlay lit snapshot N52.
+	local atomState = GameState.new(1099)
+	atomState.combatUnlocked = true
+	local bomber = atomState:addPlayer(nil, "OgivePool", Random.new(101), 0)
+	local victim = atomState:addPlayer(nil, "OgiveCible", Random.new(102), 0)
+	local atomOk = false
+	if not bomber or not victim or not victim.capitalTile then
+		fail("missile pool — spawn impossible")
+	else
+		local siloTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(atomState.owner, index) == bomber.slot and not atomState.buildings[index] then
+				siloTile = index
+				break
+			end
+		end
+		if not siloTile then
+			fail("missile pool — tuile silo introuvable")
+		else
+			atomState:placeBuilding(siloTile, Config.BUILDING.SILO, bomber.slot)
+			bomber.era = Eras.requiredForNuke(Config.NUKE.ATOM)
+			bomber.gold = 99999
+			local tx, ty = MapGen.fromIndex(victim.capitalTile)
+			local ok, msg = Nukes.launch(atomState, bomber.slot, victim.capitalTile, Config.NUKE.ATOM)
+			local rec = atomState.missiles[1]
+			if not ok or not rec then
+				fail(`missile pool — launch ATOM refuse ({tostring(msg)})`)
+			else
+				local steps = 0
+				while #atomState.missiles > 0 and steps < 800 do
+					Nukes.step(atomState, Random.new(14), function() end)
+					steps += 1
+				end
+				if #atomState.missiles ~= 0 then
+					fail("missile pool — ATOM ne detone jamais")
+				elseif Nukes.missileFree[1] == nil then
+					fail("missile pool — free-list vide apres detonation")
+				else
+					if not atomState.buildings[siloTile] then
+						local site: number? = nil
+						for index = 0, Config.TILE_COUNT - 1 do
+							if buffer.readu8(atomState.owner, index) == bomber.slot and not atomState.buildings[index] then
+								site = index
+								break
+							end
+						end
+						if site then
+							atomState:placeBuilding(site, Config.BUILDING.SILO, bomber.slot)
+							siloTile = site
+						end
+					end
+					local silo = atomState.buildings[siloTile]
+					if silo then
+						silo.cooldown = 0
+					end
+					if atomState.coolingBuildings then
+						atomState.coolingBuildings[siloTile] = nil
+					end
+					bomber.gold = 99999
+					local ok2, msg2 = Nukes.launch(atomState, bomber.slot, victim.capitalTile, Config.NUKE.ATOM)
+					local again = atomState.missiles[1]
+					if not ok2 or not again or not rawequal(rec, again) then
+						fail(`missile pool — 2e ATOM non recycle ({tostring(msg2)})`)
+					elseif again.kind ~= Config.NUKE.ATOM or again.slot ~= bomber.slot then
+						fail("missile pool — kind/slot stale")
+					elseif again.tx ~= tx or again.ty ~= ty then
+						fail("missile pool — tx/ty stale")
+					elseif again.engaged ~= nil then
+						fail("missile pool — leftover engaged")
+					elseif again.warhead ~= nil then
+						fail("missile pool — leftover warhead ATOM")
+					else
+						atomOk = true
+					end
+				end
+			end
+		end
+	end
+
+	local mirvState = GameState.new(1100)
+	mirvState.combatUnlocked = true
+	local mirvA = mirvState:addPlayer(nil, "OgiveMirv", Random.new(103), 0)
+	local mirvB = mirvState:addPlayer(nil, "OgiveMirvCible", Random.new(104), 0)
+	local mirvOk = false
+	if not mirvA or not mirvB or not mirvB.capitalTile then
+		fail("missile pool MIRV — spawn impossible")
+	else
+		local siloTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(mirvState.owner, index) == mirvA.slot and not mirvState.buildings[index] then
+				siloTile = index
+				break
+			end
+		end
+		if not siloTile then
+			fail("missile pool MIRV — tuile silo introuvable")
+		else
+			mirvState:placeBuilding(siloTile, Config.BUILDING.SILO, mirvA.slot)
+			mirvA.era = Eras.requiredForNuke(Config.NUKE.MIRV)
+			mirvA.gold = 99999
+			local ok, msg = Nukes.launch(mirvState, mirvA.slot, mirvB.capitalTile, Config.NUKE.MIRV)
+			local carrier = mirvState.missiles[1]
+			if not ok or not carrier then
+				fail(`missile pool MIRV — launch refuse ({tostring(msg)})`)
+			elseif carrier.warhead ~= nil then
+				fail("missile pool MIRV — porteur warhead stale")
+			else
+				local splitSeen = 0
+				local recycled = false
+				local alias = false
+				local steps = 0
+				while #mirvState.missiles > 0 and steps < 800 do
+					Nukes.step(mirvState, Random.new(15), function() end)
+					steps += 1
+					local warheads: { any } = {}
+					for _, missile in mirvState.missiles do
+						if missile.warhead then
+							table.insert(warheads, missile)
+							if rawequal(missile, carrier) then
+								recycled = true
+							end
+						end
+					end
+					splitSeen = math.max(splitSeen, #warheads)
+					for i = 1, #warheads do
+						for j = i + 1, #warheads do
+							if rawequal(warheads[i], warheads[j]) then
+								alias = true
+							end
+						end
+					end
+				end
+				if splitSeen < 2 then
+					fail(`missile pool MIRV — pas de scission (ogives {splitSeen})`)
+				elseif alias then
+					fail("missile pool MIRV — ogives alias live")
+				elseif not recycled then
+					fail("missile pool MIRV — ogive n'a pas recycle le porteur")
+				else
+					if not mirvState.buildings[siloTile] then
+						local site: number? = nil
+						for index = 0, Config.TILE_COUNT - 1 do
+							if buffer.readu8(mirvState.owner, index) == mirvA.slot and not mirvState.buildings[index] then
+								site = index
+								break
+							end
+						end
+						if site then
+							mirvState:placeBuilding(site, Config.BUILDING.SILO, mirvA.slot)
+							siloTile = site
+						end
+					end
+					local silo = mirvState.buildings[siloTile]
+					if silo then
+						silo.cooldown = 0
+					end
+					if mirvState.coolingBuildings then
+						mirvState.coolingBuildings[siloTile] = nil
+					end
+					mirvA.gold = 99999
+					local ok2, msg2 = Nukes.launch(mirvState, mirvA.slot, mirvB.capitalTile, Config.NUKE.MIRV)
+					local again = mirvState.missiles[1]
+					if not ok2 or not again then
+						fail(`missile pool MIRV — 2e launch refuse ({tostring(msg2)})`)
+					elseif again.warhead ~= nil then
+						fail("missile pool MIRV — 2e porteur leftover warhead")
+					elseif again.engaged ~= nil then
+						fail("missile pool MIRV — 2e porteur leftover engaged")
+					else
+						mirvOk = true
+					end
+				end
+			end
+		end
+	end
+
+	if atomOk and mirvOk then
+		print("missile pool : rawequal ATOM / ogive MIRV (N97)")
+	end
+end
+
+do
+	-- N98 : GameState recycle attackFree (contrat A). launchAttack →
+	-- retreat jusqu'au retrait → 2e launchAttack → rawequal record,
+	-- attacker/target a jour, frontier distinct (Heap neuf), retreatAt
+	-- == nil, isBeachhead nil. seedBeachhead 2 ponts leftover N68
+	-- (3 Attack, pas de fusion N29). Banc N67 / N68 / N69 verts.
+	local land = GameState.new(1101)
+	land.combatUnlocked = true
+	local la = land:addPlayer(nil, "FrontPoolA", Random.new(105), 0)
+	local lb = land:addPlayer(nil, "FrontPoolB", Random.new(106), 0)
+	local landOk = false
+	if not la or not lb then
+		fail("attack pool — spawn land impossible")
+	else
+		local scratch = table.create(4, 0)
+		local contact = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(land.owner, index) == la.slot and land:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if land:isLand(nb) and buffer.readu8(land.owner, nb) == 0 then
+						land:setOwner(nb, lb.slot)
+						contact = index
+						break
+					end
+				end
+			end
+			if contact then
+				break
+			end
+		end
+		if not contact then
+			fail("attack pool — pas de contact terrestre")
+		else
+			la.attackRatio = 1
+			la.troops = 4000
+			local ok1 = land:launchAttack(la.slot, lb.slot)
+			local rec = land.attacks[1]
+			if not ok1 or not rec then
+				fail(`attack pool — launch refuse ({ok1} #={#land.attacks})`)
+			else
+				local frontier1 = rec.frontier
+				local queued1 = rec.queued
+				land:retreatAttack(la.slot, lb.slot)
+				if rec.retreatAt == nil then
+					fail("attack pool — retreatAt non pose")
+				else
+					land.tick = rec.retreatAt
+					land:stepAttacks()
+					if #land.attacks ~= 0 then
+						fail(`attack pool — front restant apres retraite (#{#land.attacks})`)
+					elseif GameState.attackFree[1] == nil then
+						fail("attack pool — free-list vide apres retraite")
+					else
+						la.troops = 4000
+						local ok2 = land:launchAttack(la.slot, lb.slot)
+						local again = land.attacks[1]
+						if not ok2 or not again or not rawequal(rec, again) then
+							fail("attack pool — 2e launch non recycle")
+						elseif again.attacker ~= la.slot or again.target ~= lb.slot then
+							fail("attack pool — attacker/target stale")
+						elseif again.retreatAt ~= nil then
+							fail("attack pool — leftover retreatAt")
+						elseif again.isBeachhead ~= nil then
+							fail("attack pool — leftover isBeachhead terre")
+						elseif rawequal(frontier1, again.frontier) then
+							fail("attack pool — frontier aliases")
+						elseif rawequal(queued1, again.queued) then
+							fail("attack pool — queued aliases")
+						else
+							landOk = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local sea = GameState.new(1102)
+	sea.combatUnlocked = true
+	local sa = sea:addPlayer(nil, "FrontSeaA", Random.new(107), 0)
+	local sb = sea:addPlayer(nil, "FrontSeaB", Random.new(108), 0)
+	local seaOk = false
+	if not sa or not sb then
+		fail("attack pool beach — spawn impossible")
+	else
+		local scratch = table.create(4, 0)
+		local pairsFound: { { number } } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if sea:isLand(index) then
+				local nn = MapGen.neighbors(index, scratch)
+				for i = 1, nn do
+					local nb = scratch[i]
+					if sea:isLand(nb) and nb ~= index then
+						local used = false
+						for _, pair in pairsFound do
+							if pair[1] == index or pair[1] == nb or pair[2] == index or pair[2] == nb then
+								used = true
+								break
+							end
+						end
+						if not used then
+							table.insert(pairsFound, { index, nb })
+							if #pairsFound >= 2 then
+								break
+							end
+						end
+					end
+				end
+			end
+			if #pairsFound >= 2 then
+				break
+			end
+		end
+		if #pairsFound < 2 then
+			fail("attack pool beach — deux paires terrestres introuvables")
+		else
+			local landContact = nil
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(sea.owner, index) == sa.slot and sea:isLand(index) then
+					local nn = MapGen.neighbors(index, scratch)
+					for i = 1, nn do
+						local nb = scratch[i]
+						if sea:isLand(nb) and buffer.readu8(sea.owner, nb) == 0 then
+							local clash = false
+							for _, pair in pairsFound do
+								if nb == pair[1] or nb == pair[2] or index == pair[1] or index == pair[2] then
+									clash = true
+									break
+								end
+							end
+							if not clash then
+								sea:setOwner(nb, sb.slot)
+								landContact = index
+								break
+							end
+						end
+					end
+				end
+				if landContact then
+					break
+				end
+			end
+			if not landContact then
+				fail("attack pool beach — pas de contact terre distinct des ponts")
+			else
+				local troopsA, troopsB = 700, 900
+				sea:setOwner(pairsFound[1][1], sa.slot)
+				sea:setOwner(pairsFound[1][2], sb.slot)
+				sea:setOwner(pairsFound[2][1], sa.slot)
+				sea:setOwner(pairsFound[2][2], sb.slot)
+				sea:seedBeachhead(sa.slot, sb.slot, troopsA, pairsFound[1][1])
+				local rec = sea.attacks[1]
+				sea:seedBeachhead(sa.slot, sb.slot, troopsB, pairsFound[2][1])
+				if not rec or #sea.attacks ~= 2 then
+					fail(`attack pool beach — {#sea.attacks} ponts apres 2 seed (attendu 2)`)
+				elseif rec.isBeachhead ~= true then
+					fail("attack pool beach — isBeachhead absent")
+				else
+					sa.attackRatio = 1
+					sa.troops = 5000
+					local launched = sea:launchAttack(sa.slot, sb.slot)
+					local nBeach, nLand = 0, 0
+					for _, atk in sea.attacks do
+						if atk.isBeachhead then
+							nBeach += 1
+						else
+							nLand += 1
+						end
+					end
+					if not launched or #sea.attacks ~= 3 or nBeach ~= 2 or nLand ~= 1 then
+						fail(
+							`attack pool beach — 2 ponts+terre ({launched} #={#sea.attacks} beach={nBeach} land={nLand})`
+						)
+					else
+						sa.troops = 5000
+						sea:launchAttack(sa.slot, sb.slot)
+						if #sea.attacks ~= 3 then
+							fail(`attack pool beach — leftover pont fantome (#{#sea.attacks})`)
+						else
+							seaOk = true
+						end
+					end
+				end
+			end
+		end
+	end
+
+	if landOk and seaOk then
+		print("attack pool : rawequal land, 2 ponts leftover 3 (N98)")
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
