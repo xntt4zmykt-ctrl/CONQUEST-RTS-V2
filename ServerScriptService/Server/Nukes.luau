@@ -35,6 +35,14 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local tilesBeforeBuf: { [number]: number } = {}
 local hitTilesBuf: { [number]: number } = {}
 
+-- N77 : visee MIRV recyclee (nombres, pas Vector2). Truncate leftover
+-- AVANT fill — un leftover viserait les ogives du porteur precedent
+-- (autorite). Distinct de tilesBeforeBuf / hitTilesBuf (N76) / samBuf
+-- / blastX. Non reentrant : Nukes.step scinde en serie. Les records
+-- state.missiles restent uniques (possession, comme boat.path N64).
+local mirvTxBuf: { number } = table.create(8)
+local mirvTyBuf: { number } = table.create(8)
+
 --=============================================================================
 -- Tir
 --=============================================================================
@@ -282,12 +290,15 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 		then buffer.readu8(state.owner, MapGen.toIndex(bx, by))
 		else NEUTRAL
 
-	local targets: { Vector2 } = {}
+	-- N77 : table.clear avant fill. Pas de Vector2 — copie tx/ty dans
+	-- l'ogive. Loi spread / minGap=4 / fallback point vise inchangee.
+	table.clear(mirvTxBuf)
+	table.clear(mirvTyBuf)
 	local spread = stats.spread
 	local minGap = 4
 
 	for _ = 1, stats.warheads * 30 do
-		if #targets >= stats.warheads then
+		if #mirvTxBuf >= stats.warheads then
 			break
 		end
 		local nx = bx + rng:NextInteger(-spread, spread)
@@ -303,8 +314,8 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 			continue
 		end
 		local tooClose = false
-		for _, t in targets do
-			if math.abs(t.X - nx) + math.abs(t.Y - ny) < minGap then
+		for i = 1, #mirvTxBuf do
+			if math.abs(mirvTxBuf[i] - nx) + math.abs(mirvTyBuf[i] - ny) < minGap then
 				tooClose = true
 				break
 			end
@@ -312,16 +323,18 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 		if tooClose then
 			continue
 		end
-		table.insert(targets, Vector2.new(nx, ny))
+		table.insert(mirvTxBuf, nx)
+		table.insert(mirvTyBuf, ny)
 	end
 
 	-- La victime a disparu ou n'a plus de terre dans la zone : les ogives
 	-- retombent sur le point vise, comme un tir non guide.
-	if #targets == 0 then
-		table.insert(targets, Vector2.new(bx, by))
+	if #mirvTxBuf == 0 then
+		table.insert(mirvTxBuf, bx)
+		table.insert(mirvTyBuf, by)
 	end
 
-	for _, t in targets do
+	for i = 1, #mirvTxBuf do
 		table.insert(state.missiles, {
 			id = state:nextId(),
 			slot = missile.slot,
@@ -331,8 +344,8 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 			y = missile.y,
 			sx = missile.x,
 			sy = missile.y,
-			tx = t.X,
-			ty = t.Y,
+			tx = mirvTxBuf[i],
+			ty = mirvTyBuf[i],
 			progress = 0,
 			-- Les ogives retombent plus vite que le porteur ne montait : la
 			-- fenetre d'interception est courte, c'est le prix de la saturation.
@@ -344,7 +357,7 @@ local function splitMirv(state: GameState, missile: GameState.Missile, rng: Rand
 
 	local owner = state.players[missile.slot]
 	state:notify(
-		`\u{2622} Le MIRV {if owner then `de {owner.name} ` else ""}se scinde en {#targets} ogives !`,
+		`\u{2622} Le MIRV {if owner then `de {owner.name} ` else ""}se scinde en {#mirvTxBuf} ogives !`,
 		"alert"
 	)
 end
@@ -468,5 +481,8 @@ end
 -- Banc N76 : leftover ocean / rawequal. Pas replique.
 Nukes.tilesBeforeBuf = tilesBeforeBuf
 Nukes.hitTilesBuf = hitTilesBuf
+-- Banc N77 : leftover ocean / rawequal. Pas replique.
+Nukes.mirvTxBuf = mirvTxBuf
+Nukes.mirvTyBuf = mirvTyBuf
 
 return Nukes
