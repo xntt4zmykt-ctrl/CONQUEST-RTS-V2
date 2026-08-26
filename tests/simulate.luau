@@ -7976,6 +7976,128 @@ do
 end
 
 do
+	-- N93 : stepDoomsday recycle stripBuf. 1 humain sous quota →
+	-- tuiles diminuent, tiles vs buffer. Deux slots marques le meme
+	-- tick → chacun perd le sien (un leftover sans truncate
+	-- arracherait les tuiles du premier pendant le second).
+	-- Recette visual V43 (truncate avant traitement). Pas d'index
+	-- tuiles-par-slot (N9 reste ouvert). Pas stripTerritory (N94).
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(3102)
+	local leader = state:addPlayer(nil, "StripLead", Random.new(104), 0)
+	local a = state:addPlayer(nil, "StripA", Random.new(105), 0)
+	local b = state:addPlayer(nil, "StripB", Random.new(106), 0)
+	if not leader or not a or not b then
+		fail("stripBuf — spawn impossible")
+	else
+		a.isBot = false
+		b.isBot = false
+		-- Feel SPAWN_RADIUS=3 (~29 tuiles). Visual V43 shrinkTo 40 suppose
+		-- un disque plus large ; 8 tuiles restent sous le quota et sous
+		-- le leader. rotQuota(8, 20) = 1.
+		local keep = 8
+		local function shrinkTo(ps, nKeep)
+			local seen = 0
+			local drop: { number } = {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == ps.slot then
+					seen += 1
+					if seen > nKeep then
+						table.insert(drop, index)
+					end
+				end
+			end
+			for _, index in drop do
+				state:setOwner(index, Config.NEUTRAL_SLOT)
+			end
+		end
+		if leader.tiles <= keep then
+			fail(`stripBuf — leader trop petit ({leader.tiles})`)
+		else
+			shrinkTo(a, keep)
+			shrinkTo(b, keep)
+			if a.tiles ~= keep or b.tiles ~= keep then
+				fail(`stripBuf — shrink A={a.tiles} B={b.tiles}`)
+			elseif a.tiles >= leader.tiles or b.tiles >= leader.tiles then
+				fail("stripBuf — leader pas unique")
+			else
+				state.tick = 12000
+				local elapsed = state.tick * Config.TICK_DT
+				state.doomWarnedAt = {
+					[a.slot] = elapsed - 70,
+					[b.slot] = elapsed - 70,
+				}
+				state.doomUnderSince = {
+					[a.slot] = 40,
+					[b.slot] = 40,
+				}
+				local beforeA, beforeB, beforeL = a.tiles, b.tiles, leader.tiles
+				local buf = ChantierB.stripBuf
+				state:stepDoomsday()
+				local realA, realB, realL = 0, 0, 0
+				for index = 0, Config.TILE_COUNT - 1 do
+					local slot = buffer.readu8(state.owner, index)
+					if slot == a.slot then
+						realA += 1
+					elseif slot == b.slot then
+						realB += 1
+					elseif slot == leader.slot then
+						realL += 1
+					end
+				end
+				if a.tiles >= beforeA then
+					fail(`stripBuf — A n'a pas perdu ({a.tiles} / {beforeA})`)
+				elseif b.tiles >= beforeB then
+					fail(`stripBuf — B n'a pas perdu ({b.tiles} / {beforeB})`)
+				elseif leader.tiles ~= beforeL then
+					fail(`stripBuf — leader touche ({leader.tiles} / {beforeL})`)
+				elseif a.tiles ~= realA or b.tiles ~= realB or leader.tiles ~= realL then
+					fail(`stripBuf — tiles vs buffer A={a.tiles}/{realA} B={b.tiles}/{realB}`)
+				elseif not rawequal(buf, ChantierB.stripBuf) then
+					fail("stripBuf — rawequal")
+				elseif #buf ~= 0 then
+					fail(`stripBuf — leftover apres deux slots (#{#buf})`)
+				else
+					print("stripBuf : rot sous quota, deux camps, tiles vs buffer (N93)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N94 : stripTerritory table.clear in-place. Hashes conservees
+	-- (rawequal), vides, second joueur intact (un buf module partage
+	-- aurait vide le voisin). Recette passe 31. Pas stepDoomsday (N93).
+	local ChantierB = __require("ChantierB")
+	local state = GameState.new(3103)
+	local a = state:addPlayer(nil, "ClearA", Random.new(107), 0)
+	local b = state:addPlayer(nil, "ClearB", Random.new(108), 0)
+	if not a or not b then
+		fail("stripTerritory clear — spawn impossible")
+	else
+		local borderA, coastA = a.border, a.coast
+		local borderB = b.border
+		if next(borderA) == nil then
+			fail("stripTerritory clear — A sans frontiere avant strip")
+		else
+			ChantierB.stripTerritory(state, a)
+			if a.tiles ~= 0 then
+				fail(`stripTerritory clear — tiles={a.tiles}`)
+			elseif next(a.border) ~= nil or next(a.coast) ~= nil then
+				fail("stripTerritory clear — hashes non vides")
+			elseif not rawequal(borderA, a.border) or not rawequal(coastA, a.coast) then
+				fail("stripTerritory clear — hashes remplacees")
+			elseif next(borderB) == nil then
+				fail("stripTerritory clear — B videe (buf partage)")
+			else
+				print("stripTerritory : table.clear in-place, voisin intact (N94)")
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
