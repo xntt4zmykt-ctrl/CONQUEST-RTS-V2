@@ -393,6 +393,20 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		table.insert(path, worldAt(run.toIndex))
 	end
 
+	-- V64 : orientation camion cuite une fois par segment (grille HV, Y identique
+	-- aux deux bouts — le lift 0.8 s'annule). stepInterpolation compose
+	-- translation * segRot, plus de lookAt 60 Hz. Magnitude < 0.01 → rot
+	-- precedente (ou identite au premier), jamais un lookAt degenere.
+	local segRot: { CFrame } = {}
+	for i = 1, #path - 1 do
+		local d = path[i + 1] - path[i]
+		if d.Magnitude < 0.01 then
+			segRot[i] = if i > 1 then segRot[i - 1] else CFrame.new(0, 0, 0)
+		else
+			segRot[i] = CFrame.lookAt(Vector3.zero, d)
+		end
+	end
+
 	local from = path[1]
 	local to = path[#path]
 
@@ -442,6 +456,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		from = from + Vector3.new(0, 0.8, 0),
 		to = to + Vector3.new(0, 0.8, 0),
 		path = path,
+		segRot = segRot,
 		slot = slot,
 		delivery = nil,
 		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
@@ -861,7 +876,9 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		end
 		-- V57 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
-		-- Un lookAt. Roues : Angles conserve. Unites inchangees (V56).
+		-- V64 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+		-- 60 Hz. Roues : Angles conserve. Unites inchangees (V56). Chantier
+		-- segment.rot inchange (V63).
 		local path = route.path
 		local nSeg = #path - 1
 		local scaled = delivery.progress * nSeg
@@ -876,7 +893,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local px = ax + dx * segmentProgress
 		local py = ay + dy * segmentProgress
 		local pz = az + dz * segmentProgress
-		local frame = CFrame.lookAt(Vector3.new(px, py, pz), Vector3.new(px + dx, py + dy, pz + dz))
+		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
 		for _, piece in route.truck do
 			if piece.part.Name == "Wheel" then
 				piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
