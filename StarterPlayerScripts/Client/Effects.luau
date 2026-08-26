@@ -98,6 +98,25 @@ end
 -- frame, il ne doit donc jamais creer une Part par mouvement de souris.
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
 	local marker = self.actionPreview
+	-- N154 : skip si tuile + valid + color inchanges. actionPreviewIndex
+	-- etait pose et jamais lu. Meme hover 60 Hz (init.client raycast)
+	-- reecrivait Color / Transparency / CFrame.new + indexToWorld.
+	-- Skip les TROIS : attaque vs build peut changer valid/color sur
+	-- la meme tuile. Marker existant requis (premier appel cree).
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual V74
+	-- freeze). Distinct HUD N153 (feed plafond). Distinct visual V77
+	-- PlacementPreview early-out (ne pas merger 185a). Distinct
+	-- selectTile (Destroy+recreate, leftover). Recette leftover N153,
+	-- pas merger visual. HUD / UnitModels / Overlay / PlacementPreview
+	-- inchanges.
+	if
+		marker
+		and self.actionPreviewIndex == index
+		and self.actionPreviewValid == valid
+		and self.actionPreviewColor == color
+	then
+		return
+	end
 	if not marker then
 		marker = Instance.new("Part")
 		marker.Name = "ActionPreview"
@@ -118,6 +137,8 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	marker.Transparency = if valid then 0.5 else 0.72
 	marker.CFrame = CFrame.new(base.X, height + 0.42, base.Z)
 	self.actionPreviewIndex = index
+	self.actionPreviewValid = valid
+	self.actionPreviewColor = color
 end
 
 function Effects.clearActionPreview(self: Effects)
@@ -125,6 +146,8 @@ function Effects.clearActionPreview(self: Effects)
 		self.actionPreview:Destroy()
 		self.actionPreview = nil
 		self.actionPreviewIndex = nil
+		self.actionPreviewValid = nil
+		self.actionPreviewColor = nil
 	end
 end
 

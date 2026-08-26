@@ -763,6 +763,14 @@ check("construction du monde 3D", function()
 end)
 
 check("calques d'entites, effets et apercu", function()
+	-- N154 : previewTile skip index+valid+color. 2001 puis 2002 sont
+	-- deux indices distincts — pas de skip entre eux, CFrame/Color
+	-- ecrits, Part reutilisee (pas Instance.new au 2e). clearActionPreview
+	-- nil aussi Valid/Color. Leftover N153 fil (check notifications)
+	-- et leftover N152 flame (check navires) doivent rester verts.
+	-- Recette leftover N153, pas merger visual V77 PlacementPreview.
+	-- selectTile Destroy+recreate inchange (leftover). HUD / UnitModels
+	-- / Overlay / PlacementPreview non touches.
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
