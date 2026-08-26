@@ -115,7 +115,10 @@ function IntentValidator.clearPlayer(userId: number)
 end
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value == math.floor(value)
+		and math.abs(value) ~= math.huge
 end
 
 local function checkRate(userId: number, now: number): boolean
@@ -252,6 +255,8 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
+		-- Meme bornes que l'apply : un ratio extreme n'occupe pas la file.
+		payload.ratio = math.clamp(payload.ratio, 0.05, 1)
 	elseif actionType == "ChooseDoctrine" then
 		if not Doctrines.isValid(payload.doctrineId) then
 			bumpRefuse("InvalidSchema")
@@ -271,9 +276,18 @@ function IntentValidator.enqueue(
 			return false, "InvalidTarget"
 		end
 	elseif actionType == "QuickChat" then
-		if typeof(payload.messageId) ~= "string" or not QuickChat.get(payload.messageId) then
+		local entry = if typeof(payload.messageId) == "string" then QuickChat.get(payload.messageId) else nil
+		if not entry then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
+		end
+		-- Un needsTarget sans 3e arg lisait un sequence (ex. 99) comme slot.
+		if entry.needsTarget then
+			local targetSlot = payload.targetSlot
+			if not isInteger(targetSlot) or targetSlot < 1 or targetSlot > Config.MAX_TOTAL_FACTIONS then
+				bumpRefuse("InvalidTarget")
+				return false, "InvalidTarget"
+			end
 		end
 	end
 

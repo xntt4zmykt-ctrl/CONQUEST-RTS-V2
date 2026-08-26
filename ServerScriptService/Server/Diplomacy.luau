@@ -28,6 +28,13 @@ local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	end
 end
 
+-- Une proposition est encore honorable tant que le tick courant n'a pas
+-- atteint l'expiry. flush() tourne avant Diplomacy.step : viewFor et accept
+-- doivent appliquer le meme garde, sinon le HUD affiche 1 tick de trop.
+local function requestIsLive(state: GameState, expiry: any): boolean
+	return typeof(expiry) == "number" and state.tick < expiry
+end
+
 --=============================================================================
 -- Alliances
 --=============================================================================
@@ -72,9 +79,7 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 		return false, "Aucune proposition en cours."
 	end
 	local requestExpiry = requests[to]
-	-- flush() tourne avant Diplomacy.step : sans ce garde, une proposition
-	-- expiree reste acceptable pendant le tick qui la nettoie.
-	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+	if not requestIsLive(state, requestExpiry) then
 		requests[to] = nil
 		return false, "Cette proposition a expire."
 	end
@@ -501,13 +506,16 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if requestIsLive(state, expiry) then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if expiry and requestIsLive(state, expiry) then
 			incoming[other] = true
 		end
 	end

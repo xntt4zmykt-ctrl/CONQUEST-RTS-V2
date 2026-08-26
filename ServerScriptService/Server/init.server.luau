@@ -495,7 +495,11 @@ local function deployPlayer(player: Player, nationId: number)
 end
 
 joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
-	if typeof(nationId) ~= "number" then
+	if typeof(nationId) ~= "number"
+		or nationId ~= nationId
+		or nationId ~= math.floor(nationId)
+		or math.abs(nationId) == math.huge
+	then
 		return
 	end
 	-- Avant cooldown / pendingMode : un JoinRequest en phase ended ne doit
@@ -652,8 +656,13 @@ end)
 local quickChatEvent = Remotes.get("QuickChat")
 
 quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any, sequence: any)
-	-- Compat : ancien client envoie (id, target) ; nouveau (id, target, seq).
-	-- Si targetSlot est un nombre et sequence nil, c'est l'ancien format.
+	-- Client officiel : (id, target, seq). Ancien fil 2-args : (id, seq) avec
+	-- seq > MAX_TOTAL_FACTIONS ne doit pas viser une faction. Un needsTarget
+	-- 2-args avec petit N reste lu comme cible (compat ancienne UI).
+	if sequence == nil and typeof(targetSlot) == "number" and targetSlot > Config.MAX_TOTAL_FACTIONS then
+		sequence = targetSlot
+		targetSlot = nil
+	end
 	enqueueOrReject(player, "QuickChat", sequence, { messageId = messageId, targetSlot = targetSlot })
 end)
 
