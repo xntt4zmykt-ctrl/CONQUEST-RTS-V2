@@ -10666,6 +10666,126 @@ do
 	end
 end
 
+do
+	-- N107 : IntentValidator.clearPlayer swap-pop (leftover N82).
+	-- 3 intents A, B, A → clearPlayer(A) → #queue==1 rawequal B, pas de
+	-- trou, leftover [2]==nil. clearPlayer user absent = no-op.
+	-- Payload live — ne pas pooler. Banc N82 flush #queue==0 vert.
+	IntentValidator.reset()
+	local recA1 = {
+		userId = 10,
+		slot = 1,
+		sequence = 1,
+		actionType = "SetAttackRatio",
+		payload = { ratio = 0.2 },
+	}
+	local recB = {
+		userId = 20,
+		slot = 2,
+		sequence = 1,
+		actionType = "SetAttackRatio",
+		payload = { ratio = 0.3 },
+	}
+	local recA2 = {
+		userId = 10,
+		slot = 1,
+		sequence = 2,
+		actionType = "SetAttackRatio",
+		payload = { ratio = 0.4 },
+	}
+	IntentValidator.queue[1] = recA1
+	IntentValidator.queue[2] = recB
+	IntentValidator.queue[3] = recA2
+	IntentValidator.clearPlayer(10)
+	local hole = false
+	for i = 1, #IntentValidator.queue do
+		if IntentValidator.queue[i] == nil then
+			hole = true
+			break
+		end
+	end
+	if hole then
+		fail("clear order — trou array apres swap-pop")
+	elseif #IntentValidator.queue ~= 1 then
+		fail(`clear order — leftover #={#IntentValidator.queue} (attendu 1)`)
+	elseif not rawequal(IntentValidator.queue[1], recB) then
+		fail("clear order — restant non rawequal B")
+	elseif IntentValidator.queue[2] ~= nil then
+		fail("clear order — leftover [2] non nil")
+	else
+		IntentValidator.clearPlayer(999)
+		if #IntentValidator.queue ~= 1 or not rawequal(IntentValidator.queue[1], recB) then
+			fail("clear order — no-op user absent a mute la file")
+		else
+			print("clear order : swap-pop A/B/A, rawequal B, no-op absent (N107)")
+		end
+	end
+	IntentValidator.reset()
+end
+
+do
+	-- N108 : Bots.botSlots / Tribes.tribeSlots swap-pop (leftover N63).
+	-- {2, 5, 8} ; players[5]=nil ; step → #==2 rawequal {2, 8}, pas de trou.
+	-- tick=1 pour sauter DECISION_INTERVAL. Pas de free-list (nombres).
+	-- Ne pas corriger N12. Banc grace / elimBuf verts.
+	local Tribes = __require("Tribes")
+	local botState = GameState.new(1111)
+	botState.players[2] = { slot = 2 }
+	botState.players[8] = { slot = 8 }
+	table.clear(Bots.botSlots)
+	Bots.botSlots[1] = 2
+	Bots.botSlots[2] = 5
+	Bots.botSlots[3] = 8
+	botState.tick = 1
+	Bots.step(botState, Random.new(11))
+	local botHole = false
+	for i = 1, #Bots.botSlots do
+		if Bots.botSlots[i] == nil then
+			botHole = true
+			break
+		end
+	end
+	if botHole then
+		fail("slot order — trou botSlots")
+	elseif #Bots.botSlots ~= 2 then
+		fail(`slot order — bot leftover #={#Bots.botSlots} (attendu 2)`)
+	elseif Bots.botSlots[1] ~= 2 or Bots.botSlots[2] ~= 8 then
+		fail(`slot order — bot restants {Bots.botSlots[1]}, {Bots.botSlots[2]} (attendu 2,8)`)
+	elseif Bots.botSlots[3] ~= nil then
+		fail("slot order — bot leftover [3] non nil")
+	else
+		print("slot order : botSlots swap-pop milieu rawequal {2,8} (N108)")
+	end
+
+	local tribeState = GameState.new(1112)
+	tribeState.players[2] = { slot = 2, isTribe = true }
+	tribeState.players[8] = { slot = 8, isTribe = true }
+	table.clear(Tribes.tribeSlots)
+	Tribes.tribeSlots[1] = 2
+	Tribes.tribeSlots[2] = 5
+	Tribes.tribeSlots[3] = 8
+	tribeState.tick = 1
+	Tribes.step(tribeState, Random.new(12))
+	local tribeHole = false
+	for i = 1, #Tribes.tribeSlots do
+		if Tribes.tribeSlots[i] == nil then
+			tribeHole = true
+			break
+		end
+	end
+	if tribeHole then
+		fail("slot order — trou tribeSlots")
+	elseif #Tribes.tribeSlots ~= 2 then
+		fail(`slot order — tribe leftover #={#Tribes.tribeSlots} (attendu 2)`)
+	elseif Tribes.tribeSlots[1] ~= 2 or Tribes.tribeSlots[2] ~= 8 then
+		fail(`slot order — tribe restants {Tribes.tribeSlots[1]}, {Tribes.tribeSlots[2]} (attendu 2,8)`)
+	elseif Tribes.tribeSlots[3] ~= nil then
+		fail("slot order — tribe leftover [3] non nil")
+	else
+		print("slot order : tribeSlots swap-pop milieu rawequal {2,8} (N108)")
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
