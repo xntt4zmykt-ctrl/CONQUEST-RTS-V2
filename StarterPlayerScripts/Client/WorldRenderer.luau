@@ -65,6 +65,9 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	self.terrain = MapGen.generate(seed)
 	self.owner = buffer.create(W * H)
 	self.chunkFolders = {} :: { [number]: Folder }
+	self.chunkGround = {} :: { [number]: { Part } }
+	self.chunkBorder = {} :: { [number]: { Part } }
+	self.chunkVisible = {} :: { [number]: number }
 	self.dirty = {} :: { [number]: boolean }
 	self.dirtyQueue = {} :: { number }
 	self.partCount = 0
@@ -400,12 +403,20 @@ local BORDER_LIFT = 0.05 * Config.WORLD_SCALE
 -- borderTerrain / borderOwner / borderFolder / borderSurface AU DEBUT
 -- de buildChunkBorders. Un leftover `self` d'un chunk precedent colorerait
 -- le voisin. Overlay n'appelle pas buildChunkBorders. Pas de RemoteFunction.
--- Ne pas table.clone de BORDER_PASSES. Ne pas recycler les Parts (N106).
+-- Ne pas table.clone de BORDER_PASSES.
+-- N106 : emit recycle les Parts Border du chunk (borderParts pose par
+-- rebuildChunk). Ne PAS partager groundParts. Truncate leftover Parent=nil
+-- AVANT return de rebuildChunk. Color/Size/CFrame reecrits chaque rebuild.
 local borderTerrain: buffer? = nil
 local borderOwner: buffer? = nil
 local borderFolder: Folder? = nil
 local borderSurface = 0
 local borderDrawn = 0
+-- N106 : pool Border DU chunk, pose par rebuildChunk avant buildChunkBorders.
+-- Pas un pool global — Ground et Border ne s'empruntent pas. emitUsed
+-- compte les Parts reutilisees / creees ce rebuild.
+local borderParts: { Part }? = nil
+local emitUsed = 0
 
 local BORDER_PASSES = {
 	{ dx = 0, dy = -1 },
@@ -443,16 +454,28 @@ local function emit(slot: number, ax: number, ay: number, bx: number, by: number
 	local horizontal = dy ~= 0
 	local length = (if horizontal then math.abs(bx - ax) else math.abs(by - ay)) * TILE + TILE
 
-	local part = Instance.new("Part")
-	part.Name = "Border"
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = false
-	part.CanQuery = false
-	part.CastShadow = false
-	part.Material = Enum.Material.SmoothPlastic
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
+	-- N106 : recycler le Part Border du chunk. Reecrire Size / CFrame / Color
+	-- / Name. Un leftover Color du voisin peindrait deux nations.
+	emitUsed += 1
+	local parts = borderParts
+	local part: Part? = if parts then parts[emitUsed] else nil
+	if not part then
+		part = Instance.new("Part")
+		part.Name = "Border"
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CanQuery = false
+		part.CastShadow = false
+		part.Material = Enum.Material.SmoothPlastic
+		part.TopSurface = Enum.SurfaceType.Smooth
+		part.BottomSurface = Enum.SurfaceType.Smooth
+		if parts then
+			parts[emitUsed] = part
+		end
+	else
+		part.Name = "Border"
+	end
 	part.Color = borderColor(slot)
 	part.Size = if horizontal
 		then Vector3.new(length, 0.12 * Config.WORLD_SCALE, BORDER_THICKNESS)
@@ -499,6 +522,7 @@ function WorldRenderer.buildChunkBorders(
 	borderFolder = folder
 	borderSurface = Config.LAND_HEIGHT + BORDER_LIFT
 	borderDrawn = 0
+	emitUsed = 0
 
 	--[[
 		Deux balayages : les cotes nord/sud se fusionnent le long des lignes, les
@@ -552,15 +576,27 @@ function WorldRenderer.buildChunkBorders(
 end
 
 function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
-	local existing = self.chunkFolders[chunk]
-	if existing then
-		self.partCount -= #existing:GetChildren()
-		existing:Destroy()
+	-- N106 : recycler Ground/Border DU folder de chunk. Ne plus Destroy()
+	-- le folder entier. Pool par chunk (pas global — un second rebuild
+	-- sequentiel du chunk suivant casserait un pool partage). Recette N85.
+	-- meshKeyAt inchange (N104). Loi greedy inchangee. Overlay non touche.
+	local folder = self.chunkFolders[chunk]
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = `Chunk{chunk}`
+		self.chunkFolders[chunk] = folder
 	end
 
-	local folder = Instance.new("Folder")
-	folder.Name = `Chunk{chunk}`
-	self.chunkFolders[chunk] = folder
+	local groundParts = self.chunkGround[chunk]
+	if not groundParts then
+		groundParts = {}
+		self.chunkGround[chunk] = groundParts
+	end
+	local chunkBorderParts = self.chunkBorder[chunk]
+	if not chunkBorderParts then
+		chunkBorderParts = {}
+		self.chunkBorder[chunk] = chunkBorderParts
+	end
 
 	if not self.everBuilt[chunk] then
 		self.everBuilt[chunk] = true
@@ -578,24 +614,32 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 	meshOwner = self.owner
 	local rects = GreedyMesh.rectangles(meshKeyAt, cx, cy, x1, y1, self.meshScratch)
 
+	local usedG = 0
 	for _, rect in rects do
 		local terrain = rect.key % KEY_STRIDE
 		local slot = (rect.key - terrain) // KEY_STRIDE
 		local height = Config.TERRAIN_HEIGHT[terrain]
 		local origin = WorldSpace.tileToWorld(rect.x, rect.y)
 
-		local part = Instance.new("Part")
-		part.Name = "Ground"
-		part.Anchored = true
-		-- La collision est assuree par la geometrie du serveur : celle-ci n'est
-		-- que visuelle, et la rendre solide dupliquerait le travail du moteur
-		-- physique.
-		part.CanCollide = false
-		part.CanTouch = false
-		part.CastShadow = false
-		part.Material = Enum.Material.SmoothPlastic
-		part.TopSurface = Enum.SurfaceType.Smooth
-		part.BottomSurface = Enum.SurfaceType.Smooth
+		usedG += 1
+		local part = groundParts[usedG]
+		if not part then
+			part = Instance.new("Part")
+			part.Name = "Ground"
+			part.Anchored = true
+			-- La collision est assuree par la geometrie du serveur : celle-ci n'est
+			-- que visuelle, et la rendre solide dupliquerait le travail du moteur
+			-- physique.
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CastShadow = false
+			part.Material = Enum.Material.SmoothPlastic
+			part.TopSurface = Enum.SurfaceType.Smooth
+			part.BottomSurface = Enum.SurfaceType.Smooth
+			groundParts[usedG] = part
+		else
+			part.Name = "Ground"
+		end
 		part.Size = Vector3.new(rect.width * TILE, height, rect.depth * TILE)
 		part.CFrame = CFrame.new(
 			origin.X + (rect.width - 1) * TILE / 2,
@@ -605,10 +649,36 @@ function WorldRenderer.rebuildChunk(self: WorldRenderer, chunk: number)
 		part.Color = blockColor(slot, terrain)
 		part.Parent = folder
 	end
+	-- Leftover Ground : Parent = nil AVANT return. Un leftover Color du
+	-- voisin colorerait le biome. Ne pas Destroy — le prochain rebuild du
+	-- MEME chunk reutilise. Ne pas nil les slots du pool.
+	for i = usedG + 1, #groundParts do
+		local leftover = groundParts[i]
+		if leftover then
+			leftover.Parent = nil
+		end
+	end
 
-	self.partCount += #rects
-	self.partCount += self:buildChunkBorders(folder, cx, cy, x1, y1)
-	folder.Parent = self.root
+	-- Poser le pool Border AVANT emit. Distinct de groundParts.
+	borderParts = chunkBorderParts
+	local usedB = self:buildChunkBorders(folder, cx, cy, x1, y1)
+	for i = usedB + 1, #chunkBorderParts do
+		local leftover = chunkBorderParts[i]
+		if leftover then
+			leftover.Parent = nil
+		end
+	end
+
+	-- partCount = Parts visibles seulement, pas #GetChildren() d'un folder
+	-- qui garderait des orphelins Parent=nil hors liste.
+	local visible = usedG + usedB
+	local prevVisible = self.chunkVisible[chunk] or 0
+	self.partCount += visible - prevVisible
+	self.chunkVisible[chunk] = visible
+
+	if folder.Parent ~= self.root then
+		folder.Parent = self.root
+	end
 end
 
 -- Animation ambiante a tres faible amplitude : elle se lit en vue avatar sans
