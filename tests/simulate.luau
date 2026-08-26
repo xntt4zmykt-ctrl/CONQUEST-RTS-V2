@@ -397,6 +397,35 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5i. Index navalBasesBySlot = NAVAL_BASE (ISSUE-N48).
+	do
+		local BASE = Config.BUILDING.NAVAL_BASE
+		local indexed = 0
+		local navalBasesBySlot = state.navalBasesBySlot or {}
+		for slot, set in navalBasesBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= BASE or building.slot ~= slot then
+					fail(`tick {tick} — navalBasesBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realBase = 0
+		for index, building in state.buildings do
+			if building.kind == BASE then
+				realBase += 1
+				local set = navalBasesBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — NAVAL_BASE {index} absent de navalBasesBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realBase then
+			fail(`tick {tick} — navalBasesBySlot count {indexed} != NAVAL_BASE {realBase}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5687,6 +5716,77 @@ do
 end
 
 do
+	-- N48 : navalBasesBySlot. 2 bases + 1 port → 2 carriers, pas de carrier PORT.
+	-- Recette feel N65. _carriersDirty reste evenementiel (N34).
+	local state = GameState.new(1074)
+	local owner = state:addPlayer(nil, "Amiraute", Random.new(80), 0)
+	local heir = state:addPlayer(nil, "Prise", Random.new(81), 0)
+	if not owner or not heir then
+		fail("navalBasesBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("navalBasesBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.NAVAL_BASE, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.NAVAL_BASE, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.PORT, owner.slot)
+			local set = state.navalBasesBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 2 then
+				fail(`navalBasesBySlot — {count} bases indexees, attendu 2`)
+			elseif set and set[sites[3]] then
+				fail("navalBasesBySlot — PORT indexe comme base")
+			elseif not state._carriersDirty then
+				fail("navalBasesBySlot — pose n'a pas leve _carriersDirty")
+			else
+				Navy.step(state, Random.new(82))
+				local carriers = 0
+				for _, boat in state.boats do
+					if boat.kind == Navy.KIND_CARRIER then
+						carriers += 1
+					end
+				end
+				if carriers ~= 2 then
+					fail(`syncCarriers index — {carriers} carrier(s), attendu 2`)
+				elseif state._carriersDirty then
+					fail("syncCarriers index — dirty encore vrai apres sync")
+				else
+					state:transferBuilding(sites[1], heir.slot)
+					local oldSet = state.navalBasesBySlot[owner.slot]
+					local newSet = state.navalBasesBySlot[heir.slot]
+					if oldSet and oldSet[sites[1]] then
+						fail("navalBasesBySlot — transfer laisse l'ancien camp")
+					elseif not (newSet and newSet[sites[1]]) then
+						fail("navalBasesBySlot — transfer n'indexe pas le nouvel camp")
+					else
+						state:destroyBuilding(sites[2])
+						if oldSet and oldSet[sites[2]] then
+							fail("navalBasesBySlot — destroy laisse un orphelin")
+						else
+							print("navalBasesBySlot : 2 bases, pas le port, transfer/destroy OK (N48)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- removePlayer snapshot buildingsBySlot (N46), pas le hash global.
 	local state = GameState.new(1073)
 	local owner = state:addPlayer(nil, "Sortant", Random.new(77), 0)
@@ -5697,22 +5797,25 @@ do
 		for index = 0, Config.TILE_COUNT - 1 do
 			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
 				table.insert(sites, index)
-				if #sites >= 2 then
+				if #sites >= 3 then
 					break
 				end
 			end
 		end
-		if #sites < 2 then
+		if #sites < 3 then
 			fail("removePlayer index — tuiles libres insuffisantes")
 		else
 			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
 			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.NAVAL_BASE, owner.slot)
 			local gone = owner.slot
 			state:removePlayer(gone)
 			if state.buildingsBySlot[gone] then
 				fail("removePlayer index — buildingsBySlot[slot] encore pose")
 			elseif state.samsBySlot[gone] then
 				fail("removePlayer index — samsBySlot[slot] encore pose")
+			elseif state.navalBasesBySlot[gone] then
+				fail("removePlayer index — navalBasesBySlot[slot] encore pose")
 			elseif state.factoriesByTile[sites[1]] ~= nil then
 				fail("removePlayer index — factoriesByTile encore pose")
 			else
