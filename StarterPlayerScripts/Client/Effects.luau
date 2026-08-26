@@ -70,7 +70,8 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- BillboardGui + TextLabel + UIStroke, pas recreer les enfants).
 	-- Distinct de V119 (goldPopup goldFree, Overlay). Distinct de V82
 	-- (ConquestPulse pulseRot). Distinct de V83 (SelectionRing).
-	-- Distinct de V121 (tileFlash flashFree). Pas reentrant.
+	-- Distinct de V121 (tileFlash flashFree). Distinct de V122
+	-- (conquestPulse pulseFree). Pas reentrant.
 	-- Evenement vague mineure (count >= 4), pas 60 Hz.
 	self.textFree = {} :: { Part }
 
@@ -81,10 +82,23 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- ≠ GoldPopup V119). Reset Color / Transparency 0.15 / Size
 	-- TILE×0.4×TILE / CFrame (base.X, height+0.3, base.Z) AVANT Tween.
 	-- Caps 90 live / 28 par vague inchanges. Distinct de V120
-	-- (floatingText textFree). Distinct de V82 (ConquestPulse
-	-- pulseRot, Y = surface+0.8). Distinct de V83 (SelectionRing).
+	-- (floatingText textFree). Distinct de V122 (ConquestPulse
+	-- pulseFree, Y = surface+0.8). Distinct de V83 (SelectionRing).
 	-- Pas reentrant. Evenement eclat, pas 60 Hz.
 	self.flashFree = {} :: { Part }
+
+	-- V122 : free-list conquestPulse PAR Effects (pas flashFree /
+	-- textFree / goldFree / wakeFree). Recette feel N157 inline —
+	-- ne PAS merger 6cec / bfcc. Leftover Parent = nil, pas Destroy.
+	-- Name ConquestPulse conserve (V82). pulseRot deja (V82). Reset
+	-- Color / Transparency 0.45 / Size (0.6, 4, 4) / CFrame
+	-- (ground.X, height, ground.Z) * pulseRot AVANT Tween. Height =
+	-- surface + 0.8 (fallback 3 hors carte) inchange — ne pas porter
+	-- Y = 3 feel. Cap 8 live inchange. Distinct de V121 (tileFlash
+	-- flashFree). Distinct de V120 (floatingText textFree). Distinct
+	-- de V83 (SelectionRing). Distinct de V81 (Shockwave Overlay).
+	-- Pas reentrant. Evenement onde, pas 60 Hz.
+	self.pulseFree = {} :: { Part }
 
 	return self
 end
@@ -220,7 +234,7 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	-- + fade Transparency 1 + shrink TILE*0.4 inchanges. Caps 90 / 28
 	-- inchanges. Early-out live >= MAX_LIVE_FLASHES inchange.
 	-- Echantillonnage step = count // 28 inchange. Ne pas changer
-	-- floatingText (V120 deja). Ne pas changer conquestPulse (V82).
+	-- floatingText (V120 deja). Ne pas changer conquestPulse (V122).
 	-- Ne pas geler Size flame (V74).
 	local flashFree = self.flashFree
 	local pn = #flashFree
@@ -273,15 +287,39 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	end
 	local worldRadius = math.clamp(radius, 3, 40) * Config.TILE_SIZE
 
-	local ring = Instance.new("Part")
-	ring.Name = "ConquestPulse"
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
+	-- V122 : recycler conquestPulse. Color + Transparency 0.45 + Size
+	-- (0.6, 4, 4) + CFrame (ground.X, height, ground.Z) * pulseRot
+	-- AVANT Tween (un leftover Size worldRadius*2 / Transparency 1
+	-- de l'onde precedente). Recette feel N157 inline — ne PAS merger
+	-- 6cec / bfcc. Name ConquestPulse conserve (V82). pulseRot deja
+	-- (V82). Height = surface + 0.8 (fallback 3 hors carte) inchange
+	-- — ne pas porter Y = 3 feel. Pas de pool partage avec flashFree /
+	-- textFree / goldFree / wakeFree. Ne pas nil les slots du pool
+	-- (pop O(1) : [n] = nil). Distinct de V121 (tileFlash flashFree).
+	-- Distinct de V120 (floatingText textFree). Distinct de V83
+	-- (SelectionRing). Distinct de V81 (Shockwave Overlay). Delay 1
+	-- inchange. Tween Size worldRadius*2 + Transparency 1 inchanges.
+	-- Compteur livePulses / cap 8 inchanges. Early-out livePulses >=
+	-- MAX_LIVE_PULSES inchange. lossWave passe par ce site. Ne pas
+	-- changer tileFlash (V121 deja). Ne pas changer floatingText
+	-- (V120 deja). Ne pas recuire pulseRot. Ne pas geler Size flame
+	-- (V74).
+	local pulseFree = self.pulseFree
+	local pn = #pulseFree
+	local ring = if pn > 0 then pulseFree[pn] else nil
+	if ring then
+		pulseFree[pn] = nil
+	else
+		ring = Instance.new("Part")
+		ring.Name = "ConquestPulse"
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+	end
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
@@ -299,7 +337,8 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	}):Play()
 
 	task.delay(1, function()
-		ring:Destroy()
+		ring.Parent = nil
+		pulseFree[#pulseFree + 1] = ring
 		self.livePulses = math.max(0, (self.livePulses or 1) - 1)
 	end)
 end
@@ -324,8 +363,8 @@ function Effects.floatingText(self: Effects, x: number, y: number, text: string,
 	-- Distinct de V83 (SelectionRing). Distinct de V118 (wakeFree).
 	-- Distinct de V121 (tileFlash flashFree). Delay 1.3 inchange. Tween lift Y=26 + fade label/outline
 	-- inchanges. conquestWave n'affiche que si mine and count >= 4
-	-- inchange. tileFlash recyclee (V121). Ne pas changer
-	-- conquestPulse. Ne pas geler Size flame (V74).
+	-- inchange. tileFlash recyclee (V121). conquestPulse recyclee
+	-- (V122). Ne pas geler Size flame (V74).
 	local textFree = self.textFree
 	local pn = #textFree
 	local anchor = if pn > 0 then textFree[pn] else nil

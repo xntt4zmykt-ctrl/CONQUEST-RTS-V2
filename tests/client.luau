@@ -2913,6 +2913,8 @@ check("vagues de conquete", function()
 	assert(#effects.textFree == 0, "textFree pre-park non vide")
 	assert(type(effects.flashFree) == "table", "flashFree absent")
 	assert(#effects.flashFree == 0, "flashFree pre-park non vide")
+	assert(type(effects.pulseFree) == "table", "pulseFree absent")
+	assert(#effects.pulseFree == 0, "pulseFree pre-park non vide")
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -2922,14 +2924,17 @@ check("vagues de conquete", function()
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
 	local pulseFound = false
 	local aPulse
+	local pulses = {}
 	for _, node in effects.root:GetChildren() do
 		if node.Name == "ConquestPulse" then
 			pulseFound = true
 			aPulse = node
+			table.insert(pulses, node)
 		end
 	end
 	assert(pulseFound, "pas d'onde ConquestPulse")
 	assert(aPulse ~= nil and aPulse.CFrame, "pulse sans CFrame")
+	assert(#pulses >= 1, "conquestPulse count")
 	local expectedY = WorldSpace.surfaceHeight(terrain, 5) + 0.8
 	assert(math.abs(aPulse.CFrame.Y - expectedY) < 1e-6, "pulse Y")
 	assert(aPulse.CFrame.Y ~= 3, "pulse Y feel N134")
@@ -3030,6 +3035,18 @@ check("vagues de conquete", function()
 	for i = 1, #flashes do
 		assert(flashSeen[effects.flashFree[i]], "flashFree autre Part")
 	end
+	-- V122 : pulseFree parque au meme flush. 2e vague mine=false
+	-- recycle un anneau sans toucher textFree / flashFree leftovers.
+	assert(#effects.pulseFree == #pulses, "pulseFree non parque")
+	assert(effects.pulseFree[#pulses + 1] == nil, "pulseFree leftover slot")
+	local pulseSeen = {}
+	for i = 1, #pulses do
+		assert(pulses[i].Parent == nil, "conquestPulse encore parent apres delay")
+		pulseSeen[pulses[i]] = true
+	end
+	for i = 1, #pulses do
+		assert(pulseSeen[effects.pulseFree[i]], "pulseFree autre Part")
+	end
 	local recycleFlashColor = Color3.fromRGB(9, 87, 165)
 	effects:conquestWave(wave, recycleFlashColor, false)
 	local liveFlashes = {}
@@ -3057,6 +3074,44 @@ check("vagues de conquete", function()
 	end
 	assert(#effects.textFree == 1, "textFree casse par 2e vague")
 	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree au recycle flash")
+	local livePulses = {}
+	for _, node in effects.root:GetChildren() do
+		if node.Name == "ConquestPulse" then
+			table.insert(livePulses, node)
+		end
+	end
+	assert(#livePulses >= 1, "conquestPulse count 2e vague")
+	assert(#effects.pulseFree == #pulses - #livePulses, "pulseFree non pop 2e")
+	assert(effects.pulseFree[#pulses - #livePulses + 1] == nil, "pulseFree leftover slot pop 2e")
+	local sumX, sumY = 0, 0
+	for i = 1, 200 do
+		local px, py = MapGen.fromIndex(1000 + i)
+		sumX += px
+		sumY += py
+	end
+	local centreX = sumX / 200
+	local centreY = sumY / 200
+	local recycleY = 3
+	if MapGen.inBounds(centreX, centreY) then
+		recycleY = WorldSpace.surfaceHeight(terrain, MapGen.toIndex(centreX, centreY)) + 0.8
+	end
+	for _, ring in livePulses do
+		assert(pulseSeen[ring], "conquestPulse non recycle")
+		assert(ring.Parent == effects.root, "conquestPulse recycle hors root")
+		assert(ring.Name == "ConquestPulse", "Name ConquestPulse perdu au recycle")
+		assert(math.abs(ring.CFrame.Y - recycleY) < 1e-6, "pulse Y recycle")
+		assert(ring.CFrame.Y ~= 3, "pulse Y feel N134 recycle")
+	end
+	local leftoverPulse = effects.pulseFree[1]
+	assert(leftoverPulse ~= nil, "leftover pulseFree absent")
+	assert(pulseSeen[leftoverPulse], "pulseFree leftover autre Part")
+	assert(leftoverPulse.Parent == nil, "leftover conquestPulse encore parent")
+	for _, ring in livePulses do
+		assert(leftoverPulse ~= ring, "leftover pulseFree incoherent")
+	end
+	assert(#effects.flashFree == #flashes - #liveFlashes, "flashFree casse par pulse")
+	assert(#effects.textFree == 1, "textFree casse par pulse")
+	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree au recycle pulse")
 end)
 
 check("deltas de terrain et conquetes classees", function()
