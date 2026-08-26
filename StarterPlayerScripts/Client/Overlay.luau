@@ -648,6 +648,73 @@ end
 -- Unites
 --=============================================================================
 
+-- V52 : applyUnits hoist trackUnit + extra missile mute (recette boatSnapBuf inner).
+-- Distinct de V26 (payload serveur) et du refactor Vector2.
+-- Non reentrant — un seul applyUnits / lot. Navire : extra reste nil.
+-- Insert : poser { tx, ty } une fois (copie, jamais l'alias snapshot).
+-- Deja suivi : muter tx/ty, jamais remplacer unit.extra.
+-- Pas de RemoteFunction. current / target Vector2 inchanges.
+local function trackUnit(
+	self: Overlay,
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	isMissile: boolean,
+	extra: any?
+)
+	local unit = self.units[id]
+	if not unit then
+		local visual = if isMissile
+			then UnitModels.createMissile(self.root, slot, kind)
+			else UnitModels.createBoat(self.root, slot, kind)
+		local ownedExtra: any? = nil
+		if isMissile and extra then
+			ownedExtra = { tx = extra.tx, ty = extra.ty }
+		end
+		unit = {
+			visual = visual,
+			current = Vector2.new(x, y),
+			target = Vector2.new(x, y),
+			isMissile = isMissile,
+			phase = (id % 31) / 31 * math.pi * 2,
+			extra = ownedExtra,
+		}
+		self.units[id] = unit
+		if not isMissile then
+			local origin = WorldSpace.tileToWorld(x, y)
+			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+			wake.Shape = Enum.PartType.Cylinder
+			wake.Transparency = 0.34
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.16, 9, 9),
+				Transparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				if wake.Parent then
+					wake:Destroy()
+				end
+			end)
+		end
+	elseif isMissile then
+		if extra then
+			local owned = unit.extra
+			if owned == nil then
+				unit.extra = { tx = extra.tx, ty = extra.ty }
+			else
+				owned.tx = extra.tx
+				owned.ty = extra.ty
+			end
+		end
+	else
+		unit.extra = nil
+	end
+	unit.target = Vector2.new(x, y)
+	self.seen[id] = true
+end
+
 --[[
 	Les instantanes arrivent a 10 Hz. On stocke la position cible et on
 	interpole a chaque frame, sinon les navires avancent par saccades visibles.
@@ -655,52 +722,14 @@ end
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
-		local unit = self.units[id]
-		if not unit then
-			local visual = if isMissile
-				then UnitModels.createMissile(self.root, slot, kind)
-				else UnitModels.createBoat(self.root, slot, kind)
-			unit = {
-				visual = visual,
-				current = Vector2.new(x, y),
-				target = Vector2.new(x, y),
-				isMissile = isMissile,
-				phase = (id % 31) / 31 * math.pi * 2,
-				extra = extra,
-			}
-			self.units[id] = unit
-			if not isMissile then
-				local origin = WorldSpace.tileToWorld(x, y)
-				local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-				wake.Shape = Enum.PartType.Cylinder
-				wake.Transparency = 0.34
-				wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.16, 9, 9),
-					Transparency = 1,
-				}):Play()
-				task.delay(0.8, function()
-					if wake.Parent then
-						wake:Destroy()
-					end
-				end)
-			end
-		end
-		unit.target = Vector2.new(x, y)
-		unit.extra = extra
-		self.seen[id] = true
-	end
-
 	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
+		trackUnit(self, boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
 	end
 
 	for _, missile in missiles do
-		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
-			tx = missile.tx,
-			ty = missile.ty,
-		})
+		-- Le snapshot (missileSnapBuf) porte deja tx/ty : le passer comme
+		-- extra n'alloue pas. trackUnit copie / mute, jamais d'alias.
+		trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, missile)
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.

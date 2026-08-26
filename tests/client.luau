@@ -1284,7 +1284,21 @@ check("navires, missiles et interpolation", function()
 	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
 	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
 	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
+	assert(overlay.units[1].extra == nil, "navire extra non nil")
+	local extra1 = overlay.units[3].extra
+	assert(extra1 ~= nil, "missile extra absent")
+	assert(extra1.tx == 60 and extra1.ty == 60, "missile extra initial")
 	overlay:stepInterpolation(1 / 60)
+	-- V52 : second lot, meme id, tx/ty differents → mute, rawequal du record.
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "missile extra non mute")
+	assert(rawequal(overlay.units[3].extra, extra1), "missile extra non recycle")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
