@@ -21,8 +21,17 @@ export type Sample = {
 	tickMs: number,
 }
 
-local history: { Sample } = {}
 local HISTORY_CAP = 600 -- 60 s a 10 Hz
+local history: { Sample } = table.create(HISTORY_CAP)
+local historyCount = 0
+local historyWrite = 0
+local seenBuf: { [number]: boolean } = {}
+-- N79 : copies numeriques pour percentile. table.sort mute — le prochain
+-- snapshot reecrit 1..historyCount (pas d'early-out « deja plein »).
+local changedBuf: { number } = table.create(HISTORY_CAP, 0)
+local bytesBuf: { number } = table.create(HISTORY_CAP, 0)
+local msBuf: { number } = table.create(HISTORY_CAP, 0)
+local chunksBuf: { number } = table.create(HISTORY_CAP, 0)
 local totals = {
 	ticks = 0,
 	changedTiles = 0,
@@ -32,6 +41,26 @@ local totals = {
 	maxChanged = 0,
 	maxDeltaBytes = 0,
 	maxTickMs = 0,
+}
+-- N81 : 1 record + 2 nested module-level. formatReport lit tout de suite ;
+-- un 2e snapshot reecrit les champs (pas d'early-out).
+local p95Buf = {
+	changedTiles = 0,
+	deltaBytes = 0,
+	tickMs = 0,
+	dirtyChunks = 0,
+}
+local p99Buf = {
+	changedTiles = 0,
+	deltaBytes = 0,
+	tickMs = 0,
+	dirtyChunks = 0,
+}
+local snapBuf = {
+	samples = 0,
+	totals = totals,
+	p95 = p95Buf,
+	p99 = p99Buf,
 }
 
 local function chunkOf(index: number): number
@@ -49,37 +78,58 @@ end
 ]]
 function TickMetrics.dirtyChunksFromDelta(delta: buffer?): number
 	if not delta then
+		-- N78 : early-out nil conserve — pas de table.clear inutile.
 		return 0
 	end
+	-- N78 : hash module, table.clear avant fill. Un leftover gonflerait
+	-- dirtyChunks (instrumentation, pas d'autorite GameState).
+	table.clear(seenBuf)
 	local count = buffer.len(delta) // 5
-	local seen: { [number]: boolean } = {}
 	local n = 0
 	for i = 0, count - 1 do
 		local index = buffer.readu32(delta, i * 5)
 		local chunk = chunkOf(index)
-		if not seen[chunk] then
-			seen[chunk] = true
+		if not seenBuf[chunk] then
+			seenBuf[chunk] = true
 			n += 1
 		end
 	end
 	return n
 end
 
+local function acquireSample(): Sample
+	if historyCount < HISTORY_CAP then
+		historyCount += 1
+		historyWrite = historyCount
+	else
+		historyWrite = historyWrite % HISTORY_CAP + 1
+	end
+	local sample = history[historyWrite]
+	if not sample then
+		sample = {
+			tick = 0,
+			changedTiles = 0,
+			dirtyChunks = 0,
+			deltaBytes = 0,
+			tickMs = 0,
+		}
+		history[historyWrite] = sample
+	end
+	TickMetrics.historyCount = historyCount
+	return sample
+end
+
 function TickMetrics.record(tick: number, changedTiles: number, delta: buffer?, tickMs: number)
 	local deltaBytes = if delta then buffer.len(delta) else 0
 	local dirtyChunks = TickMetrics.dirtyChunksFromDelta(delta)
-	local sample: Sample = {
-		tick = tick,
-		changedTiles = changedTiles,
-		dirtyChunks = dirtyChunks,
-		deltaBytes = deltaBytes,
-		tickMs = tickMs,
-	}
-
-	table.insert(history, sample)
-	if #history > HISTORY_CAP then
-		table.remove(history, 1)
-	end
+	-- N78 : ring 1..HISTORY_CAP, pas table.insert + table.remove(1) O(n).
+	-- Reecrit les champs du record recycle. Totaux inchanges.
+	local sample = acquireSample()
+	sample.tick = tick
+	sample.changedTiles = changedTiles
+	sample.dirtyChunks = dirtyChunks
+	sample.deltaBytes = deltaBytes
+	sample.tickMs = tickMs
 
 	totals.ticks += 1
 	totals.changedTiles += changedTiles
@@ -100,38 +150,49 @@ local function percentile(values: { number }, p: number): number
 	return values[rank]
 end
 
-function TickMetrics.snapshot()
-	local changed = table.create(#history, 0)
-	local bytes = table.create(#history, 0)
-	local ms = table.create(#history, 0)
-	local chunks = table.create(#history, 0)
-	for i, sample in history do
-		changed[i] = sample.changedTiles
-		bytes[i] = sample.deltaBytes
-		ms[i] = sample.tickMs
-		chunks[i] = sample.dirtyChunks
+local function truncateMetric(buf: { number }, n: number)
+	for i = n + 1, #buf do
+		buf[i] = nil
 	end
+end
 
-	return {
-		samples = #history,
-		totals = totals,
-		p95 = {
-			changedTiles = percentile(changed, 0.95),
-			deltaBytes = percentile(bytes, 0.95),
-			tickMs = percentile(ms, 0.95),
-			dirtyChunks = percentile(chunks, 0.95),
-		},
-		p99 = {
-			changedTiles = percentile(changed, 0.99),
-			deltaBytes = percentile(bytes, 0.99),
-			tickMs = percentile(ms, 0.99),
-			dirtyChunks = percentile(chunks, 0.99),
-		},
-	}
+function TickMetrics.snapshot()
+	-- N79 : 4 arrays module. N80 contrat B : iterer 1..historyCount, pas
+	-- #history (les Sample restent apres reset). Truncate leftover avant
+	-- percentile — un [601] fantome fausserait p95. N81 : snapBuf +
+	-- p95Buf / p99Buf, pas une table neuve.
+	local n = historyCount
+	for i = 1, n do
+		local sample = history[i]
+		changedBuf[i] = sample.changedTiles
+		bytesBuf[i] = sample.deltaBytes
+		msBuf[i] = sample.tickMs
+		chunksBuf[i] = sample.dirtyChunks
+	end
+	truncateMetric(changedBuf, n)
+	truncateMetric(bytesBuf, n)
+	truncateMetric(msBuf, n)
+	truncateMetric(chunksBuf, n)
+
+	snapBuf.samples = n
+	p95Buf.changedTiles = percentile(changedBuf, 0.95)
+	p95Buf.deltaBytes = percentile(bytesBuf, 0.95)
+	p95Buf.tickMs = percentile(msBuf, 0.95)
+	p95Buf.dirtyChunks = percentile(chunksBuf, 0.95)
+	p99Buf.changedTiles = percentile(changedBuf, 0.99)
+	p99Buf.deltaBytes = percentile(bytesBuf, 0.99)
+	p99Buf.tickMs = percentile(msBuf, 0.99)
+	p99Buf.dirtyChunks = percentile(chunksBuf, 0.99)
+	return snapBuf
 end
 
 function TickMetrics.reset()
-	table.clear(history)
+	-- N80 contrat B : ne pas table.clear(history) — le pool Sample reste.
+	-- historyCount = 0 pour que snapshot / formatReport ignorent les
+	-- leftovers d'un match mort (sinon p95 du match precedent).
+	historyCount = 0
+	historyWrite = 0
+	TickMetrics.historyCount = 0
 	totals.ticks = 0
 	totals.changedTiles = 0
 	totals.dirtyChunks = 0
@@ -161,5 +222,20 @@ function TickMetrics.formatReport(): string
 		snap.p95.dirtyChunks
 	)
 end
+
+-- Banc N78 : rawequal seenBuf / Sample recycle. Pas replique.
+-- Banc N79 : rawequal des 4 arrays. Banc N80 : historyCount / Sample pool.
+-- Banc N81 : rawequal snapBuf / p95Buf / p99Buf.
+TickMetrics.HISTORY_CAP = HISTORY_CAP
+TickMetrics.history = history
+TickMetrics.historyCount = historyCount
+TickMetrics.seenBuf = seenBuf
+TickMetrics.changedBuf = changedBuf
+TickMetrics.bytesBuf = bytesBuf
+TickMetrics.msBuf = msBuf
+TickMetrics.chunksBuf = chunksBuf
+TickMetrics.snapBuf = snapBuf
+TickMetrics.p95Buf = p95Buf
+TickMetrics.p99Buf = p99Buf
 
 return TickMetrics
