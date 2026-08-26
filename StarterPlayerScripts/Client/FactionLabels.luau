@@ -81,7 +81,48 @@ function FactionLabels.new(parent: Instance, terrain: buffer): FactionLabels
 	root.Parent = parent
 	self.root = root
 
+	-- V133 : free-list etiquettes PAR FactionLabels (record
+	-- {anchor, billboard, name, troops}, pas routeFree Overlay).
+	-- Recette analogique V132 / feel N182 inline — ne PAS
+	-- merger feel. Leftover Parent = nil, pas Destroy. Take
+	-- n'importe quel entry. Name FactionAnchor{slot} reecrit.
+	-- Skip Parent == nil. refresh + clear via le meme park.
+	-- Skip Overlay. Skip surveyTerritories (V49). Leftover
+	-- suivant = PlacementPreview setKind Destroy (V134). Pas
+	-- reentrant. 1 Hz / rematch, pas 60 Hz.
+	self.labelFree = {} :: { any }
+
 	return self
+end
+
+-- V133 : parker une etiquette (Parent = nil, push labelFree).
+-- Recette analogique V132 / feel N182 inline — ne PAS merger
+-- feel. Pas Destroy. Skip Parent == nil (deja parque). Ne pas
+-- partager routeFree Overlay. Skip surveyTerritories (V49).
+-- refresh + clear reutilisent parkLabel. Leftover suivant =
+-- PlacementPreview setKind Destroy (V134). Pas de delay.
+local function parkLabel(self: FactionLabels, entry: any)
+	if entry.anchor.Parent == nil then
+		return
+	end
+	entry.anchor.Parent = nil
+	local pool = self.labelFree
+	pool[#pool + 1] = entry
+end
+
+-- Take n'importe quel entry. Pop O(1) depuis la fin.
+local function takeLabel(self: FactionLabels): any?
+	local free = self.labelFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local entry = free[n]
+	free[n] = nil
+	return entry
 end
 
 --[[
@@ -95,6 +136,17 @@ local function ensureLabel(self: FactionLabels, slot: number)
 	local existing = self.labels[slot]
 	if existing then
 		return existing
+	end
+
+	-- V133 : take n'importe quel entry. Name FactionAnchor{slot}
+	-- reecrit. Parent = self.root. Recette analogique V132 /
+	-- feel N182 inline — ne PAS merger feel.
+	local recycled = takeLabel(self)
+	if recycled then
+		recycled.anchor.Name = `FactionAnchor{slot}`
+		recycled.anchor.Parent = self.root
+		self.labels[slot] = recycled
+		return recycled
 	end
 
 	local anchor = Instance.new("Part")
@@ -182,9 +234,14 @@ end
 function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, roster: any)
 	local sumX, sumY, counts = surveyTerritories(owner)
 
+	-- V133 : park Parent=nil labelFree. Recette analogique
+	-- V132 / feel N182 inline — ne PAS merger feel. Skip
+	-- Parent == nil (deja parque). Skip Overlay. Skip
+	-- surveyTerritories (V49, ci-dessus). Leftover suivant =
+	-- PlacementPreview setKind Destroy (V134).
 	for slot, entry in self.labels do
 		if not counts[slot] then
-			entry.anchor:Destroy()
+			parkLabel(self, entry)
 			self.labels[slot] = nil
 		end
 	end
@@ -194,7 +251,7 @@ function FactionLabels.refresh(self: FactionLabels, owner: buffer, stats: any, r
 		if not info or count * SAMPLE_STRIDE * SAMPLE_STRIDE < MIN_TILES then
 			local stale = self.labels[slot]
 			if stale then
-				stale.anchor:Destroy()
+				parkLabel(self, stale)
 				self.labels[slot] = nil
 			end
 			continue
@@ -254,8 +311,13 @@ function FactionLabels.setVisible(self: FactionLabels, visible: boolean)
 end
 
 function FactionLabels.clear(self: FactionLabels)
+	-- V133 : park Parent=nil via parkLabel (meme pool que
+	-- refresh). Recette analogique V132 / feel N182 inline —
+	-- ne PAS merger feel. Skip Parent == nil. Skip Overlay.
+	-- Skip surveyTerritories (V49). Leftover suivant =
+	-- PlacementPreview setKind Destroy (V134).
 	for slot, entry in self.labels do
-		entry.anchor:Destroy()
+		parkLabel(self, entry)
 		self.labels[slot] = nil
 	end
 end

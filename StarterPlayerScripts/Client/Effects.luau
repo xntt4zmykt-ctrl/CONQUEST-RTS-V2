@@ -71,7 +71,7 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- chatFree (feel N170, autre fichier). Overlay.clear
 	-- Parent=nil (V130). V131 syncFactoryRoutes routeFree
 	-- deja. Overlay.clear parkRoute (V132) deja. Leftover
-	-- suivant = FactionLabels refresh/clear Destroy (V133).
+	-- suivant = PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	-- V129 applyBuildingDelta buildingFree deja.
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
@@ -236,7 +236,7 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	-- chatFree (V128, autre fichier). Overlay.clear
 	-- Parent=nil (V130). V131 syncFactoryRoutes routeFree
 	-- deja. Overlay.clear parkRoute (V132) deja. Leftover
-	-- suivant = FactionLabels refresh/clear Destroy (V133).
+	-- suivant = PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	-- V129 applyBuildingDelta buildingFree deja.
 	local marker = self.actionPreview
 	if not marker then
@@ -272,7 +272,7 @@ function Effects.clearActionPreview(self: Effects)
 	-- autre fichier). Overlay.clear Parent=nil (V130).
 	-- V131 syncFactoryRoutes routeFree deja. Overlay.clear
 	-- parkRoute (V132) deja. Leftover suivant =
-	-- FactionLabels refresh/clear Destroy (V133).
+	-- PlacementPreview setKind Destroy (V134). V133 FactionLabels labelFree deja.
 	-- V129 applyBuildingDelta buildingFree deja. Distinct de
 	-- V126
 	-- (clearSelection park). Distinct de V125 (reuse pendant
