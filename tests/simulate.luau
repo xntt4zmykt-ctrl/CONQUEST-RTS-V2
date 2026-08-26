@@ -9559,6 +9559,292 @@ do
 	end
 end
 
+do
+	-- N99 : AimFront.focus recycle Heap + queued in-place (leftover N98).
+	-- aimTile → launchAttack → rawequal frontier acquire, queued seulement
+	-- visée. Renfort ne recrée pas le Heap. Banc N68 / N98 / aim reinforce
+	-- verts. Pas de recette feel. Client 34/34.
+	local AimFront = __require("AimFront")
+	local Heap = __require("Heap")
+	local state = GameState.new(1103)
+	state.combatUnlocked = true
+	local a = state:addPlayer(nil, "ViseeHeap", Random.new(109), 0)
+	if not a then
+		fail("aim heap — spawn impossible")
+	else
+		a.troops = 8000
+		a.attackRatio = 1
+		local scratch = table.create(4, 0)
+		local aimTile: number? = nil
+		local targetSlot: number? = nil
+		for index in a.border do
+			local n = MapGen.neighbors(index, scratch)
+			for i = 1, n do
+				local nb = scratch[i]
+				if state:isLand(nb) then
+					local owner = buffer.readu8(state.owner, nb)
+					if owner ~= a.slot then
+						aimTile = nb
+						targetSlot = owner
+						break
+					end
+				end
+			end
+			if aimTile then
+				break
+			end
+		end
+		if not aimTile or targetSlot == nil then
+			fail("aim heap — pas de contact")
+		else
+			local origFocus = AimFront.focus
+			local frontierBefore = nil
+			local queuedBefore = nil
+			AimFront.focus = function(st, atk, tile)
+				frontierBefore = atk.frontier
+				queuedBefore = atk.queued
+				return origFocus(st, atk, tile)
+			end
+			a.aimTile = aimTile
+			local ok1 = state:launchAttack(a.slot, targetSlot)
+			AimFront.focus = origFocus
+			local rec = state.attacks[1]
+			if not ok1 or not rec or frontierBefore == nil or queuedBefore == nil then
+				fail(`aim heap — launch/focus refuse ({ok1} #={#state.attacks})`)
+			elseif not rawequal(rec.frontier, frontierBefore) then
+				fail("aim heap — frontier recree (N99)")
+			elseif not rawequal(rec.queued, queuedBefore) then
+				fail("aim heap — queued recree (N99)")
+			elseif Heap.isEmpty(rec.frontier) then
+				fail("aim heap — frontier vide apres visée")
+			else
+				local ghost = false
+				local any = false
+				for index in rec.queued do
+					any = true
+					if not state:isLand(index) or buffer.readu8(state.owner, index) ~= targetSlot then
+						ghost = true
+						break
+					end
+				end
+				if not any then
+					fail("aim heap — queued vide")
+				elseif ghost then
+					fail("aim heap — leftover queued hors cible")
+				else
+					local frontierAfter = rec.frontier
+					a.troops = 8000
+					a.aimTile = aimTile
+					state:launchAttack(a.slot, targetSlot)
+					if #state.attacks ~= 1 then
+						fail(`aim heap — fronts dupliques (#{#state.attacks})`)
+					elseif not rawequal(state.attacks[1].frontier, frontierAfter) then
+						fail("aim heap — renfort recree le Heap")
+					else
+						print("aim heap : rawequal frontier visée / renfort (N99)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N100 : despawnMissile swap-pop (contrat A leftover N97). 3 ATOM
+	-- detonate → #missiles == 0, free-list contient les 3, 2e launch
+	-- rawequal. MIRV scission ogives uniques, pas de trou dans l'array.
+	-- Banc N76 / N77 / N97 / inbound / tryIntercept verts. Overlay lit
+	-- snapshot N52. GameState.removePlayer inchange.
+	local atomState = GameState.new(1104)
+	atomState.combatUnlocked = true
+	local bomber = atomState:addPlayer(nil, "SwapPopA", Random.new(111), 0)
+	local victim = atomState:addPlayer(nil, "SwapPopB", Random.new(112), 0)
+	local atomOk = false
+	if not bomber or not victim or not victim.capitalTile then
+		fail("missile order — spawn impossible")
+	else
+		local siloTiles: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(atomState.owner, index) == bomber.slot and not atomState.buildings[index] then
+				table.insert(siloTiles, index)
+				if #siloTiles >= 3 then
+					break
+				end
+			end
+		end
+		if #siloTiles < 3 then
+			fail("missile order — 3 tuiles silo introuvables")
+		else
+			for _, tile in siloTiles do
+				atomState:placeBuilding(tile, Config.BUILDING.SILO, bomber.slot)
+			end
+			bomber.era = Eras.requiredForNuke(Config.NUKE.ATOM)
+			bomber.gold = 99999
+			local launched: { any } = {}
+			local launchFail = false
+			for _ = 1, 3 do
+				local ok, msg = Nukes.launch(atomState, bomber.slot, victim.capitalTile, Config.NUKE.ATOM)
+				if not ok then
+					fail(`missile order — launch ATOM refuse ({tostring(msg)})`)
+					launchFail = true
+					break
+				end
+			end
+			if not launchFail then
+				if #atomState.missiles ~= 3 then
+					fail(`missile order — {#atomState.missiles} missiles apres 3 launch`)
+				else
+					for _, missile in atomState.missiles do
+						table.insert(launched, missile)
+					end
+					local hole = false
+					local steps = 0
+					while #atomState.missiles > 0 and steps < 800 do
+						Nukes.step(atomState, Random.new(16), function() end)
+						steps += 1
+						for i = 1, #atomState.missiles do
+							if atomState.missiles[i] == nil then
+								hole = true
+								break
+							end
+						end
+						if hole then
+							break
+						end
+					end
+					if hole then
+						fail("missile order — trou array apres swap-pop")
+					elseif #atomState.missiles ~= 0 then
+						fail("missile order — ATOM ne detone jamais")
+					else
+						local recycled = 0
+						for _, rec in Nukes.missileFree do
+							for _, live in launched do
+								if rawequal(rec, live) then
+									recycled += 1
+									break
+								end
+							end
+						end
+						if recycled ~= 3 then
+							fail(`missile order — free-list {recycled}/3`)
+						else
+							local silo = atomState.buildings[siloTiles[1]]
+							if not silo then
+								for index = 0, Config.TILE_COUNT - 1 do
+									if buffer.readu8(atomState.owner, index) == bomber.slot and not atomState.buildings[index] then
+										atomState:placeBuilding(index, Config.BUILDING.SILO, bomber.slot)
+										silo = atomState.buildings[index]
+										siloTiles[1] = index
+										break
+									end
+								end
+							end
+							if silo then
+								silo.cooldown = 0
+							end
+							if atomState.coolingBuildings then
+								atomState.coolingBuildings[siloTiles[1]] = nil
+							end
+							bomber.gold = 99999
+							local ok2, msg2 = Nukes.launch(atomState, bomber.slot, victim.capitalTile, Config.NUKE.ATOM)
+							local again = atomState.missiles[1]
+							local match = false
+							if again then
+								for _, live in launched do
+									if rawequal(again, live) then
+										match = true
+										break
+									end
+								end
+							end
+							if not ok2 or not again or not match then
+								fail(`missile order — 2e ATOM non recycle ({tostring(msg2)})`)
+							else
+								atomOk = true
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local mirvState = GameState.new(1105)
+	mirvState.combatUnlocked = true
+	local mirvA = mirvState:addPlayer(nil, "SwapMirv", Random.new(113), 0)
+	local mirvB = mirvState:addPlayer(nil, "SwapMirvCible", Random.new(114), 0)
+	local mirvOk = false
+	if not mirvA or not mirvB or not mirvB.capitalTile then
+		fail("missile order MIRV — spawn impossible")
+	else
+		local siloTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(mirvState.owner, index) == mirvA.slot and not mirvState.buildings[index] then
+				siloTile = index
+				break
+			end
+		end
+		if not siloTile then
+			fail("missile order MIRV — tuile silo introuvable")
+		else
+			mirvState:placeBuilding(siloTile, Config.BUILDING.SILO, mirvA.slot)
+			mirvA.era = Eras.requiredForNuke(Config.NUKE.MIRV)
+			mirvA.gold = 99999
+			local ok, msg = Nukes.launch(mirvState, mirvA.slot, mirvB.capitalTile, Config.NUKE.MIRV)
+			local carrier = mirvState.missiles[1]
+			if not ok or not carrier then
+				fail(`missile order MIRV — launch refuse ({tostring(msg)})`)
+			else
+				local splitSeen = 0
+				local alias = false
+				local hole = false
+				local steps = 0
+				while #mirvState.missiles > 0 and steps < 800 do
+					Nukes.step(mirvState, Random.new(17), function() end)
+					steps += 1
+					for i = 1, #mirvState.missiles do
+						if mirvState.missiles[i] == nil then
+							hole = true
+							break
+						end
+					end
+					if hole then
+						break
+					end
+					local warheads: { any } = {}
+					for _, missile in mirvState.missiles do
+						if missile.warhead then
+							table.insert(warheads, missile)
+						end
+					end
+					splitSeen = math.max(splitSeen, #warheads)
+					for i = 1, #warheads do
+						for j = i + 1, #warheads do
+							if rawequal(warheads[i], warheads[j]) then
+								alias = true
+							end
+						end
+					end
+				end
+				if hole then
+					fail("missile order MIRV — trou array")
+				elseif splitSeen < 2 then
+					fail(`missile order MIRV — pas de scission (ogives {splitSeen})`)
+				elseif alias then
+					fail("missile order MIRV — ogives alias live")
+				else
+					mirvOk = true
+				end
+			end
+		end
+	end
+
+	if atomOk and mirvOk then
+		print("missile order : swap-pop 3 ATOM / MIRV unique (N100)")
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
