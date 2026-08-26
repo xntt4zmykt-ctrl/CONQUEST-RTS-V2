@@ -32,6 +32,13 @@ local B = Config.BUILDING
 -- appelant synchrone (Bots.decideNuke). Pas reentrant — dupliquer le
 -- buffer si un second appelant concurrent apparait.
 local samBuf: { number } = table.create(8)
+-- N56 : prix HUD par slot (recette samBuf / N49, feel N75). Pas de dirty
+-- flag : buildingCounts bouge souvent en combat ; clear+refill suffit.
+-- Pas reentrant — un seul replicate() par tick. Slot inconnu →
+-- emptyPriceBuf, pas math.huge. GameState ne doit pas require Buildings
+-- (cycle).
+local priceBuf: { [number]: { [number]: number } } = {}
+local emptyPriceBuf: { [number]: number } = {}
 
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
@@ -73,6 +80,29 @@ function Buildings.priceFor(state: GameState, slot: number, kind: number): numbe
 		return math.huge
 	end
 	return Placement.priceFor(ps.buildingCounts, kind, state:doctrineOf(slot).buildCost)
+end
+
+--[[
+	N56 : map des prix BUILDABLE pour un slot, recyclee. Wire inchange
+	`{ [kind]: number }`. Ne duplique pas Placement.priceFor. GameState ne
+	doit pas require Buildings (cycle).
+]]
+function Buildings.pricesFor(state: GameState, slot: number): { [number]: number }
+	if not state.players[slot] then
+		table.clear(emptyPriceBuf)
+		return emptyPriceBuf
+	end
+	local buf = priceBuf[slot]
+	if buf == nil then
+		buf = {}
+		priceBuf[slot] = buf
+	else
+		table.clear(buf)
+	end
+	for _, def in BuildingDefs.BUILDABLE do
+		buf[def.id] = Buildings.priceFor(state, slot, def.id)
+	end
+	return buf
 end
 
 --[[
