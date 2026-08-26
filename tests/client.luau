@@ -734,7 +734,7 @@ check("construction du monde 3D", function()
 	-- consommation. V102 compact prefix (feel N114, seuil 32) ci-dessous.
 	-- Recycle Ground/Border (feel N106) non porte. Distinct de V100
 	-- (trail offset.Z). Distinct de V48 (applyDelta). FactoryOutput /
-	-- SiloWarning leftover separe (pas de Position). HUD feed leftover
+	-- SiloWarning fermees (V104, check modeles). HUD feed leftover
 	-- V103.
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
@@ -759,7 +759,7 @@ check("construction du monde 3D", function()
 	-- (drain → head 1, file vide) reste au-dessus. Pas de table.remove.
 	-- Recette feel N114 inline — ne PAS merger 846c. Recycle Parts
 	-- N106 non porte. Distinct de V48 (applyDelta). HUD feed leftover
-	-- V103. FactoryOutput / SiloWarning leftover separe.
+	-- V103. FactoryOutput / SiloWarning fermees (V104).
 	local compactChunks = {}
 	for chunk in world.chunkFolders do
 		table.insert(compactChunks, chunk)
@@ -1349,7 +1349,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- 60 Hz. Recette feel N149 — ne PAS merger c450. Distinct de
 	-- V70 (Radar yaw). Distinct de V60 (cable Y). Distinct de V97
 	-- (mesh carrier, UnitModels). Distinct de V99 (beacons rest.Z,
-	-- ci-dessous). FactoryOutput / SiloWarning non touches. Animate
+	-- ci-dessous). Distinct de V104 (FactoryOutput / SiloWarning,
+	-- ci-dessous). Animate
 	-- AVANT playConstruction : ConstructionUntil court-circuite
 	-- animate (time 1/2 < os.clock()+duree).
 	local windows = city:FindFirstChild("CityWindows")
@@ -1360,8 +1361,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- 60 Hz. Recette feel N150 — ne PAS merger c450. Distinct de
 	-- V98 (CityWindows rest.X, elseif precedent). Distinct de V70
 	-- (Radar yaw). Distinct de V60 (cable Y). Distinct de V100
-	-- (trail offset.Z, UnitModels.place — check navires). FactoryOutput /
-	-- SiloWarning non touches. Meme animate que V98 (avant
+	-- (trail offset.Z, UnitModels.place — check navires). Distinct de
+	-- V104 (FactoryOutput / SiloWarning, ci-dessous). Meme animate que V98 (avant
 	-- playConstruction).
 	local beacon = city:FindFirstChild("CityBeacon")
 	assert(beacon, "ville sans CityBeacon")
@@ -1380,6 +1381,39 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	assert(
 		beacon.Transparency >= 0.05 and beacon.Transparency <= 0.41,
 		"CityBeacon Transparency hors bande"
+	)
+	-- V104 : phase FactoryOutput depuis rest.X, SiloWarning depuis
+	-- rest.Z. Pas de Position. Recette analogique V98/V99 — ne PAS
+	-- merger c450 / ee71. Amplitude 0.12/0.12, frequence 3.2, * 0.1
+	-- (output). Seuil -0.25 / 0.05 / 0.6, frequence 4.5, * 0.05
+	-- (warning). Distinct de V98 (CityWindows rest.X). Distinct de
+	-- V99 (beacons rest.Z, leftover ci-dessus — doit rester vert).
+	-- Distinct de V103 (feedEntries, HUD). Distinct de leftover
+	-- V105 (UnitModels role==light, check navires). Animate AVANT
+	-- playConstruction (usine / silo n'ont pas ConstructionUntil).
+	local output = factory:FindFirstChild("FactoryOutput")
+	assert(output, "usine sans FactoryOutput")
+	local outputRest = output:GetAttribute("RestCFrame")
+	assert(outputRest, "FactoryOutput sans RestCFrame")
+	Building.animate(factory, 1, 1 / 60)
+	Building.animate(factory, 2, 1 / 60)
+	assert(rawequal(factory:FindFirstChild("FactoryOutput"), output), "Part FactoryOutput recreee")
+	assert(type(output.Transparency) == "number", "FactoryOutput Transparency absente")
+	assert(
+		output.Transparency >= 0.12 and output.Transparency <= 0.36,
+		"FactoryOutput Transparency hors bande"
+	)
+	local warning = silo:FindFirstChild("SiloWarning")
+	assert(warning, "silo sans SiloWarning")
+	local warningRest = warning:GetAttribute("RestCFrame")
+	assert(warningRest, "SiloWarning sans RestCFrame")
+	Building.animate(silo, 1, 1 / 60)
+	Building.animate(silo, 2, 1 / 60)
+	assert(rawequal(silo:FindFirstChild("SiloWarning"), warning), "Part SiloWarning recreee")
+	assert(type(warning.Transparency) == "number", "SiloWarning Transparency absente")
+	assert(
+		warning.Transparency == 0.05 or warning.Transparency == 0.6,
+		"SiloWarning Transparency hors {0.05, 0.6}"
 	)
 	Building.playConstruction(city, Vector3.new(0, 2, 0))
 	local buildRing = city:FindFirstChild("BuildRing")
@@ -2071,7 +2105,7 @@ check("navires, missiles et interpolation", function()
 	-- Distinct de V96 (Fin Z == 2.45). Navires id 1/2/4 : 0 Exhaust.
 	-- Deux stepInterpolation ci-dessous → Part rawequal, Transparency
 	-- ∈ [0.25, 0.9]. Ne pas merger feel. FactoryOutput / SiloWarning
-	-- leftover separe (pas de Position).
+	-- fermees (V104, check modeles). Leftover V105 role==light.
 	local exhaustN = 0
 	local aTrail
 	for _, piece in overlay.units[3].visual.pieces do

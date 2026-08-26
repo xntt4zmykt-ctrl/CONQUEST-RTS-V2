@@ -698,9 +698,10 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- (mesh carrier, UnitModels — autre fichier). Distinct de
 			-- V99 (beacons rest.Z, elseif suivant). Distinct de
 			-- V100 (trail offset.Z, UnitModels.place — autre fichier).
-			-- FactoryOutput / SiloWarning n'ont PAS de Position — ne
-			-- pas les toucher. Radar / Flag / Boom (V70) et cable (V60)
-			-- inchanges. RestCFrame a la construction inchange.
+			-- Distinct de V104 (FactoryOutput rest.X, SiloWarning
+			-- rest.Z — elseif plus bas, pas de Position). Radar /
+			-- Flag / Boom (V70) et cable (V60) inchanges. RestCFrame
+			-- a la construction inchange.
 			child.Transparency = 0.06 + (math.sin(time * 0.7 + rest.X * 0.1) + 1) * 0.08
 		elseif child.Name == "CityBeacon" or child.Name == "PortBeacon" or child.Name == "LabBeacon" then
 			-- V99 : phase depuis rest.Z. Plus de child.Position.Z 60 Hz
@@ -711,15 +712,32 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- rest.X, elseif precedent). Distinct de V70 (Radar
 			-- CFrame yaw). Distinct de V60 (cable Y nombres). Distinct
 			-- de V100 (trail offset.Z, UnitModels.place —
-			-- autre fichier). FactoryOutput / SiloWarning n'ont PAS
-			-- de Position — ne pas les toucher. Un elseif, trois
+			-- autre fichier). Distinct de V104 (FactoryOutput /
+			-- SiloWarning, elseif suivants). Un elseif, trois
 			-- noms. Radar / Flag / Boom (V70) et cable (V60)
 			-- inchanges. RestCFrame a la construction inchange.
 			child.Transparency = 0.05 + (math.sin(time * 2.8 + rest.Z * 0.05) + 1) * 0.18
 		elseif child.Name == "FactoryOutput" then
-			child.Transparency = 0.12 + (math.sin(time * 3.2) + 1) * 0.12
+			-- V104 : phase depuis rest.X. Pas de Position 60 Hz
+			-- (ces branches n'en lisaient jamais). rest est deja
+			-- lu plus haut. Amplitude 0.12 / 0.12, frequence 3.2,
+			-- * 0.1 inchanges (meme famille V98). Recette analogique
+			-- V98/V99 — ne PAS merger c450 / ee71. Distinct de V98
+			-- (CityWindows, elseif precedent). Distinct de V99
+			-- (beacons rest.Z). Distinct de V103 (feedEntries, HUD).
+			-- Distinct de leftover V105 (UnitModels role==light,
+			-- autre fichier). Un elseif, Name inchange. Radar /
+			-- Flag / Boom (V70) et cable (V60) inchanges.
+			-- RestCFrame a la construction inchange.
+			child.Transparency = 0.12 + (math.sin(time * 3.2 + rest.X * 0.1) + 1) * 0.12
 		elseif child.Name == "SiloWarning" then
-			child.Transparency = if math.sin(time * 4.5) > -0.25 then 0.05 else 0.6
+			-- V104 : phase depuis rest.Z. Seuil -0.25 / 0.05 / 0.6
+			-- et frequence 4.5 inchanges. Coefficient * 0.05 =
+			-- meme famille V99. Pas de Position. Distinct de
+			-- FactoryOutput (elseif precedent, rest.X). Distinct
+			-- de leftover V105 (feux navire). Un elseif, Name
+			-- inchange.
+			child.Transparency = if math.sin(time * 4.5 + rest.Z * 0.05) > -0.25 then 0.05 else 0.6
 		end
 	end
 end
