@@ -1772,8 +1772,14 @@ check("navires, missiles et interpolation", function()
 	-- offset.Z, leftover N152 flame Size, leftover N148 mesh,
 	-- leftover N130 euler inline doivent rester verts. Recette
 	-- leftover N159, pas merger visual V78 wakeRot. goldPopup
-	-- N159 (check livraison / vagues) inchange. LandingSplash
-	-- leftover N161 non touche.
+	-- N159 (check livraison / vagues) inchange.
+	-- N161 : LandingSplash free-list splashFree. Pas de
+	-- testFlushDelays ici — les splash restent parentés (le flush
+	-- + reuse rawequal est dans « vagues de conquete »). Skip
+	-- retraite id=1 N56. Leftover N160 wake, leftover N131 euler
+	-- inline, leftover N151 trail doivent rester verts. Recette
+	-- leftover N160, pas merger visual V79 wakeRot. DeliveryPulse
+	-- leftover N162 non touche.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1805,7 +1811,13 @@ check("vagues de conquete", function()
 	-- N160 : LaunchWake free-list. Le check navires n'a pas flushé ;
 	-- ce flush pousse wakeFree. applyUnits nouvel id reparente la
 	-- meme Part (rawequal Parent root, Name LaunchWake). Distinct
-	-- goldFree. LandingSplash leftover N161 non touche.
+	-- goldFree.
+	-- N161 : LandingSplash free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse splashFree (ids 2 et 4, pas id=1
+	-- retraite N56). Snapshot avant l'insert N160 ; apres l'insert,
+	-- applyUnits({}, {}) despawn id=99 reparente la meme Part
+	-- (rawequal Parent root, Name LandingSplash). Distinct
+	-- wakeFree / goldFree. DeliveryPulse leftover N162 non touche.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1861,6 +1873,15 @@ check("vagues de conquete", function()
 	assert(pooledWake.Parent == nil, "wake encore parente")
 	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu")
 	assert(pooledWake ~= pooledGold, "wakeFree partage goldFree")
+	-- N161 : flush ci-dessus a poussé les LandingSplash de « navires »
+	-- (ids 2 et 4, pas id=1 retraite). Snapshot avant l'insert N160.
+	local splashPool = overlay.splashFree
+	assert(splashPool ~= nil and #splashPool >= 1, "splashes non poolees")
+	local pooledSplash = splashPool[#splashPool]
+	assert(pooledSplash.Parent == nil, "splash encore parente")
+	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu")
+	assert(pooledSplash ~= pooledWake, "splashFree partage wakeFree")
+	assert(pooledSplash ~= pooledGold, "splashFree partage goldFree")
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -1868,6 +1889,12 @@ check("vagues de conquete", function()
 	assert(#wakePool == wakeN - 1, "wake non reutilise")
 	assert(rawequal(pooledWake.Parent, overlay.root), "wake non reparente")
 	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu au reuse")
+	-- N161 : despawn id=99 (pas retraite) consomme splashFree.
+	local splashN = #splashPool
+	overlay:applyUnits({}, {})
+	assert(#splashPool == splashN - 1, "splash non reutilise")
+	assert(rawequal(pooledSplash.Parent, overlay.root), "splash non reparente")
+	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()

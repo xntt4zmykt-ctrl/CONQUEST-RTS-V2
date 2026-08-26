@@ -909,27 +909,67 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				local retreating = (unit.extra and unit.extra.retreating) or unit.retreatTinted
 				if not retreating then
 					local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
-					local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-					splash.Shape = Enum.PartType.Cylinder
+					-- N161 : free-list splashFree, pop O(1) depuis la fin. Pas de
+					-- Destroy a 0.95 s : Parent = nil + push si encore parenté
+					-- (un delay fantôme ne double-push pas). LaunchWake
+					-- réutilise déjà (N160, wakeFree — ne pas partager).
+					-- goldPopup réutilise déjà (N159, goldFree — ne pas
+					-- partager). Distinct flame leftover N152
+					-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+					-- N153. Distinct previewTile N154. Distinct selectTile N155.
+					-- Distinct tileFlash N156. Distinct conquestPulse N157.
+					-- Distinct floatingText N158. Distinct goldPopup N159.
+					-- Distinct LaunchWake N160 (wakeFree, ne pas partager).
+					-- Distinct N131 (euler LandingSplash déjà inline).
+					-- Distinct visual V79 LandingSplash wakeRot (ne pas
+					-- merger 54d6). Distinct DeliveryPulse leftover N162
+					-- (Destroy, ne pas fusionner). Name LandingSplash conservé.
+					-- Reset Size (0.18, 3, 3) + Transparency 0.18 au reuse
+					-- (le tween les avait mises à (0.18, 15, 15) / 1).
+					-- Euler N131 inline conservé. Tween Create conservé
+					-- (Size + Transparency restart). routePart non modifié
+					-- (LaunchWake / DeliveryPulse / Shockwave / BlastSmoke).
+					-- Destroy du modèle navire inchangé (0.95 s, pas le splash).
+					-- Recette leftover N160, pas merger visual. HUD /
+					-- UnitModels / Effects / PlacementPreview / goldPopup /
+					-- trackUnit insert / stepInterpolation inchangés.
+					local free = self.splashFree
+					if not free then
+						free = {}
+						self.splashFree = free
+					end
+					local n = #free
+					local splash
+					if n > 0 then
+						splash = free[n]
+						free[n] = nil
+					else
+						splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
+						splash.Shape = Enum.PartType.Cylinder
+					end
+					splash.Size = Vector3.new(0.18, 3, 3)
 					splash.Transparency = 0.18
 					-- N131 : despawn navire LandingSplash. Plus de CFrame.Angles.
 					-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
 					-- Offset Y OCEAN_LEVEL + 0.14 inchange. Gardes not isMissile /
 					-- not retreating (N56) inchangees. Tween Size/Transparency +
-					-- task.delay Destroy inchanges. Distinct LaunchWake N130
-					-- (spawn, Y + 0.12). Distinct pulse N132 (route.to terre).
-					-- Distinct footprint N129. Distinct roulis N125.
+					-- task.delay (Parent = nil, plus Destroy). Distinct LaunchWake
+					-- N130/N160 (spawn, Y + 0.12). Distinct pulse N132 (route.to
+					-- terre). Distinct footprint N129. Distinct roulis N125.
 					-- Recette visual V75 leftover evenements Overlay.
 					-- stepInterpolation / trackUnit insert non touches.
 					-- UnitModels / PlacementPreview inchanges.
 					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+					splash.Parent = self.root
 					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 						Size = Vector3.new(0.18, 15, 15),
 						Transparency = 1,
 					}):Play()
 					task.delay(0.95, function()
 						if splash.Parent then
-							splash:Destroy()
+							splash.Parent = nil
+							local pool = self.splashFree
+							pool[#pool + 1] = splash
 						end
 					end)
 				end
