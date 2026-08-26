@@ -8,8 +8,8 @@
 	publiquement — ce qui laisse a la victime le temps de reagir et inscrit la
 	trahison au compteur permanent du traitre.
 
-	L'embargo, lui, donne a la diplomatie un poids economique : couper les
-	routes commerciales d'un rival lui coute de l'or a chaque tick.
+	L'embargo, lui, donne a la diplomatie un poids economique : il bloque les
+	navires de commerce (`canTrade`). Il ne modifie pas l'or territorial par tick.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,6 +26,13 @@ local function ensure(map: { [number]: { [number]: any } }, slot: number)
 	if not map[slot] then
 		map[slot] = {}
 	end
+end
+
+-- Une proposition est encore honorable tant que le tick courant n'a pas
+-- atteint l'expiry. flush() tourne avant Diplomacy.step : viewFor et accept
+-- doivent appliquer le meme garde, sinon le HUD affiche 1 tick de trop.
+local function requestIsLive(state: GameState, expiry: any): boolean
+	return typeof(expiry) == "number" and state.tick < expiry
 end
 
 --=============================================================================
@@ -70,6 +77,15 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	if not requestIsLive(state, requestExpiry) then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
 	end
 	requests[to] = nil
 
@@ -482,19 +498,24 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 	local allySet = state.alliances[slot]
 	if allySet then
 		for other in allySet do
-			allies[other] = true
+			if state:areAllied(slot, other) then
+				allies[other] = true
+			end
 		end
 	end
 
 	local myRequests = state.requests[slot]
 	if myRequests then
-		for other in myRequests do
-			outgoing[other] = true
+		for other, expiry in myRequests do
+			if requestIsLive(state, expiry) then
+				outgoing[other] = true
+			end
 		end
 	end
 
 	for other, targets in state.requests do
-		if targets[slot] then
+		local expiry = targets[slot]
+		if expiry and requestIsLive(state, expiry) then
 			incoming[other] = true
 		end
 	end
