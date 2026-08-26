@@ -519,8 +519,10 @@ local function runMatch(seed, ticks)
 		-- indefiniment et le test mesurerait une fuite qui n'existe pas en jeu.
 		local delta = state:flushOwnerDelta()
 		state:flushBuildingDelta()
-		table.clear(state.events)
-		table.clear(state.sounds)
+		-- N83 : drain testable (pas table.clear — dropperait l'identite
+		-- des records une fois poolee).
+		state:drainEvents()
+		state:drainSounds()
 		local changed = if delta then buffer.len(delta) // 5 else 0
 		TickMetrics.record(tick, changed, delta, (os.clock() - t0) * 1000)
 
@@ -8072,6 +8074,125 @@ do
 			fail("metrics snapBuf — snapshot apres reset distinct")
 		else
 			print("metrics snapBuf : rawequal, samples=1 (N81)")
+		end
+	end
+end
+
+do
+	-- N83 : notify / sound recycle eventPool / soundPool.
+	-- Deux notify + drain + deux notify → rawequal [1]. #events == 0
+	-- apres drain. only reecrit a nil (pas un leftover du premier).
+	-- Schema texte / kind / only inchange. Pas N82 / N84 / N26 / N75.
+	local state = GameState.new(1083)
+	state:notify("alpha", "info", 1)
+	state:notify("beta", "alert")
+	local ev1 = state.events[1]
+	local ev2 = state.events[2]
+	if ev1 == nil or ev2 == nil or not rawequal(ev1, GameState.eventPool[1]) then
+		fail("notify pool — enqueue")
+	else
+		state:drainEvents()
+		if #state.events ~= 0 or state.events[1] ~= nil then
+			fail(`notify pool — leftover file (#={#state.events})`)
+		else
+			state:notify("gamma", "good")
+			state:notify("delta", "bad", 2)
+			if not rawequal(ev1, state.events[1]) then
+				fail("notify pool — record [1] non recycle")
+			elseif not rawequal(ev2, state.events[2]) then
+				fail("notify pool — record [2] non recycle")
+			elseif state.events[1].text ~= "gamma" or state.events[1].kind ~= "good" then
+				fail("notify pool — champs [1]")
+			elseif state.events[1].only ~= nil then
+				fail("notify pool — only fantome")
+			elseif state.events[2].only ~= 2 or state.events[2].text ~= "delta" then
+				fail("notify pool — champs [2]")
+			else
+				state:drainEvents()
+				if #state.events ~= 0 then
+					fail("notify pool — leftover apres 2e drain")
+				else
+					state:sound("attackLaunch", 3)
+					state:sound("boatLand")
+					local s1 = state.sounds[1]
+					local s2 = state.sounds[2]
+					state:drainSounds()
+					if #state.sounds ~= 0 or s1 == nil or s2 == nil then
+						fail("sound pool — leftover file")
+					else
+						state:sound("eraAdvance")
+						state:sound("nukeLaunch", 4)
+						if not rawequal(s1, state.sounds[1]) or not rawequal(s2, state.sounds[2]) then
+							fail("sound pool — record non recycle")
+						elseif state.sounds[1].name ~= "eraAdvance" or state.sounds[1].only ~= nil then
+							fail("sound pool — champs [1]")
+						elseif not rawequal(s1, GameState.soundPool[1]) then
+							fail("sound pool — soundPool[1] distinct")
+						else
+							state:drainSounds()
+							if #state.sounds ~= 0 then
+								fail("sound pool — leftover apres 2e drain")
+							else
+								print("notify/sound pool : rawequal [1], #=0 (N83)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N84 : MatchLifecycle.buildRoster recycle rosterBuf + records.
+	-- Deux build → rawequal porteuse + record slot. removePlayer → slot
+	-- absent. Doctrine change → champ a jour. Map vide recyclee.
+	-- Banc N37 endMatchRecords inchange. Pas N83 / N57 / N26.
+	-- N84 hardening ≠ feel N84 (stationBuf).
+	local state = GameState.new(1084)
+	local a = state:addPlayer(nil, "RosterA", Random.new(1), 2)
+	local b = state:addPlayer(nil, "RosterB", Random.new(2), 0)
+	if not a or not b then
+		fail("roster pool — spawn impossible")
+	else
+		local r1 = MatchLifecycle.buildRoster(state.players)
+		local recA = r1[a.slot]
+		local recB = r1[b.slot]
+		local r2 = MatchLifecycle.buildRoster(state.players)
+		if not rawequal(r1, r2) or not rawequal(r1, MatchLifecycle.rosterBuf) then
+			fail("roster pool — rawequal porteuse")
+		elseif not rawequal(recA, r2[a.slot]) or not rawequal(recB, r2[b.slot]) then
+			fail("roster pool — rawequal record slot")
+		elseif recA.name ~= "RosterA" or recA.isBot ~= true or recA.betrayals ~= 2 then
+			fail("roster pool — champs init")
+		else
+			local bSlot = b.slot
+			state:removePlayer(bSlot)
+			local r3 = MatchLifecycle.buildRoster(state.players)
+			if r3[bSlot] ~= nil then
+				fail("roster pool — slot disparu encore present")
+			elseif not rawequal(r3[a.slot], recA) then
+				fail("roster pool — record A perdu au remove")
+			else
+				a.doctrine = 2
+				a.betrayals = 5
+				local r4 = MatchLifecycle.buildRoster(state.players)
+				if r4[a.slot].doctrine ~= 2 or r4[a.slot].betrayals ~= 5 then
+					fail("roster pool — doctrine/betrayals stale")
+				elseif not rawequal(r4[a.slot], recA) then
+					fail("roster pool — record A non recycle apres mutation")
+				else
+					local empty1 = MatchLifecycle.buildRoster({})
+					local empty2 = MatchLifecycle.buildRoster(nil)
+					if next(empty1) ~= nil then
+						fail("roster pool — map vide non vide")
+					elseif not rawequal(empty1, empty2) or not rawequal(empty1, MatchLifecycle.rosterBuf) then
+						fail("roster pool — map vide non recyclee")
+					else
+						print("roster pool : rawequal, removePlayer, doctrine (N84)")
+					end
+				end
+			end
 		end
 	end
 end
