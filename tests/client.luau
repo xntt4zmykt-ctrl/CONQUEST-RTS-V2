@@ -1477,10 +1477,11 @@ check("pose et capture de chaque type de batiment", function()
 	-- merger feel. Kind+Level match. Recolor capture inchange.
 	-- playConstruction seulement si neuf. Destroy modele navire
 	-- conserve. Ne pas partager ringFree (V123). Overlay.clear
-	-- Destroy conserve (V130). Leftover V128 chatFree (check
+	-- Parent=nil (V130, ci-dessous). Leftover V128 chatFree (check
 	-- messages) doit rester vert. Leftover V123 ringFree (check
 	-- modeles) doit rester vert. Leftover V80 DeliveryPulse
-	-- (ci-dessus) doit rester vert.
+	-- (ci-dessus) doit rester vert. Leftover V131
+	-- syncFactoryRoutes Destroy routes conserve.
 	assert(type(overlay.buildingFree) == "table", "buildingFree absent")
 	local cityKind = Config.BUILDING.CITY
 	local cityPool = overlay.buildingFree[cityKind]
@@ -1505,6 +1506,39 @@ check("pose et capture de chaque type de batiment", function()
 	assert(#cityPool == nCity - 1, "buildingFree[CITY] non pop")
 	assert(cityPool[nCity] == nil, "buildingFree leftover slot pop")
 	assert(overlay:buildingAt(cityIndex) == cityKind, "CITY inspecteur perdu au reuse")
+
+	-- V130 : Overlay.clear Parent=nil push buildingFree existant.
+	-- Recette analogique V129 / feel N179 inline — ne PAS merger
+	-- feel. Skip Parent == nil. Destroy modele navire conserve.
+	-- Destroy routes conserve (leftover V131). Ne pas partager
+	-- ringFree (V123). Leftover V129 buildingFree (ci-dessus)
+	-- doit rester vert. Leftover V128 chatFree doit rester vert.
+	-- Leftover V123 ringFree doit rester vert.
+	local liveCity = overlay.buildings[cityIndex]
+	assert(liveCity ~= nil, "CITY live absente avant clear")
+	assert(rawequal(liveCity, parkedCity), "CITY live n'est pas le reuse V129")
+	assert(liveCity.Parent == overlay.root, "CITY live hors root avant clear")
+	local nCityBeforeClear = #cityPool
+	overlay:clear()
+	assert(next(overlay.buildings) == nil, "buildings non vide apres clear")
+	assert(overlay:buildingAt(cityIndex) == nil, "inspecteur CITY apres clear")
+	assert(liveCity.Parent == nil, "CITY clear pas parque Parent=nil")
+	assert(#cityPool == nCityBeforeClear + 1, "buildingFree[CITY] non push au clear")
+	assert(rawequal(cityPool[#cityPool], liveCity), "CITY clear non push")
+	assert(cityPool[#cityPool + 1] == nil, "buildingFree leftover slot clear")
+	overlay.buildings[cityIndex] = liveCity
+	local nSkip = #cityPool
+	overlay:clear()
+	assert(#cityPool == nSkip, "clear skip Parent==nil re-parque")
+	assert(liveCity.Parent == nil, "skip Parent==nil unparque")
+	assert(next(overlay.buildings) == nil, "buildings non vide apres skip")
+	overlay:applyBuildingDelta({
+		{ index = cityIndex, kind = cityKind, slot = 1, level = 1 },
+	})
+	assert(rawequal(overlay.buildings[cityIndex], liveCity), "CITY non recycle apres clear")
+	assert(liveCity.Parent == overlay.root, "CITY recycle hors root apres clear")
+	assert(#cityPool == nSkip - 1, "buildingFree[CITY] non pop apres clear")
+	assert(overlay:buildingAt(cityIndex) == cityKind, "CITY inspecteur perdu apres clear")
 end)
 
 --[[

@@ -32,6 +32,9 @@ Overlay.__index = Overlay
 
 export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
+-- V130 : Overlay.clear reutilise parkBuilding (defini plus bas).
+local parkBuilding: (any, Model) -> ()
+
 local colorFor = Theme.factionColor
 local DARK = Color3.fromRGB(29, 35, 43)
 -- V56 : conversion tuile → monde en nombres (meme formule que WorldSpace.tileToWorld).
@@ -148,8 +151,9 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- V128 / V123 / feel N178 inline — ne PAS merger feel.
 	-- Leftover Parent = nil, pas Destroy. Kind+Level match au
 	-- take. Recolor meme kind+level inchange. Destroy modele
-	-- navire conserve. Overlay.clear Destroy conserve (V130).
-	-- Pas reentrant.
+	-- navire conserve. Overlay.clear Parent=nil (V130).
+	-- Leftover suivant = Overlay.syncFactoryRoutes Destroy
+	-- routes (V131). Pas reentrant.
 	self.buildingFree = {} :: { [number]: { Model } }
 
 	return self
@@ -157,8 +161,15 @@ end
 
 function Overlay.clear(self: Overlay)
 	table.clear(self.counts)
-	for _, part in self.buildings do
-		part:Destroy()
+	-- V130 : park Parent=nil buildingFree[kind]. Recette
+	-- analogique V129 / feel N179 inline — ne PAS merger
+	-- feel. Skip Parent == nil (deja parque). Destroy
+	-- modele navire conserve. Destroy routes conserve
+	-- (leftover V131). Ne pas partager ringFree / shipFree.
+	for _, model in self.buildings do
+		if model.Parent ~= nil then
+			parkBuilding(self, model)
+		end
 	end
 	for _, unit in self.units do
 		unit.visual.model:Destroy()
@@ -732,8 +743,9 @@ end
 -- V129 : parker un modele (Parent = nil, push buildingFree[kind]).
 -- Recette analogique V128 chatFree / V123 ringFree / feel N178
 -- inline — ne PAS merger feel. Pas Destroy. Ne pas partager
--- ringFree. Overlay.clear Destroy conserve (V130).
-local function parkBuilding(self: Overlay, model: Model)
+-- ringFree. Overlay.clear Parent=nil (V130). Leftover suivant
+-- = Overlay.syncFactoryRoutes Destroy routes (V131).
+parkBuilding = function(self: Overlay, model: Model)
 	local kind = model:GetAttribute("Kind") :: number?
 	if not kind or kind == 0 then
 		model.Parent = nil
@@ -916,8 +928,9 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		-- V128 / V123 / feel N178 inline — ne PAS merger feel.
 		-- playConstruction seulement si le modele est NEUF (pas
 		-- reuse, pas recolor). Destroy modele navire conserve.
-		-- Ne pas partager ringFree. Overlay.clear Destroy conserve
-		-- (V130).
+		-- Ne pas partager ringFree. Overlay.clear Parent=nil
+		-- (V130). Leftover suivant = Overlay.syncFactoryRoutes
+		-- Destroy routes (V131).
 		if existing then
 			parkBuilding(self, existing)
 		end
