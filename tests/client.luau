@@ -1111,9 +1111,10 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	end
 
 	-- N109 : câble Y depuis rest, plus de Vector3.new. Leftover N107/N108
-	-- (houle / feuillage) reste dans construction du monde. Radar / flag /
-	-- boom inchanges. Factory sans câble : animate ne lève pas.
-	-- Recette visual V60, portee pas mergee.
+	-- (houle / feuillage) reste dans construction du monde.
+	-- N124 : radar / flag / boom rotation via fromEulerAnglesYXZ, pas
+	-- CFrame.Angles. Factory sans câble : animate ne lève pas.
+	-- Recette visual V70, portee pas mergee.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
@@ -1122,10 +1123,39 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	local rest = cable:GetAttribute("RestCFrame")
 	assert(rest, "câble sans RestCFrame")
 	local restY = rest.Y
+	local boom = port:FindFirstChild("PortCraneBoom")
+	assert(boom and boom.CFrame, "PORT sans grue")
+	local boomRest = boom:GetAttribute("RestCFrame")
+	assert(boomRest, "grue sans RestCFrame")
 	Building.animate(port, 1, 1 / 60)
 	Building.animate(port, 2, 1 / 60)
 	assert(rawequal(port:FindFirstChild("PortCraneCable"), cable), "Part câble recreee")
 	assert(cable.CFrame.Y ~= restY, "câble n'a pas bouge")
+	assert(rawequal(port:FindFirstChild("PortCraneBoom"), boom), "Part grue recreee")
+	assert(boom.CFrame.Y == boomRest.Y, "grue convertie en translation")
+	assert(not rawequal(boom.CFrame, boomRest), "grue alias RestCFrame")
+
+	local sam = Building.create(Config.BUILDING.SAM, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local radar = sam:FindFirstChild("Radar")
+	assert(radar and radar.CFrame, "SAM sans radar")
+	local radarRest = radar:GetAttribute("RestCFrame")
+	assert(radarRest, "radar sans RestCFrame")
+	Building.animate(sam, 1, 1 / 60)
+	Building.animate(sam, 2, 1 / 60)
+	assert(rawequal(sam:FindFirstChild("Radar"), radar), "Part radar recreee")
+	assert(radar.CFrame.Y == radarRest.Y, "radar converti en translation")
+	assert(not rawequal(radar.CFrame, radarRest), "radar alias RestCFrame")
+
+	local capital = Building.create(Config.BUILDING.CAPITAL, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local flag = capital:FindFirstChild("CapitalFlag")
+	assert(flag and flag.CFrame, "capitale sans drapeau")
+	local flagRest = flag:GetAttribute("RestCFrame")
+	assert(flagRest, "drapeau sans RestCFrame")
+	Building.animate(capital, 1, 1 / 60)
+	Building.animate(capital, 2, 1 / 60)
+	assert(rawequal(capital:FindFirstChild("CapitalFlag"), flag), "Part drapeau recreee")
+	assert(flag.CFrame.Y == flagRest.Y, "drapeau converti en translation")
+	assert(flag.CFrame ~= flagRest, "drapeau n'a pas quitte RestCFrame")
 end)
 
 check("apercu de placement pour chaque batiment", function()
