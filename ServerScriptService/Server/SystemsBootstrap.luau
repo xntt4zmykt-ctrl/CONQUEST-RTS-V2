@@ -17,8 +17,6 @@ local GameState = require(script.Parent.GameState)
 local Nukes = require(script.Parent.Nukes)
 local Navy = require(script.Parent.Navy)
 local Tribes = require(script.Parent.Tribes)
-local Bots = require(script.Parent.Bots)
-local Diplomacy = require(script.Parent.Diplomacy)
 
 local SystemsBootstrap = {}
 
@@ -42,6 +40,9 @@ function SystemsBootstrap.install()
 		return
 	end
 	installed = true
+
+	local Bots = require(script.Parent.Bots)
+	local Diplomacy = require(script.Parent.Diplomacy)
 
 	ChantierB.install(GameState, Nukes)
 	BoatFront.install(GameState)

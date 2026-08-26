@@ -777,7 +777,7 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 	local minDist = Config.SPAWN_MIN_PLAYER_DISTANCE or 30
 	local minDist2 = minDist * minDist
 
-	for _ = 1, 6000 do
+	for _ = 1, 15000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
 		local y = rng:NextInteger(check, Config.MAP_HEIGHT - check - 1)
 		local center = MapGen.toIndex(x, y)
