@@ -1204,7 +1204,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- Distinct de V113 (blastFree). Distinct de V114 (smokeFree).
 	-- Leftover V80 wakeRot doit rester vert. Leftover V81 Y ==
 	-- PLAINS + 0.5 (check navires) doit rester vert. Leftover V115
-	-- Shockwave (check navires) doit rester vert.
+	-- Shockwave (check navires) doit rester vert. Leftover V117
+	-- LandingSplash (check navires) doit rester vert.
 	assert(type(overlay.deliveryFree) == "table", "deliveryFree absent")
 	assert(#overlay.deliveryFree == 0, "deliveryFree pre-park non vide")
 	testFlushDelays()
@@ -2048,7 +2049,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). V117 recycle LandingSplash (ci-dessous). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2549,11 +2550,14 @@ check("navires, missiles et interpolation", function()
 	overlay:applyUnits({}, {})
 	-- V79 : 3 navires → 3 LandingSplash. Missile skip. Y = OCEAN + 0.14.
 	-- wakeRot rawequal (un seul champ, constante identique a V78).
+	-- V117 recycle LandingSplash (apres flush V115).
 	local splashN = 0
 	local aSplash
+	local firstSplash = {}
 	for _, node in overlay.root:GetChildren() do
 		if node.Name == "LandingSplash" then
 			splashN += 1
+			firstSplash[splashN] = node
 			aSplash = node
 		end
 	end
@@ -2718,6 +2722,54 @@ check("navires, missiles et interpolation", function()
 	-- BlastSmoke doit rester vert. Leftover V113 Blast doit rester
 	-- vert. Leftover V81 Y == PLAINS + 0.5 doit rester vert.
 	-- Leftover V116 DeliveryPulse (check pose/capture) doit rester vert.
+	-- V117 : LandingSplash free-list splashFree. Recette feel N161
+	-- inline — ne PAS merger 41d3. Name LandingSplash. Euler N131
+	-- deja (wakeRot V79). Size (0.18, 3, 3) + Transparency 0.18 +
+	-- Color 202,239,247 + CFrame avant Tween. Pas Destroy. Destroy
+	-- modele navire conserve. Skip missiles conserve. Distinct de
+	-- V116 (deliveryFree). Distinct de V115 (shockFree). Distinct
+	-- de V113 (blastFree). Distinct de V114 (smokeFree). V113 flush
+	-- a parque les 3 splash du despawn V79. Respawn + despawn
+	-- recycle. Leftover V79 Y == OCEAN + 0.14 doit rester vert.
+	-- Leftover V78 LaunchWake doit rester vert. Leftover V116
+	-- DeliveryPulse (check pose/capture) doit rester vert.
+	-- Leftover V115 Shockwave doit rester vert.
+	assert(type(overlay.splashFree) == "table", "splashFree absent")
+	assert(#overlay.splashFree == 3, "splashFree non parque")
+	assert(overlay.splashFree[4] == nil, "splashFree leftover slot")
+	local splashSeen = {}
+	for i = 1, 3 do
+		assert(firstSplash[i] ~= nil, "LandingSplash capture V79 manquante")
+		assert(firstSplash[i].Parent == nil, "LandingSplash encore parent apres delay")
+		splashSeen[firstSplash[i]] = true
+	end
+	for i = 1, 3 do
+		assert(splashSeen[overlay.splashFree[i]], "splashFree autre Part")
+	end
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 50, y = 55, tx = 80, ty = 90, kind = 1 },
+	})
+	overlay:applyUnits({}, {})
+	local splashN2 = 0
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "LandingSplash" then
+			splashN2 += 1
+			assert(splashSeen[node], "LandingSplash non recycle")
+			assert(node.Parent == overlay.root, "LandingSplash recycle hors root")
+			assert(
+				math.abs(node.CFrame.Y - (Config.OCEAN_LEVEL + 0.14)) < 1e-6,
+				"splash Y recycle"
+			)
+		end
+	end
+	assert(splashN2 == 3, "LandingSplash count despawn recycle")
+	assert(#overlay.splashFree == 0, "splashFree non pop")
+	assert(overlay.splashFree[1] == nil, "splashFree leftover slot pop")
+	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree au recycle splash")
 end)
 
 check("vagues de conquete", function()
