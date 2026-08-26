@@ -225,6 +225,7 @@ local function applyRouteProgress(construction: any, progress: number)
 
 	for _, segment in construction.segments do
 		local visible = math.clamp(covered - segment.startsAt, 0, segment.length)
+		local dx, dy, dz = segment.dx, segment.dy, segment.dz
 		for _, layer in segment.layers do
 			local part = layer.part
 			--[[
@@ -239,12 +240,17 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			-- N110 : lift cuit dans layer.origin a la pose. Plus de
-			-- Vector3.new(0, lift, 0) 60 Hz. LookAt conserve. Size = API.
-			-- Recette visual V61, portee pas mergee. Cable / camion / houle
-			-- / feuillage / unites inchanges (N109/N105/N107/N108/N103).
-			local centre = layer.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction)
+			-- N111 : interpolation en nombres depuis ox/oy/oz + dx/dy/dz
+			-- (cuits a la pose). Plus de layer.origin + direction * t 60 Hz.
+			-- LookAt conserve (deux Vector3 = API, leftover N113). Size = API.
+			-- Lift cuit inchange (N110). Cable / camion / houle / feuillage /
+			-- unites inchanges (N109/N105/N107/N108/N103). Recette visual V62,
+			-- portee pas mergee.
+			local t = visible - shown / 2
+			local cx = layer.ox + dx * t
+			local cy = layer.oy + dy * t
+			local cz = layer.oz + dz * t
+			part.CFrame = CFrame.lookAt(Vector3.new(cx, cy, cz), Vector3.new(cx + dx, cy + dy, cz + dz))
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -318,6 +324,8 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local frame = CFrame.lookAt(a + span * 0.5, b)
 		local direction = span.Unit
 		local origin = a - direction * (tileSize / 2)
+		local dx, dy, dz = direction.X, direction.Y, direction.Z
+		local ox, oy, oz = origin.X, origin.Y, origin.Z
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
@@ -336,15 +344,19 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		table.insert(segments, {
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
-			-- la chaussee qui la porte. Lift cuit dans origin (N110) : plus
-			-- de Vector3 60 Hz dans applyRouteProgress.
+			-- la chaussee qui la porte. Lift cuit dans origin (N110). N111 :
+			-- ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
+			-- plus origin + direction * t a 60 Hz.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, stripeLift, 0), ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ox = ox, oy = oy + shoulderLift, oz = oz, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ox = ox, oy = oy + asphaltLift, oz = oz, ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, stripeLift, 0), ox = ox, oy = oy + stripeLift, oz = oz, ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,
+			dx = dx,
+			dy = dy,
+			dz = dz,
 			length = length,
 			startsAt = totalLength,
 		})
