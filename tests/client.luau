@@ -708,6 +708,24 @@ check("construction du monde 3D", function()
 		guard += 1
 	end
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+
+	-- V58 : houle sans Vector3, Parts stables, CFrame distinct du base.
+	-- Leftover V57 (camion) reste dans le check pose/capture.
+	local nRipple = #world.oceanRipples
+	assert(nRipple > 0, "aucun reflet ocean")
+	local first = world.oceanRipples[1]
+	local glintPart = first.part
+	local glintBase = first.base
+	world:step(1 / 60)
+	world:step(1 / 60)
+	assert(#world.oceanRipples == nRipple, "reflets recrees")
+	assert(rawequal(world.oceanRipples[1].part, glintPart), "Part glint recree")
+	assert(glintPart.CFrame.X ~= glintBase.X or glintPart.CFrame.Z ~= glintBase.Z, "houle n'a pas bouge")
+	assert(glintPart.Transparency >= 0.64 and glintPart.Transparency <= 0.82, "Transparency hors bande")
+	local savedRipples = world.oceanRipples
+	world.oceanRipples = {}
+	world:step(1 / 60)
+	world.oceanRipples = savedRipples
 end)
 
 check("calques d'entites, effets et apercu", function()
