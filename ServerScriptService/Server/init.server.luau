@@ -338,6 +338,8 @@ local function startMatch()
 	state.combatUnlocked = false
 	rng = Random.new(seed)
 	resultRecorded = {}
+	-- N91 : currentMapMeta = metaBuf (reference live). Late join reutilise
+	-- ce record ; fallback mapMeta seulement si nil.
 	currentMapMeta = MapGen.mapMeta(seed, state.terrain)
 
 	matchPhase = "waiting"
@@ -499,6 +501,7 @@ local function deployPlayer(player: Player, nationId: number)
 		buildRoster(),
 		ps.capitalTile,
 		profilePacket(profile),
+		-- N91 : currentMapMeta est metaBuf. Fallback seulement si nil.
 		currentMapMeta or MapGen.mapMeta(state.seed, state.terrain)
 	)
 	spawnCharacterAt(player, ps.capitalTile)
