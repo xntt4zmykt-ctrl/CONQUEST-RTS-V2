@@ -371,6 +371,32 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5h. Index buildingsBySlot = tous les batiments (ISSUE-N46).
+	do
+		local indexed = 0
+		local buildingsBySlot = state.buildingsBySlot or {}
+		for slot, set in buildingsBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.slot ~= slot then
+					fail(`tick {tick} — buildingsBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local real = 0
+		for index, building in state.buildings do
+			real += 1
+			local set = buildingsBySlot[building.slot]
+			if not (set and set[index]) then
+				fail(`tick {tick} — batiment {index} absent de buildingsBySlot[{building.slot}]`)
+			end
+		end
+		if indexed ~= real then
+			fail(`tick {tick} — buildingsBySlot count {indexed} != buildings {real}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5555,6 +5581,151 @@ do
 					fail("factoriesByTile — destroy laisse l'index")
 				else
 					print("factoriesByTile : destroy OK")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N46 option A : buildingsBySlot. Upgrade = plus bas palier, bunker ignore.
+	-- Score nuke : 2 villes dans le rayon battent une tuile vide.
+	local state = GameState.new(1071)
+	local owner = state:addPlayer(nil, "Contremaitre", Random.new(73), 0)
+	if not owner then
+		fail("buildingsBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 5 then
+					break
+				end
+			end
+		end
+		if #sites < 5 then
+			fail("buildingsBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[4], Config.BUILDING.DEFENSE, owner.slot)
+			state.buildings[sites[2]].level = 2
+			state.buildings[sites[3]].level = 3
+			local picked = Bots.lowestUpgradable(state, owner.slot)
+			local allSet = state.buildingsBySlot[owner.slot]
+			if not (allSet and allSet[sites[1]] and allSet[sites[4]] and allSet[owner.capitalTile]) then
+				fail("buildingsBySlot — pose incomplete")
+			elseif picked ~= sites[1] then
+				fail(`lowestUpgradable — tuile {picked}, attendu ville niveau 1`)
+			else
+				print("lowestUpgradable : ville niveau 1, bunker ignore (N46)")
+			end
+			local empty = sites[5]
+			local blast2 = 8
+			local rich = Bots.blastValue(state, owner.slot, sites[1], blast2)
+			local poor = Bots.blastValue(state, owner.slot, empty, 0)
+			local selfHit = Bots.blastValue(state, owner.slot, sites[1], 0)
+			if selfHit < 1 then
+				fail(`blastValue — ville score {selfHit}, attendu >= 1`)
+			elseif poor ~= 0 then
+				fail(`blastValue — tuile vide score {poor}, attendu 0`)
+			elseif rich <= poor then
+				fail(`blastValue — cluster {rich} <= vide {poor}`)
+			else
+				print("blastValue : 2 villes battent une frontiere vide (N46)")
+			end
+		end
+	end
+end
+
+do
+	-- N47 : refreshRailNetwork lit buildingsBySlot. Le bunker n'est pas une gare.
+	local state = GameState.new(1072)
+	local owner = state:addPlayer(nil, "Reseau", Random.new(76), 0)
+	if not owner then
+		fail("refreshRail — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("refreshRail — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.DEFENSE, owner.slot)
+			state:refreshRailNetwork(owner.slot)
+			local factory = state.buildings[sites[1]]
+			local linkedBunker = false
+			local linkedCity = false
+			if factory then
+				for _, dest in factory.links do
+					if dest == sites[3] then
+						linkedBunker = true
+					elseif dest == sites[2] or dest == owner.capitalTile then
+						linkedCity = true
+					end
+				end
+			end
+			if linkedBunker then
+				fail("refreshRail — bunker relie comme gare")
+			elseif not linkedCity then
+				fail("refreshRail — ville/capitale absente des liens usine")
+			else
+				print("refreshRail : gares du slot, bunker ignore (N47)")
+			end
+		end
+	end
+end
+
+do
+	-- removePlayer snapshot buildingsBySlot (N46), pas le hash global.
+	local state = GameState.new(1073)
+	local owner = state:addPlayer(nil, "Sortant", Random.new(77), 0)
+	if not owner then
+		fail("removePlayer index — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 2 then
+					break
+				end
+			end
+		end
+		if #sites < 2 then
+			fail("removePlayer index — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			local gone = owner.slot
+			state:removePlayer(gone)
+			if state.buildingsBySlot[gone] then
+				fail("removePlayer index — buildingsBySlot[slot] encore pose")
+			elseif state.samsBySlot[gone] then
+				fail("removePlayer index — samsBySlot[slot] encore pose")
+			elseif state.factoriesByTile[sites[1]] ~= nil then
+				fail("removePlayer index — factoriesByTile encore pose")
+			else
+				local leftover = 0
+				for _, building in state.buildings do
+					if building.slot == gone then
+						leftover += 1
+					end
+				end
+				if leftover ~= 0 then
+					fail(`removePlayer index — {leftover} batiment(s) du disparu`)
+				else
+					print("removePlayer index : snapshot buildingsBySlot, rien ne reste")
 				end
 			end
 		end
