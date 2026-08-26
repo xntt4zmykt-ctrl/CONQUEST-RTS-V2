@@ -2998,6 +2998,87 @@ do
 end
 
 do
+	-- V38 : pathWalkBuf — retour unique (pas le walk). Seed 1608, paire
+	-- cotiere reliee. Deux appels → pas rawequal. Stocker p1, rappeler,
+	-- p1[i] intact. Trajet inverse ne pollue pas.
+	local sea = GameState.new(1608)
+	local coastal: { number } = {}
+	for index = 0, Config.TILE_COUNT - 1 do
+		if sea:isLand(index) and MapGen.isCoastal(sea.terrain, index) then
+			table.insert(coastal, index)
+			if #coastal >= 400 then
+				break
+			end
+		end
+	end
+	local fromTile: number? = nil
+	local toTile: number? = nil
+	for _, first in coastal do
+		for _, second in coastal do
+			if first ~= second then
+				local path = Navy.findSeaPath(sea, first, second)
+				if path and #path >= 2 then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+		end
+		if fromTile then
+			break
+		end
+	end
+	if not fromTile or not toTile then
+		fail("findSeaPath pathWalk — aucune paire cotiere reliee")
+	else
+		local p1 = Navy.findSeaPath(sea, fromTile, toTile)
+		local p2 = Navy.findSeaPath(sea, fromTile, toTile)
+		local function same(a: { number }?, b: { number }?): boolean
+			if not a or not b or #a ~= #b then
+				return false
+			end
+			for i = 1, #a do
+				if a[i] ~= b[i] then
+					return false
+				end
+			end
+			return true
+		end
+		if not p1 or not same(p1, p2) then
+			fail("findSeaPath pathWalk — trajet non deterministe")
+		elseif rawequal(p1, p2) then
+			fail("findSeaPath pathWalk — rawequal (V38)")
+		else
+			local snapshot = table.create(#p1)
+			for i = 1, #p1 do
+				snapshot[i] = p1[i]
+			end
+			local back = Navy.findSeaPath(sea, toTile, fromTile)
+			local again = Navy.findSeaPath(sea, fromTile, toTile)
+			if not back then
+				fail("findSeaPath pathWalk — trajet inverse introuvable")
+			elseif not same(p1, again) then
+				fail("findSeaPath pathWalk — parent scratch pollue")
+			else
+				local mutated = false
+				for i = 1, #p1 do
+					if p1[i] ~= snapshot[i] then
+						mutated = true
+						break
+					end
+				end
+				if mutated then
+					fail("findSeaPath pathWalk — p1 mute par un second appel (V38)")
+				elseif rawequal(p1, again) then
+					fail("findSeaPath pathWalk — identite partagee (V38)")
+				else
+					print("findSeaPath pathWalk : identite unique, p1 intact (V38)")
+				end
+			end
+		end
+	end
+end
+
+do
 	local carrierState = GameState.new(1609)
 	local a = carrierState:addPlayer(nil, "Amiral", Random.new(81), 0)
 	if not a then
@@ -5380,6 +5461,79 @@ do
 end
 
 print("passe 28 : gatherSites siteBuf, elimBuf recycle OK")
+
+--[[
+	Nightly passe 29 — revue PR #81 : findSeaPath pathWalkBuf / refreshRailNetwork stationBuf (V38–V39).
+]]
+do
+	-- V39 : stationBuf recycle. Spawn (capitale = gare) → railRoutes 0.
+	-- FACTORY + CITY a portee → factory.links contient la ville, railIncome > 0.
+	-- Second refresh → memes liens, identite factory.links conservee
+	-- (pas table.clear in-place / option B). factory.links n'est pas
+	-- stationBuf (ne contient pas l'index usine).
+	local state = GameState.new(2901)
+	local owner = state:addPlayer(nil, "RailBuf", Random.new(85), 0)
+	if not owner then
+		fail("stationBuf — spawn impossible")
+	else
+		state:refreshRailNetwork(owner.slot)
+		if owner.railRoutes ~= 0 then
+			fail(`stationBuf — railRoutes={owner.railRoutes} sans usine`)
+		else
+			local sites: { number } = {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+					table.insert(sites, index)
+					if #sites >= 2 then
+						break
+					end
+				end
+			end
+			if #sites < 2 then
+				fail("stationBuf — tuiles libres insuffisantes")
+			else
+				state:placeBuilding(sites[1], Config.BUILDING.FACTORY, owner.slot)
+				state:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+				state:refreshRailNetwork(owner.slot)
+				local factory = state.buildings[sites[1]]
+				local sawCity = false
+				local sawSelf = false
+				if factory then
+					for _, dest in factory.links do
+						if dest == sites[2] or dest == owner.capitalTile then
+							sawCity = true
+						end
+						if dest == sites[1] then
+							sawSelf = true
+						end
+					end
+				end
+				if not factory or not sawCity then
+					fail("stationBuf — ville/capitale absente des liens")
+				elseif sawSelf then
+					fail("stationBuf — factory.links == stationBuf (index usine)")
+				elseif owner.railIncome <= 0 then
+					fail(`stationBuf — railIncome={owner.railIncome}`)
+				else
+					local firstLinks = factory.links
+					local nLinks = #firstLinks
+					state:refreshRailNetwork(owner.slot)
+					if not rawequal(factory.links, firstLinks) then
+						fail("stationBuf — identite links perdue (option B?)")
+					elseif #factory.links ~= nLinks then
+						fail("stationBuf — liens mutes au second refresh")
+					else
+						print("stationBuf : liens usine, income, identite (V39)")
+						state:refreshRailNetwork(99)
+						print("stationBuf : slot sans joueur, pas d'erreur (V39)")
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 29 : pathWalkBuf, stationBuf recycle OK")
 
 do
 	local report = TickMetrics.formatReport()

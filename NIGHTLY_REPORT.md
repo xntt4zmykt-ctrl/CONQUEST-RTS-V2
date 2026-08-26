@@ -1,11 +1,11 @@
-# Nightly report — passe 28 (revue PR #79)
+# Nightly report — passe 29 (revue PR #81)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-027d` (PR #79, `5b3681f`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-d685`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-d685` (PR #81, `109ff75`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-107e`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #79 (`Diplomacy.step` expiredBuf / `neighborFactions` recycle — HEAD visuel). Correctifs sûrs, sans merger feel `b62d`/`2f5d` ni hardening `ded3`.
+Revue de PR #81 (`gatherSites` siteBuf / `stepElimination` elimBuf — HEAD visuel). Correctifs sûrs, sans merger feel `69f4`/`b62d` ni hardening `bef6`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,14 +15,14 @@ Revue de PR #79 (`Diplomacy.step` expiredBuf / `neighborFactions` recycle — HE
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `Bots.gatherSites` pool `siteBuf` | `Bots.luau` | V36 N81 |
-| `GameState.stepElimination` pool `elimBuf` | `GameState.luau` | V37 N82 |
+| `Navy.findSeaPath` walk scratch `pathWalkBuf` | `Navy.luau` | V38 N83 |
+| `GameState.refreshRailNetwork` pool `stationBuf` | `GameState.luau` | V39 N84 |
 
-`expiredBuf` / `contactBuf` / type-guard visuel (`true`/non-number) **conservés**. Skip `awaitingSpawn` et `settledHumans` **conservés**. `removePlayer` snapshot bâtiments (`local doomed`) **non retouché**. `findSeaPath` path+reversed **non poolé**. `refreshRailNetwork` stations **non poolées**. Schéma filaire client **inchangé**. GameState ne require toujours pas Buildings / Research.
+`visitBuf` / `parentPool` / `queuePool` **conservés**. Retour **unique** (`boat.path` ne reçoit jamais `pathWalkBuf`). `buildingsBySlot[slot]` + skip `IS_STATION` **conservés**. Inners `neighborsOf` **alloués** (deviennent `building.links`). Formule HUD `railIncome` **visuelle** (pas de `TRAIN_STOP_BONUS` — il vit dans `Trade`). Skip `awaitingSpawn` et `settledHumans` **conservés**. `siteBuf` / `elimBuf` **non retouchés**. Schéma filaire client **inchangé**. GameState ne require toujours pas Buildings / Research.
 
 ---
 
-## Constatations PR #79 (à ne pas casser)
+## Constatations PR #81 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -48,6 +48,8 @@ Revue de PR #79 (`Diplomacy.step` expiredBuf / `neighborFactions` recycle — HE
 - **Bots perception :** `Bots.neighborFactions` (V35). `contactBuf` unique, `table.clear`. Slot inconnu → map vide. **Pas réentrant.**
 - **Bots pose :** `Bots.gatherSites` (V36). `siteBuf` (`table.create(60)`). Caps 40/60/45. Pas de shuffle. Truncate leftover. Slot / côte vide → `# == 0`. **Pas réentrant.** Unique appelant `decideBuild`.
 - **Élimination 10 Hz :** `stepElimination` (V37). `elimBuf` (`table.create(8)`). **Pas** nommé `doomed`. Skip `awaitingSpawn`. Truncate leftover **avant** `removePlayer`. Ne pas truncate à 0 après return. Buffer **partagé inter-instances**. `settledHumans` inchangé.
+- **Path maritime :** `Navy.findSeaPath` (V38). `pathWalkBuf` walk scratch. Copie inverse dans un tableau **neuf**. `return out`, jamais `return pathWalkBuf`. Origine terrestre **exclue**. `visitBuf` / `parentPool` / `queuePool` inchangés. **Pas réentrant.** Unique appelant synchrone (invasion / retraite / convoi).
+- **Réseau ferroviaire :** `refreshRailNetwork` (V39). `stationBuf` + `railParentBuf` / `railXsBuf` / `railYsBuf` + maps de grappe. Truncate leftover **puis** `table.sort`. Itérer `1..count`, pas `#`. Inners `neighborsOf` uniques. Formule HUD visuelle **sans** `TRAIN_STOP_BONUS`. **Pas réentrant.**
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
@@ -57,7 +59,7 @@ Revue de PR #79 (`Diplomacy.step` expiredBuf / `neighborFactions` recycle — HE
 
 ## Specs worker (reste)
 
-Ne pas merger feel `b62d`/`2f5d` ni hardening `ded3` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `69f4`/`b62d` ni hardening `bef6` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -113,39 +115,46 @@ Ne pas merger feel `b62d`/`2f5d` ni hardening `ded3` sur cette branche sans reba
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V38 — `Navy.findSeaPath` `pathWalkBuf`
+### ISSUE-V40 — `Buildings.contextFor` table + 2 closures par resolve
 
-**Problème.** Un trajet réussi construit `local path = { toTile }` puis `table.insert` en remontant `parent`, puis `local reversed = table.create(#path)` et un second remplissage. Deux allocations par invasion, retraite, et convoi commercial. Les trois call sites **prennent possession** du retour : `boat.path = path`. Un `pathBuf` partagé aliaserait le trajet du bateau A quand B cherche une route. Feel N83 recycle le walk seulement. Distinct de V16 (`visitBuf` / `parentPool` / `queuePool` déjà poolés) et de V21 (`portsBuf` / `candidateBuf`).
+**Problème.** Chaque `Buildings.resolve` (intent `BuildOrder` + `Bots.decideBuild`) fait `return { slot, era, gold, terrain, ownerAt = function…, buildingAt = function… }`. Trois allocations (record + 2 closures) par clic / décision bot. Les closures capturent `state`. `Placement.resolve` lit `ctx` de façon synchrone et abandonne — le record n’a pas besoin d’être unique. Feel N85. Distinct de V30 (`pricesFor`) et de V39 (`stationBuf`).
 
-**20K CCU.** Le BFS visité est déjà payé (V16). Il reste le double alloc du résultat, sur chaque vague `TRADE_SHIP_INTERVAL` (45) et chaque débarquement. Recycle du **walk** seulement ; le tableau rendu au bateau **doit rester unique**. Pas d’autorité (la géométrie ne change pas).
+**20K CCU.** Un shard 8 humains + 16 bots pose/upgrade plusieurs fois par seconde en mid-game. Recycle du record + fonctions module (lisent `ctxState`) élimine l’alloc courte. Pas d’autorité (même `buffer.readu8(state.owner)` / `state.buildings[index]`). Ne pas fusionner avec le ctx client : `PlacementPreview` / `init.client` construisent **leurs** closures sur Overlay / WorldRenderer.
 
-**Faire.** Recette feel N83 (`b62d`) : `pathWalkBuf` module-level (`table.create(256)`). Au hit `nb == toTile` : n = 0 ; poser `toTile` puis remonter `current` jusqu’à `fromTile` **exclu** (loi actuelle : l’origine terrestre n’est pas dans le path). `pathWalkBuf[n] = node`. Truncate leftover n+1..#. Allouer **un** `out = table.create(n)` et copier **à l’envers** (`out[i] = pathWalkBuf[n - i + 1]`). `return out`. Ne **pas** `return pathWalkBuf`. Pas de second tableau `reversed`. Après V37. Ne pas porter `refreshRailNetwork` (V39) en même temps.
+**Faire.** Recette feel N85 (`69f4`) :
 
-**Contraintes.** Server-only. Ne pas modifier `launchInvasion` / retraite / `spawnTradeShips` (ils stockent déjà le retour). Ne pas require de module nouveau. Ne pas toucher `visitBuf` / `parentPool` / `queuePool`. `buffer.fill(visitBuf, 0, 0)` inchangé. Échec BFS / `MAX_BFS_NODES` → `nil`. Ne pas `table.clone` du walk. Overlay n’itère pas `boat.path` (non répliqué). **Pas réentrant.** `findSeaPath` est synchrone et unique.
+1. Ajouter `ctxState: GameState?` et `ctxBuf: Placement.Context` module-level dans `Buildings.luau`. `ownerAt` / `buildingAt` = fonctions **module** (pas de `function` inline) : `ownerAt` lit `buffer.readu8(ctxState.owner, index)` ; `buildingAt` lit `ctxState.buildings[index]` (kind/slot/level ou nil,nil,nil — **même contrat**). `contextFor` : slot inconnu → `return nil` **sans** muter `ctxBuf`. Slot vivant : poser `ctxState = state`, `ctxBuf.slot/era/gold/terrain`, `ctxBuf.ownerAt` / `ctxBuf.buildingAt` = les fonctions module (identité stable), `return ctxBuf`.
+2. Ne pas require de module nouveau. Ne pas toucher `pricesFor` / `siteBuf` / `stationBuf`. Ne pas toucher `Placement.luau` (le type `Context` reste). Ne pas toucher `PlacementPreview.resolve` (le client passe ses propres closures — un `ctxBuf` serveur n’existe pas côté client). `resolve` reste le seul appelant serveur. Pas de RemoteFunction.
+3. Après V39. Ne pas porter `ChantierB` doomed/collapsing (V41) en même temps.
 
-**Tester.** Banc V16 existant (deux appels, mêmes longueurs) **doit rester vert**. Ajouter : deux appels successifs même paire → **pas** `rawequal` (identité unique). Stocker `p1`, rappeler, `p1[i]` inchangé (pas de mutation du path du premier bateau). Trajet inverse ne pollue pas. `./tests/run.sh`. Client 34/34.
+**Contraintes.** Server-only. Recette `viewBuf` (record réécrit, pas une nouvelle table) + closures stables. **V40 visual ≠ V30 (`pricesFor`, déjà fait) ≠ V36 (`siteBuf`, déjà fait) ≠ V39 (`stationBuf`, déjà fait).** `ctxBuf` n’est pas réentrant. `resolve` est synchrone et unique. Ne pas `table.clone(ctxBuf)`. Ne pas stocker le ctx au-delà de `Placement.resolve`. `terrain` est le buffer live (pas une copie) — Overlay client a le sien. Ne pas require Placement côté GameState (cycle).
 
-**Fichiers.** `Navy.luau` (`findSeaPath` seulement), `tests/simulate.luau` (bloc court à côté du banc V16 seed 1608).
+**Tester.** `Buildings.contextFor(state, slot)` deux fois → `rawequal`. Slot 99 → `nil`. `Buildings.resolve` pose encore une CITY (snap / exact inchangé — banc placement existant). Après `contextFor(A)` puis `contextFor(B)`, un `ownerAt` **conservé** du premier ctx lit B (non réentrant — documenter, ne pas « corriger » en clonant). `./tests/run.sh`. Client 34/34. 6000 ticks.
 
-### ISSUE-V39 — `GameState.refreshRailNetwork` `stationBuf`
+**Fichiers.** `Buildings.luau` (`contextFor` + helpers module, `resolve` inchangé à l’appel), `tests/simulate.luau` (bloc court à côté du banc V30 / `pricesFor`).
 
-**Problème.** Chaque `placeBuilding` / `destroyBuilding` / `transferBuilding` d’une gare reconstruit `local stations = {}`, `parent = table.create(count)`, `xs`/`ys`, `neighborsOf` (une table interne **par** gare) et deux maps de grappe. Pas 10 Hz, mais une partie Classique pose/capture des dizaines de gares. `building.links = links` **prend possession** de `neighborsOf[i]` : un pool partagé des inners aliaserait les voies de deux usines (et le dirty BuildingDelta). Feel N84 recycle les **porteuses**. Distinct de V22 (`buildingsBySlot[slot]` déjà) et de V28 (`buildingSnapBuf` live `links`).
+### ISSUE-V41 — `ChantierB.cancelOpposingFronts` / `collapsing` allouent 10 Hz
 
-**20K CCU.** Leftover V22. Recycle des porteuses (stations, parent, xs, ys, maps de grappe) élimine l’alloc courte. Les inners `neighborsOf` stockées dans `building.links` restent uniques — même classe que V38 (`boat.path`). Pas d’autorité (tri + union-find inchangés ; sans tri les liens répliqués danseraient).
+**Problème.** Chaque tick avec fronts, `cancelOpposingFronts` fait `local doomed: { boolean } = {}` (hash sparse indexé par i d’attaque) et le wrap `stepAttacks` fait `local collapsing = {}` puis `table.insert(collapsing, { victim, captor })` par front sous le seuil. Deux allocations porteuses + N records par tick de combat. La loi (clash `min(troops)`, refund si troops>0 au remove, collapse si `tiles < collapseThreshold()` encore vrai **après** la passe) ne change pas. Feel N86. Distinct de V37 (`elimBuf` élimination) et de `retreatAttack` (couple).
 
-**Faire.** Recette feel N84 (`b62d`) : `stationBuf` module-level (`table.create(32)`), plus `railParentBuf` / `railXsBuf` / `railYsBuf` (`table.create(32)`), plus `clusterStations` / `clusterFactoryCount` maps recyclées (`table.clear`). Au début : n = 0. Même collecte V22 (`buildingsBySlot[slot]`, fallback hash, kinds CITY/CAPITAL/PORT/FACTORY, **pas** DEFENSE). `stationBuf[n] = index`. **Truncate leftover puis `table.sort(stationBuf)`** — `table.sort` sur un leftover non truncaté mélangerait d’anciennes gares. `count = n`. Remplir parent/xs/ys dans les buf (itérer `1..count`, pas `#`). Maps de grappe : `table.clear` puis refill. Après V38. Ne pas toucher `elimBuf` / `siteBuf`.
+**20K CCU.** Leftover combat vivant. 10 Hz × 18 slots × quelques fronts. Recycle des porteuses (et pool des records collapse) élimine l’alloc courte du hot path. Pas d’autorité (mêmes soustractions, même `table.remove` arrière, même notify). Ne pas fusionner avec `elimBuf` : collapse n’est pas une élimination (territoire redistribué, pas `removePlayer`).
 
-**Contraintes.** Server-only. **Ne pas** recycler les inners `neighborsOf[i]` dans un pool partagé. Allouer `{}` par gare comme aujourd’hui (elles deviennent `building.links` si usine + changed). Option B (écrire dans `building.links` existant) **interdite** : Overlay / BuildingDelta comparent l’identité via le dirty, et un `table.clear` in-place pendant qu’un snapshot V28 tient `links` live casserait le wire. Ne pas require de module nouveau. Ne **pas** référencer `IS_STATION` (local trop bas, nil au runtime — piège V22). Ne pas `table.clone(links)` au dirty. **Pas réentrant.** `refreshRailNetwork` est unique par mutation.
+**Faire.** Recette feel N86 (`69f4`) :
 
-**Tester.** 1 FACTORY + 1 CITY à portée → `factory.links` contient la ville, `railIncome > 0`. Deuxième `refreshRailNetwork` → mêmes liens, `not rawequal(factory.links, stationBuf)`. Slot sans gare (hors capitale) : poser uniquement un bunker → `railRoutes` inchangé / pas d’erreur. Capitale spawn est une gare : un test « 1 FACTORY seule » peut encore lier `owner.capitalTile`. `./tests/run.sh`. Client 34/34.
+1. Ajouter `doomedBuf: { [number]: boolean } = {}` module-level dans `ChantierB.luau`. Au début de `cancelOpposingFronts` : `table.clear(doomedBuf)`. Remplacer `doomed` par `doomedBuf`. Ne **pas** itérer `#doomedBuf` (c’est un hash sparse — la boucle `for i = #state.attacks, 1, -1` reste). Ajouter `collapsingBuf` (`table.create(8)`) + `collapseRecPool` (`table.create(8)`, records `{ victim, captor }`). Au début du wrap `stepAttacks` : n = 0. À chaque insert : n += 1 ; réécrire un rec du pool (créer si `collapseRecPool[n] == nil`) ; `collapsingBuf[n] = rec`. Truncate leftover n+1..# **avant** la boucle `for _, entry in collapsing`. Traiter `1..n` (pas `#` sans truncate). Pas de RemoteFunction.
+2. Ne pas toucher `BoatFront` (`parked` par `launchAttack`). Ne pas toucher `GameState.stepAttacks` mort (`local _ = origStepAttacks`). `CAPTURE_GUARD=80` visuel **inchangé**. `stripTerritory` visuel (`awaitingSpawn = true`) **inchangé**. Après V40. Ne pas porter `contextFor` en même temps.
 
-**Fichiers.** `GameState.luau` (`refreshRailNetwork` seulement), `tests/simulate.luau` (bloc court).
+**Contraintes.** Pas de RemoteFunction. Recette V34 (`expiredBuf` + pool records) pour collapsing ; recette `table.clear` hash pour doomed (comme `contactBuf` V35). **V41 visual ≠ V37 (`elimBuf`, déjà fait) ≠ V38 (`pathWalkBuf`, déjà fait).** `doomedBuf` / `collapsingBuf` ne sont pas réentrants. `stepAttacks` est unique par tick. Ne pas `table.remove` dans `collapsingBuf` pendant l’itération — la collecte est close avant le traitement. Un leftover d’état A dans l’état B sans truncate ferait collapse d’un slot fantôme — truncate obligatoire (recette V37). Les records ne sont pas répliqués.
+
+**Tester.** Banc combat vivant existant (guard=80) **doit rester vert**. Ajouter : deux joueurs, fronts opposés A→B et B→A avec troupes égales → les deux fronts disparaissent, troupes restituées (clash). Un défenseur sous le seuil → `collapseFaction` toujours appelé (territoire du captor augmente). Deux appels `cancelOpposingFronts` sans fronts → pas d’erreur, `next(doomedBuf) == nil` après clear. `./tests/run.sh`. Client 34/34. 6000 ticks.
+
+**Fichiers.** `ChantierB.luau` (`cancelOpposingFronts` + wrap `stepAttacks` seulement), `tests/simulate.luau` (bloc court).
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `b62d`/`2f5d` / hardening `ded3` sur #39/#79.
+- Merger feel `69f4`/`b62d` / hardening `bef6` sur #39/#81.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -153,10 +162,11 @@ Ne pas merger feel `b62d`/`2f5d` ni hardening `ded3` sur cette branche sans reba
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
-- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` / `viewFor` / `expiredBuf` / `contactBuf` / `siteBuf` / `elimBuf` réentrants : un seul appelant chacun (sauf `viewFor` **par slot** — c’est voulu). Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
+- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` / `viewFor` / `expiredBuf` / `contactBuf` / `siteBuf` / `elimBuf` / `pathWalkBuf` / `stationBuf` réentrants : un seul appelant chacun (sauf `viewFor` **par slot** — c’est voulu). Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
 - Feel N70 `retreating` sur le snapshot — Overlay visuel ne teinte pas la retraite.
+- Feel N20 `TRAIN_STOP_BONUS` dans `refreshRailNetwork` — HUD visuel lit l’espérance **sans** ce multiplicateur ; `Trade.deliveryValue` l’applique déjà. Ne pas porter.
 - `delivery.level` snapshot à l’arrivée (feel) : le header Trade dit « niveau à l’arrivée » ; dispatch stocke déjà `level` mais `resolve` lit `factory.level`. Produit, pas un bug d’index.
-- Feel N83 (`findSeaPath` path unique) / N84 (`stationBuf`) — V38 / V39.
+- Feel N85 (`contextFor`) / N86 (`doomedBuf`/`collapsingBuf`) — V40 / V41.
 - `dirtyIndexBuf` (feel N72 / hardening N53) — ne ferme pas l’alloc `buffer.create` (voir V14b).
 
 ---
@@ -168,6 +178,6 @@ Ne pas merger feel `b62d`/`2f5d` ni hardening `ded3` sur cette branche sans reba
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–27 + **passe 28** (`gatherSites` DEFENSE frontière + `rawequal` + cap 60, truncate border `# == 0`, PORT sans côte `# == 0` ; `elimBuf` vivant length 0 + `rawequal`, strip → length 1 slot disparu, leftover inter-instances 1→0).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–28 + **passe 29** (`findSeaPath` pathWalk identite unique + p1 intact, trajet inverse sans pollution ; `stationBuf` liens usine + income + identite `factory.links`, slot 99 sans erreur).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
