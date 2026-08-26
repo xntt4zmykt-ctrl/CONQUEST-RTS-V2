@@ -71,6 +71,17 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
 	end
+	local requestExpiry = requests[to]
+	-- flush() tourne avant Diplomacy.step : sans ce garde, une proposition
+	-- expiree reste acceptable pendant le tick qui la nettoie.
+	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
+	end
 	requests[to] = nil
 
 	local a, b = state.players[from], state.players[to]

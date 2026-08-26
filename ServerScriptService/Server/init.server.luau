@@ -498,6 +498,12 @@ joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId
 	if typeof(nationId) ~= "number" then
 		return
 	end
+	-- Avant cooldown / pendingMode : un JoinRequest en phase ended ne doit
+	-- ni bruler le throttle ni voter le mode du round suivant.
+	if matchPhase == "ended" then
+		notify:FireClient(player, "La partie est terminee — attends la relance.", "info")
+		return
+	end
 	local now = os.clock()
 	local lastJoin = joinCooldown[player.UserId]
 	if lastJoin and now - lastJoin < (Config.JOIN_COOLDOWN_SEC or 2) then
