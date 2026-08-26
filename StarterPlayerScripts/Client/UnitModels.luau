@@ -264,7 +264,18 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- portee pas mergee. Overlay / BuildingModels inchanges.
 			localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
-			localFrame = localFrame * CFrame.Angles(math.sin(time * 5) * 0.06, 0, 0)
+			-- N128 : offset * pitch. Plus de CFrame.Angles 60 Hz.
+			-- fromEulerAnglesYXZ(rx, 0, 0) ≡ Angles(rx, 0, 0) (ry=0,
+			-- rz=0 → X seul). Amplitude 0.06, frequence 5 inchangees.
+			-- Garde role == "flag" inchangee. piece.offset * euler —
+			-- pas CFrame.new(offset.X,Y,Z) * euler (recette N124).
+			-- Distinct radar N127 (Y, time * 2.2). Distinct CapitalFlag
+			-- N124 (deux sin, rest identite). Distinct roulis Overlay
+			-- N125. Distinct flamme Size (leftover). Recette visual V73
+			-- leftover deja sur 9793, portee pas mergee. Radar N127
+			-- inchange. Overlay / BuildingModels inchanges.
+			local rx = math.sin(time * 5) * 0.06
+			localFrame = piece.offset * CFrame.fromEulerAnglesYXZ(rx, 0, 0)
 		elseif piece.role == "wake" then
 			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
