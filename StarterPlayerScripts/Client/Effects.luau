@@ -187,7 +187,15 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
-	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N134 : conquestPulse ring. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- Hauteur Y = 3 inchangee. Tween Size/Transparency + task.delay Destroy
+	-- inchanges. Caps MAX_FLASHES_PER_WAVE / MAX_LIVE_FLASHES inchanges.
+	-- conquestWave / lossWave barycentre inchanges. Flashes tuile sans euler.
+	-- Distinct Overlay Shockwave N133 (PLAINS + 0.5). Distinct pulse N132
+	-- (Overlay gare). Distinct WorldRenderer OceanGlint leftover.
+	-- Overlay / WorldRenderer / BuildingModels inchanges.
+	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = self.root
 
 	TweenService:Create(ring, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
