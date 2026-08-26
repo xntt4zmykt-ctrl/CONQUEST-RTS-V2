@@ -1182,7 +1182,8 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveRoute.delivery == nil, "livraison encore active")
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
 	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
-	-- l'arrivee. Recette feel N132. V81 Shockwave (check navires).
+	-- l'arrivee. Recette feel N132. V116 recycle DeliveryPulse
+	-- (ci-dessous). V81 Shockwave (check navires).
 	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil).
 	local pulseFound = false
 	local aPulse
@@ -1195,6 +1196,46 @@ check("pose et capture de chaque type de batiment", function()
 	assert(pulseFound, "pas de pulse a l'arrivee")
 	assert(aPulse ~= nil and aPulse.CFrame, "pulse sans CFrame")
 	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree a l'arrivee camion")
+	-- V116 : DeliveryPulse free-list deliveryFree. Recette feel N162
+	-- inline — ne PAS merger 076b. Name DeliveryPulse. Euler N132
+	-- deja (wakeRot V80). Size (0.22, 2.8, 2.8) + Transparency 0.28
+	-- + Color colorFor(slot) + CFrame avant Tween. Pas Destroy.
+	-- Camion Parent = nil conserve. Distinct de V115 (shockFree).
+	-- Distinct de V113 (blastFree). Distinct de V114 (smokeFree).
+	-- Leftover V80 wakeRot doit rester vert. Leftover V81 Y ==
+	-- PLAINS + 0.5 (check navires) doit rester vert. Leftover V115
+	-- Shockwave (check navires) doit rester vert.
+	assert(type(overlay.deliveryFree) == "table", "deliveryFree absent")
+	assert(#overlay.deliveryFree == 0, "deliveryFree pre-park non vide")
+	testFlushDelays()
+	assert(aPulse.Parent == nil, "DeliveryPulse encore parent apres delay")
+	assert(#overlay.deliveryFree == 1, "deliveryFree non parque")
+	assert(overlay.deliveryFree[2] == nil, "deliveryFree leftover slot")
+	assert(rawequal(overlay.deliveryFree[1], aPulse), "deliveryFree autre Part")
+	assert(liveRoute.truckModel.Parent == nil, "camion reaparent au flush")
+	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au 2e dispatch")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "2e livraison perdue")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "2e livraison encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion non retire a la 2e arrivee")
+	local pulseAfter
+	local pulseN = 0
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "DeliveryPulse" then
+			pulseN += 1
+			pulseAfter = node
+		end
+	end
+	assert(pulseN == 1, "DeliveryPulse count 2e arrivee")
+	assert(rawequal(pulseAfter, aPulse), "DeliveryPulse non recycle")
+	assert(aPulse.Parent == overlay.root, "DeliveryPulse recycle hors root")
+	assert(#overlay.deliveryFree == 0, "deliveryFree non pop")
+	assert(overlay.deliveryFree[1] == nil, "deliveryFree leftover slot pop")
+	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree au recycle pulse")
 
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
@@ -2007,7 +2048,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2676,6 +2717,7 @@ check("navires, missiles et interpolation", function()
 	-- de la 2e explosion ; 3e explosion recycle. Leftover V114
 	-- BlastSmoke doit rester vert. Leftover V113 Blast doit rester
 	-- vert. Leftover V81 Y == PLAINS + 0.5 doit rester vert.
+	-- Leftover V116 DeliveryPulse (check pose/capture) doit rester vert.
 end)
 
 check("vagues de conquete", function()

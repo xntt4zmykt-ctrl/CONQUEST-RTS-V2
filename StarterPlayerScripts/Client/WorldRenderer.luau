@@ -62,7 +62,8 @@ local otherBuf: { number } = table.create(16)
 -- CapitalFlag fermee (V108). PortCraneBoom fermee (V109).
 -- PortCraneCable fermee (V110). Flame Size phase fermee (V111).
 -- Overlay Blast recyclee (V113). Overlay BlastSmoke recyclee (V114).
--- Overlay Shockwave recyclee (V115).
+-- Overlay Shockwave recyclee (V115). Overlay DeliveryPulse recyclee
+-- (V116).
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}
