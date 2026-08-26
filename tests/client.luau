@@ -1673,8 +1673,17 @@ check("navires, missiles et interpolation", function()
 	-- leftover N127 radar, leftover N125 roulis, leftover N116
 	-- immobile, leftover N142 Interceptor (check modeles) doivent
 	-- rester verts. Recette leftover N143, pas merger visual.
-	-- Rampe / missile leftover non touches. addWake N143 inchange.
-	-- BuildingModels / Overlay inchanges.
+	-- Rampe leftover N145 / missile leftover non touches. addWake
+	-- N143 inchange. BuildingModels / Overlay inchanges.
+	-- N145 : UnitModels LandingRamp fromEulerAnglesYXZ (pas
+	-- CFrame.Angles). Pitch X=-8° fixe, un site (kind==1). Leftover
+	-- N144 Bow, leftover N143 houle addWake, leftover N133
+	-- Shockwave, leftover N131 splash, leftover N130 LaunchWake
+	-- Overlay, leftover N128 flag, leftover N127 radar, leftover
+	-- N125 roulis, leftover N116 immobile, leftover N142 Interceptor
+	-- (check modeles) doivent rester verts. Recette leftover N144,
+	-- pas merger visual. Missile leftover non touche. Bow N144 /
+	-- addWake N143 inchanges. BuildingModels / Overlay inchanges.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")

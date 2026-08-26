@@ -216,7 +216,17 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 		addPart(visual, "Part", "Superstructure", Vector3.new(3.45, 2.5, 3.05), NAVY, CFrame.new(0, 1.85, 2.65), Enum.Material.Metal)
 		local bridge = addPart(visual, "Part", "BridgeGlass", Vector3.new(3.52, 0.58, 0.13), GLASS, CFrame.new(0, 2.2, 1.08), Enum.Material.Glass)
 		bridge.Transparency = 0.1
-		local ramp = addPart(visual, "WedgePart", "LandingRamp", Vector3.new(3.25, 0.28, 2.9), NAVY_DARK, CFrame.new(0, 0.72, -4.45) * CFrame.Angles(math.rad(-8), 0, 0), Enum.Material.DiamondPlate)
+		-- N145 : rampe LandingRamp. Plus de CFrame.Angles.
+		-- fromEulerAnglesYXZ(math.rad(-8), 0, 0) ≡ Angles(-8°, 0, 0).
+		-- Pitch X=-8° fixe. Offset (0, 0.72, -4.45), taille
+		-- Vector3.new(3.25, 0.28, 2.9), NAVY_DARK, DiamondPlate,
+		-- Name = "LandingRamp", ramp.Color = faction inchanges.
+		-- Un site (kind==1 amphibie seulement). Distinct Bow N144
+		-- (Y=π). Distinct houle N143. Distinct SAM N142 (pitch -31°).
+		-- Distinct missile leftover (Y=90). Cargo kind==2 sans rampe
+		-- — ne pas en inventer. Bow N144 / addWake N143 / Overlay /
+		-- BuildingModels / place / createMissile inchanges.
+		local ramp = addPart(visual, "WedgePart", "LandingRamp", Vector3.new(3.25, 0.28, 2.9), NAVY_DARK, CFrame.new(0, 0.72, -4.45) * CFrame.fromEulerAnglesYXZ(math.rad(-8), 0, 0), Enum.Material.DiamondPlate)
 		ramp.Color = faction
 		for side = -1, 1, 2 do
 			addPart(visual, "Part", "Lifeboat", Vector3.new(0.62, 0.62, 2.5), GOLD, CFrame.new(side * 2.18, 1.18, 1.15), Enum.Material.Metal)
