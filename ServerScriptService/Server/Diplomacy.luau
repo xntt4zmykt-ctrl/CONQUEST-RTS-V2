@@ -37,6 +37,14 @@ type ViewRec = {
 
 local viewBuf: { [number]: ViewRec } = {}
 
+-- N60 : paires expirees recyclees (recette feel 2f5d N79).
+-- Collecter avant de muter alliances[] (parcours + ecriture = comportement
+-- indefini). Un record par paire (a < b), pas { a, b } anonyme.
+-- Non reentrant — step unique par tick.
+type ExpiredRec = { a: number, b: number }
+local expiredBuf: { ExpiredRec } = table.create(8)
+local expiredRecPool: { ExpiredRec } = table.create(8)
+
 local function viewRecFor(slot: number): ViewRec
 	local rec = viewBuf[slot]
 	if rec == nil then
@@ -444,17 +452,30 @@ function Diplomacy.step(state: GameState)
 		On collecte avant de retirer : muter les deux tables pendant qu'on les
 		parcourt est un comportement indefini.
 	]]
-	local expired: { { a: number, b: number } } = {}
+	local n = 0
 	for a, set in state.alliances do
 		for b, expiry in set do
-			-- Une seule fois par paire.
-			if a < b and state.tick >= expiry then
-				table.insert(expired, { a = a, b = b })
+			-- Une seule fois par paire. `true` legacy (tests unidirectionnels) :
+			-- pas une date, le pacte ne tombe pas (meme classe que pactStillLive).
+			if a < b and typeof(expiry) == "number" and state.tick >= expiry then
+				n += 1
+				local rec = expiredRecPool[n]
+				if rec == nil then
+					rec = { a = 0, b = 0 }
+					expiredRecPool[n] = rec
+				end
+				rec.a = a
+				rec.b = b
+				expiredBuf[n] = rec
 			end
 		end
 	end
 
-	for _, pair in expired do
+	for i = 1, n do
+		local pair = expiredBuf[i]
+		if pair == nil then
+			continue
+		end
 		local setA, setB = state.alliances[pair.a], state.alliances[pair.b]
 		if setA then
 			setA[pair.b] = nil
@@ -480,6 +501,9 @@ function Diplomacy.step(state: GameState)
 				pair.b
 			)
 		end
+	end
+	for i = #expiredBuf, 1, -1 do
+		expiredBuf[i] = nil
 	end
 
 	-- Une marque qui vise un disparu, ou posee par un disparu, ne doit pas
