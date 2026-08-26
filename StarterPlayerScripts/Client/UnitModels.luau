@@ -85,8 +85,8 @@ local function addWake(visual: Visual)
 	-- retoucher les Bow). Distinct de V94 (LandingRamp pitch X=-8°,
 	-- kind==1 — ne PAS retoucher la rampe). Distinct de V95
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
-	-- corps). Distinct de leftover V96 (Fin roll Z=axis·π/2,
-	-- quatre sites). Distinct de V78 (LaunchWake Overlay, wakeRot
+	-- corps). Distinct de leftover V97 (buildCarrier mesh
+	-- visual.parts). Distinct de V78 (LaunchWake Overlay, wakeRot
 	-- cuit, Y = OCEAN+0.12 — autre objet). Construction de
 	-- modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
@@ -156,7 +156,8 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- retoucher les Wake). Distinct de V94 (LandingRamp pitch
 	-- X=-8°, kind==1 — ne PAS retoucher la rampe). Distinct de
 	-- V95 (MissileBody yaw Y=90°, cylindre — ne PAS retoucher
-	-- le corps). Distinct de leftover V96 (Fin roll Z=axis·π/2).
+	-- le corps). Distinct de leftover V97 (buildCarrier mesh
+	-- visual.parts).
 	-- Distinct de V78 (LaunchWake Overlay — autre objet).
 	-- Construction de modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
@@ -203,7 +204,7 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- Call site createBoat kind==1/2 (avant pont). Ne pas merger
 	-- feel c62f. Ne PAS retoucher LandingRamp (V94 deja). Ne PAS
 	-- retoucher MissileBody (V95 deja). Ne PAS retoucher Fin
-	-- (leftover V96).
+	-- (V96 deja). Leftover V97 buildCarrier mesh.
 	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
@@ -242,8 +243,8 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 		-- transport/cargo — ne PAS retoucher les Bow). Distinct de
 		-- V92 (Wake yaw Y=±11°, addWake — ne PAS retoucher les
 		-- Wake). Distinct de V95 (MissileBody yaw Y=90°, cylindre
-		-- — ne PAS retoucher le corps). Distinct de leftover V96
-		-- (Fin roll Z=axis·π/2, quatre sites). Distinct de V91
+		-- — ne PAS retoucher le corps). Distinct de leftover V97
+		-- (buildCarrier mesh visual.parts). Distinct de V91
 		-- (rampes SAM, pitch X=-31°, BuildingModels — autre
 		-- fichier). Distinct de V78 (LaunchWake Overlay — autre
 		-- objet). Construction de modele, pas 60 Hz. addPart pose
@@ -286,12 +287,13 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	-- V88 cylinderRot interdits). Distinct de V94 (LandingRamp
 	-- pitch X=-8°, kind==1 amphibie — ne PAS retoucher la
 	-- rampe). Distinct de V93 (Bow yaw Y=π). Distinct de V92
-	-- (Wake yaw Y=±11°, addWake). Distinct de leftover V96
-	-- (Fin roll Z=axis·π/2, quatre sites, meme createMissile).
-	-- Distinct de V88 (cylinder() helper, Z=90°, BuildingModels
-	-- — autre fichier). Distinct de V78 (LaunchWake Overlay —
-	-- autre objet). Construction de modele, pas 60 Hz. addPart
-	-- pose part.CFrame = offset ; Overlay place compose frame *
+	-- (Wake yaw Y=±11°, addWake). Distinct de V96 (Fin roll
+	-- Z=axis·π/2 — ne PAS retoucher les ailettes). Distinct de
+	-- leftover V97 (buildCarrier mesh visual.parts). Distinct
+	-- de V88 (cylinder() helper, Z=90°, BuildingModels — autre
+	-- fichier). Distinct de V78 (LaunchWake Overlay — autre
+	-- objet). Construction de modele, pas 60 Hz. addPart pose
+	-- part.CFrame = offset ; Overlay place compose frame *
 	-- offset ensuite. Size 6.2, 1.05, 1.05 / WHITE / Metal /
 	-- Name MissileBody / Part + Shape Cylinder pose apres
 	-- inchanges. Call site createMissile seulement (un site).
@@ -301,6 +303,22 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	local nose = addPart(visual, "Part", "Warhead", Vector3.new(1.35, 1.35, 1.65), faction, CFrame.new(0, 0, -3.45), Enum.Material.Metal)
 	nose.Shape = Enum.PartType.Ball
 	addPart(visual, "Part", "GuidanceBand", Vector3.new(1.18, 1.3, 0.42), faction, CFrame.new(0, 0, -1.9), Enum.Material.Neon)
+	-- V96 : translation * fromEulerAnglesYXZ (roll Z=axis·π/2).
+	-- Plus de CFrame.Angles a Fin. Recette feel N147 inline —
+	-- ne PAS cuire un finRot (quatre sites, axis ∈ {0,1,2,3},
+	-- memes translations, comme V95 bodyRot / V94 rampRot /
+	-- V93 bowRot / V92 wakeRot interdits). Distinct de V95
+	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
+	-- corps). Distinct de V94 (LandingRamp pitch X=-8°,
+	-- kind==1). Distinct de V93 (Bow yaw Y=π). Distinct de V92
+	-- (Wake yaw Y=±11°, addWake). Distinct de leftover V97
+	-- (buildCarrier mesh visual.parts). Distinct de V78
+	-- (LaunchWake Overlay — autre objet). Construction de
+	-- modele, pas 60 Hz. addPart pose part.CFrame = offset ;
+	-- Overlay place compose frame * offset ensuite. Size 0.22,
+	-- 1.65, 1.4 / NAVY_DARK / Metal / Name Fin / WedgePart
+	-- inchanges. Call site createMissile seulement (boucle
+	-- for axis = 0, 3). Ne pas merger feel 7dff.
 	for axis = 0, 3 do
 		addPart(
 			visual,
@@ -308,7 +326,7 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 			"Fin",
 			Vector3.new(0.22, 1.65, 1.4),
 			NAVY_DARK,
-			CFrame.new(0, 0, 2.45) * CFrame.Angles(0, 0, axis * math.pi / 2),
+			CFrame.new(0, 0, 2.45) * CFrame.fromEulerAnglesYXZ(0, 0, axis * math.pi / 2),
 			Enum.Material.Metal
 		)
 	end
