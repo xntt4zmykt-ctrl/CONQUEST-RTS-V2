@@ -72,7 +72,7 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- (ConquestPulse pulseRot). Distinct de V83 (SelectionRing).
 	-- Distinct de V121 (tileFlash flashFree). Distinct de V122
 	-- (conquestPulse pulseFree). Distinct de V123 (BuildRing ringFree,
-	-- BuildingModels). Pas reentrant.
+	-- BuildingModels). Distinct de V124 (HUD notify feedFree). Pas reentrant.
 	-- Evenement vague mineure (count >= 4), pas 60 Hz.
 	self.textFree = {} :: { Part }
 

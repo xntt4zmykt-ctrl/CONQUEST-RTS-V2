@@ -67,7 +67,7 @@ local otherBuf: { number } = table.create(16)
 -- recyclee (V118). Overlay goldPopup recyclee (V119). Effects
 -- floatingText recyclee (V120). Effects tileFlash recyclee (V121).
 -- Effects conquestPulse recyclee (V122). BuildingModels BuildRing
--- recyclee (V123).
+-- recyclee (V123). HUD notify recyclee (V124).
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}

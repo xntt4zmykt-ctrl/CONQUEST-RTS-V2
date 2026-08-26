@@ -337,6 +337,11 @@ check("fil de notifications sature", function()
 	-- (V107). CapitalFlag fermee (V108). PortCraneBoom fermee
 	-- (V109). PortCraneCable fermee (V110). Flame Size phase fermee
 	-- (V111). Recycle Ground/Border fermee (V112).
+	-- V124 : free-list feedFree PAR HUD. Recette feel N167 inline —
+	-- ne PAS merger ee71 / 6cec. Parent = self.feed. Pas Theme.corner
+	-- au reuse. Recreer Dismiss si Destroy par delay. Leftover V103
+	-- FIFO 38/39/40 doit rester vert. Leftover V123 ringFree (check
+	-- modeles) doit rester vert.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -347,6 +352,16 @@ check("fil de notifications sature", function()
 	assert(hud.feedEntries[4] == nil, "surplus non nile")
 	local keptA = hud.feedEntries[2]
 	local keptB = hud.feedEntries[3]
+	-- V124 : overflow a parque les labels hors plafond (Parent = nil).
+	-- Snapshot avant repetition (qui pop). Compte >= 1 : un notify
+	-- diplomatie (check identite) peut deja occuper un slot live.
+	assert(type(hud.feedFree) == "table", "feedFree absent")
+	local nParked = #hud.feedFree
+	assert(nParked >= 1, "feedFree overflow non parque")
+	assert(hud.feedFree[nParked + 1] == nil, "feedFree leftover slot overflow")
+	local parkedFeed = hud.feedFree[nParked]
+	assert(parkedFeed ~= nil, "feedFree slot overflow vide")
+	assert(parkedFeed.Parent == nil, "label overflow encore parent")
 	-- Le meme message repete doit se regrouper, pas s'empiler.
 	hud:notify("repetition", "info")
 	assert(#hud.feedEntries == 3, "overflow recree une 4e entree")
@@ -354,6 +369,10 @@ check("fil de notifications sature", function()
 	assert(rawequal(hud.feedEntries[2], keptB), "decalage recree l'entree 40")
 	assert(hud.feedEntries[3].Text == "repetition", "nouvelle entree pas en queue")
 	assert(hud.feedEntries[1].Text == "message 39", "FIFO overflow repetition")
+	assert(rawequal(hud.feedEntries[3], parkedFeed), "TextLabel non recycle overflow")
+	assert(#hud.feedFree == nParked, "feedFree pop+push overflow repetition")
+	assert(rawequal(parkedFeed.Parent, hud.feed), "label non reparente a self.feed")
+	assert(parkedFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse overflow")
 	for _ = 1, 4 do
 		hud:notify("repetition", "info")
 	end
@@ -384,6 +403,24 @@ check("fil de notifications sature", function()
 	hud:notify("a degager", "alert")
 	assert(hud.feedGroups["a degager"].count == 1, "le compteur survit au rejet")
 	task.delay = realDelay
+
+	-- V124 : testFlushDelays parque les live dont le delay n'a pas ete
+	-- stubbe (Destroy Dismiss + Parent = nil). 2e notify recycle +
+	-- recree Dismiss. Leftover V103 FIFO ci-dessus doit rester vert.
+	testFlushDelays()
+	assert(type(hud.feedFree) == "table", "feedFree absent apres flush")
+	assert(#hud.feedFree >= 1, "feedFree vide apres flush")
+	assert(hud.feedFree[#hud.feedFree + 1] == nil, "feedFree leftover slot flush")
+	local flushed = hud.feedFree[#hud.feedFree]
+	assert(flushed.Parent == nil, "label encore parent apres delay")
+	local nFeed = #hud.feedFree
+	hud:notify("v124 reuse", "good")
+	assert(rawequal(hud.feedEntries[#hud.feedEntries], flushed), "TextLabel non recycle delay")
+	assert(#hud.feedFree == nFeed - 1, "feedFree non pop delay")
+	assert(hud.feedFree[nFeed] == nil, "feedFree leftover slot pop")
+	assert(rawequal(flushed.Parent, hud.feed), "label delay non reparente a self.feed")
+	assert(flushed.Text == "v124 reuse", `reuse affiche "{flushed.Text}"`)
+	assert(flushed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse delay")
 end)
 
 check("onboarding, profil et inspecteur de territoire", function()
