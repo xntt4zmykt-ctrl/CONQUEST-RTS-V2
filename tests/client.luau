@@ -1597,6 +1597,11 @@ check("navires, missiles et interpolation", function()
 	-- Leftover N128/N127 pieces, leftover N125 roulis, leftover N116
 	-- immobile, leftover N129 apercu doivent rester verts. Recette visual
 	-- V75 leftover evenements Overlay. stepInterpolation inchange.
+	-- N131 : LandingSplash despawn fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Offset Y + 0.14. Skip retraite N56. Leftover N130 wake spawn,
+	-- leftover N128/N127 pieces, leftover N125 roulis, leftover N116
+	-- immobile, leftover N129 apercu doivent rester verts. applyUnits({}, {})
+	-- plus bas ne leve pas. Recette visual V75 leftover evenements Overlay.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")

@@ -835,7 +835,17 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 					local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
 					splash.Shape = Enum.PartType.Cylinder
 					splash.Transparency = 0.18
-					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
+					-- N131 : despawn navire LandingSplash. Plus de CFrame.Angles.
+					-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+					-- Offset Y OCEAN_LEVEL + 0.14 inchange. Gardes not isMissile /
+					-- not retreating (N56) inchangees. Tween Size/Transparency +
+					-- task.delay Destroy inchanges. Distinct LaunchWake N130
+					-- (spawn, Y + 0.12). Distinct pulse N132 (route.to terre).
+					-- Distinct footprint N129. Distinct roulis N125.
+					-- Recette visual V75 leftover evenements Overlay.
+					-- stepInterpolation / trackUnit insert non touches.
+					-- UnitModels / PlacementPreview inchanges.
+					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 						Size = Vector3.new(0.18, 15, 15),
 						Transparency = 1,
