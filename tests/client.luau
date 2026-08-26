@@ -826,9 +826,9 @@ check("pose et capture de chaque type de batiment", function()
 		)
 	end
 
-	-- V62 : ox/oy/oz + dx/dy/dz cuits. Deux frames → Parts stables, Y asphalt
-	-- ≠ shoulder (leftover V61). Leftover V57 (camion) plus bas. Leftover V60
-	-- (câble) dans le check modeles.
+	-- V63 : rot cuit a l'origine. Deux frames → Parts stables, Y asphalt
+	-- ≠ shoulder (leftover V61). ox/dx nombres (leftover V62). Leftover V57
+	-- (camion) plus bas. Leftover V60 (câble) dans le check modeles.
 	assert(sample.construction, "pas de chantier pour tester l'interpolation")
 	local firstSeg = sample.construction.segments[1]
 	assert(firstSeg and firstSeg.layers[1] and firstSeg.layers[2] and firstSeg.layers[3], "calques absents")
@@ -836,11 +836,15 @@ check("pose et capture de chaque type de batiment", function()
 	assert(type(firstSeg.layers[1].ox) == "number" and type(firstSeg.layers[1].oy) == "number", "ox/oy shoulder absents")
 	assert(firstSeg.layers[2].oy ~= firstSeg.layers[1].oy, "oy asphalt = shoulder")
 	assert(firstSeg.layers[3].oy ~= firstSeg.layers[2].oy, "oy bande = asphalt")
+	assert(firstSeg.rot ~= nil and type(firstSeg.rot.X) == "number", "rot absent")
+	assert(firstSeg.rot.X == 0 and firstSeg.rot.Y == 0 and firstSeg.rot.Z == 0, "rot n'est pas a l'origine")
+	local bakedRot = firstSeg.rot
 	local shoulderPart = firstSeg.layers[1].part
 	local roadPart = firstSeg.layers[2].part
 	local stripePart = firstSeg.layers[3].part
 	overlay:stepInterpolation(1 / 60)
 	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(firstSeg.rot, bakedRot), "rot recree pendant le chantier")
 	assert(rawequal(firstSeg.layers[1].part, shoulderPart), "Part Shoulder recreee")
 	assert(rawequal(firstSeg.layers[2].part, roadPart), "Part Road recreee")
 	assert(rawequal(firstSeg.layers[3].part, stripePart), "Part CenterMark recreee")
