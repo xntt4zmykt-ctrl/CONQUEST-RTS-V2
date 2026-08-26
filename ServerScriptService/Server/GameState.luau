@@ -394,7 +394,7 @@ local buildingRecPool: { [number]: Building } = {}
 GameState.buildingRecPool = buildingRecPool
 -- N98 : record Attack recycle (leftover N67/N29). Contrat A free-list,
 -- recette boatFree N96. launchAttack (nouveau couple) / seedBeachhead
--- pop, table.remove push via releaseAttack. frontier = Heap.new()
+-- pop, swap-pop push via releaseAttack (N102). frontier = Heap.new()
 -- neuf et queued = {} neuf a chaque acquire (N65/N64 unique — ne pas
 -- reutiliser le Heap : deux fronts aliaseraient la file). Overwrite
 -- attacker / target / troops / isBeachhead / sourceTile / retreatAt
@@ -449,8 +449,14 @@ GameState.acquireAttack = acquireAttack
 GameState.freeAttack = freeAttack
 
 function GameState.releaseAttack(self: GameState, i: number)
-	local atk = self.attacks[i]
-	table.remove(self.attacks, i)
+	-- N102 : swap-pop (recette despawnMissile N100). Callers reverse
+	-- while + decrement toujours : l'item swappe venait d'un indice
+	-- plus haut (deja visite). BoatFront.parkedBuf NE passe PAS ici.
+	local attacks = self.attacks
+	local atk = attacks[i]
+	local last = #attacks
+	attacks[i] = attacks[last]
+	attacks[last] = nil
 	freeAttack(atk)
 end
 -- N83 : pool parallele. drainEvents / drainSounds nil les files
@@ -1639,15 +1645,17 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
-	for i = #self.attacks, 1, -1 do
-		local atk = self.attacks[i]
+	local iAtk = #self.attacks
+	while iAtk >= 1 do
+		local atk = self.attacks[iAtk]
 		if atk.attacker == slot then
 			-- La faction disparait : ses troupes engagees disparaissent avec elle.
-			self:releaseAttack(i)
+			self:releaseAttack(iAtk)
 		elseif atk.target == slot then
 			self:returnCommittedTroops(atk)
-			self:releaseAttack(i)
+			self:releaseAttack(iAtk)
 		end
+		iAtk -= 1
 	end
 
 	for other, set in self.alliances do
@@ -2225,18 +2233,21 @@ end
 function GameState.stepAttacks(self: GameState)
 	local collapsing: { { victim: number, captor: number } } = {}
 
-	for i = #self.attacks, 1, -1 do
+	local i = #self.attacks
+	while i >= 1 do
 		local atk = self.attacks[i]
 		local attacker = self.players[atk.attacker]
 		local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 
 		if not attacker then
 			self:releaseAttack(i)
+			i -= 1
 			continue
 		end
 		if atk.target ~= NEUTRAL and not defender then
 			self:returnCommittedTroops(atk)
 			self:releaseAttack(i)
+			i -= 1
 			continue
 		end
 
@@ -2245,6 +2256,7 @@ function GameState.stepAttacks(self: GameState)
 		if atk.retreatAt and self.tick >= atk.retreatAt then
 			attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
 			self:releaseAttack(i)
+			i -= 1
 			continue
 		end
 
@@ -2316,6 +2328,7 @@ function GameState.stepAttacks(self: GameState)
 			attacker.troops += math.max(0, atk.troops) -- les survivants rentrent
 			self:releaseAttack(i)
 		end
+		i -= 1
 	end
 
 	for _, entry in collapsing do

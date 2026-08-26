@@ -322,7 +322,10 @@ function ChantierB.cancelOpposingFronts(state)
 			end
 		end
 	end
-	for i = #state.attacks, 1, -1 do
+	-- N102 : while reverse + swap-pop. Decrement toujours apres
+	-- releaseAttack : l'item swappe venait d'un indice plus haut.
+	local i = #state.attacks
+	while i >= 1 do
 		if doomedBuf[i] or state.attacks[i].troops <= 0 then
 			local atk = state.attacks[i]
 			local owner = state.players[atk.attacker]
@@ -331,6 +334,7 @@ function ChantierB.cancelOpposingFronts(state)
 			end
 			state:releaseAttack(i)
 		end
+		i -= 1
 	end
 end
 
@@ -451,22 +455,27 @@ function ChantierB.install(GameState, Nukes)
 	function GameState.stepAttacks(self)
 		ChantierB.cancelOpposingFronts(self)
 		local collapseN = 0
-		for i = #self.attacks, 1, -1 do
+		-- N102 : while reverse + swap-pop. Decrement toujours.
+		local i = #self.attacks
+		while i >= 1 do
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 			if not attacker then
 				self:releaseAttack(i)
+				i -= 1
 				continue
 			end
 			if atk.target ~= NEUTRAL and not defender then
 				self:returnCommittedTroops(atk)
 				self:releaseAttack(i)
+				i -= 1
 				continue
 			end
 			if atk.retreatAt and self.tick >= atk.retreatAt then
 				attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
 				self:releaseAttack(i)
+				i -= 1
 				continue
 			end
 			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
@@ -529,6 +538,7 @@ function ChantierB.install(GameState, Nukes)
 				attacker.troops += math.max(0, atk.troops)
 				self:releaseAttack(i)
 			end
+			i -= 1
 		end
 		for i = #collapsingBuf, collapseN + 1, -1 do
 			collapsingBuf[i] = nil

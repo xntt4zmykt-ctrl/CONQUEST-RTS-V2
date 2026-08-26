@@ -157,12 +157,15 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 
 	-- Une alliance annule automatiquement les offensives en cours entre les
 	-- deux camps : sinon on signe la paix pendant que ses troupes avancent.
-	for i = #state.attacks, 1, -1 do
+	-- N102 : while reverse + swap-pop. Decrement toujours.
+	local i = #state.attacks
+	while i >= 1 do
 		local atk = state.attacks[i]
 		if (atk.attacker == from and atk.target == to) or (atk.attacker == to and atk.target == from) then
 			state:returnCommittedTroops(atk)
 			state:releaseAttack(i)
 		end
+		i -= 1
 	end
 
 	state:notifyBetween(`\u{1F91D} {a.name} et {b.name} ont signe une alliance.`, "info", from, to)
