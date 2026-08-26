@@ -336,7 +336,7 @@ check("fil de notifications sature", function()
 	-- (V105). Wake Transparency fermee (V106). Flag pitch fermee
 	-- (V107). CapitalFlag fermee (V108). PortCraneBoom fermee
 	-- (V109). PortCraneCable fermee (V110). Flame Size phase fermee
-	-- (V111).
+	-- (V111). Recycle Ground/Border fermee (V112).
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -736,13 +736,26 @@ check("construction du monde 3D", function()
 	-- V101 : curseur dirtyHead, file drainee. Plus de table.remove(1).
 	-- Recette feel N112 inline — ne PAS merger 04e7. Truncate a la
 	-- consommation. V102 compact prefix (feel N114, seuil 32) ci-dessous.
-	-- Recycle Ground/Border (feel N106) non porte. Distinct de V100
-	-- (trail offset.Z). Distinct de V48 (applyDelta). FactoryOutput /
-	-- SiloWarning fermees (V104, check modeles). Feux navire fermes
-	-- (V105, check navires). HUD feed leftover V103. Wake Transparency
-	-- fermee (V106). Flag pitch fermee (V107). CapitalFlag fermee
-	-- (V108). PortCraneBoom fermee (V109). PortCraneCable fermee
-	-- (V110). Flame Size phase fermee (V111).
+	-- Recycle Ground/Border fermee (V112, recette feel N106 inline —
+	-- ne PAS merger de1a). Distinct de V100 (trail offset.Z). Distinct
+	-- de V48 (applyDelta). FactoryOutput / SiloWarning fermees
+	-- (V104, check modeles). Feux navire fermes (V105, check navires).
+	-- HUD feed leftover V103. Wake Transparency fermee (V106). Flag
+	-- pitch fermee (V107). CapitalFlag fermee (V108). PortCraneBoom
+	-- fermee (V109). PortCraneCable fermee (V110). Flame Size phase
+	-- fermee (V111).
+	-- V112 : partCount = Ground+Border visibles, pas #GetChildren()
+	-- d'orphelins Parent=nil. Recette feel N106 inline.
+	local visibleParts = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				visibleParts += 1
+				assert(child.Parent == folder, "Ground/Border orphelin apres construction")
+			end
+		end
+	end
+	assert(world.partCount == visibleParts, "partCount incoherent avec les Parts visibles")
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 	world:markChunkDirty(0)
@@ -765,11 +778,12 @@ check("construction du monde 3D", function()
 	-- = tete 34 → compact des 7 restants a l'index 1. Leftover V101
 	-- (drain → head 1, file vide) reste au-dessus. Pas de table.remove.
 	-- Recette feel N114 inline — ne PAS merger 846c. Recycle Parts
-	-- N106 non porte. Distinct de V48 (applyDelta). HUD feed leftover
+	-- fermee (V112). Distinct de V48 (applyDelta). HUD feed leftover
 	-- V103. FactoryOutput / SiloWarning fermees (V104). Feux navire
 	-- fermes (V105). Wake Transparency fermee (V106). Flag pitch
 	-- fermee (V107). CapitalFlag fermee (V108). PortCraneBoom
-	-- fermee (V109). PortCraneCable fermee (V110).
+	-- fermee (V109). PortCraneCable fermee (V110). Flame Size
+	-- phase fermee (V111).
 	local compactChunks = {}
 	for chunk in world.chunkFolders do
 		table.insert(compactChunks, chunk)
@@ -804,6 +818,63 @@ check("construction du monde 3D", function()
 		world:stepRebuilds()
 	end
 	assert(world.dirtyHead == 1 and #world.dirtyQueue == 0, "file non drainee apres compact")
+
+	-- V112 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
+	-- Parent = nil ; partCount = visibles. Recette feel N106 inline —
+	-- ne PAS merger de1a. Pas de pool global. Chunk TERRE (un chunk
+	-- ocean n'a pas de Ground). Leftover V101/V102 restent au-dessus.
+	-- Distinct de V48 (applyDelta). Distinct de V111 (flame Size).
+	local sampleChunk: number? = nil
+	local sampleFolder = nil
+	local firstGround
+	for chunk, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" then
+				sampleChunk = chunk
+				sampleFolder = folder
+				firstGround = child
+				break
+			end
+		end
+		if sampleChunk then
+			break
+		end
+	end
+	assert(sampleChunk ~= nil and sampleFolder ~= nil and firstGround ~= nil, "aucun chunk terre")
+	world:rebuildChunk(sampleChunk)
+	local recycled
+	local groundKids = 0
+	for _, child in sampleFolder:GetChildren() do
+		if child.Name == "Ground" then
+			groundKids += 1
+			assert(child.Parent == sampleFolder, "Ground orphelin apres rebuild")
+			if not recycled then
+				recycled = child
+			end
+		elseif child.Name == "Border" then
+			assert(child.Parent == sampleFolder, "Border orphelin apres rebuild")
+		end
+	end
+	assert(rawequal(firstGround, recycled), "Ground non recycle")
+	local pool = world.chunkGround[sampleChunk]
+	assert(pool ~= nil and #pool >= groundKids, "pool Ground absent")
+	for i = 1, #pool do
+		local p = pool[i]
+		if i <= groundKids then
+			assert(p.Parent == sampleFolder, "Ground visible hors folder")
+		else
+			assert(p.Parent == nil, "leftover Ground encore parent")
+		end
+	end
+	local visAfter = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				visAfter += 1
+			end
+		end
+	end
+	assert(world.partCount == visAfter, "partCount incoherent apres recycle")
 
 	-- V58 : houle sans Vector3, Parts stables, CFrame distinct du base.
 	-- V59 : couronnes Y depuis base, plus de CFrame.Angles. Leftover V60
@@ -1936,7 +2007,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2306,6 +2377,7 @@ check("navires, missiles et interpolation", function()
 	-- Offset X == 0 pour toutes les flammes — ne PAS user offset.X
 	-- (resterait lockstep). Deux stepInterpolation → Part rawequal,
 	-- Size.X/Y == 0.62, Size.Z ∈ [1.35, 2.25]. Pas de flamePhase.
+	-- Distinct de V112 (recycle Ground/Border, check construction).
 	local flameN = 0
 	local aFlame
 	for _, piece in overlay.units[3].visual.pieces do

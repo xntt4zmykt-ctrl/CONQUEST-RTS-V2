@@ -188,7 +188,8 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 	-- placer intelligemment plutot qu'au hasard. Autres kinds : TILE * 3.
 	-- pulseSize = radius * 1.08. Plus de Vector3.new Size 60 Hz hover.
 	-- Distinct de V74 (flame Z pulse API). Distinct de V111
-	-- (flame phase frame.X, sin(time*18+frame.X*0.1)). Distinct de V75
+	-- (flame phase frame.X, sin(time*18+frame.X*0.1)). Distinct de V112
+	-- (recycle Ground/Border, WorldRenderer — autre fichier). Distinct de V75
 	-- (CFrame translation, rot deja cuit). Placeholder 10×10 / 8×8 du
 	-- new n'est pas le rayon reel — ne pas geler Size ici.
 	local radius = if kind == Config.BUILDING.DEFENSE
