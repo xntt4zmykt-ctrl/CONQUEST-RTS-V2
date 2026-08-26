@@ -101,9 +101,11 @@ local joinCooldown: { [number]: number } = {}
 local currentMapMeta: any = nil
 -- N2 : dernier UnitSnapshot envoye etait vide-vide. Reset a startMatch
 -- (premier vide du match DOIT fire). Ne pas comparer l'identite de
--- boatSnapBuf / missileSnapBuf (buffers mutes). StateDelta toujours
--- fire ici — empreinte stats = leftover.
+-- boatSnapBuf / missileSnapBuf (buffers mutes).
+-- N2 StateDelta : xor-fold des 7 nombres HUD. Reset nil a startMatch
+-- (premier lot DOIT fire). Ne pas rawequal(stats) — statsBuf mute.
 local lastUnitEmpty = false
+local lastStatsFp: number? = nil
 
 -- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
 -- se reconnait a son pays, pas a son pseudo Roblox.
@@ -144,6 +146,27 @@ end
 
 local function broadcastRoster()
 	rosterUpdate:FireAllClients(buildRoster())
+end
+
+-- N2 StateDelta : empreinte HUD. XOR par record (ordre des cles hash
+-- indifferent). Slot apparait / disparait change le fold. Pas de clone.
+-- Ne pas hasher buildPrices / attackTargets / eraProgress (N75 / N74) —
+-- leftover N2 HUD etendu. bit32 tronque ; or de RTS << 2^32.
+local function statsFingerprint(stats): number
+	local fp = 0
+	local n = 0
+	for slot, rec in stats do
+		n += 1
+		local recFp = slot
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.troops)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.gold)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.tiles)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.era)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.activeAttacks)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.committedTroops)
+		fp = bit32.bxor(fp, recFp)
+	end
+	return bit32.bxor(fp, n)
 end
 
 -- StateDelta / UnitSnapshot / explosions : uniquement les commandants deployes.
@@ -327,6 +350,7 @@ local function startMatch()
 	table.clear(snapshotCooldown)
 	table.clear(snapshotCount)
 	lastUnitEmpty = false
+	lastStatsFp = nil
 
 	state = GameState.new(seed)
 	state.mode = activeMode
@@ -742,7 +766,14 @@ local function replicate()
 		rec.eraProgress = Research.progress(state, slot)
 		rec.buildPrices = Buildings.pricesFor(state, slot)
 	end
-	fireDeployed(stateDelta, ownerDelta, stats)
+	-- N2 StateDelta : skip si ownerDelta nil ET empreinte inchangee.
+	-- HUD vit sur StateDelta — ne pas skip sur ownerDelta nil seul.
+	-- Premier lot (lastStatsFp nil) DOIT fire. Poser l'empreinte apres envoi.
+	local statsFp = statsFingerprint(stats)
+	if not (ownerDelta == nil and lastStatsFp == statsFp) then
+		fireDeployed(stateDelta, ownerDelta, stats)
+		lastStatsFp = statsFp
+	end
 
 	local buildings = state:flushBuildingDelta()
 	if buildings then
@@ -753,7 +784,7 @@ local function replicate()
 	-- important lui aussi : c'est lui qui retire le dernier navire du client et
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
 	-- N2 : skip vide-vide seulement si le dernier envoi etait deja vide.
-	-- Premier vide -> fire. StateDelta toujours (empreinte leftover).
+	-- Premier vide -> fire. StateDelta skip-si-empreinte deja (ci-dessus).
 	-- snapshotBoats (N56) porte `retreating`, jamais path / homeTile.
 	local boats = state:snapshotBoats()
 	-- snapshotMissiles (N71) : Types.MissileSnapshot seulement, pas progress.

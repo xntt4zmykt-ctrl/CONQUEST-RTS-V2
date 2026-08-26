@@ -6628,6 +6628,8 @@ do
 	-- → length 0 (pas de fuite du premier remplissage).
 	-- N2 : `#snaps == 0` apres truncate est le predicat lastUnitEmpty
 	-- (init.server hors bundle). Premier vide fire ; second skip.
+	-- N2 StateDelta : empreinte 7 nombres (slot/troops/gold/tiles/era/
+	-- activeAttacks/committedTroops), pas rawequal(statsBuf).
 	local state = GameState.new(1070)
 	local owner = state:addPlayer(nil, "FlotteSnap", Random.new(90), 0)
 	if not owner then
@@ -7226,6 +7228,9 @@ do
 	-- honores, attackTargets nil, next(stats) = ce slot. launchAttack →
 	-- activeAttacks==1. removePlayer → slot absent. Second appel →
 	-- rawequal porteuse + record.
+	-- N2 StateDelta : rawequal N76 n'est PAS le predicat skip (buffers
+	-- mutes). Empreinte = slot + troops/gold/tiles/era/activeAttacks/
+	-- committedTroops (init.server hors bundle).
 	local state = GameState.new(1076)
 	local a = state:addPlayer(nil, "StatAtk", Random.new(11), 0)
 	if not a then
