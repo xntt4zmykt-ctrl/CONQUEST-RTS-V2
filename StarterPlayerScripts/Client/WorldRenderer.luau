@@ -38,6 +38,17 @@ local CHUNK = Config.CHUNK_SIZE
 local OCEAN = Config.TERRAIN.OCEAN
 local NEUTRAL = Config.NEUTRAL_SLOT
 
+-- N95 : applyDelta recycle gains / losses / others (recette visual V48).
+-- Distinct de N2 (skip-si-inchangé payload) et de N72 (dirtyIndexBuf serveur).
+-- Non reentrant — applyDelta synchrone unique par frame. Truncate leftover
+-- AVANT return (vague A rejouerait un splash sur une tuile de vague B).
+-- Early-out count == 0 : truncate a 0, retourner les pools (JAMAIS {}).
+-- Overlay n'appelle pas applyDelta ; Effects lit les listes tout de suite
+-- et n'en conserve pas l'identite. Retourner les pools est licite.
+local gainBuf: { number } = table.create(16)
+local lossBuf: { number } = table.create(16)
+local otherBuf: { number } = table.create(16)
+
 local WorldRenderer = {}
 WorldRenderer.__index = WorldRenderer
 
@@ -604,35 +615,48 @@ function WorldRenderer.applyDelta(
 ): (number, { number }, { number }, { number })
 	local count = buffer.len(delta) // 5
 
-	local gains: { number } = {} -- arrachees a une faction par le joueur local
-	local losses: { number } = {} -- perdues par le joueur local
-	local others: { number } = {} -- prises entre tierces factions
+	-- Colonisation du neutre : aucun effet. Prise sur une faction :
+	-- gains si nextOwner == mySlot, losses si previous == mySlot, others sinon.
+	local nG, nL, nO = 0, 0, 0
+	if count > 0 then
+		for i = 0, count - 1 do
+			local offset = i * 5
+			local index = buffer.readu32(delta, offset)
+			if index >= W * H then
+				continue
+			end
 
-	for i = 0, count - 1 do
-		local offset = i * 5
-		local index = buffer.readu32(delta, offset)
-		if index >= W * H then
-			continue
-		end
+			local previous = buffer.readu8(self.owner, index)
+			local nextOwner = buffer.readu8(delta, offset + 4)
 
-		local previous = buffer.readu8(self.owner, index)
-		local nextOwner = buffer.readu8(delta, offset + 4)
+			buffer.writeu8(self.owner, index, nextOwner)
+			self:markTileDirty(index)
 
-		buffer.writeu8(self.owner, index, nextOwner)
-		self:markTileDirty(index)
-
-		if previous ~= NEUTRAL then
-			if nextOwner == mySlot then
-				table.insert(gains, index)
-			elseif previous == mySlot then
-				table.insert(losses, index)
-			else
-				table.insert(others, index)
+			if previous ~= NEUTRAL then
+				if nextOwner == mySlot then
+					nG += 1
+					gainBuf[nG] = index
+				elseif previous == mySlot then
+					nL += 1
+					lossBuf[nL] = index
+				else
+					nO += 1
+					otherBuf[nO] = index
+				end
 			end
 		end
 	end
+	for i = #gainBuf, nG + 1, -1 do
+		gainBuf[i] = nil
+	end
+	for i = #lossBuf, nL + 1, -1 do
+		lossBuf[i] = nil
+	end
+	for i = #otherBuf, nO + 1, -1 do
+		otherBuf[i] = nil
+	end
 
-	return count, gains, losses, others
+	return count, gainBuf, lossBuf, otherBuf
 end
 
 --[[
