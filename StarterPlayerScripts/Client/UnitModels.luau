@@ -389,12 +389,20 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- ne PAS merger. Distinct de V99 (beacons rest.Z,
 			-- BuildingModels.animate — autre fichier). Distinct de
 			-- V74 (flame Size API). Distinct de V73 (radar/flag).
-			-- Distinct de V98 (CityWindows rest.X). FactoryOutput /
-			-- SiloWarning leftover separe (pas de Position). Trois
-			-- Parts Exhaust par missile. Construction createMissile
-			-- inchangee.
+			-- Distinct de V98 (CityWindows rest.X). Distinct de V104
+			-- (FactoryOutput rest.X / SiloWarning rest.Z,
+			-- BuildingModels.animate — autre fichier). Leftover
+			-- V105 role==light (feux navire, pas de Position).
+			-- Trois Parts Exhaust par missile. Construction
+			-- createMissile inchangee.
 			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Z) * 0.035, 0.25, 0.9)
 		elseif piece.role == "light" then
+			-- Leftover V105 : phase synchrone sin(time * 3), sans
+			-- offset.X. PortLight X=-2.16 / StarboardLight X=2.16
+			-- (meme Z -3.3 — ne PAS user offset.Z). Distinct de
+			-- V104 (FactoryOutput / SiloWarning, autre fichier).
+			-- Distinct de V100 (trail offset.Z). Seuil -0.2 / 0 /
+			-- 0.45, frequence 3 inchanges.
 			piece.part.Transparency = if math.sin(time * 3) > -0.2 then 0 else 0.45
 		end
 		piece.part.CFrame = frame * localFrame
