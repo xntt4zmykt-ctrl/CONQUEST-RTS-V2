@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Menu principal, cale sur l'ecran d'accueil du jeu de reference (OpenFront).
+	Menu principal, cale sur l'ecran d'accueil du direction visuelle CONQUEST.
 
 	Disposition 1:1, adaptee a notre contexte (un serveur, des bots, pas de
 	salons inter-serveurs) :
@@ -14,7 +14,7 @@
 
 	Leurs cartes de maps deviennent nos cartes de modes : chacune montre un
 	apercu reel du terrain genere (graine fixe par mode), son rythme et son
-	remplissage. La ou OpenFront promet une partie qui commence, nous montrons
+	remplissage. La ou d'autres titres du genre promet une partie qui commence, nous montrons
 	exactement ce que le joueur va affronter.
 
 	Le drapeau est dessine a la volee a partir d'un motif et de deux ou trois
@@ -77,26 +77,70 @@ export type MainMenu = typeof(setmetatable({} :: any, MainMenu))
 -- Drapeaux
 --=============================================================================
 
---[[
-	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
-	vocabulaire vexillologique reel avec quatre Frames au maximum.
-]]
-function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+-- N171 : recycle les Frame bandes. Distinct chatFree (N170, catalogue HUD).
+-- Distinct feedFree (N167, fil notify). Distinct previewFree N172 (tuiles
+-- miniature, listes séparées). Pas de Theme.corner sur les bandes —
+-- le UICorner vit sur le parent (pastille / cellule). Parent = argument
+-- parent (playerFlag, identityFlag, flagCell, Intro.flagFrame). Pas
+-- chatFree. Pas visual V107 (ne pas merger ee95).
+local flagFree: { Frame } = {}
+MainMenu.flagFree = flagFree
+
+local function parkFlagBands(parent: GuiObject)
 	for _, child in parent:GetChildren() do
 		if child:IsA("Frame") then
-			child:Destroy()
+			if child.Parent then
+				child.Parent = nil
+			end
+			flagFree[#flagFree + 1] = child :: Frame
 		end
 	end
+end
 
-	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
-		local f = Instance.new("Frame")
+local function takeFlagBand(
+	parent: GuiObject,
+	position: UDim2,
+	size: UDim2,
+	color: Color3,
+	rotation: number?
+): Frame
+	local n = #flagFree
+	local f: Frame
+	if n > 0 then
+		f = flagFree[n]
+		flagFree[n] = nil
 		f.BackgroundColor3 = color
 		f.BorderSizePixel = 0
 		f.Position = position
 		f.Size = size
 		f.Rotation = rotation or 0
 		f.Parent = parent
-		return f
+	else
+		f = Instance.new("Frame")
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.Position = position
+		f.Size = size
+		f.Rotation = rotation or 0
+		f.Parent = parent
+	end
+	return f
+end
+
+--[[
+	Dessine un drapeau dans `parent`. Les motifs couvrent l'essentiel du
+	vocabulaire vexillologique reel avec quatre Frames au maximum.
+]]
+function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
+	-- N171 : Parent = nil + push flagFree. Pas Destroy. Filtre IsA("Frame")
+	-- conserve (UICorner / UIStroke / TextLabel du parent intacts). Reset
+	-- Rotation obligatoire (diagonal -30 vs vertical 0). Distinct N170
+	-- chatFree. Distinct leftover N152 flame. Distinct N172 previewFree
+	-- (listes séparées). Pas Theme.corner au reuse. Pas de Name.
+	parkFlagBands(parent)
+
+	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
+		return takeFlagBand(parent, position, size, color, rotation)
 	end
 
 	local colors = flag.colors
@@ -133,23 +177,71 @@ end
 -- Apercu de terrain
 --=============================================================================
 
+-- N172 : recycle les Frame tuiles. Distinct flagFree (N171, bandes drapeau).
+-- Distinct chatFree (N170, catalogue HUD). Distinct feedFree (N167). Shade
+-- est frère du preview (enfant de la carte), pas enfant de `frame` — ne pas
+-- parcourir card:GetChildren(). Pas de Theme.corner sur les tuiles. Parent
+-- = argument frame (featuredPreview 32×20, cartes mode 24×12). Océan non
+-- dessiné. Pas visual V108 (ne pas merger d46a).
+local previewFree: { Frame } = {}
+MainMenu.previewFree = previewFree
+
+local function parkPreviewTiles(frame: GuiObject)
+	for _, child in frame:GetChildren() do
+		if child:IsA("Frame") then
+			if child.Parent then
+				child.Parent = nil
+			end
+			previewFree[#previewFree + 1] = child :: Frame
+		end
+	end
+end
+
+local function takePreviewTile(frame: GuiObject, position: UDim2, size: UDim2, color: Color3, zIndex: number): Frame
+	local n = #previewFree
+	local tile: Frame
+	if n > 0 then
+		tile = previewFree[n]
+		previewFree[n] = nil
+		tile.BackgroundColor3 = color
+		tile.Position = position
+		tile.Size = size
+		tile.BackgroundTransparency = 0.05
+		tile.BorderSizePixel = 0
+		tile.ZIndex = zIndex
+		tile.Parent = frame
+	else
+		tile = Instance.new("Frame")
+		tile.BackgroundColor3 = color
+		tile.BorderSizePixel = 0
+		tile.BackgroundTransparency = 0.05
+		tile.Position = position
+		tile.Size = size
+		tile.ZIndex = zIndex
+		tile.Parent = frame
+	end
+	return tile
+end
+
 --[[
 	Remplit `frame` d'une miniature de la vraie generation procedurale : c'est
 	ce qui rend le choix concret sans charger aucun asset externe. Les tuiles
 	ocean ne sont pas dessinees — le fond du cadre porte deja leur couleur.
 ]]
 local function drawTerrainPreview(frame: GuiObject, seed: number, cellsX: number, cellsY: number)
-	for _, child in frame:GetChildren() do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
+	-- N172 : Parent = nil + push previewFree. Pas Destroy. Filtre IsA("Frame")
+	-- sur `frame` seulement (UICorner / shade / UIGradient de la carte
+	-- intacts). Reset Size / ZIndex obligatoire (32×20 vs 24×12). Distinct
+	-- N171 flagFree. Distinct leftover N152 flame. Pas Theme.corner au reuse.
+	-- Pas de Name. Océan non dessiné — ne pas remplir le pool avec de l'eau.
+	parkPreviewTiles(frame)
 
 	local terrain = MapGen.generate(seed)
 	local width = frame.AbsoluteSize.X > 0 and frame.AbsoluteSize.X or 360
 	local height = frame.AbsoluteSize.Y > 0 and frame.AbsoluteSize.Y or 220
 	local cellWidth = width / cellsX
 	local cellHeight = height / cellsY
+	local zIndex = frame.ZIndex + 1
 
 	for y = 0, cellsY - 1 do
 		for x = 0, cellsX - 1 do
@@ -157,14 +249,13 @@ local function drawTerrainPreview(frame: GuiObject, seed: number, cellsX: number
 			local sourceY = math.clamp(math.floor((y + 0.5) * Config.MAP_HEIGHT / cellsY), 0, Config.MAP_HEIGHT - 1)
 			local terrainKind = buffer.readu8(terrain, MapGen.toIndex(sourceX, sourceY))
 			if terrainKind ~= Config.TERRAIN.OCEAN then
-				local tile = Instance.new("Frame")
-				tile.BorderSizePixel = 0
-				tile.BackgroundColor3 = Config.TERRAIN_COLORS[terrainKind] or Config.TERRAIN_COLORS[2]
-				tile.BackgroundTransparency = 0.05
-				tile.Position = UDim2.fromOffset(math.floor(x * cellWidth), math.floor(y * cellHeight))
-				tile.Size = UDim2.fromOffset(math.ceil(cellWidth + 1), math.ceil(cellHeight + 1))
-				tile.ZIndex = frame.ZIndex + 1
-				tile.Parent = frame
+				takePreviewTile(
+					frame,
+					UDim2.fromOffset(math.floor(x * cellWidth), math.floor(y * cellHeight)),
+					UDim2.fromOffset(math.ceil(cellWidth + 1), math.ceil(cellHeight + 1)),
+					Config.TERRAIN_COLORS[terrainKind] or Config.TERRAIN_COLORS[2],
+					zIndex
+				)
 			end
 		end
 	end
@@ -265,7 +356,7 @@ function MainMenu.new(parent: ScreenGui): MainMenu
 	gradient.Color = ColorSequence.new(Color3.fromRGB(14, 19, 30), Color3.fromRGB(5, 7, 12))
 	gradient.Parent = backdrop
 
-	-- La trame hexagonale du jeu de reference, traduite en diagonales legeres :
+	-- La trame hexagonale CONQUEST, traduite en diagonales legeres :
 	-- une profondeur de carte sans fausse image de fond.
 	local tacticalGrid = Instance.new("Frame")
 	tacticalGrid.Name = "TacticalGrid"
@@ -585,7 +676,7 @@ end
 --=============================================================================
 
 --[[
-	La grande carte centrale, calque de leur carte de map : apercu reel du
+	La grande carte centrale, apercu de carte CONQUEST : apercu reel du
 	terrain en plein cadre, degrade en bas, pastille de compte a rebours en
 	haut a droite, nom et rythme en bas a gauche, remplissage en bas a droite.
 ]]
@@ -682,7 +773,7 @@ function MainMenu.buildRightColumn(self: MainMenu)
 	right.ZIndex = 51
 	right.Parent = self.stage
 
-	-- La ou OpenFront montre un stream, nous montrons la partie qui tourne
+	-- La ou d'autres titres du genre montre un stream, nous montrons la partie qui tourne
 	-- reellement sur ce serveur : meme case, meme promesse, donnees vraies.
 	local liveChip = Theme.label(right, "EN DIRECT MAINTENANT", T.tiny, C.danger)
 	liveChip.Position = UDim2.fromOffset(0, 0)
