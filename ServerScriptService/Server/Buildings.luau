@@ -28,6 +28,11 @@ local Buildings = {}
 
 local B = Config.BUILDING
 
+-- N68 : samsOf recycle (recette factoryBuf / N66). Unique appelant synchrone
+-- (Bots.decideNuke). Pas reentrant — dupliquer le buffer si un second
+-- appelant concurrent apparait.
+local samBuf: { number } = table.create(8)
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -242,21 +247,29 @@ end
 
 -- Batteries SAM du joueur, utilisees par le systeme d'interception.
 -- N59 : index samsBySlot (recette N57), fallback hash si l'index est nil.
+-- N68 : samBuf recycle ; truncate apres remplissage. Index present et
+-- set nil = zero SAM (pas de fallback hash).
 function Buildings.samsOf(state: GameState, slot: number): { number }
-	local out = {}
+	local out = samBuf
+	local n = 0
 	if state.samsBySlot then
 		local set = state.samsBySlot[slot]
 		if set then
 			for index in set do
-				table.insert(out, index)
+				n += 1
+				out[n] = index
 			end
 		end
-		return out
-	end
-	for index, building in state.buildings do
-		if building.slot == slot and building.kind == B.SAM then
-			table.insert(out, index)
+	else
+		for index, building in state.buildings do
+			if building.slot == slot and building.kind == B.SAM then
+				n += 1
+				out[n] = index
+			end
 		end
+	end
+	for i = #out, n + 1, -1 do
+		out[i] = nil
 	end
 	return out
 end

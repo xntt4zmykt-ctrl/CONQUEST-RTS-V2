@@ -33,6 +33,10 @@ local carrierSeen: { [number]: boolean } = {}
 -- N63 : spawnTradeShips recycle (recette hardening N40). Pas d'alloc par vague.
 local portsBuf: { { index: number, slot: number, level: number } } = table.create(24)
 local candidateBuf: { number } = table.create(32)
+-- N67 : stepCarriers listes recyclees (recette hardening N39). Pas d'alloc
+-- par tick, early-out si 0 carrier ou 0 bateau d'un autre slot.
+local carrierBuf = table.create(18)
+local targetBuf = table.create(48)
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -467,7 +471,8 @@ end
 local function syncCarriers(state: GameState)
 	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
 	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
-	-- (ISSUE-N38). Le spawn/despawn reste identique ; N22 (shells) inchange.
+	-- (ISSUE-N38). Le spawn/despawn reste identique ; N67 recycle les
+	-- listes de ciblage, pas ce dirty.
 	if not state._carriersDirty then
 		return
 	end
@@ -578,111 +583,139 @@ local function stepCarriers(state: GameState)
 		boat.y = hy + math.sin(boat.angle) * patrolR
 	end
 
-	-- 2. Shell fire (rate-limited), OF priority
-	for _, carrier in state.boats do
-		if carrier.kind ~= KIND_CARRIER then
-			continue
+	-- 2. Shell fire (rate-limited), OF priority.
+	-- N67 contrat B : une passe pour lister carriers vivants et cibles
+	-- possibles (pools module-level). Early-out si 0 carrier ou aucun
+	-- bateau d'un autre slot. Priorite / areAllied / degats inchanges.
+	-- Pas de spatial hash (contrat A) : ticket separe si le late-game
+	-- le justifie. N65 (navalBasesBySlot) et N63 (portsByTile) inchanges.
+	table.clear(carrierBuf)
+	table.clear(targetBuf)
+	for _, boat in state.boats do
+		if boat.kind == KIND_CARRIER then
+			if (boat.health or 1) > 0 then
+				table.insert(carrierBuf, boat)
+			end
+			if (boat.health or 0) > 0 then
+				table.insert(targetBuf, boat)
+			end
+		elseif boat.kind == KIND_TRANSPORT or boat.kind == KIND_TRADE then
+			table.insert(targetBuf, boat)
 		end
-		if (carrier.health or 1) <= 0 then
-			continue
-		end
-		local last = carrier.lastShellTick or 0
-		if state.tick - last < shellRate then
-			continue
-		end
+	end
 
-		local best = nil
-		local bestPri = 99
-		local bestDist = math.huge
+	local hasHostile = false
+	if #carrierBuf > 0 then
+		for _, target in targetBuf do
+			for _, carrier in carrierBuf do
+				if target.id ~= carrier.id and target.slot ~= carrier.slot then
+					hasHostile = true
+					break
+				end
+			end
+			if hasHostile then
+				break
+			end
+		end
+	end
 
-		for _, target in state.boats do
-			if target.id == carrier.id then
+	if hasHostile then
+		for _, carrier in carrierBuf do
+			local last = carrier.lastShellTick or 0
+			if state.tick - last < shellRate then
 				continue
 			end
-			if target.slot == carrier.slot then
-				continue
-			end
-			if state:areAllied(carrier.slot, target.slot) then
-				continue
-			end
 
-			local pri
-			if target.kind == KIND_TRANSPORT then
-				pri = 0
-			elseif target.kind == KIND_CARRIER then
-				if (target.health or 0) <= 0 then
+			local best = nil
+			local bestPri = 99
+			local bestDist = math.huge
+
+			for _, target in targetBuf do
+				if target.id == carrier.id then
 					continue
 				end
-				pri = 1
-			elseif target.kind == KIND_TRADE then
-				pri = 2
-			else
+				if target.slot == carrier.slot then
+					continue
+				end
+				if state:areAllied(carrier.slot, target.slot) then
+					continue
+				end
+
+				local pri
+				if target.kind == KIND_TRANSPORT then
+					pri = 0
+				elseif target.kind == KIND_CARRIER then
+					pri = 1
+				elseif target.kind == KIND_TRADE then
+					pri = 2
+				else
+					continue
+				end
+
+				local dx = carrier.x - target.x
+				local dy = carrier.y - target.y
+				local d2 = dx * dx + dy * dy
+				if d2 > targetR2 then
+					continue
+				end
+				if pri < bestPri or (pri == bestPri and d2 < bestDist) then
+					best = target
+					bestPri = pri
+					bestDist = d2
+				end
+			end
+
+			if not best then
 				continue
 			end
 
-			local dx = carrier.x - target.x
-			local dy = carrier.y - target.y
-			local d2 = dx * dx + dy * dy
-			if d2 > targetR2 then
-				continue
-			end
-			if pri < bestPri or (pri == bestPri and d2 < bestDist) then
-				best = target
-				bestPri = pri
-				bestDist = d2
-			end
-		end
+			carrier.lastShellTick = state.tick
 
-		if not best then
-			continue
-		end
-
-		carrier.lastShellTick = state.tick
-
-		if best.kind == KIND_TRANSPORT then
-			best.troops -= best.troops * transportDmg
-			if best.troops < Config.MIN_BOAT_TROOPS then
-				local owner = state.players[best.slot]
+			if best.kind == KIND_TRANSPORT then
+				best.troops -= best.troops * transportDmg
+				if best.troops < Config.MIN_BOAT_TROOPS then
+					local owner = state.players[best.slot]
+					local defender = state.players[carrier.slot]
+					state:notify("Ton convoi a ete coule en mer.", "bad", best.slot)
+					if defender then
+						state:notify(
+							`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
+							"good",
+							carrier.slot
+						)
+					end
+					state:sound("boatLand")
+					best.troops = 0
+					best._sink = true
+				end
+			elseif best.kind == KIND_TRADE and tradeSink then
 				local defender = state.players[carrier.slot]
-				state:notify("Ton convoi a ete coule en mer.", "bad", best.slot)
+				local owner = state.players[best.slot]
+				state:notify("Un convoi marchand a ete coule.", "bad", best.slot)
 				if defender then
 					state:notify(
-						`Ta flotte a coule un debarquement{if owner then ` de {owner.name}` else ""}.`,
+						`Ta flotte a pirate un convoi{if owner then ` de {owner.name}` else ""}.`,
 						"good",
 						carrier.slot
 					)
 				end
-				state:sound("boatLand")
-				best.troops = 0
 				best._sink = true
-			end
-		elseif best.kind == KIND_TRADE and tradeSink then
-			local defender = state.players[carrier.slot]
-			local owner = state.players[best.slot]
-			state:notify("Un convoi marchand a ete coule.", "bad", best.slot)
-			if defender then
-				state:notify(
-					`Ta flotte a pirate un convoi{if owner then ` de {owner.name}` else ""}.`,
-					"good",
-					carrier.slot
-				)
-			end
-			best._sink = true
-		elseif best.kind == KIND_CARRIER then
-			best.health = (best.health or 100) - warshipShell
-			if best.health <= 0 then
-				local owner = state.players[best.slot]
-				local defender = state.players[carrier.slot]
-				state:notify("Ton navire de guerre a ete coule.", "bad", best.slot)
-				if defender then
-					state:notify(
-						`Ta flotte a coule un navire ennemi{if owner then ` de {owner.name}` else ""}.`,
-						"good",
-						carrier.slot
-					)
+			elseif best.kind == KIND_CARRIER then
+				best.health = (best.health or 100) - warshipShell
+				if best.health <= 0 then
+					local owner = state.players[best.slot]
+					local defender = state.players[carrier.slot]
+					state:notify("Ton navire de guerre a ete coule.", "bad", best.slot)
+					if defender then
+						state:notify(
+							`Ta flotte a coule un navire ennemi{if owner then ` de {owner.name}` else ""}.`,
+							"good",
+							carrier.slot
+						)
+					end
+					state:sound("boatLand")
+					best._sink = true
 				end
-				state:sound("boatLand")
-				best._sink = true
 			end
 		end
 	end
