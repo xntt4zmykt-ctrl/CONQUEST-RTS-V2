@@ -58,7 +58,8 @@ local otherBuf: { number } = table.create(16)
 -- de V100 (trail offset.Z, UnitModels.place). HUD feed leftover V103.
 -- FactoryOutput / SiloWarning fermees (V104). Feux navire fermes
 -- (V105). Wake Transparency fermee (V106). Flag pitch fermee (V107).
--- CapitalFlag fermee (V108). PortCraneBoom leftover V109.
+-- CapitalFlag fermee (V108). PortCraneBoom fermee (V109).
+-- PortCraneCable leftover V110.
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}
@@ -87,8 +88,8 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	-- Trail offset.Z (V100) inchange. FactoryOutput / SiloWarning
 	-- fermees (V104). Feux navire fermes (V105). HUD feed leftover
 	-- V103. Wake Transparency fermee (V106). Flag pitch fermee
-	-- (V107). CapitalFlag fermee (V108). PortCraneBoom leftover
-	-- V109.
+	-- (V107). CapitalFlag fermee (V108). PortCraneBoom fermee
+	-- (V109). PortCraneCable leftover V110.
 	self.dirtyHead = 1
 	self.partCount = 0
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une

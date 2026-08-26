@@ -334,8 +334,8 @@ check("fil de notifications sature", function()
 	-- MAX_FEED_ENTRIES=3. Leftover V102 (40 chunks, compact seuil 32)
 	-- dans le check construction — doit rester vert. Feux navire fermes
 	-- (V105). Wake Transparency fermee (V106). Flag pitch fermee
-	-- (V107). CapitalFlag fermee (V108). PortCraneBoom leftover
-	-- V109.
+	-- (V107). CapitalFlag fermee (V108). PortCraneBoom fermee
+	-- (V109). PortCraneCable leftover V110.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -740,7 +740,8 @@ check("construction du monde 3D", function()
 	-- SiloWarning fermees (V104, check modeles). Feux navire fermes
 	-- (V105, check navires). HUD feed leftover V103. Wake Transparency
 	-- fermee (V106). Flag pitch fermee (V107). CapitalFlag fermee
-	-- (V108). PortCraneBoom leftover V109.
+	-- (V108). PortCraneBoom fermee (V109). PortCraneCable leftover
+	-- V110.
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 	world:markChunkDirty(0)
@@ -767,7 +768,7 @@ check("construction du monde 3D", function()
 	-- V103. FactoryOutput / SiloWarning fermees (V104). Feux navire
 	-- fermes (V105). Wake Transparency fermee (V106). Flag pitch
 	-- fermee (V107). CapitalFlag fermee (V108). PortCraneBoom
-	-- leftover V109.
+	-- fermee (V109). PortCraneCable leftover V110.
 	local compactChunks = {}
 	for chunk in world.chunkFolders do
 		table.insert(compactChunks, chunk)
@@ -1298,9 +1299,16 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	assert(rawequal(port:FindFirstChild("PortCraneBoom"), boom), "Part grue recreee")
 	assert(boom.CFrame.Y == boomRest.Y, "grue convertie en translation")
 	assert(not rawequal(boom.CFrame, boomRest), "grue alias RestCFrame")
-	-- Leftover V109 : PortCraneBoom yaw sin(time * 0.35) sans rest.X.
-	-- Distinct de V108 (CapitalFlag, ci-dessous). Distinct de V60
-	-- (cable Y). Distinct de V70 (fromEulerAnglesYXZ deja).
+	-- V109 : phase PortCraneBoom depuis rest.X. Plus de lockstep
+	-- sin(time * 0.35). Recette analogique V108 — ne PAS merger
+	-- c450 / ee71. Distinct de V108 (CapitalFlag, ci-dessous).
+	-- Distinct de V60 (cable Y). Distinct de V70
+	-- (fromEulerAnglesYXZ deja). Distinct de leftover V110
+	-- (PortCraneCable, ci-dessus). Pas de boomPhase. Construction
+	-- buildPort inchangee.
+	-- Leftover V110 : PortCraneCable Y sin(time * 0.8) sans rest.X.
+	-- Distinct de V109 (PortCraneBoom, ci-dessus). Distinct de V60
+	-- (Y nombres deja). Distinct de V108 (CapitalFlag).
 
 	local sam = Building.create(Config.BUILDING.SAM, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	-- V91 : rampes SAM pose via fromEulerAnglesYXZ (pitch X=-31° fixe).
@@ -1350,7 +1358,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- lockstep sin(time * 2.4) / sin(time * 1.7). Recette analogique
 	-- V107 — ne PAS merger c450 / ee71. Distinct de V107 (UnitModels
 	-- Flag, offset local). Distinct de V70 (fromEulerAnglesYXZ deja).
-	-- Distinct de leftover V109 (PortCraneBoom, ci-dessus). Pas de
+	-- Distinct de V109 (PortCraneBoom, ci-dessus — fermee). Distinct
+	-- de leftover V110 (PortCraneCable). Pas de
 	-- flagPhase. Construction buildCapital inchangee.
 
 	-- V85 : BuildRing pose via fromEulerAnglesYXZ (Z=90° fixe). Plus de
@@ -1410,7 +1419,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- de V106 (wake Transparency, check navires — fermee ici).
 	-- Distinct de V107 (flag pitch, check navires — fermee ici).
 	-- Distinct de V108 (CapitalFlag, check modeles, ci-dessus —
-	-- fermee ici). Leftover V109 PortCraneBoom (ci-dessus).
+	-- fermee ici). Distinct de V109 (PortCraneBoom, ci-dessus —
+	-- fermee ici). Leftover V110 PortCraneCable (ci-dessus).
 	-- Animate AVANT
 	-- playConstruction (usine / silo n'ont pas ConstructionUntil).
 	local output = factory:FindFirstChild("FactoryOutput")
@@ -1920,8 +1930,8 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). Leftover V77 (Preview hover)
-	-- dans le check apercu. Leftover V109 PortCraneBoom.
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). Leftover V77 (Preview hover)
+	-- dans le check apercu. Leftover V110 PortCraneCable.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
 	local bakedWake = overlay.wakeRot
@@ -2130,7 +2140,8 @@ check("navires, missiles et interpolation", function()
 	-- fermees (V104, check modeles). Feux navire fermes (V105,
 	-- ci-dessous). Wake Transparency fermee (V106, ci-dessous). Flag
 	-- pitch fermee (V107, ci-dessous). CapitalFlag fermee (V108,
-	-- check modeles). Leftover V109 PortCraneBoom.
+	-- check modeles). PortCraneBoom fermee (V109, check modeles).
+	-- Leftover V110 PortCraneCable.
 	local exhaustN = 0
 	local aTrail
 	for _, piece in overlay.units[3].visual.pieces do
@@ -2239,7 +2250,8 @@ check("navires, missiles et interpolation", function()
 	-- — ne PAS merger c450 / ee71. Distinct de V106 (wake
 	-- Transparency). Distinct de V73 (fromEulerAnglesYXZ deja).
 	-- Distinct de V108 (CapitalFlag, check modeles, fermee).
-	-- Distinct de leftover V109 (PortCraneBoom).
+	-- Distinct de V109 (PortCraneBoom, fermee). Distinct de leftover
+	-- V110 (PortCraneCable).
 	-- Deux stepInterpolation → Part rawequal. Construction Flag
 	-- inchangee. Pas de flagPhase.
 	local aFlagPiece
