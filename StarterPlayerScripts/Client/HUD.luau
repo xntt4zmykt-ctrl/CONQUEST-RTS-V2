@@ -1201,6 +1201,9 @@ function HUD.notify(self: HUD, text: string, kind: string)
 		end
 		local index = table.find(self.feedEntries, target)
 		if index then
+			-- V103 : Dismiss / expiration gardent table.remove(index)
+			-- (retrait au milieu, pas overflow FIFO). Ne PAS y mettre
+			-- le decalage prefixe.
 			table.remove(self.feedEntries, index)
 		end
 		for key, group in self.feedGroups do
@@ -1264,8 +1267,25 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	table.insert(self.feedEntries, entry)
 	self.feedGroups[text] = { entry = entry, count = 1 }
 
+	-- V103 : decalage prefixe in-place. Plus de table.remove(1) a
+	-- chaque overflow. n = 3 (MAX_FEED_ENTRIES). oldest lu AVANT le
+	-- shift ; nil du dernier ; PUIS removeEntry (table.find rate, pas
+	-- de double-retrait, Destroy + feedGroups nil). Recette feel N153
+	-- inline — ne PAS merger ee71. Pas de feedHead (N112/V101 est
+	-- WorldRenderer). Croix Dismiss garde table.remove(index) (retrait
+	-- au milieu). Groupement / LayoutOrder / task.delay(4.5) inchanges.
+	-- Distinct de V101/V102 (dirtyQueue, WorldRenderer — autre fichier).
+	-- Distinct de feel N106 (recycle Ground/Border — non porte).
+	-- MAX_FEED_ENTRIES=3 inchange. Pas reentrant. Ne pas inventer un
+	-- pool de TextLabel. FactoryOutput / SiloWarning leftover separe.
 	while #self.feedEntries > MAX_FEED_ENTRIES do
-		local oldest = table.remove(self.feedEntries, 1)
+		local entries = self.feedEntries
+		local n = #entries
+		local oldest = entries[1]
+		for i = 1, n - 1 do
+			entries[i] = entries[i + 1]
+		end
+		entries[n] = nil
 		if oldest then
 			removeEntry(oldest)
 		end
