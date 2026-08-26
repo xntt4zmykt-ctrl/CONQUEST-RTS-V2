@@ -156,8 +156,20 @@ end
 function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color3): Part
 	local part = block(parent, size, offset, color)
 	part.Shape = Enum.PartType.Cylinder
-	-- Le cylindre de Roblox pointe le long de X : on le redresse.
-	part.CFrame = CFrame.new(offset) * CFrame.Angles(0, 0, math.rad(90))
+	-- V88 : translation * fromEulerAnglesYXZ (Z=90° fixe). Le cylindre
+	-- Roblox pointe X : on le redresse. Plus de CFrame.Angles dans le
+	-- helper mesh. Recette feel N139 inline — ne PAS cuire un
+	-- cylinderRot (translations distinctes par `offset`, comme V86
+	-- trunkRot interdit). Distinct de V87 (Rock yaw `phase` variable,
+	-- WorldRenderer.buildDecorations). Distinct de V86 (TreeTrunk, même
+	-- Z=90° mais WorldRenderer). Distinct de V85 (BuildRing,
+	-- playConstruction, pas ce helper). Distinct de V84 (OceanGlint yaw
+	-- `angle` variable, buildOcean). Construction de modele, pas 60 Hz.
+	-- Shape = Cylinder pose AVANT le CFrame. block() pose d'abord
+	-- CFrame.new(offset) ; cylinder() ecrase ensuite. Call sites
+	-- buildFactory / buildSilo non edites. Ne pas toucher les toits
+	-- usine (leftover V89). Ne pas merger feel a8e1.
+	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
 
