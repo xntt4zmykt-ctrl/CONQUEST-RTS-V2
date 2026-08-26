@@ -70,6 +70,10 @@ function WorldRenderer.new(seed: number): WorldRenderer
 	self.chunkVisible = {} :: { [number]: number }
 	self.dirty = {} :: { [number]: boolean }
 	self.dirtyQueue = {} :: { number }
+	-- N112 : curseur de consommation. table.remove(1) decalait tout le
+	-- tableau a chaque rebuild (budget 3 / frame). Recycle Parts N106
+	-- inchange. Truncate seulement quand la file est consommee.
+	self.dirtyHead = 1
 	self.partCount = 0
 	-- Table de travail du mailleur, reutilisee entre chunks pour eviter une
 	-- allocation par reconstruction.
@@ -721,15 +725,29 @@ end
 function WorldRenderer.stepRebuilds(self: WorldRenderer): number
 	local budget = Config.CHUNK_REBUILDS_PER_FRAME
 	local done = 0
+	local queue = self.dirtyQueue
+	local head = self.dirtyHead
 
-	while done < budget and #self.dirtyQueue > 0 do
-		local chunk = table.remove(self.dirtyQueue, 1)
+	-- N112 : curseur + truncate. Plus de table.remove(1). markDirty /
+	-- table.insert inchanges. rebuildChunk recycle Ground/Border inchange
+	-- (N106). meshKeyAt inchange (N104). Houle / feuillage inchanges
+	-- (N107/N108). Stale (dirty deja nil) saute sans compter le budget,
+	-- comme avant. Pas de RemoteFunction.
+	while done < budget and head <= #queue do
+		local chunk = queue[head]
+		head += 1
 		if chunk and self.dirty[chunk] then
 			self.dirty[chunk] = nil
 			self:rebuildChunk(chunk)
 			done += 1
 		end
 	end
+
+	if head > #queue then
+		table.clear(queue)
+		head = 1
+	end
+	self.dirtyHead = head
 
 	return done
 end
