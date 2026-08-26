@@ -1,11 +1,11 @@
-# Nightly report — passe 25 (revue PR #72)
+# Nightly report — passe 26 (revue PR #74)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-b826` (PR #72, `853bd3e`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-3245`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-3245` (PR #74, `b49be73`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-e857`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #72 (`buildingSnapBuf` / `frontHudForReplicate` — HEAD visuel). Correctifs sûrs, sans merger feel `cc42`/`4876` ni hardening `c4da`.
+Revue de PR #74 (`pricesFor` / `playerStatsForReplicate` — HEAD visuel). Correctifs sûrs, sans merger feel `2f5d`/`cc42` ni hardening `c4da`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,15 +15,14 @@ Revue de PR #72 (`buildingSnapBuf` / `frontHudForReplicate` — HEAD visuel). Co
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `Buildings.pricesFor` / `priceBuf` (slot inconnu = `emptyPriceBuf`, pas `math.huge`) | `Buildings.luau` | V30 N75/N56 |
-| `playerStatsForReplicate` / `statsBuf` (`eraProgress`/`buildPrices` nil dans le helper) | `GameState.luau` | V31 N76/N57 |
-| `init.server` `replicate()` pose `eraProgress` / `buildPrices` après le helper | `init.server.luau` | V30+V31 |
+| `Research.progress` min courant, pas de table `ratios` | `Research.luau` | V32 N77/N58 |
+| `Diplomacy.viewFor` / `viewBuf[slot]` (un record par slot) | `Diplomacy.luau` | V33 N78/N59 |
 
-`buildingSnapBuf` / `frontHudForReplicate` / `boatSnapBuf` / `missileSnapBuf` **non retouchés**. Schéma filaire client **inchangé** (`FireAllClients`, pas `fireDeployed`). GameState ne require toujours pas Buildings / Research.
+`pricesFor` / `playerStatsForReplicate` / `buildingSnapBuf` / `frontHudForReplicate` **non retouchés**. `requestIsLive(expiry, tick)` et `areAllied` visuels **conservés** (type-guard `typeof == "number"`). `Diplomacy.step` `expired` **non poolé**. Schéma filaire client **inchangé** (`FireClient` diplomatie, `FireAllClients` stats). GameState ne require toujours pas Buildings / Research.
 
 ---
 
-## Constatations PR #72 (à ne pas casser)
+## Constatations PR #74 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -43,6 +42,8 @@ Revue de PR #72 (`buildingSnapBuf` / `frontHudForReplicate` — HEAD visuel). Co
 - **HUD fronts 10 Hz :** `frontHudForReplicate` (V29), appelé **une fois** depuis `playerStatsForReplicate`. Terre et `isBeachhead` = tas séparés. Slot sans front absent (nil, pas `{}`).
 - **Prix HUD 10 Hz :** `Buildings.pricesFor` (V30). Slot inconnu = map vide, **pas** `math.huge` (réservé à `priceFor` unitaire). Pas dans GameState — cycle `require`.
 - **Stats HUD 10 Hz :** `playerStatsForReplicate` (V31). `eraProgress` / `buildPrices` posés dans `init.server`. Record recyclé par slot ; slot parti absent de la porteuse.
+- **Ère HUD 10 Hz :** `Research.progress` (V32). Min scalaire or / tuiles / bâtiments, **pas** de table `ratios`. Slot inconnu / `MAX_ID` = 1. Schéma `eraProgress` number 0..1 inchangé.
+- **Diplomatie 1 Hz :** `viewFor` (V33). **Un record par slot** (`viewBuf[slot]`), pas un buf global (la boucle `FireClient` séquentielle viderait le client précédent). Slot disparu → maps vides, pas de scan. `requestIsLive` visuel conservé.
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
@@ -52,7 +53,7 @@ Revue de PR #72 (`buildingSnapBuf` / `frontHudForReplicate` — HEAD visuel). Co
 
 ## Specs worker (reste)
 
-Ne pas merger feel `cc42`/`4876` ni hardening `c4da` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `2f5d`/`cc42` ni hardening `c4da` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -108,35 +109,35 @@ Ne pas merger feel `cc42`/`4876` ni hardening `c4da` sur cette branche sans reba
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V32 — `Research.progress` sans table `ratios`
+### ISSUE-V34 — `Diplomacy.step` pool `expired`
 
-**Problème.** `Research.progress` alloue `ratios = { gold, tiles }` puis `table.insert` par bâtiment requis, **chaque tick playing × 18 factions**. Feel N77 (`cc42`) calcule le min courant sans table.
+**Problème.** `Diplomacy.step` alloue `local expired: { { a, b } } = {}` puis `table.insert({ a = a, b = b })` **chaque tick playing**, même si zéro pacte tombe. Feel N79 (`2f5d`) recycle `expiredBuf` / `expiredRecPool`.
 
-**20K CCU.** 10 Hz × 18 = alloc HUD même sans clic d’ère.
+**20K CCU.** 10 Hz × 1 array + N records anonymes = alloc diplomatique chaude, empilée sur le tick déjà allégé par V32/V33.
 
-**Faire.** Recette feel N77 (`cc42`) : `lowest` scalaire, `math.min` or / tuiles / buildings, `math.clamp(lowest, 0, 1)`. **Pas** de `ratiosBuf` (inutile). Formule inchangée. Ne pas porter `viewFor` recycle en même temps (V33).
+**Faire.** Recette feel N79 (`2f5d`) : `expiredBuf` + `expiredRecPool` (`table.create(8)`). Collecter `n`, poser `rec.a`/`rec.b`, itérer `1..n`. Truncate leftover après. **Garder le type-guard visuel** : `expiry == true` → `continue` (pacte legacy vivant) ; `typeof ~= "number"` **ou** `numericExpired` → expire (le test « oops » de passe 17 doit rester vert). Feel N79 ne purge que `typeof == "number"` — **ne pas** copier ça, ça recasserait le banc visuel. Ne pas porter `neighborFactions` (V35) en même temps.
 
-**Contraintes.** Server-only. Ne pas changer le schéma `eraProgress` (number 0..1). Ne pas toucher `canAdvance` / `advance` / `goldReserveFor`.
+**Contraintes.** Server-only. Ne pas changer `startCooldown` / notify. Ne pas toucher `viewFor` / `requestIsLive`. `FireClient` visuel.
 
-**Tester.** Slot max ère → 1. Slot or=0 tuiles insuffisantes → 0. Un critère bloquant = le min. `./tests/run.sh`. Client 34/34.
+**Tester.** Pacte `true` legacy survit. Expiry `"oops"` purge sans crash. Deux pactes numériques arrivés à terme → cooldown + notify. Second `step` immédiat sans expiry → pas de leftover du tour d’avant (`#` utile = 0). `./tests/run.sh`. Client 34/34.
 
-### ISSUE-V33 — `Diplomacy.viewFor` record par slot
+### ISSUE-V35 — `Bots.neighborFactions` `contactBuf`
 
-**Problème.** `viewFor` alloue 6 tables (`allies`/`incoming`/`outgoing`/`embargoes`/`traitors`/`marks` + record) **par humain, 1 Hz**. Feel N78 a `viewBuf[slot]` — **un record par slot**, pas un buf global (la boucle `FireClient` séquentielle viderait le client précédent).
+**Problème.** `neighborFactions` (locale) alloue `local contacts = {}` à **4 call sites** par décision bot. Feel N80 a `contactBuf` module-level + fonction promue `Bots.neighborFactions`.
 
-**20K CCU.** 1 Hz × 8 humains = alloc diplomatique inutile ; un buf global corromprait le HUD.
+**20K CCU.** Jusqu’à 18 bots × décisions (attaque / alliance / nuke) = hash contacts court alloué en rafale. Le parcours `border` est déjà payé.
 
-**Faire.** Recette feel N78 (`cc42`) : `viewRecFor(slot)` + `table.clear` des inner maps. Slot disparu → maps vides, pas d’erreur, **pas** de scan requests/traitors. Garder `areAllied` / `requestIsLive` visuels (feel inline `tick < expiry` — ne pas casser le type-guard visuel). Après V32.
+**Faire.** Recette feel N80 (`2f5d`) : `contactBuf` unique, `table.clear` en tête, promouvoir `Bots.neighborFactions`. Slot inconnu → map **vide** (pas nil). Remplacer les 4 call sites internes. **Pas réentrant** — ne pas appeler pendant qu’un appelant itère encore. Après V34. Ne pas porter `gatherSites` (feel N81) en même temps.
 
-**Contraintes.** Server-only. Ne pas porter `Diplomacy.step` `expired` pool (feel N79) ni `neighborFactions` `contactBuf` (feel N80). Schéma `Types.Diplomacy` inchangé. `FireClient` visuel (pas `fireDeployed`).
+**Contraintes.** Server-only. Ne pas changer la loi (terre voisine, `other ~= slot`, compteur de tuiles de contact). Ne pas require de module nouveau. Ne pas toucher `humanTargetProtected` / `decideNuke` scoring.
 
-**Tester.** 1 joueur 0 pacte → maps vides, second appel `rawequal` du record. Alliance live → `allies[other]`. Slot disparu → maps vides. `./tests/run.sh`. Client 34/34.
+**Tester.** 1 joueur spawn (frontière non vide) → au moins un contact (souvent `NEUTRAL`). Second appel `rawequal` de la map. Slot 99 → map vide, `rawequal` du buf. `./tests/run.sh`. Client 34/34.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `cc42`/`4876` / hardening `c4da` sur #39/#72.
+- Merger feel `2f5d`/`cc42` / hardening `c4da` sur #39/#74.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -144,11 +145,11 @@ Ne pas merger feel `cc42`/`4876` ni hardening `c4da` sur cette branche sans reba
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
-- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` réentrants : un seul appelant chacun. Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
+- `samsOf` / `fillBlastBuf` / `snapshotBoats` / `buildingSnapBuf` / `frontHudForReplicate` / `pricesFor` / `playerStatsForReplicate` / `viewFor` réentrants : un seul appelant chacun (sauf `viewFor` **par slot** — c’est voulu). Dupliquer le buffer si un second appelant apparaît. `playerStatsForReplicate` appelle `frontHudForReplicate` — ne pas rappeler le HUD dans `replicate()`.
 - Feel N70 `retreating` sur le snapshot — Overlay visuel ne teinte pas la retraite.
 - `delivery.level` snapshot à l’arrivée (feel) : le header Trade dit « niveau à l’arrivée » ; dispatch stocke déjà `level` mais `resolve` lit `factory.level`. Produit, pas un bug d’index.
-- Feel N77 (`Research.progress` sans table `ratios`) / N78 (`viewFor` recycle par slot) — V32 / V33.
-- Feel N79 (`Diplomacy.step` expired pool) / N80 (`neighborFactions` contactBuf) — après V33.
+- Feel N79 (`Diplomacy.step` expired pool) / N80 (`neighborFactions` contactBuf) — V34 / V35.
+- Feel N81 (`gatherSites` siteBuf) / N82 (`elimBuf`) — après V35.
 - `dirtyIndexBuf` (feel N72 / hardening N53) — ne ferme pas l’alloc `buffer.create` (voir V14b).
 
 ---
@@ -160,6 +161,6 @@ Ne pas merger feel `cc42`/`4876` ni hardening `c4da` sur cette branche sans reba
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–24 + **passe 25** (`pricesFor` = `priceFor` pour chaque BUILDABLE, second appel `rawequal`, slot 99 map vide, CITY double après pose ; 1 joueur 0 front → champs honores `eraProgress`/`buildPrices` nil, second appel `rawequal` porteuse+record, launch → `activeAttacks==1`, `removePlayer` → slot absent).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–25 + **passe 26** (`Research.progress` gold=0 ∈ [0,1), slot 99 = 1, `MAX_ID` = 1, or énorme clampé ; `viewFor` 0 pacte vide + `rawequal`, incoming/outgoing live, expiry `tick` invisible, `allies[other]` après accept, traître visible, slot disparu maps vides).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
