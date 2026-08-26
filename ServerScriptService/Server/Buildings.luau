@@ -40,6 +40,41 @@ local samBuf: { number } = table.create(8)
 local priceBuf: { [number]: { [number]: number } } = {}
 local emptyPriceBuf: { [number]: number } = {}
 
+-- N66 : contextFor recycle le record + closures module (recette N59, feel N85).
+-- Non reentrant — resolve est synchrone et unique. Slot inconnu → nil
+-- sans muter ctxBuf. Ne pas cloner : un ownerAt conserve lit le dernier
+-- ctxState. Overlay client construit son propre ctx (PlacementPreview).
+local ctxState: GameState? = nil
+
+local function ctxOwnerAt(index: number): number
+	local st = ctxState
+	if not st then
+		return Config.NEUTRAL_SLOT
+	end
+	return buffer.readu8(st.owner, index)
+end
+
+local function ctxBuildingAt(index: number): (number?, number?, number?)
+	local st = ctxState
+	if not st then
+		return nil, nil, nil
+	end
+	local building = st.buildings[index]
+	if not building then
+		return nil, nil, nil
+	end
+	return building.kind, building.slot, building.level
+end
+
+local ctxBuf: Placement.Context = {
+	slot = 0,
+	era = 0,
+	gold = 0,
+	terrain = buffer.create(1),
+	ownerAt = ctxOwnerAt,
+	buildingAt = ctxBuildingAt,
+}
+
 --=============================================================================
 -- Branchement de l'etat serveur sur le resolveur partage
 --=============================================================================
@@ -50,22 +85,14 @@ function Buildings.contextFor(state: GameState, slot: number): Placement.Context
 		return nil
 	end
 
-	return {
-		slot = slot,
-		era = ps.era,
-		gold = ps.gold,
-		terrain = state.terrain,
-		ownerAt = function(index: number): number
-			return buffer.readu8(state.owner, index)
-		end,
-		buildingAt = function(index: number): (number?, number?, number?)
-			local building = state.buildings[index]
-			if not building then
-				return nil, nil, nil
-			end
-			return building.kind, building.slot, building.level
-		end,
-	}
+	ctxState = state
+	ctxBuf.slot = slot
+	ctxBuf.era = ps.era
+	ctxBuf.gold = ps.gold
+	ctxBuf.terrain = state.terrain
+	ctxBuf.ownerAt = ctxOwnerAt
+	ctxBuf.buildingAt = ctxBuildingAt
+	return ctxBuf
 end
 
 --[[
