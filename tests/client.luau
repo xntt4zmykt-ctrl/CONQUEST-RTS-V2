@@ -1316,8 +1316,8 @@ check("pose et capture de chaque type de batiment", function()
 	assert(citySnap ~= nil and citySnapIndex ~= nil, "snapshot ville N178 absent")
 
 	-- N180 : snapshot voie factory→city avant kind=0. Recapture
-	-- slot=2 inchangée. Pas overlay:clear() (Destroy routes
-	-- leftover N181). Recette leftover N179, pas merger visual
+	-- slot=2 inchangée. Pas overlay:clear() (N181 testé dans
+	-- vagues). Recette leftover N179, pas merger visual
 	-- V118. Distinct leftover N152 flame. truckModel.Parent nil
 	-- (arrivée N162 déjà plus haut).
 	local routeSnap = overlay.routes[factoryEntry.index * 100000 + cityIndex]
@@ -2582,7 +2582,11 @@ check("vagues de conquete", function()
 	-- leftover N178. Pas merger visual V116. Pas d'assert
 	-- applyBuildingDelta après clear (reuse id=55/44).
 	-- N180 testé dans pose (kind=0 + reuse, pas clear).
-	-- Overlay.clear routes Destroy leftover N181.
+	-- N181 : Overlay.clear Parent=nil + routeFree existant
+	-- via parkRoute. Snapshot voie N162 avant clear. Skip
+	-- syncFactoryRoutes. Recette leftover N180. Pas merger
+	-- visual V118. Pas d'assert applyBuildingDelta après
+	-- clear (reuse id=55/44).
 	overlay:applyUnits({
 		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
 	}, {
@@ -2597,6 +2601,10 @@ check("vagues de conquete", function()
 	assert(clearOgive.isMissile == true, "navire spawn N177 dans ogive")
 	local clearCity = overlay.buildings[cityIndex]
 	assert(clearCity ~= nil, "snapshot ville N179 absent")
+	-- N181 : snapshot voie N162 encore live avant clear.
+	-- Pas overlay:applyBuildingDelta après clear.
+	local clearRoute = overlay.routes[factoryIndex * 100000 + cityIndex]
+	assert(clearRoute ~= nil, "snapshot voie N181 absent")
 	overlay:clear()
 	assert(overlay.units[77] == nil and overlay.units[66] == nil, "units live apres clear")
 	assert(clearShip.model.Parent == nil, "navire clear encore parent")
@@ -2619,6 +2627,20 @@ check("vagues de conquete", function()
 	end
 	assert(cityInFree, "ville N179 absente de buildingFree")
 	assert(clearCity:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au clear")
+	assert(clearRoute.model.Parent == nil, "voie clear encore parentee")
+	assert(clearRoute.truckModel.Parent == nil, "camion clear encore parent")
+	local routePoolClear = overlay.routeFree
+	assert(routePoolClear ~= nil, "routeFree absent apres clear")
+	local routeInFree = false
+	for _, rec in routePoolClear do
+		if rawequal(rec, clearRoute) then
+			routeInFree = true
+			break
+		end
+	end
+	assert(routeInFree, "voie N181 absente de routeFree")
+	assert(clearRoute.city == cityIndex, "city perdu au clear")
+	assert(clearRoute.factory == factoryIndex, "factory perdu au clear")
 	overlay:applyUnits({
 		{ id = 55, slot = 1, x = 20, y = 18, troops = 40, kind = 1 },
 	}, {

@@ -91,6 +91,29 @@ local function rememberShipRest(visual: any)
 	visual.restColor = restC
 end
 
+-- N181 : parkRoute hoisté pour Overlay.clear sans cycle.
+-- Corps N180 inchangé (truckModel.Parent nil, skip Parent nil,
+-- push routeFree). takeRoute / poseRoute / syncFactoryRoutes
+-- restent plus bas. Recette leftover N180. Pas merger visual
+-- V118. Distinct leftover N152 flame.
+local function parkRoute(self: Overlay, route: any)
+	local truckModel = route.truckModel
+	if truckModel and truckModel.Parent then
+		truckModel.Parent = nil
+	end
+	route.delivery = nil
+	if not route.model.Parent then
+		return
+	end
+	route.model.Parent = nil
+	local pool = self.routeFree
+	if not pool then
+		pool = {}
+		self.routeFree = pool
+	end
+	pool[#pool + 1] = route
+end
+
 function Overlay.clear(self: Overlay)
 	table.clear(self.counts)
 	-- N179 : recycle les Model bâtiments live. Plus de Destroy.
@@ -141,12 +164,19 @@ function Overlay.clear(self: Overlay)
 			end
 		end
 	end
-	-- Leftover N181 : teardown routes encore Destroy.
-	-- N180 parque seulement syncFactoryRoutes. Ne pas vider
-	-- routeFree. Skip bâtiments N179. Skip unités N177.
-	-- Skip applyBuildingDelta. Park clear sans take = fuite.
-	for _, route in self.routes do
-		route.model:Destroy()
+	-- N181 : recycle les Model voies live. Plus de Destroy.
+	-- Push routeFree existant (N180) via parkRoute. Skip si
+	-- Parent nil (déjà parké par syncFactoryRoutes kind==0).
+	-- city depuis la clé si absent (take factory+city). Skip
+	-- bâtiments N179. Skip unités N177. Skip syncFactoryRoutes.
+	-- Pas de delay. Recette leftover N180. Pas merger visual
+	-- V118. Distinct leftover N152 flame. Ne pas vider
+	-- routeFree. takeRoute N180 inchangé.
+	for key, route in self.routes do
+		if typeof(route.city) ~= "number" then
+			route.city = key % 100000
+		end
+		parkRoute(self, route)
 	end
 	table.clear(self.buildings)
 	table.clear(self.units)
@@ -261,28 +291,10 @@ end
 -- (pas buildingFree / shipFree / ogiveFree). Take
 -- factory+city (clé usine*100000+ville). truckModel.Parent
 -- = nil obligatoire (N162). segRot N115 conservé.
--- Overlay.clear routes Destroy conservé (leftover N181).
+-- Overlay.clear routes aussi N181 (parkRoute hoisté).
 -- Overlay.clear bâtiments N179 inchangé. applyBuildingDelta
 -- N178 inchangé. Recette leftover N179, pas merger visual
 -- V118. Distinct leftover N152 flame. Pas de delay.
-local function parkRoute(self: Overlay, route: any)
-	local truckModel = route.truckModel
-	if truckModel and truckModel.Parent then
-		truckModel.Parent = nil
-	end
-	route.delivery = nil
-	if not route.model.Parent then
-		return
-	end
-	route.model.Parent = nil
-	local pool = self.routeFree
-	if not pool then
-		pool = {}
-		self.routeFree = pool
-	end
-	pool[#pool + 1] = route
-end
-
 local function takeRoute(self: Overlay, factoryIndex: number, cityIndex: number): any?
 	local free = self.routeFree
 	if not free then
@@ -801,7 +813,7 @@ end
 -- park. syncFactoryRoutes kind==0 AVANT le park. Overlay.clear
 -- bâtiments aussi N179. syncFactoryRoutes aussi N180
 -- (routeFree, pas buildingFree). Overlay.clear routes
--- Destroy leftover N181. Recette leftover
+-- aussi N181 (parkRoute existant). Recette leftover
 -- N177, pas merger visual V116 (eaa4). Distinct leftover N152
 -- flame. makeBuilding construction si mismatch. Pas de delay.
 local function parkBuilding(self: Overlay, model: Model)
