@@ -16,6 +16,7 @@ local Nations = __require("Nations")
 local GameModes = __require("GameModes")
 local BuildingDefs = __require("BuildingDefs")
 local Eras = __require("Eras")
+local WorldSpace = __require("WorldSpace")
 
 local failures = 0
 
@@ -910,8 +911,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- dans le check navires. V74 flame Size = API. V75 rot + V76 Size
 	-- rayon + V77 early-out hover dans le check apercu. V78 wakeRot
 	-- + V79 LandingSplash (check navires). V80 DeliveryPulse (ci-dessous).
-	-- V81 Shockwave (check navires explosion). Leftover V82 (Effects
-	-- conquestPulse). Voies encore
+	-- V81 Shockwave (check navires explosion). V82 conquestPulse
+	-- (check vagues). Leftover V83 (SelectionRing). Voies encore
 	-- vivantes ici ; la destruction plus bas les vide (le check
 	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
@@ -939,7 +940,7 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
 	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
 	-- l'arrivee. Recette feel N132. V81 Shockwave (check navires).
-	-- Leftover V82 (Effects conquestPulse).
+	-- V82 conquestPulse (check vagues). Leftover V83 (SelectionRing).
 	local pulseFound = false
 	local aPulse
 	for _, node in overlay.root:GetChildren() do
@@ -1053,7 +1054,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
 	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). V80
 	-- DeliveryPulse (check pose/capture). V81 Shockwave (check navires).
-	-- Leftover V82 (Effects conquestPulse).
+	-- V82 conquestPulse (check vagues). Leftover V83 (SelectionRing).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1103,8 +1104,8 @@ check("apercu de placement pour chaque batiment", function()
 	-- (resolve) dans le check accrochage. Leftover V73 (radar/flag)
 	-- dans le check navires. V78 wakeRot + V79 LandingSplash
 	-- (check navires). V80 DeliveryPulse (check pose/capture).
-	-- V81 Shockwave (check navires). Leftover V82 (Effects
-	-- conquestPulse). Hauteurs +0.42 / +0.38.
+	-- V81 Shockwave (check navires). V82 conquestPulse (check vagues).
+	-- Leftover V83 (SelectionRing). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1556,7 +1557,8 @@ check("navires, missiles et interpolation", function()
 	-- reutilise wakeRot au despawn (feel N131, Y + 0.14). V80 : DeliveryPulse
 	-- reutilise wakeRot a l'arrivee camion (feel N132, check pose/capture).
 	-- V81 : Shockwave reutilise wakeRot a l'explosion (feel N133,
-	-- PLAINS + 0.5). Leftover V82 (Effects conquestPulse). Leftover V77
+	-- PLAINS + 0.5). V82 : Effects conquestPulse pulseRot (feel N134,
+	-- check vagues). Leftover V83 (SelectionRing). Leftover V77
 	-- (Preview hover) dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -1683,7 +1685,7 @@ check("navires, missiles et interpolation", function()
 	overlay:explosion(50, 50, 9)
 	-- V81 : Shockwave reutilise wakeRot. Plus de CFrame.Angles explosion.
 	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast / fumee inchangees.
-	-- Leftover V82 (Effects conquestPulse).
+	-- V82 conquestPulse (check vagues). Leftover V83 (SelectionRing).
 	local shockFound = false
 	local aShock
 	for _, node in overlay.root:GetChildren() do
@@ -1702,6 +1704,13 @@ check("navires, missiles et interpolation", function()
 end)
 
 check("vagues de conquete", function()
+	-- V82 : pulseRot cuit a new (recette V75 footprintRot / V78 wakeRot /
+	-- feel N134). Plus de CFrame.Angles a chaque onde. Height = surface
+	-- + 0.8 (pas Y = 3 feel). Name ConquestPulse. Leftover V81 Shockwave
+	-- dans le check navires. Leftover V83 (SelectionRing).
+	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
+	assert(effects.pulseRot.X == 0 and effects.pulseRot.Y == 0 and effects.pulseRot.Z == 0, "pulseRot n'est pas a l'origine")
+	local bakedPulse = effects.pulseRot
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1709,6 +1718,20 @@ check("vagues de conquete", function()
 	effects:conquestWave(wave, Color3.fromRGB(255, 0, 0), true)
 	effects:lossWave(wave, #wave)
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
+	local pulseFound = false
+	local aPulse
+	for _, node in effects.root:GetChildren() do
+		if node.Name == "ConquestPulse" then
+			pulseFound = true
+			aPulse = node
+		end
+	end
+	assert(pulseFound, "pas d'onde ConquestPulse")
+	assert(aPulse ~= nil and aPulse.CFrame, "pulse sans CFrame")
+	local expectedY = WorldSpace.surfaceHeight(terrain, 5) + 0.8
+	assert(math.abs(aPulse.CFrame.Y - expectedY) < 1e-6, "pulse Y")
+	assert(aPulse.CFrame.Y ~= 3, "pulse Y feel N134")
+	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree a l'onde")
 end)
 
 check("deltas de terrain et conquetes classees", function()
@@ -1756,8 +1779,8 @@ check("camera strategique", function()
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
 	-- V78 wakeRot + V79 LandingSplash (check navires). V80 DeliveryPulse
-	-- (check pose/capture). V81 Shockwave (check navires). Leftover V82
-	-- (Effects conquestPulse).
+	-- (check pose/capture). V81 Shockwave (check navires). V82
+	-- conquestPulse (check vagues). Leftover V83 (SelectionRing).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")

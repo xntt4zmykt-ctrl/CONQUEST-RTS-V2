@@ -53,6 +53,15 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	root.Parent = parent
 	self.root = root
 
+	-- V82 : rotation cylindre plat cuite une fois (recette V75 footprintRot /
+	-- V78 wakeRot / feel N134). Plus de CFrame.Angles a chaque onde de
+	-- conquete. fromEulerAnglesYXZ(0, 0, rad(90)) ≡ Angles(0, 0, 90°)
+	-- (rx=0, ry=0 → Z seul). Height = surface + 0.8 (fallback 3 hors carte)
+	-- inchange — ne pas porter Y = 3 feel. Tween Size/Transparency inchange.
+	-- MAX_LIVE_PULSES=8 inchange. Distinct de Overlay Shockwave (V81,
+	-- PLAINS + 0.5). Distinct de SelectionRing (leftover V83).
+	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+
 	return self
 end
 
@@ -210,6 +219,7 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	local worldRadius = math.clamp(radius, 3, 40) * Config.TILE_SIZE
 
 	local ring = Instance.new("Part")
+	ring.Name = "ConquestPulse"
 	ring.Anchored = true
 	ring.CanCollide = false
 	ring.CanTouch = false
@@ -220,7 +230,12 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
-	ring.CFrame = CFrame.new(ground.X, height, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- V82 : translation * rot cuit. Plus de CFrame.Angles a l'onde.
+	-- Recette feel N134 — ne pas merger bfcc. Ne pas porter Y = 3
+	-- (visuel = surface + 0.8 / fallback 3). Distinct de V81 (explosion
+	-- Overlay, PLAINS + 0.5). Distinct de V80 (arrivee camion). Distinct
+	-- de SelectionRing (leftover V83). lossWave passe par ce site.
+	ring.CFrame = CFrame.new(ground.X, height, ground.Z) * self.pulseRot
 	ring.Parent = self.root
 
 	TweenService:Create(ring, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
