@@ -449,7 +449,7 @@ end
 --[[
 	"+X or" flottant au-dessus d'une gare, la signature d'une livraison
 	reussie — le seul retour du commerce terrestre, exactement comme dans le
-	jeu de reference.
+	regles CONQUEST.
 ]]
 --[[
 	Notre slot, pour savoir quelles livraisons nous concernent.

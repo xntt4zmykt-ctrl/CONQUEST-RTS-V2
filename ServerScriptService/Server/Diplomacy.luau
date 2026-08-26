@@ -8,8 +8,8 @@
 	publiquement — ce qui laisse a la victime le temps de reagir et inscrit la
 	trahison au compteur permanent du traitre.
 
-	L'embargo, lui, donne a la diplomatie un poids economique : couper les
-	routes commerciales d'un rival lui coute de l'or a chaque tick.
+	L'embargo, lui, donne a la diplomatie un poids economique : il bloque les
+	navires de commerce (`canTrade`). Il ne modifie pas l'or territorial par tick.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -70,6 +70,17 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	-- apply immediat (feel) tourne avant Diplomacy.step : sans ce garde, une
+	-- proposition expiree reste acceptable pendant le tick qui la nettoie.
+	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
 	end
 	requests[to] = nil
 
@@ -157,7 +168,7 @@ function Diplomacy.startCooldown(state: GameState, a: number, b: number)
 end
 
 --[[
-	Prolonge un pacte avant son terme, modele OpenFront : la prolongation est
+	Prolonge un pacte avant son terme, regle CONQUEST : la prolongation est
 	MUTUELLE. Le premier camp marque son intention ; le pacte n'est repousse
 	que quand le second marque la sienne. Une prolongation unilaterale
 	permettrait a un camp d'enfermer l'autre dans une alliance dont il ne
@@ -437,7 +448,7 @@ end
 
 --[[
 	Designe une faction comme cible de l'alliance, modele des coordonnees
-	partagees du jeu de reference : une offensive a trois n'a de poids que si
+	partagees CONQUEST : une offensive a trois n'a de poids que si
 	tout le monde frappe au meme endroit. La marque est propre a chaque joueur,
 	visible de ses allies, et remplace la precedente — une seule priorite a la
 	fois, sinon elle ne priorise plus rien.
@@ -482,7 +493,9 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 	local allySet = state.alliances[slot]
 	if allySet then
 		for other in allySet do
-			allies[other] = true
+			if state:areAllied(slot, other) then
+				allies[other] = true
+			end
 		end
 	end
 
