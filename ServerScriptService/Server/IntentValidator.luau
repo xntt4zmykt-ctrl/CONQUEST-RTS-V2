@@ -74,6 +74,19 @@ local ACTION_ORDER = {
 	QuickChat = 11,
 }
 
+local DIPLOMACY_ACTIONS = {
+	request = true,
+	accept = true,
+	decline = true,
+	["break"] = true,
+	extend = true,
+	donateGold = true,
+	donateTroops = true,
+	embargo = true,
+	unembargo = true,
+	markTarget = true,
+}
+
 local function bumpRefuse(reason: string)
 	refuseCounts[reason] = (refuseCounts[reason] or 0) + 1
 end
@@ -154,7 +167,12 @@ function IntentValidator.enqueue(
 		return false, "UnknownAction"
 	end
 
-	-- Doctrine / ratio restent valides hors combat ; le reste exige la phase playing.
+	-- Partie terminee : plus aucun ordre. Doctrine / ratio restent valides
+	-- en lobby (waiting), pas une fois le match clos.
+	if ctx.matchPhase == "ended" then
+		bumpRefuse("NotPlaying")
+		return false, "NotPlaying"
+	end
 	if ctx.matchPhase ~= "playing" and actionType ~= "ChooseDoctrine" and actionType ~= "SetAttackRatio" then
 		bumpRefuse("NotPlaying")
 		return false, "NotPlaying"
@@ -174,6 +192,18 @@ function IntentValidator.enqueue(
 	end
 
 	if not checkRate(userId, now) then
+		bumpRefuse("RateLimited")
+		return false, "RateLimited"
+	end
+
+	local maxPending = Config.MAX_PENDING_INTENTS or 32
+	local pending = 0
+	for _, intent in queue do
+		if intent.userId == userId then
+			pending += 1
+		end
+	end
+	if pending >= maxPending then
 		bumpRefuse("RateLimited")
 		return false, "RateLimited"
 	end
@@ -213,7 +243,7 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
-		if not isInteger(kind) then
+		if not isInteger(kind) or Config.NUKE_STATS[kind] == nil then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
@@ -223,7 +253,7 @@ function IntentValidator.enqueue(
 			return false, "InvalidSchema"
 		end
 	elseif actionType == "ChooseDoctrine" then
-		if not isInteger(payload.doctrineId) then
+		if not Doctrines.isValid(payload.doctrineId) then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
@@ -231,6 +261,10 @@ function IntentValidator.enqueue(
 		if typeof(payload.action) ~= "string" or not isInteger(payload.targetSlot) then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
+		end
+		if not DIPLOMACY_ACTIONS[payload.action] then
+			bumpRefuse("UnknownAction")
+			return false, "UnknownAction"
 		end
 		if payload.targetSlot < 1 or payload.targetSlot > Config.MAX_TOTAL_FACTIONS then
 			bumpRefuse("InvalidTarget")
@@ -274,7 +308,6 @@ local function applyOne(ctx: Context, intent: Intent)
 			if ps.awaitingSpawn then
 				local claimed = state:claimSpawn(slot, index)
 				if claimed then
-					ps.justClaimed = true
 					ok, message = true, "Territoire revendique."
 				else
 					ok, message = false, "Spawn invalide."
@@ -362,17 +395,21 @@ local function applyOne(ctx: Context, intent: Intent)
 			elseif not state.players[targetSlot] then
 				ok, message = false, "Cette faction n'existe plus."
 			else
-				ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
-				ok = true
+				ok = ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
+				if not ok then
+					message = "Message trop frequent."
+				end
 			end
 		else
-			ctx.diplomacy.sendQuickChat(
+			ok = ctx.diplomacy.sendQuickChat(
 				state,
 				slot,
 				payload.messageId,
 				if isInteger(payload.targetSlot) then payload.targetSlot else nil
 			)
-			ok = true
+			if not ok then
+				message = "Message trop frequent."
+			end
 		end
 	end
 
@@ -419,9 +456,12 @@ function IntentValidator.flush(ctx: Context): number
 			ctx.refuse(intent.player, "Eliminated", "Faction eliminee.")
 			continue
 		end
-		if ctx.matchPhase ~= "playing"
-			and intent.actionType ~= "ChooseDoctrine"
-			and intent.actionType ~= "SetAttackRatio"
+		if ctx.matchPhase == "ended"
+			or (
+				ctx.matchPhase ~= "playing"
+				and intent.actionType ~= "ChooseDoctrine"
+				and intent.actionType ~= "SetAttackRatio"
+			)
 		then
 			bumpRefuse("NotPlaying")
 			ctx.refuse(intent.player, "NotPlaying", nil)

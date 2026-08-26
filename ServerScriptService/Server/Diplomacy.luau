@@ -8,8 +8,8 @@
 	publiquement — ce qui laisse a la victime le temps de reagir et inscrit la
 	trahison au compteur permanent du traitre.
 
-	L'embargo, lui, donne a la diplomatie un poids economique : couper les
-	routes commerciales d'un rival lui coute de l'or a chaque tick.
+	L'embargo, lui, donne a la diplomatie un poids economique : il bloque les
+	navires de commerce (`canTrade`). Il ne modifie pas l'or territorial par tick.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -70,6 +70,17 @@ function Diplomacy.accept(state: GameState, from: number, to: number): (boolean,
 	local requests = state.requests[from]
 	if not requests or not requests[to] then
 		return false, "Aucune proposition en cours."
+	end
+	local requestExpiry = requests[to]
+	-- flush() tourne avant Diplomacy.step : sans ce garde, une proposition
+	-- expiree reste acceptable pendant le tick qui la nettoie.
+	if typeof(requestExpiry) == "number" and state.tick >= requestExpiry then
+		requests[to] = nil
+		return false, "Cette proposition a expire."
+	end
+	if state:areAllied(from, to) then
+		requests[to] = nil
+		return false, "Vous etes deja allies."
 	end
 	requests[to] = nil
 
@@ -482,7 +493,9 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 	local allySet = state.alliances[slot]
 	if allySet then
 		for other in allySet do
-			allies[other] = true
+			if state:areAllied(slot, other) then
+				allies[other] = true
+			end
 		end
 	end
 
