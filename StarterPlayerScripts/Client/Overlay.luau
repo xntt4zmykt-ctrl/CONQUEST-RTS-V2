@@ -152,9 +152,19 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Leftover Parent = nil, pas Destroy. Kind+Level match au
 	-- take. Recolor meme kind+level inchange. Destroy modele
 	-- navire conserve. Overlay.clear Parent=nil (V130).
-	-- Leftover suivant = Overlay.syncFactoryRoutes Destroy
-	-- routes (V131). Pas reentrant.
+	-- V131 : syncFactoryRoutes routeFree deja. Leftover
+	-- suivant = Overlay.clear Destroy routes (V132). Pas
+	-- reentrant.
 	self.buildingFree = {} :: { [number]: { Model } }
+
+	-- V131 : free-list voies PAR overlay (pas buildingFree /
+	-- deliveryFree / blastFree). Recette analogique V130 /
+	-- V116 / feel N180 inline — ne PAS merger feel. Leftover
+	-- Parent = nil, pas Destroy. Take cle usine+ville, sinon
+	-- n'importe quel record. Camion Parent = nil (V116)
+	-- conserve. Overlay.clear Destroy routes conserve
+	-- (leftover V132). Pas reentrant.
+	self.routeFree = {} :: { any }
 
 	return self
 end
@@ -165,7 +175,8 @@ function Overlay.clear(self: Overlay)
 	-- analogique V129 / feel N179 inline — ne PAS merger
 	-- feel. Skip Parent == nil (deja parque). Destroy
 	-- modele navire conserve. Destroy routes conserve
-	-- (leftover V131). Ne pas partager ringFree / shipFree.
+	-- (leftover V132). V131 routeFree deja. Ne pas
+	-- partager ringFree / shipFree / routeFree.
 	for _, model in self.buildings do
 		if model.Parent ~= nil then
 			parkBuilding(self, model)
@@ -287,6 +298,76 @@ local function routePart(parent: Instance, name: string, size: Vector3, color: C
 	return part
 end
 
+-- V131 : parker une voie (Parent = nil, push routeFree).
+-- Recette analogique V130 / V116 / feel N180 inline — ne
+-- PAS merger feel. Pas Destroy. Camion Parent = nil (V116)
+-- obligatoire. Skip Parent == nil (deja parque). Ne pas
+-- partager buildingFree / deliveryFree. Overlay.clear
+-- Destroy routes conserve (leftover V132). Pas de delay.
+local function parkRoute(self: Overlay, route: any)
+	local truckModel = route.truckModel
+	if truckModel and truckModel.Parent ~= nil then
+		truckModel.Parent = nil
+	end
+	route.delivery = nil
+	if route.model.Parent == nil then
+		return
+	end
+	route.model.Parent = nil
+	local pool = self.routeFree
+	pool[#pool + 1] = route
+end
+
+-- Take cle usine+ville (scan depuis la fin). Sinon n'importe
+-- quel record. Pop O(1) swap-pop.
+local function takeRoute(self: Overlay, factoryIndex: number, cityIndex: number): any?
+	local free = self.routeFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.factory == factoryIndex and last.city == cityIndex then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.factory == factoryIndex and cand.city == cityIndex then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	free[n] = nil
+	return last
+end
+
+-- Reparent + Name / cab / truck park. Geometry deja valide
+-- si la cle usine+ville matche.
+local function poseRoute(self: Overlay, route: any, factoryIndex: number, cityIndex: number, slot: number)
+	local truckModel = route.truckModel
+	if truckModel and truckModel.Parent ~= nil then
+		truckModel.Parent = nil
+	end
+	route.delivery = nil
+	if route.slot ~= slot then
+		local cab = truckModel and truckModel:FindFirstChild("Cab")
+		if cab and cab:IsA("BasePart") then
+			cab.Color = colorFor(slot)
+		end
+		route.slot = slot
+	end
+	route.factory = factoryIndex
+	route.city = cityIndex
+	route.model.Name = `LogisticsRoute{factoryIndex}`
+	route.model.Parent = self.root
+	self.routes[factoryIndex * 100000 + cityIndex] = route
+end
+
 --[[
 	Retrace toutes les routes d'une usine.
 
@@ -298,7 +379,10 @@ end
 function Overlay.syncFactoryRoutes(self: Overlay, factoryIndex: number, links: { number }?, slot: number)
 	for key, route in self.routes do
 		if route.factory == factoryIndex then
-			route.model:Destroy()
+			if type(route.city) ~= "number" then
+				route.city = key % 100000
+			end
+			parkRoute(self, route)
 			self.routes[key] = nil
 		end
 	end
@@ -365,16 +449,69 @@ end
 	deja. Une voie ne coute donc pas un octet de reseau.
 ]]
 function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number, slot: number)
+	-- V131 : take cle usine+ville (ou n'importe quel record).
+	-- Recette analogique V130 / V116 / feel N180 inline — ne
+	-- PAS merger feel. Match → poseRoute (geometry deja
+	-- valide). Mismatch → reset Name / CFrame / segments dans
+	-- le Model recycle. Overlay.clear Destroy conserve (V132).
+	local reused = takeRoute(self, factoryIndex, cityIndex)
+	if reused and reused.factory == factoryIndex and reused.city == cityIndex then
+		poseRoute(self, reused, factoryIndex, cityIndex, slot)
+		return
+	end
+
 	local tiles = RailPath.find(self.terrain, factoryIndex, cityIndex)
 	if not tiles or #tiles < 2 then
+		if reused then
+			local pool = self.routeFree
+			pool[#pool + 1] = reused
+		end
 		return
 	end
 
 	local roadY = WorldSpace.surfaceHeight(self.terrain, factoryIndex) + 0.38
 
-	local model = Instance.new("Model")
-	model.Name = `LogisticsRoute{factoryIndex}`
-	model.Parent = self.root
+	local model: Model
+	local spare: { BasePart }? = nil
+	if reused then
+		model = reused.model
+		spare = reused.spare
+		if not spare then
+			spare = {}
+			reused.spare = spare
+		end
+		for _, child in model:GetChildren() do
+			if child:IsA("BasePart") then
+				child.Parent = nil
+				spare[#spare + 1] = child
+			end
+		end
+		model.Name = `LogisticsRoute{factoryIndex}`
+		model.Parent = self.root
+	else
+		model = Instance.new("Model")
+		model.Name = `LogisticsRoute{factoryIndex}`
+		model.Parent = self.root
+	end
+
+	local function roadPart(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
+		local pool = spare
+		local n = if pool then #pool else 0
+		if pool and n > 0 then
+			local part = pool[n]
+			pool[n] = nil
+			if part then
+				part.Name = name
+				part.Size = size
+				part.Color = color
+				part.Material = material
+				part.Transparency = 0
+				part.Parent = model
+				return part :: Part
+			end
+		end
+		return routePart(model, name, size, color, material)
+	end
 
 	local function worldAt(index: number): Vector3
 		local base = WorldSpace.indexToWorld(index)
@@ -428,11 +565,11 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local k = Config.WORLD_SCALE
 		local liftAsphalt = 0.08 * k
 		local liftStripe = 0.18 * k
-		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
+		local shoulder = roadPart("Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
-		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
+		local asphalt = roadPart("Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
 		asphalt.CFrame = frame + Vector3.new(0, liftAsphalt, 0)
-		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
+		local stripe = roadPart("CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
 		stripe.CFrame = frame + Vector3.new(0, liftStripe, 0)
 
@@ -512,40 +649,55 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		livraison la route reste vide — un camion qui tournerait en boucle
 		ferait croire a un flux continu qui n'existe plus.
 	]]
-	local truckModel = Instance.new("Model")
-	truckModel.Name = "CargoTruck"
-	truckModel.Parent = nil
-	local truck = {}
-	local function truckPart(name: string, size: Vector3, color: Color3, offset: CFrame, material: Enum.Material?): Part
-		local part = routePart(truckModel, name, size, color, material or Enum.Material.Metal)
-		part.CastShadow = true
-		part.CFrame = CFrame.lookAt(from + Vector3.new(0, 0.8, 0), to) * offset
-		table.insert(truck, { part = part, offset = offset })
-		return part
-	end
-	truckPart("Chassis", Vector3.new(1.55, 0.28, 2.9), DARK, CFrame.new(0, 0.35, 0))
-	truckPart("Container", Vector3.new(1.45, 1.05, 1.75), Color3.fromRGB(255, 196, 72), CFrame.new(0, 0.94, 0.45))
-	truckPart("Cab", Vector3.new(1.45, 0.9, 0.9), colorFor(slot), CFrame.new(0, 0.82, -0.95))
-	local windshield = truckPart("Windshield", Vector3.new(1.15, 0.36, 0.08), Color3.fromRGB(125, 210, 235), CFrame.new(0, 1.02, -1.42), Enum.Material.Glass)
-	windshield.Transparency = 0.18
-	for sideLight = -1, 1, 2 do
-		local lamp = truckPart("Headlight", Vector3.new(0.28, 0.24, 0.08), Color3.fromRGB(255, 239, 176), CFrame.new(sideLight * 0.48, 0.72, -1.47), Enum.Material.Neon)
-		local light = Instance.new("PointLight")
-		light.Color = lamp.Color
-		light.Brightness = 0.8
-		light.Range = 8
-		light.Parent = lamp
-	end
-	for side = -1, 1, 2 do
-		for axle = -1, 1, 2 do
-			local wheel = truckPart("Wheel", Vector3.new(0.3, 0.48, 0.48), Color3.fromRGB(18, 21, 25), CFrame.new(side * 0.78, 0.28, axle * 0.88))
-			wheel.Shape = Enum.PartType.Cylinder
+	local truckModel: Model
+	local truck: { any }
+	if reused and reused.truckModel then
+		truckModel = reused.truckModel
+		truck = reused.truck
+		if truckModel.Parent ~= nil then
+			truckModel.Parent = nil
+		end
+		local cab = truckModel:FindFirstChild("Cab")
+		if cab and cab:IsA("BasePart") then
+			cab.Color = colorFor(slot)
+		end
+	else
+		truckModel = Instance.new("Model")
+		truckModel.Name = "CargoTruck"
+		truckModel.Parent = nil
+		truck = {}
+		local function truckPart(name: string, size: Vector3, color: Color3, offset: CFrame, material: Enum.Material?): Part
+			local part = routePart(truckModel, name, size, color, material or Enum.Material.Metal)
+			part.CastShadow = true
+			part.CFrame = CFrame.lookAt(from + Vector3.new(0, 0.8, 0), to) * offset
+			table.insert(truck, { part = part, offset = offset })
+			return part
+		end
+		truckPart("Chassis", Vector3.new(1.55, 0.28, 2.9), DARK, CFrame.new(0, 0.35, 0))
+		truckPart("Container", Vector3.new(1.45, 1.05, 1.75), Color3.fromRGB(255, 196, 72), CFrame.new(0, 0.94, 0.45))
+		truckPart("Cab", Vector3.new(1.45, 0.9, 0.9), colorFor(slot), CFrame.new(0, 0.82, -0.95))
+		local windshield = truckPart("Windshield", Vector3.new(1.15, 0.36, 0.08), Color3.fromRGB(125, 210, 235), CFrame.new(0, 1.02, -1.42), Enum.Material.Glass)
+		windshield.Transparency = 0.18
+		for sideLight = -1, 1, 2 do
+			local lamp = truckPart("Headlight", Vector3.new(0.28, 0.24, 0.08), Color3.fromRGB(255, 239, 176), CFrame.new(sideLight * 0.48, 0.72, -1.47), Enum.Material.Neon)
+			local light = Instance.new("PointLight")
+			light.Color = lamp.Color
+			light.Brightness = 0.8
+			light.Range = 8
+			light.Parent = lamp
+		end
+		for side = -1, 1, 2 do
+			for axle = -1, 1, 2 do
+				local wheel = truckPart("Wheel", Vector3.new(0.3, 0.48, 0.48), Color3.fromRGB(18, 21, 25), CFrame.new(side * 0.78, 0.28, axle * 0.88))
+				wheel.Shape = Enum.PartType.Cylinder
+			end
 		end
 	end
 
 	-- Cle composite : une usine peut avoir plusieurs routes simultanees.
 	self.routes[factoryIndex * 100000 + cityIndex] = {
 		factory = factoryIndex,
+		city = cityIndex,
 		model = model,
 		truck = truck,
 		truckModel = truckModel,
@@ -555,6 +707,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		segRot = segRot,
 		slot = slot,
 		delivery = nil,
+		spare = if reused then reused.spare else nil,
 		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
 		construction = self.pendingConstruction,
 	}
@@ -743,8 +896,9 @@ end
 -- V129 : parker un modele (Parent = nil, push buildingFree[kind]).
 -- Recette analogique V128 chatFree / V123 ringFree / feel N178
 -- inline — ne PAS merger feel. Pas Destroy. Ne pas partager
--- ringFree. Overlay.clear Parent=nil (V130). Leftover suivant
--- = Overlay.syncFactoryRoutes Destroy routes (V131).
+-- ringFree. Overlay.clear Parent=nil (V130). V131 routeFree
+-- deja. Leftover suivant = Overlay.clear Destroy routes
+-- (V132).
 parkBuilding = function(self: Overlay, model: Model)
 	local kind = model:GetAttribute("Kind") :: number?
 	if not kind or kind == 0 then
@@ -929,8 +1083,8 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		-- playConstruction seulement si le modele est NEUF (pas
 		-- reuse, pas recolor). Destroy modele navire conserve.
 		-- Ne pas partager ringFree. Overlay.clear Parent=nil
-		-- (V130). Leftover suivant = Overlay.syncFactoryRoutes
-		-- Destroy routes (V131).
+		-- (V130). V131 routeFree deja. Leftover suivant =
+		-- Overlay.clear Destroy routes (V132).
 		if existing then
 			parkBuilding(self, existing)
 		end

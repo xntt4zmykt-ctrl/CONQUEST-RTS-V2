@@ -69,9 +69,9 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- garder self.actionPreview (feel N169 inline, pas merger
 	-- e839 / a72c / 2188). V128 : HUD refreshChatSheet
 	-- chatFree (feel N170, autre fichier). Overlay.clear
-	-- Parent=nil (V130). Leftover suivant =
-	-- Overlay.syncFactoryRoutes Destroy routes (V131). V129
-	-- applyBuildingDelta buildingFree deja.
+	-- Parent=nil (V130). V131 syncFactoryRoutes routeFree
+	-- deja. Leftover suivant = Overlay.clear Destroy routes
+	-- (V132). V129 applyBuildingDelta buildingFree deja.
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	-- V120 : free-list floatingText PAR Effects (pas goldFree Overlay /
@@ -233,9 +233,10 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	-- (raycast). Ne pas porter Size / Transparency / Y feel.
 	-- Ne pas geler Size flame (V74). HUD refreshChatSheet
 	-- chatFree (V128, autre fichier). Overlay.clear
-	-- Parent=nil (V130). Leftover suivant =
-	-- Overlay.syncFactoryRoutes Destroy routes (V131). V129
-	-- applyBuildingDelta buildingFree deja.
+	-- Parent=nil (V130). V131 syncFactoryRoutes routeFree
+	-- deja. Leftover suivant = Overlay.clear Destroy
+	-- routes (V132). V129 applyBuildingDelta
+	-- buildingFree deja.
 	local marker = self.actionPreview
 	if not marker then
 		marker = Instance.new("Part")
@@ -268,9 +269,10 @@ function Effects.clearActionPreview(self: Effects)
 	-- Pas de skip N154 (feel-only). Pas de pool
 	-- actionPreviewFree. HUD refreshChatSheet chatFree (V128,
 	-- autre fichier). Overlay.clear Parent=nil (V130).
-	-- Leftover suivant = Overlay.syncFactoryRoutes Destroy
-	-- routes (V131). V129 applyBuildingDelta
-	-- buildingFree deja. Distinct de V126
+	-- V131 syncFactoryRoutes routeFree deja. Leftover
+	-- suivant = Overlay.clear Destroy routes (V132).
+	-- V129 applyBuildingDelta buildingFree deja. Distinct de
+	-- V126
 	-- (clearSelection park). Distinct de V125 (reuse pendant
 	-- la vie). Pas reentrant. Chemin hover 60 Hz. Ne pas porter
 	-- Size / Transparency / Y feel. Ne pas geler Size flame

@@ -1773,9 +1773,10 @@ function HUD.refreshChatSheet(self: HUD)
 	-- Distinct de V126 (park select). Distinct de V123 (ringFree).
 	-- Dismiss delay Destroy conserve (V124). Pas de skip N154.
 	-- Pas reentrant. Geste catalogue, pas 60 Hz. Ne pas geler Size
-	-- flame (V74). Overlay.clear Parent=nil (V130). Leftover
-	-- suivant = Overlay.syncFactoryRoutes Destroy routes
-	-- (V131). V129 applyBuildingDelta buildingFree deja.
+	-- flame (V74). Overlay.clear Parent=nil (V130). V131
+	-- syncFactoryRoutes routeFree deja. Leftover
+	-- suivant = Overlay.clear Destroy routes (V132).
+	-- V129 applyBuildingDelta buildingFree deja.
 	local chatFree = self.chatFree
 	if not chatFree then
 		chatFree = {}

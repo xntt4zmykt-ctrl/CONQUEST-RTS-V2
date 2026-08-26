@@ -1274,6 +1274,47 @@ check("pose et capture de chaque type de batiment", function()
 		)
 	end
 
+	-- V131 : Overlay.syncFactoryRoutes Parent=nil routeFree.
+	-- Recette analogique V130 / V116 / feel N180 inline — ne PAS
+	-- merger feel. Take cle usine+ville. 2e apply memes links →
+	-- rawequal route.model, #routeFree pop. Camion Parent = nil
+	-- (V116) conserve. Destroy Overlay.clear conserve (leftover
+	-- V132). Ne pas partager buildingFree. Leftover V130
+	-- Overlay.clear (plus bas) doit rester vert. Leftover V129
+	-- buildingFree (plus bas) doit rester vert. Leftover V116
+	-- DeliveryPulse (plus bas) doit rester vert.
+	assert(type(overlay.routeFree) == "table", "routeFree absent")
+	assert(#overlay.routeFree == 0, "routeFree non vide a la pose")
+	assert(overlay.routeFree[1] == nil, "routeFree leftover slot pose")
+	local keptModels = {}
+	for _, route in overlay.routes do
+		if route.factory == factoryEntry.index then
+			table.insert(keptModels, route.model)
+			assert(type(route.city) == "number", "city voie V131 absente")
+		end
+	end
+	assert(#keptModels == 3, "snapshot 3 voies V131")
+	overlay:applyBuildingDelta({ factoryEntry })
+	local reusedCount = 0
+	local liveCount = 0
+	for _, route in overlay.routes do
+		if route.factory == factoryEntry.index then
+			liveCount += 1
+			for _, model in keptModels do
+				if rawequal(route.model, model) then
+					reusedCount += 1
+					break
+				end
+			end
+			assert(route.model.Parent == overlay.root, "voie V131 recycle hors root")
+			assert(route.truckModel.Parent == nil, "camion V131 reparente au reuse")
+		end
+	end
+	assert(liveCount == 3, "voies perdues au recycle V131")
+	assert(reusedCount >= 1, "aucune voie recyclee V131")
+	assert(#overlay.routeFree == 0, "routeFree non pop")
+	assert(overlay.routeFree[1] == nil, "routeFree leftover slot pop")
+
 	-- V63 : rot cuit a l'origine. Deux frames → Parts stables, Y asphalt
 	-- ≠ shoulder (leftover V61). ox/dx nombres (leftover V62). Leftover V57
 	-- (camion) plus bas. Leftover V60 (câble) dans le check modeles.
@@ -1348,6 +1389,8 @@ check("pose et capture de chaque type de batiment", function()
 	factoryEntry.links = { cityIndex }
 	overlay:applyBuildingDelta({ factoryEntry })
 	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
+	assert(#overlay.routeFree >= 2, "voies obsoletes non parquees V131")
+	assert(overlay.routeFree[#overlay.routeFree + 1] == nil, "routeFree leftover slot drop")
 	overlay:stepInterpolation(1 / 60)
 
 	-- V57 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
@@ -1480,8 +1523,9 @@ check("pose et capture de chaque type de batiment", function()
 	-- Parent=nil (V130, ci-dessous). Leftover V128 chatFree (check
 	-- messages) doit rester vert. Leftover V123 ringFree (check
 	-- modeles) doit rester vert. Leftover V80 DeliveryPulse
-	-- (ci-dessus) doit rester vert. Leftover V131
-	-- syncFactoryRoutes Destroy routes conserve.
+	-- (ci-dessus) doit rester vert. Leftover V132
+	-- Overlay.clear Destroy routes conserve. V131 routeFree
+	-- deja (ci-dessus, pose 3 voies).
 	assert(type(overlay.buildingFree) == "table", "buildingFree absent")
 	local cityKind = Config.BUILDING.CITY
 	local cityPool = overlay.buildingFree[cityKind]
@@ -1510,10 +1554,12 @@ check("pose et capture de chaque type de batiment", function()
 	-- V130 : Overlay.clear Parent=nil push buildingFree existant.
 	-- Recette analogique V129 / feel N179 inline — ne PAS merger
 	-- feel. Skip Parent == nil. Destroy modele navire conserve.
-	-- Destroy routes conserve (leftover V131). Ne pas partager
-	-- ringFree (V123). Leftover V129 buildingFree (ci-dessus)
-	-- doit rester vert. Leftover V128 chatFree doit rester vert.
-	-- Leftover V123 ringFree doit rester vert.
+	-- Destroy routes conserve (leftover V132). V131 routeFree
+	-- deja. Ne pas partager ringFree (V123) / routeFree.
+	-- Leftover V129 buildingFree (ci-dessus) doit rester vert.
+	-- Leftover V128 chatFree doit rester vert. Leftover V123
+	-- ringFree doit rester vert. Leftover V131 routeFree
+	-- (ci-dessus) doit rester vert.
 	local liveCity = overlay.buildings[cityIndex]
 	assert(liveCity ~= nil, "CITY live absente avant clear")
 	assert(rawequal(liveCity, parkedCity), "CITY live n'est pas le reuse V129")
