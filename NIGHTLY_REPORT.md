@@ -1,11 +1,11 @@
-# Nightly report — passe 65 (revue PR #170)
+# Nightly report — passe 66 (revue PR #172)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-490f` (PR #170, `9a0cfc8`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-0b3d`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-0b3d` (PR #172, `0b9fff5`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-8015`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #170 (`Effects` `conquestPulse` `pulseRot` — HEAD visuel, V82). Correctifs sûrs, sans merger feel `bfcc`/`5aa9`/`595e` ni hardening `41e2`/`93f6`.
+Revue de PR #172 (`Effects` `selectTile` `pulseRot` — HEAD visuel, V83). Correctifs sûrs, sans merger feel `595e`/`c299`/`bfcc` ni hardening `41e2`/`93f6`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,13 +15,13 @@ Revue de PR #170 (`Effects` `conquestPulse` `pulseRot` — HEAD visuel, V82). Co
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| Effects `selectTile` réutilise `pulseRot` (V82) ; plus de `CFrame.Angles` ; Name `SelectionRing` | `Effects.luau`, `tests/client.luau` | V83 |
+| WorldRenderer `buildOcean` OceanGlint `fromEulerAnglesYXZ` (yaw `angle` variable) ; plus de `CFrame.Angles` | `WorldRenderer.luau`, `tests/client.luau` | V84 |
 
-`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` (V68) / champ `focusX/Y/Z` (V69) / Radar / Flag / Boom (V70) / roulis navire (V71) / roues camion (V72) / radar/flag unités (V73) / flame Size API (V74) / `footprintRot` / `pulseRot` Preview (V75) / Size rayon kind (V76) / early-out hover (V77) / LaunchWake `wakeRot` (V78) / LandingSplash `wakeRot` (V79) / DeliveryPulse `wakeRot` (V80) / Shockwave `wakeRot` (V81) / Effects `conquestPulse` `pulseRot` (V82) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `FactionLabels.luau` / `WorldSpace.luau` / `WorldRenderer.luau` / `WorldCamera.luau` / `Minimap.luau` / `BuildingModels.luau` / `UnitModels.luau` / `PlacementPreview.luau` / `Overlay.luau` / `init.client.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60). Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68). Champ `focusX/Y/Z` **inchangé** (V69). Radar / Flag / Boom **inchangés** (V70). Roulis navire **inchangé** (V71). Roues camion **inchangées** (V72). Radar/flag unités **inchangés** (V73). Flame `Size = Vector3.new` **inchangé** (V74 API, pulse Z). `footprintRot` / `pulseRot` Preview **inchangés** (V75). Size rayon **inchangé** (V76). Early-out hover **inchangé** (V77). LaunchWake spawn Y + 0.12 **inchangé** (V78). LandingSplash despawn Y + 0.14 **inchangé** (V79). Pulse livraison `route.to` **inchangé** (V80). Shockwave explosion `PLAINS + 0.5` **inchangé** (V81). Effects `conquestPulse` height surface + 0.8 **inchangé** (V82). Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement. `resolve` / `previewCtxBuf` **inchangés** (V51). Hover closures **inchangées** (V53). Effects `selectTile` `CFrame.Angles` **fermé** (V83). `OceanGlint` `CFrame.Angles` **inchangé** (leftover V84).
+`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` (V68) / champ `focusX/Y/Z` (V69) / Radar / Flag / Boom (V70) / roulis navire (V71) / roues camion (V72) / radar/flag unités (V73) / flame Size API (V74) / `footprintRot` / `pulseRot` Preview (V75) / Size rayon kind (V76) / early-out hover (V77) / LaunchWake `wakeRot` (V78) / LandingSplash `wakeRot` (V79) / DeliveryPulse `wakeRot` (V80) / Shockwave `wakeRot` (V81) / Effects `conquestPulse` `pulseRot` (V82) / Effects `selectTile` `pulseRot` (V83) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `FactionLabels.luau` / `WorldSpace.luau` / `WorldCamera.luau` / `Minimap.luau` / `BuildingModels.luau` / `UnitModels.luau` / `PlacementPreview.luau` / `Overlay.luau` / `Effects.luau` / `init.client.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58, 60 Hz). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60). Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68). Champ `focusX/Y/Z` **inchangé** (V69). Radar / Flag / Boom **inchangés** (V70). Roulis navire **inchangé** (V71). Roues camion **inchangées** (V72). Radar/flag unités **inchangés** (V73). Flame `Size = Vector3.new` **inchangé** (V74 API, pulse Z). `footprintRot` / `pulseRot` Preview **inchangés** (V75). Size rayon **inchangé** (V76). Early-out hover **inchangé** (V77). LaunchWake spawn Y + 0.12 **inchangé** (V78). LandingSplash despawn Y + 0.14 **inchangé** (V79). Pulse livraison `route.to` **inchangé** (V80). Shockwave explosion `PLAINS + 0.5` **inchangé** (V81). Effects `conquestPulse` height surface + 0.8 **inchangé** (V82). Effects `selectTile` height surface + 0.48 **inchangé** (V83). Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement. `resolve` / `previewCtxBuf` **inchangés** (V51). Hover closures **inchangées** (V53). `OceanGlint` `CFrame.Angles` **fermé** (V84). `BuildRing` `CFrame.Angles` **inchangé** (leftover V85).
 
 ---
 
-## Constatations PR #170 (à ne pas casser)
+## Constatations PR #172 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence. `Placement` est partagé : Preview et serveur exécutent le même `resolve` ; la vérité reste `Buildings.build` côté serveur.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -59,7 +59,8 @@ Revue de PR #170 (`Effects` `conquestPulse` `pulseRot` — HEAD visuel, V82). Co
 - **Overlay DeliveryPulse :** `stepInterpolation` fin de trajet camion (V80). Réutilise `self.wakeRot`. `route.to` **déjà** un Vector3.
 - **Overlay Shockwave :** `Overlay.explosion` (V81). Réutilise `self.wakeRot`. Hot path : `CFrame.new(ground.X, PLAINS + 0.5, ground.Z) * self.wakeRot`. Y = PLAINS + 0.5 **inchangé**. Tween Size/Transparency **inchangé**. Sphère Blast / fumée **inchangées**. Recette feel N133 — **pas** merger `bfcc`. Distinct de V78 (spawn, Y + 0.12). Distinct de V79 (despawn, Y + 0.14). Distinct de V80 (arrivée camion). Distinct de Effects `conquestPulse` (V82, surface + 0.8 visuel, **pas** `Y = 3` feel). **Pas réentrant**. Événement explosion, pas 60 Hz.
 - **Effects `conquestPulse` :** `Effects.conquestPulse` (V82). `pulseRot` cuit à `Effects.new` : `fromEulerAnglesYXZ(0, 0, rad(90))`. Hot path : `CFrame.new(ground.X, height, ground.Z) * self.pulseRot`. `height` = `surfaceHeight + 0.8` (fallback `3` hors carte) **inchangé**. Name `ConquestPulse`. Tween Size/Transparency **inchangé**. `MAX_LIVE_PULSES=8` **inchangé**. Caps flash **inchangés**. `lossWave` passe par le même site. Recette feel N134 — **pas** merger `bfcc`, **pas** `Y = 3`. Distinct de V81 (explosion Overlay). Distinct de `SelectionRing` (V83, surface + 0.48). Distinct de `PlacementPreview.pulseRot` (autre objet). **Pas réentrant**. Événement vague, pas 60 Hz. **Ne pas** inventer un champ Overlay.
-- **Effects `selectTile` :** `Effects.selectTile` (V83). Réutilise `self.pulseRot` (V82 déjà). Hot path : `CFrame.new(base.X, height + 0.48, base.Z) * self.pulseRot`. `height` = `WorldSpace.surfaceHeight(terrain, index)` (**sans** +0.8), puis `+ 0.48` **inchangé**. Name `SelectionRing` **inchangé**. Tweens Transparency/Size **inchangés**. Marker `SelectedTerritory` **inchangé** (translation seule, Y + 0.58). `clearSelection` **inchangé**. Distinct de V82 (onde, surface+0.8, Name=`ConquestPulse`). Distinct de `ActionPreview` (pas de cylindre, translation seule). Distinct de Overlay Shockwave (V81, `PLAINS + 0.5`). Distinct de `PlacementPreview.pulseRot` (autre objet). Geste joueur (`selectTile`), pas 60 Hz interpolation. Recette V82 `pulseRot` — **pas** merger feel `bfcc`, **pas** inventer `selectionRot`. **Pas réentrant**. **Ne pas** changer `conquestPulse` (V82 déjà). **Ne pas** changer `previewTile`. **Ne pas** porter Overlay.
+- **Effects `selectTile` :** `Effects.selectTile` (V83). Réutilise `self.pulseRot` (V82 déjà). Hot path : `CFrame.new(base.X, height + 0.48, base.Z) * self.pulseRot`. `height` = `WorldSpace.surfaceHeight(terrain, index)` (**sans** +0.8), puis `+ 0.48` **inchangé**. Name `SelectionRing` **inchangé**. Tweens Transparency/Size **inchangés**. Marker `SelectedTerritory` **inchangé** (translation seule, Y + 0.58). `clearSelection` **inchangé**. Distinct de V82 (onde, surface+0.8, Name=`ConquestPulse`). Distinct de `ActionPreview` (pas de cylindre, translation seule). Distinct de Overlay Shockwave (V81, `PLAINS + 0.5`). Distinct de `PlacementPreview.pulseRot` (autre objet). Geste joueur (`selectTile`), pas 60 Hz interpolation. Recette V82 `pulseRot` — **pas** merger feel `bfcc`, **pas** inventer `selectionRot`. **Pas réentrant**. **Ne pas** changer `conquestPulse` (V82 déjà). **Ne pas** changer `previewTile`. **Ne pas** porter Overlay. **PR #172 intact** — rien à revert.
+- **WorldRenderer `buildOcean` OceanGlint :** `WorldRenderer.buildOcean` (V84). Hot path : `CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.fromEulerAnglesYXZ(0, angle, 0)`. `angle = math.rad(-18 + (i % 9) * 4)` **inchangé** (yaw **variable**, **pas** un rot cuit). Y = `OCEAN_LEVEL + 0.08` **inchangé**. Size / Transparency / Color / Name `OceanGlint` **inchangés**. `table.insert(self.oceanRipples, { part, base = glint.CFrame, phase })` **après** la pose — `base` = CFrame posée (V58 lit `base`). Distinct de V58 (houle 60 Hz : X/Z nombres depuis `base`, **pas** la pose initiale). Distinct de V83 (geste `selectTile`, `pulseRot`, Y = surface+0.48). Distinct de V82 (onde, `pulseRot`, Y = surface+0.8). Distinct de V81 (explosion Overlay, `wakeRot`, Y = PLAINS+0.5). Construction de chunk, **pas** 60 Hz interpolation. Recette feel N135 — **pas** merger `595e`. **Pas réentrant**. **Ne pas** changer `WorldRenderer.step` (V58 déjà). **Ne pas** changer `Effects.luau` (V82/V83 déjà). **Ne pas** porter Overlay. **Ne pas** inventer `glintRot`.
 - **Chantier de voie :** `applyRouteProgress` lift + nombres + `segment.rot` (V61 + V62 + V63). `part.Size = Vector3.new` **inchangé** (API).
 - **Caméra stratégique :** `WorldCamera.step` overview (V66 + V67 + V68 + V69). Champ `focusX/Y/Z`. Plus de `Vector3.new` idle 60 Hz.
 - **Hover 60 Hz :** `previewOwnerAt` / `previewBuildingAt` module (V53).
@@ -67,13 +68,13 @@ Revue de PR #170 (`Effects` `conquestPulse` `pulseRot` — HEAD visuel, V82). Co
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
-- **PR #170 :** V82 intact (`pulseRot` cuit, Name `ConquestPulse`, Y = surface+0.8, **pas** `Y = 3`). Shockwave V81 / DeliveryPulse V80 / LandingSplash V79 / LaunchWake V78 / early-out V77 / Size V76 / rot V75 **non retouchés**. Rien à revert.
+- **PR #172 :** V83 intact (`pulseRot` réutilisé, Name `SelectionRing`, Y = surface+0.48). ConquestPulse V82 / Shockwave V81 / DeliveryPulse V80 / LandingSplash V79 / LaunchWake V78 / early-out V77 / Size V76 / rot V75 **non retouchés**. Rien à revert.
 
 ---
 
 ## Specs worker (reste)
 
-Ne pas merger feel `bfcc`/`5aa9`/`595e` ni hardening `41e2`/`93f6` sur cette branche sans rebase. Porter **une** recette à la fois. Feel N129 (footprint hauteur **0.4**, **pas** de pulse) ≠ visual V75/V76/V77 — ne pas merger. Feel N134 `Y = 3` **non** porté (visuel = surface + 0.8). Feel N135 OceanGlint — **ne pas merger** `595e` (yaw `angle` variable, pas un rot cuit).
+Ne pas merger feel `595e`/`c299`/`bfcc` ni hardening `41e2`/`93f6` sur cette branche sans rebase. Porter **une** recette à la fois. Feel N129 (footprint hauteur **0.4**, **pas** de pulse) ≠ visual V75/V76/V77 — ne pas merger. Feel N134 `Y = 3` **non** porté (visuel = surface + 0.8). Feel N135 OceanGlint **fermée** ici (V84) — **ne pas merger** `595e`. Feel N136 BuildRing — **ne pas merger** `595e`.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -129,34 +130,34 @@ Ne pas merger feel `bfcc`/`5aa9`/`595e` ni hardening `41e2`/`93f6` sur cette bra
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V84 — WorldRenderer `buildOcean` OceanGlint `CFrame.Angles`
+### ISSUE-V85 — BuildingModels `playConstruction` BuildRing `CFrame.Angles`
 
-**Problème.** V83 ferme `CFrame.Angles` à **la sélection de tuile** (`selectTile` / `SelectionRing`). Reste, à **la construction des chunks océan** (`WorldRenderer.buildOcean`) :
+**Problème.** V84 ferme `CFrame.Angles` à **la construction des chunks océan** (`buildOcean` / `OceanGlint`, yaw variable). Reste, à **l’animation de chantier** (`BuildingModels.playConstruction`) :
 
 ```
-local angle = math.rad(-18 + (i % 9) * 4)
-glint.CFrame = CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.Angles(0, angle, 0)
+ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
 ```
 
-Yaw **variable** (`angle` par glint, pas une constante 90°). Distinct de V58 (houle 60 Hz : X/Z nombres depuis `base`, **pas** la pose initiale). Distinct de V83 (geste `selectTile`, `pulseRot` cuit, Y = surface+0.48). Distinct de V82 (onde, `pulseRot`, Y = surface+0.8). Distinct de V81 (explosion Overlay, `wakeRot`, Y = PLAINS+0.5). Construction de chunk, **pas** 60 Hz interpolation. Name `OceanGlint` **déjà** posé. `oceanRipples` insère `{part, base = glint.CFrame, phase}` **après** la pose — `base` doit rester la CFrame posée (V58 lit `base`).
+Z **fixe** 90° (cylindre plat, `PartType.Cylinder`). Distinct de V84 (yaw `angle` variable, **pas** un rot cuit, `WorldRenderer`). Distinct de V83 (geste `selectTile`, `pulseRot` Effects, Y = surface+0.48). Distinct de V82 (onde, `pulseRot` Effects, Y = surface+0.8). Distinct de V75 (`PlacementPreview.pulseRot`, autre objet, hover 60 Hz). Événement construction, **pas** 60 Hz interpolation. Name `BuildRing` **déjà** posé. Tween Size/Transparency **ensuite**. `ground` est un Vector3 (origine monde du modèle).
 
-**20K CCU.** 8 clients × chunks océan au chargement. Pas d’autorité. Même classe que feel N135 (Angles → `fromEulerAnglesYXZ`, yaw variable — **ne pas** cuire un rot unique).
+**20K CCU.** 8 clients × pose bâtiment. Pas d’autorité. Même classe que feel N136 (Angles → `fromEulerAnglesYXZ` inline, Z=90° — **ne pas** cuire un rot, **ne pas** réutiliser `Effects.pulseRot`).
 
-**Faire.** Remplacer `CFrame.Angles(0, angle, 0)` par `CFrame.fromEulerAnglesYXZ(0, angle, 0)`. Hot path : `CFrame.new(world.X, Config.OCEAN_LEVEL + 0.08, world.Z) * CFrame.fromEulerAnglesYXZ(0, angle, 0)`. Formule `angle` **inchangée**. Y = `OCEAN_LEVEL + 0.08` **inchangé**. Size / Transparency / Color / Name **inchangés**. `table.insert(self.oceanRipples, …)` **inchangé** (`base = glint.CFrame` **après** la pose). Ne **pas** cuire un `glintRot` (yaw variable). Ne **pas** porter Overlay. Ne **pas** changer `WorldRenderer.step` (V58 déjà). Ne **pas** changer `Effects.luau` (V82/V83 déjà). Ne **pas** merger feel `595e`.
+**Faire.** Remplacer `CFrame.Angles(0, 0, math.rad(90))` par `CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. Hot path : `CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))`. `ground` **inchangé**. Size `0.5, 4, 4` **inchangé**. Tween vers `0.5, 18, 18` + Transparency 1 **inchangé**. Name / Color / Material / PointLight **inchangés**. Ne **pas** cuire un `ringRot` / `buildRingRot` (événement unique, recette feel N136 **inline**). Ne **pas** réutiliser `Effects.pulseRot` (module distinct). Ne **pas** porter Overlay. Ne **pas** changer `WorldRenderer.luau` (V84 déjà). Ne **pas** changer `Effects.luau` (V82/V83 déjà). Ne **pas** changer `BuildingModels.animate` (V60/V70 déjà). Ne **pas** merger feel `595e`.
 
-**Contraintes.** Client-only. **V84 visual ≠ V83 (SelectionRing) ≠ V82 (conquestPulse) ≠ V58 (houle 60 Hz).** Recette feel N135 — **ne pas merger** `595e`. Client 34/34 (check construction du monde V58 **doit rester vert**. Check calques V83 **doit rester vert**. Check vagues V82 **doit rester vert**). **Ne pas** éditer le serveur. **Ne pas** éditer `Effects.luau`. **Ne pas** éditer `Overlay.luau`. **Ne pas** éditer `PlacementPreview.luau`. **Ne pas** éditer `UnitModels.luau`. **Ne pas** éditer `BuildingModels.luau`.
+**Contraintes.** Client-only. **V85 visual ≠ V84 (OceanGlint) ≠ V83 (SelectionRing) ≠ V82 (conquestPulse) ≠ V75 (Preview pulseRot).** Recette feel N136 — **ne pas merger** `595e`. Client 34/34 (check modeles procéduraux **doit rester vert**. Check construction V84 **doit rester vert**. Check calques V83 **doit rester vert**. Check vagues V82 **doit rester vert**). **Ne pas** éditer le serveur. **Ne pas** éditer `WorldRenderer.luau`. **Ne pas** éditer `Effects.luau`. **Ne pas** éditer `Overlay.luau`. **Ne pas** éditer `PlacementPreview.luau`. **Ne pas** éditer `UnitModels.luau`.
 
-**Tester.** Check « construction du monde 3D » : après rebuild initial, `#oceanRipples > 0`, premier `OceanGlint` `math.abs(glint.CFrame.Y - (Config.OCEAN_LEVEL + 0.08)) < 1e-6`. Puis `world:step` deux fois — V58 **doit rester vert** (Part stable, X/Z bougent, Transparency bande). Check calques V83 **doit rester vert** (`SelectionRing` Y = surface+0.48, `rawequal(pulseRot)`). Check vagues V82 **doit rester vert** (`ConquestPulse` Y = surface+0.8, `Y ~= 3`). `./tests/run.sh`. Client 34/34.
+**Tester.** Check « modeles procéduraux : le palier change la silhouette » : après `Building.create` + `Building.playConstruction(model, Vector3.new(0, 2, 0))`, `BuildRing` présent, `math.abs(ring.CFrame.Y - 2) < 1e-6`. Silhouette palier **doit rester verte**. Check construction V84 **doit rester vert** (`OceanGlint` Y = `OCEAN_LEVEL + 0.08`, houle V58). Check calques V83 **doit rester vert**. Check vagues V82 **doit rester vert**. `./tests/run.sh`. Client 34/34.
 
-**Fichiers.** `WorldRenderer.luau` (`buildOcean` **seulement**, la ligne `glint.CFrame`). `tests/client.luau` check construction + commentaire leftover. `Effects.luau` **non**. `Overlay.luau` **non**. `BuildingModels.luau` **non**. `selectTile` **non**. `conquestPulse` **non**. `WorldRenderer.step` **non**. `init.client.luau` **non**.
+**Fichiers.** `BuildingModels.luau` (`playConstruction` **seulement**, la ligne `ring.CFrame`). `tests/client.luau` check modeles + commentaire leftover. `WorldRenderer.luau` **non**. `Effects.luau` **non**. `Overlay.luau` **non**. `selectTile` **non**. `conquestPulse` **non**. `buildOcean` **non**. `init.client.luau` **non**.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `bfcc`/`5aa9`/`595e` / hardening `41e2`/`93f6` sur #170.
+- Merger feel `595e`/`c299`/`bfcc` / hardening `41e2`/`93f6` sur #172.
 - Feel N129 footprint hauteur 0.4 sans pulse — **ne pas** porter le Size visual V76 (pas de pulse feel).
 - Feel N134 `Y = 3` — **non** porté (visuel = surface + 0.8).
+- Feel N135 OceanGlint — **porté ici** (V84 inline, yaw variable, **pas** merger `595e`).
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -193,8 +194,9 @@ Yaw **variable** (`angle` par glint, pas une constante 90°). Distinct de V58 (h
 - Overlay Shockwave `CFrame.Angles` — **fermé** (V81). Réutilise `wakeRot`.
 - Effects `conquestPulse` `CFrame.Angles` — **fermé** (V82). `pulseRot` cuit à `Effects.new`. Height visuel = surface + 0.8, **pas** `Y = 3`.
 - Effects `selectTile` SelectionRing `CFrame.Angles` — **fermé** (V83). Réutilise `pulseRot` V82, height = surface + 0.48.
-- WorldRenderer `buildOcean` OceanGlint `CFrame.Angles` — leftover V84 (yaw `angle` variable, `fromEulerAnglesYXZ`, **pas** un rot cuit).
-- `CFrame.Angles` de construction restants (`addWake`, `Bow`, ailettes, `WorldRenderer` tronc/roche, `BuildRing`, toits usine, portes silo, rampes SAM) — une fois, pas 60 Hz interpolation. Prochaine après V84 = `BuildRing` (feel N136).
+- WorldRenderer `buildOcean` OceanGlint `CFrame.Angles` — **fermé** (V84). Yaw `angle` variable, `fromEulerAnglesYXZ`, **pas** un rot cuit.
+- BuildingModels `playConstruction` BuildRing `CFrame.Angles` — leftover V85 (Z=90° fixe, `fromEulerAnglesYXZ` inline, recette feel N136, **pas** un rot cuit, **pas** `Effects.pulseRot`).
+- `CFrame.Angles` de construction restants (`addWake`, `Bow`, ailettes, `WorldRenderer` tronc/roche, toits usine, portes silo, rampes SAM, `cylinder()`) — une fois, pas 60 Hz interpolation. Prochaine après V85 = `TreeTrunk`/`SavannaTrunk` (feel N137, deux sites, Z=90°).
 - Transparency CityWindows / beacons / FactoryOutput / SiloWarning — leftover séparé (pas CFrame, animation `sin(time)`).
 - Overlay `buildFactoryRoute` `CFrame.lookAt` (construction de voie / `segRot` / pose initiale camion) — une fois par route, pas 60 Hz.
 
@@ -207,7 +209,7 @@ Yaw **variable** (`angle` par glint, pas une constante 90°). Distinct de V58 (h
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–64 inchangées (passe 65 = client-only).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–65 inchangées (passe 66 = client-only).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Client V75 : check « apercu de placement » — `footprintRot` / `pulseRot` cuits à `new`, `rawequal` après hover, hauteurs `+0.42/+0.38`. Leftover V51/V53 accrochage **doit rester vert**.  
 Client V76 : même check apercu — `setKind(CITY)` Size `Y == TILE*3` (36), pulse `* 1.08` ; deux `update` → `rawequal(Size)` ; `setKind(DEFENSE)` Size `Y == DEFENSE_RADIUS*TILE*2` (144) ; hover ne perd pas le rayon bunker. Leftover V75 rot **doit rester vert**.  
@@ -218,6 +220,7 @@ Client V80 : check « pose et capture » — après `delivery == nil`, DeliveryP
 Client V81 : check « navires, missiles et interpolation » — après `overlay:explosion(50, 50, 9)`, Shockwave présent, `Y == PLAINS + 0.5`, `rawequal(wakeRot)`. Leftover V80 DeliveryPulse **doit rester vert**. Leftover V79 LandingSplash **doit rester vert**.  
 Client V82 : check « vagues de conquete » — `pulseRot` cuit à `new`, après `conquestWave({5})` ConquestPulse présent, `Y == surfaceHeight(5) + 0.8`, `Y ~= 3`, `rawequal(effects.pulseRot)`. Leftover V81 Shockwave **doit rester vert**.  
 Client V83 : check « calques d'entites, effets et apercu » — `pulseRot` capturé **avant** `selectTile` ; après `selectTile(2000, …)`, `SelectionRing` présent, `Y == surfaceHeight(2000) + 0.48`, `rawequal(effects.pulseRot)` ; `clearSelection` retire le ring. Leftover V82 ConquestPulse **doit rester vert**.  
+Client V84 : check « construction du monde 3D » — après rebuild, `#oceanRipples > 0`, premier Part `Name == OceanGlint`, `Y == OCEAN_LEVEL + 0.08` ; puis `world:step` deux fois — V58 **doit rester vert** (Part stable, X/Z bougent, Transparency bande). Leftover V83 SelectionRing **doit rester vert**. Leftover V82 ConquestPulse **doit rester vert**.  
 Client V73 : check navires leftover **doit rester vert**.  
 Client V72 : check pose/capture leftover **doit rester vert**.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
