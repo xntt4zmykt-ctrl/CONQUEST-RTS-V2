@@ -449,7 +449,7 @@ end
 --[[
 	"+X or" flottant au-dessus d'une gare, la signature d'une livraison
 	reussie — le seul retour du commerce terrestre, exactement comme dans le
-	jeu de reference.
+	regles CONQUEST.
 ]]
 --[[
 	Notre slot, pour savoir quelles livraisons nous concernent.
@@ -651,78 +651,135 @@ end
 --[[
 	Les instantanes arrivent a 10 Hz. On stocke la position cible et on
 	interpole a chaque frame, sinon les navires avancent par saccades visibles.
+
+	N98 : `trackUnit` est hisse au module — plus de closure par lot.
+	Extra missile pose une fois a l'insert, puis mute (tx/ty). Navire : extra
+	reste nil (la retraite N56 vit sur `retreatTinted`, pas une table 10 Hz).
+
+	N101 : `targetX`/`targetY` + `currentX`/`currentY` nombres (recette visual
+	V55). Vector2 Roblox est immuable : un `Vector2.new` par unite et par lot
+	(10 Hz) plus un userdata par lerp (60 Hz). Insert : poser les quatre
+	nombres. Update : muter `targetX`/`targetY`. Lerp numerique dans
+	`stepInterpolation` du meme commit. Extra missile inchange (N98).
+	Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
 ]]
+local function trackUnit(
+	self: Overlay,
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	isMissile: boolean,
+	extra: any?
+)
+	local unit = self.units[id]
+	if not unit then
+		local visual = if isMissile
+			then UnitModels.createMissile(self.root, slot, kind)
+			else UnitModels.createBoat(self.root, slot, kind)
+		unit = {
+			visual = visual,
+			currentX = x,
+			currentY = y,
+			targetX = x,
+			targetY = y,
+			isMissile = isMissile,
+			phase = (id % 31) / 31 * math.pi * 2,
+			extra = extra,
+		}
+		self.units[id] = unit
+		if not isMissile then
+			local origin = WorldSpace.tileToWorld(x, y)
+			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+			wake.Shape = Enum.PartType.Cylinder
+			wake.Transparency = 0.34
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
+			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.16, 9, 9),
+				Transparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				if wake.Parent then
+					wake:Destroy()
+				end
+			end)
+		end
+	else
+		if extra then
+			local stored = unit.extra
+			if stored then
+				stored.tx = extra.tx
+				stored.ty = extra.ty
+			else
+				unit.extra = extra
+			end
+		end
+	end
+	unit.targetX = x
+	unit.targetY = y
+	self.seen[id] = true
+end
+
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
-		local unit = self.units[id]
-		if not unit then
-			local visual = if isMissile
-				then UnitModels.createMissile(self.root, slot, kind)
-				else UnitModels.createBoat(self.root, slot, kind)
-			unit = {
-				visual = visual,
-				current = Vector2.new(x, y),
-				target = Vector2.new(x, y),
-				isMissile = isMissile,
-				phase = (id % 31) / 31 * math.pi * 2,
-				extra = extra,
-			}
-			self.units[id] = unit
-			if not isMissile then
-				local origin = WorldSpace.tileToWorld(x, y)
-				local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-				wake.Shape = Enum.PartType.Cylinder
-				wake.Transparency = 0.34
-				wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.16, 9, 9),
-					Transparency = 1,
-				}):Play()
-				task.delay(0.8, function()
-					if wake.Parent then
-						wake:Destroy()
-					end
-				end)
+	for _, boat in boats do
+		trackUnit(self, boat.id, boat.slot, boat.kind, boat.x, boat.y, false, nil)
+		-- N56 option A : teinte froide des que le serveur marque la retraite.
+		if boat.retreating then
+			local unit = self.units[boat.id]
+			if unit and not unit.retreatTinted then
+				unit.retreatTinted = true
+				for _, piece in unit.visual.pieces do
+					piece.part.Color = piece.part.Color:Lerp(Color3.fromRGB(168, 206, 222), 0.42)
+				end
 			end
 		end
-		unit.target = Vector2.new(x, y)
-		unit.extra = extra
-		self.seen[id] = true
-	end
-
-	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
 	end
 
 	for _, missile in missiles do
-		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
-			tx = missile.tx,
-			ty = missile.ty,
-		})
+		local unit = self.units[missile.id]
+		if unit and unit.extra then
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, nil)
+			unit.extra.tx = missile.tx
+			unit.extra.ty = missile.ty
+		else
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
+				tx = missile.tx,
+				ty = missile.ty,
+			})
+		end
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.
 	for id, unit in self.units do
 		if not self.seen[id] then
 			if not unit.isMissile then
-				local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
-				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-				splash.Shape = Enum.PartType.Cylinder
-				splash.Transparency = 0.18
-				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.18, 15, 15),
-					Transparency = 1,
-				}):Play()
+				-- N56 : une retraite auto ne doit pas jouer le splash d'arrivee
+				-- (le client interpolait vers l'ancienne cible et confondait
+				-- avec un debarquement).
+				local retreating = (unit.extra and unit.extra.retreating) or unit.retreatTinted
+				if not retreating then
+					local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
+					local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
+					splash.Shape = Enum.PartType.Cylinder
+					splash.Transparency = 0.18
+					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
+					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+						Size = Vector3.new(0.18, 15, 15),
+						Transparency = 1,
+					}):Play()
+					task.delay(0.95, function()
+						if splash.Parent then
+							splash:Destroy()
+						end
+					end)
+				end
 				for _, piece in unit.visual.pieces do
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
 				task.delay(0.95, function()
-					if splash.Parent then
-						splash:Destroy()
-					end
 					if unit.visual.model.Parent then
 						unit.visual.model:Destroy()
 					end
@@ -808,9 +865,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 	end
 
 	for _, unit in self.units do
-		unit.current += (unit.target - unit.current) * alpha
+		-- N101 : lerp numerique. `Vector2.current +=` aurait alloue 60 Hz.
+		unit.currentX += (unit.targetX - unit.currentX) * alpha
+		unit.currentY += (unit.targetY - unit.currentY) * alpha
 
-		local x, y = unit.current.X, unit.current.Y
+		local x, y = unit.currentX, unit.currentY
 		local ground = WorldSpace.tileToWorld(x, y)
 
 		local height
@@ -831,15 +890,17 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 
 		local bob = if unit.isMissile then 0 else math.sin(now * 2.4 + unit.phase) * 0.24
 		local position = Vector3.new(ground.X, height + bob, ground.Z)
-		local direction = unit.target - unit.current
+		local dx = unit.targetX - unit.currentX
+		local dy = unit.targetY - unit.currentY
+		local mag = math.sqrt(dx * dx + dy * dy)
 
-		if direction.Magnitude > 0.01 then
-			local look = Vector3.new(direction.X, 0, direction.Y).Unit
+		if mag > 0.01 then
+			local look = Vector3.new(dx, 0, dy).Unit
 			local frame = CFrame.lookAt(position, position + look)
 			if not unit.isMissile then
 				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
 			end
-			UnitModels.place(unit.visual, frame, now + unit.phase, direction.Magnitude)
+			UnitModels.place(unit.visual, frame, now + unit.phase, mag)
 		else
 			UnitModels.place(unit.visual, CFrame.new(position), now + unit.phase, 0)
 		end
