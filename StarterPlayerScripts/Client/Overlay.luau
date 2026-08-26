@@ -396,6 +396,21 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		table.insert(path, worldAt(run.toIndex))
 	end
 
+	-- N115 : orientation camion cuite une fois par segment (grille HV, Y
+	-- identique aux deux bouts — le lift TRUCK_LIFT s'annule). stepInterpolation
+	-- compose translation * segRot, plus de lookAt 60 Hz. Magnitude < 0.01 →
+	-- rot precedente (ou identite au premier), jamais un lookAt degenere.
+	-- Recette visual V64, portee pas mergee. Chantier segment.rot inchange (N113).
+	local segRot: { CFrame } = {}
+	for i = 1, #path - 1 do
+		local d = path[i + 1] - path[i]
+		if d.Magnitude < 0.01 then
+			segRot[i] = if i > 1 then segRot[i - 1] else CFrame.new(0, 0, 0)
+		else
+			segRot[i] = CFrame.lookAt(Vector3.zero, d)
+		end
+	end
+
 	local from = path[1]
 	local to = path[#path]
 
@@ -445,6 +460,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		from = from + Vector3.new(0, 0.8, 0),
 		to = to + Vector3.new(0, 0.8, 0),
 		path = path,
+		segRot = segRot,
 		slot = slot,
 		delivery = nil,
 		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
@@ -699,6 +715,8 @@ end
 	`stepInterpolation`. Extra missile inchange (N98).
 	N103 : pose 60 Hz = X/Z monde en nombres + un `CFrame.lookAt` (recette
 	visual V56). Distinct de N101 (nombres cible) / N98 (extra).
+	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Mouvement =
+	lookAt conserve. Distinct de N115 (camion HV cuisable).
 	Pas de RemoteFunction. HUD / UnitModels / serveur non touches.
 ]]
 local function trackUnit(
@@ -886,9 +904,11 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		end
 		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
-		-- Un lookAt. Roues : Angles conserve. Unites inchangees (N103).
-		-- Recette visual V57, portee pas mergee. Extra missile inchange (N98).
-		-- targetX inchange (N101). Une voie sans delivery ne rentre pas ici.
+		-- N115 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+		-- 60 Hz. Roues : Angles conserve. Unites inchangees (N103 / leftover N116).
+		-- Chantier segment.rot inchange (N113). Recette visual V64, portee pas
+		-- mergee. Extra missile inchange (N98). targetX inchange (N101).
+		-- Une voie sans delivery ne rentre pas ici.
 		local path = route.path
 		local nSeg = #path - 1
 		local scaled = delivery.progress * nSeg
@@ -903,7 +923,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local px = ax + dx * segmentProgress
 		local py = ay + dy * segmentProgress
 		local pz = az + dz * segmentProgress
-		local frame = CFrame.lookAt(Vector3.new(px, py, pz), Vector3.new(px + dx, py + dy, pz + dz))
+		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
 		for _, piece in route.truck do
 			if piece.part.Name == "Wheel" then
 				piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
@@ -924,8 +944,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 
 		local x, y = unit.currentX, unit.currentY
 		-- N103 : X/Z monde en nombres. Plus de tileToWorld / Vector3.Unit /
-		-- CFrame.new(position) par unite. Un seul lookAt. Immobile = regard -Z
-		-- (meme pose que CFrame.new(x,y,z)). Extra missile inchange (N98).
+		-- CFrame.new(position) par unite. Un seul lookAt (N116 : immobile =
+		-- CFrame.new, plus de lookAt). Extra missile inchange (N98).
 		-- Recette visual V56, portee pas mergee. targetX inchange (N101).
 		local worldX = x * TILE - HALF_W + TILE_HALF
 		local worldZ = y * TILE - HALF_D + TILE_HALF
@@ -951,11 +971,19 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local dx = unit.targetX - unit.currentX
 		local dy = unit.targetY - unit.currentY
 		local mag = math.sqrt(dx * dx + dy * dy)
-		local lookX = if mag > 0.01 then dx else 0
-		local lookZ = if mag > 0.01 then dy else -1
-		local frame = CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX + lookX, py, worldZ + lookZ))
-		if mag > 0.01 and not unit.isMissile then
-			frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+		-- N116 : immobile = translation seule (regard -Z identique a lookAt
+		-- vers (0, -1)). Plus de deux Vector3 60 Hz hors deplacement. Mouvement
+		-- : lookAt conserve (look change chaque frame, pas cuisable). Roulis
+		-- Angles inchange. Recette : leftover N103. Extra missile inchange (N98).
+		-- Camion / chantier inchanges (N115 / N113). UnitModels.place inchange.
+		local frame
+		if mag <= 0.01 then
+			frame = CFrame.new(worldX, py, worldZ)
+		else
+			frame = CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX + dx, py, worldZ + dy))
+			if not unit.isMissile then
+				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+			end
 		end
 		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)
 	end
