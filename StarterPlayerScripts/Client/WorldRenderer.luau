@@ -68,7 +68,8 @@ export type WorldRenderer = typeof(setmetatable({} :: any, WorldRenderer))
 -- Recette leftover N183. Pas merger visual V112. Distinct leftover
 -- N152 flame. Distinct leftover N183 ghostFree. Overlay non touche.
 -- PlacementPreview non touche. rebuildChunk N106 inchange. destroy()
--- self.root:Destroy inchange (N185). Ne pas vider worldFree. Pas de delay.
+-- parkWorld (N185, enfants laisses, skip Parent nil). Ne pas vider
+-- worldFree. Pas de delay. Distinct leftover N186 Placement.destroy.
 local worldFree: { Folder } = {}
 local worldChildFree: { Instance } = {}
 
@@ -988,7 +989,13 @@ function WorldRenderer.isLand(self: WorldRenderer, index: number): boolean
 end
 
 function WorldRenderer.destroy(self: WorldRenderer)
-	self.root:Destroy()
+	-- N185 : rematch park Folder existant. Pas Destroy. Enfants
+	-- laisses (new() parkWorldChildren deja). Skip Parent nil
+	-- (parkWorld). Pas take. Pas new(). Pas Overlay. Pas
+	-- PlacementPreview. Pas rebuildChunk N106. Pas init.client.
+	-- Recette leftover N184. Pas merger visual V112. Distinct
+	-- leftover N152 flame. Distinct leftover N186 Placement.destroy.
+	parkWorld(self.root)
 end
 
 return WorldRenderer
