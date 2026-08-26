@@ -906,9 +906,10 @@ check("pose et capture de chaque type de batiment", function()
 	-- V64 : segRot cuit (meme index que segmentIndex). rawequal d'un frame a
 	-- l'autre. V72 : roues fromEulerAnglesYXZ pendant la livraison (spin
 	-- π×20, garde Wheel). Leftover V63 (rot chantier) plus haut. Leftover
-	-- V56 (unités) / V71 (roulis) restent dans le check navires. Leftover
-	-- V73 (UnitModels radar/flag) separe. Voies encore vivantes ici ; la
-	-- destruction plus bas les vide (le check livraison n'en a plus).
+	-- V56 (unités) / V71 (roulis) / V73 (UnitModels radar/flag) restent
+	-- dans le check navires. Leftover V74 (flame Size) separe. Voies
+	-- encore vivantes ici ; la destruction plus bas les vide (le check
+	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
 	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
@@ -1035,7 +1036,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- via fromEulerAnglesYXZ, pas CFrame.Angles. Factory sans câble :
 	-- animate ne lève pas (0 câble = zéro alloc Vector3). Roulis navire
 	-- V71 (check navires). Roues camion V72 (check pose/capture).
-	-- UnitModels radar/flag leftover V73.
+	-- UnitModels radar/flag V73 (check navires). Leftover V74 (flame Size).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1471,6 +1472,25 @@ check("navires, missiles et interpolation", function()
 	assert(overlay.units[1].targetX == 10 and overlay.units[1].targetY == 10, "navire target insert")
 	assert(overlay.units[3].targetX == 40 and overlay.units[3].currentY == 40, "missile target insert")
 	overlay:stepInterpolation(1 / 60)
+	-- V73 : radar/flag fromEulerAnglesYXZ. Premier stepInterpolation
+	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
+	-- Leftover V71 / V65 / V55 / V52. Leftover V74 (flame Size).
+	local radarPiece, flagPiece
+	for _, piece in overlay.units[1].visual.pieces do
+		if piece.role == "radar" then
+			radarPiece = piece
+		elseif piece.role == "flag" then
+			flagPiece = piece
+		end
+	end
+	assert(radarPiece ~= nil, "debarquement sans radar")
+	assert(flagPiece ~= nil, "debarquement sans flag")
+	local radarPart = radarPiece.part
+	local flagPart = flagPiece.part
+	local radarOff = radarPiece.offset
+	local flagOff = flagPiece.offset
+	assert(not rawequal(radarPart.CFrame, radarOff), "radar reste a offset local")
+	assert(not rawequal(flagPart.CFrame, flagOff), "flag reste a offset local")
 	-- V52 : second lot, meme id, tx/ty differents → mute, rawequal du record.
 	overlay:applyUnits({
 		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
@@ -1501,10 +1521,15 @@ check("navires, missiles et interpolation", function()
 	-- V71 : roulis navire fromEulerAnglesYXZ, plus de CFrame.Angles.
 	-- Garde mag / missile inchangee. Leftover V70 (radar/flag/boom)
 	-- reste dans le check modeles. Leftover V72 (roues camion) reste
-	-- dans le check pose/capture. Leftover V73 (UnitModels radar/flag).
+	-- dans le check pose/capture.
+	-- V73 : radar/flag fromEulerAnglesYXZ. Leftover V74 (flame Size).
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
+	assert(rawequal(radarPiece.part, radarPart), "Part radar recreee")
+	assert(rawequal(flagPiece.part, flagPart), "Part flag recreee")
+	assert(rawequal(radarPiece.offset, radarOff), "offset radar mute")
+	assert(rawequal(flagPiece.offset, flagOff), "offset flag mute")
 	overlay:applyUnits({}, {})
 	overlay:explosion(50, 50, 9)
 end)
@@ -1561,7 +1586,7 @@ check("camera strategique", function()
 	-- pitch=0 yaw=0 → Z == focusZ + distance. Leftover V66 (pose) /
 	-- V65 (yaw unites) / V64 (segRot) restent. Radar/flag V70 (modeles).
 	-- Roulis navire V71 (check navires). Roues camion V72 (pose/capture).
-	-- UnitModels radar/flag leftover V73.
+	-- UnitModels radar/flag V73 (check navires). Leftover V74 (flame Size).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
