@@ -215,6 +215,42 @@ local function gatherSites(state: GameState, ps: GameState.PlayerState, kind: nu
 	return sites
 end
 
+local function lowestUpgradable(state: GameState, slot: number): number?
+	local bestIndex: number? = nil
+	local bestLevel = math.huge
+	-- N62 option A : index buildingsBySlot, pas le hash global.
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for index in set do
+				local building = state.buildings[index]
+				if
+					building
+					and BuildingDefs.isUpgradable(building.kind)
+					and building.level < BuildingDefs.maxLevel(building.kind)
+					and building.level < bestLevel
+				then
+					bestIndex = index
+					bestLevel = building.level
+				end
+			end
+		end
+		return bestIndex
+	end
+	for index, building in state.buildings do
+		if
+			building.slot == slot
+			and BuildingDefs.isUpgradable(building.kind)
+			and building.level < BuildingDefs.maxLevel(building.kind)
+			and building.level < bestLevel
+		then
+			bestIndex = index
+			bestLevel = building.level
+		end
+	end
+	return bestIndex
+end
+
 local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, reserve: number, rng: Random): boolean
 	if ps.era < 2 or rng:NextNumber() > 0.32 then
 		return false
@@ -228,19 +264,7 @@ local function tryUpgradeBuilding(state: GameState, ps: GameState.PlayerState, r
 	-- ou une usine de niveau 3 valent trois exemplaires sans occuper trois
 	-- emplacements, et sans cette boucle les niveaux resteraient du contenu mort
 	-- dans toutes les parties contre l'IA.
-	local bestIndex: number? = nil
-	local bestLevel = math.huge
-	for index, building in state.buildings do
-		if
-			building.slot == ps.slot
-			and BuildingDefs.isUpgradable(building.kind)
-			and building.level < BuildingDefs.maxLevel(building.kind)
-			and building.level < bestLevel
-		then
-			bestIndex = index
-			bestLevel = building.level
-		end
-	end
+	local bestIndex = lowestUpgradable(state, ps.slot)
 	if not bestIndex then
 		return false
 	end
@@ -346,7 +370,7 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 	--[[
 		La ville passe avant tout le reste.
 
-		C'est une regle explicite du jeu de reference, et l'avoir omise a coute
+		C'est une regle explicite CONQUEST, et l'avoir omise a coute
 		une phase entiere. Le score `manque / prix` favorise mecaniquement le pas
 		cher : une ville vaut huit bunkers, donc le bunker gagne meme avec un
 		manque bien plus faible. Mesure sans cette regle : 22 ports et 30 bunkers
@@ -438,7 +462,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 
 		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
 			for other, ps2 in state.players do
-				if other ~= slot and other ~= leader and not allies[other] then
+				if other ~= slot and other ~= leader and not state:areAllied(slot, other) then
 					Diplomacy.request(state, slot, other)
 					return
 				end
@@ -453,6 +477,9 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
 	for ally in allies do
+		if not state:areAllied(slot, ally) then
+			continue
+		end
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
 		local protectedByCoalition = threatened and ally ~= leader
@@ -476,7 +503,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	if rng:NextNumber() < 0.3 then
 		local contacts = neighborFactions(state, slot)
 		for other in contacts do
-			if other ~= NEUTRAL and not allies[other] and not (threatened and other == leader) then
+			if other ~= NEUTRAL and not state:areAllied(slot, other) and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
 					Diplomacy.request(state, slot, other)
 					return
@@ -518,7 +545,15 @@ local function decideChat(state: GameState, ps: GameState.PlayerState, rng: Rand
 	end
 	if worst then
 		local allies = state.alliances[slot]
-		local hasAlly = allies ~= nil and next(allies) ~= nil
+		local hasAlly = false
+		if allies then
+			for other in allies do
+				if state:areAllied(slot, other) then
+					hasAlly = true
+					break
+				end
+			end
+		end
 		-- Avec des allies on demande du renfort, seul on designe la menace a
 		-- toute la carte : dans les deux cas on cherche a ne pas mourir seul.
 		if hasAlly then
@@ -605,6 +640,38 @@ local function decideNavy(state: GameState, ps: GameState.PlayerState, rng: Rand
 			return
 		end
 	end
+end
+
+-- N62 : score d'emprise dans le rayon, via buildingsBySlot (plus le hash).
+local function blastValue(state: GameState, slot: number, tile: number, blast2: number): number
+	local x, y = MapGen.fromIndex(tile)
+	local value = 0
+	if state.buildingsBySlot then
+		local set = state.buildingsBySlot[slot]
+		if set then
+			for other in set do
+				local building = state.buildings[other]
+				if building then
+					local bx, by = MapGen.fromIndex(other)
+					local dx, dy = bx - x, by - y
+					if dx * dx + dy * dy <= blast2 then
+						value += building.level
+					end
+				end
+			end
+		end
+		return value
+	end
+	for other, building in state.buildings do
+		if building.slot == slot then
+			local bx, by = MapGen.fromIndex(other)
+			local dx, dy = bx - x, by - y
+			if dx * dx + dy * dy <= blast2 then
+				value += building.level
+			end
+		end
+	end
+	return value
 end
 
 local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Random)
@@ -720,17 +787,7 @@ local function decideNuke(state: GameState, ps: GameState.PlayerState, rng: Rand
 			continue
 		end
 
-		local x, y = MapGen.fromIndex(index)
-		local value = 0
-		for other, building in state.buildings do
-			if building.slot == bestSlot then
-				local bx, by = MapGen.fromIndex(other)
-				local dx, dy = bx - x, by - y
-				if dx * dx + dy * dy <= blast2 then
-					value += building.level
-				end
-			end
-		end
+		local value = blastValue(state, bestSlot, index, blast2)
 
 		if value > bestValue then
 			bestValue = value
@@ -856,5 +913,9 @@ function Bots.step(state: GameState, rng: Random)
 		decideNuke(state, ps, rng)
 	end
 end
+
+-- Banc N62 : selection / score sans passer par le rng de decide*.
+Bots.lowestUpgradable = lowestUpgradable
+Bots.blastValue = blastValue
 
 return Bots
