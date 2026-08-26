@@ -81,6 +81,14 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Leftover V82 (Effects conquestPulse).
 	self.wakeRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
+	-- V113 : free-list Blast PAR overlay (pas global). Recette feel N165
+	-- inline — ne PAS merger 6512. Leftover Parent = nil, pas Destroy.
+	-- PointLight enfant FindFirstChildWhichIsA. BlastSmoke / Shockwave
+	-- Destroy conserves (leftover V114 / V115). Distinct de V112
+	-- (Ground/Border par chunk, WorldRenderer). Distinct de V81
+	-- (Shockwave wakeRot). Pas reentrant.
+	self.blastFree = {} :: { Part }
+
 	return self
 end
 
@@ -1001,15 +1009,30 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	local ground = WorldSpace.tileToWorld(x, y)
 	local worldRadius = radius * Config.TILE_SIZE
 
-	local sphere = Instance.new("Part")
+	-- V113 : recycler Blast. Size (4,4,4) + Transparency 0.15 + Color +
+	-- CFrame AVANT Tween (un leftover Size = rayon de la frappe
+	-- precedente). Recette feel N165 inline — ne PAS merger 6512.
+	-- Name Blast conserve. Pas de pool partage avec Shockwave / fumee.
+	-- Ne pas nil les slots du pool (pop O(1) : [n] = nil). Distinct de
+	-- V112 (Ground/Border, WorldRenderer). Distinct de V81 (Shockwave
+	-- wakeRot, Destroy conserve). Flame Size (V111) inchangee.
+	local free = self.blastFree
+	local n = #free
+	local sphere = if n > 0 then free[n] else nil
+	if sphere then
+		free[n] = nil
+	else
+		sphere = Instance.new("Part")
+		sphere.Name = "Blast"
+		sphere.Shape = Enum.PartType.Ball
+		sphere.Anchored = true
+		sphere.CanCollide = false
+		sphere.CanTouch = false
+		sphere.CanQuery = false
+		sphere.CastShadow = false
+		sphere.Material = Enum.Material.Neon
+	end
 	sphere.Name = "Blast"
-	sphere.Shape = Enum.PartType.Ball
-	sphere.Anchored = true
-	sphere.CanCollide = false
-	sphere.CanTouch = false
-	sphere.CanQuery = false
-	sphere.CastShadow = false
-	sphere.Material = Enum.Material.Neon
 	sphere.Color = Color3.fromRGB(255, 190, 110)
 	sphere.Transparency = 0.15
 	sphere.Size = Vector3.new(4, 4, 4)
@@ -1025,7 +1048,7 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Recette feel N133 — ne pas merger bfcc. Distinct de V78 (spawn,
 	-- Y + 0.12) / V79 (despawn, Y + 0.14) / V80 (arrivee camion).
 	-- Distinct de Effects conquestPulse (leftover V82). Y = PLAINS + 0.5.
-	-- Sphere Blast / fumee inchangees.
+	-- Sphere Blast recyclee (V113). Fumee inchangee (leftover V114).
 	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * self.wakeRot
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
@@ -1056,15 +1079,23 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		Transparency = 1,
 	}):Play()
 
-	local light = Instance.new("PointLight")
+	-- V113 : PointLight enfant reutilise. FindFirstChildWhichIsA, pas
+	-- Instance.new a chaque frappe. Brightness / Range / Color
+	-- reecrits (leftover Brightness = 0 apres Tween). Recette feel
+	-- N165. BlastSmoke / Shockwave Destroy conserves.
+	local light = sphere:FindFirstChildWhichIsA("PointLight")
+	if not light then
+		light = Instance.new("PointLight")
+		light.Parent = sphere
+	end
 	light.Brightness = 8
 	light.Range = math.min(worldRadius * 2, 60)
 	light.Color = Color3.fromRGB(255, 200, 120)
-	light.Parent = sphere
 	TweenService:Create(light, TweenInfo.new(1.1), { Brightness = 0 }):Play()
 
 	task.delay(1.3, function()
-		sphere:Destroy()
+		sphere.Parent = nil
+		free[#free + 1] = sphere
 	end)
 	task.delay(1, function()
 		if shockwave.Parent then

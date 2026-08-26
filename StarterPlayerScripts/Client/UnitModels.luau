@@ -434,6 +434,7 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- createMissile inchangee. Pas de flamePhase.
 			-- Ne pas inventer un pool Vector3. Distinct de V112
 			-- (recycle Ground/Border, WorldRenderer — autre fichier).
+			-- Distinct de V113 (recycle Blast, Overlay — autre fichier).
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18 + frame.X * 0.1) * 0.45)
 		elseif piece.role == "trail" then
 			-- V100 : phase depuis offset.Z. Plus de offset.Position.Z

@@ -2007,7 +2007,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2378,6 +2378,7 @@ check("navires, missiles et interpolation", function()
 	-- (resterait lockstep). Deux stepInterpolation → Part rawequal,
 	-- Size.X/Y == 0.62, Size.Z ∈ [1.35, 2.25]. Pas de flamePhase.
 	-- Distinct de V112 (recycle Ground/Border, check construction).
+	-- Distinct de V113 (recycle Blast, ci-dessous).
 	local flameN = 0
 	local aFlame
 	for _, piece in overlay.units[3].visual.pieces do
@@ -2520,8 +2521,15 @@ check("navires, missiles et interpolation", function()
 	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree au despawn")
 	overlay:explosion(50, 50, 9)
 	-- V81 : Shockwave reutilise wakeRot. Plus de CFrame.Angles explosion.
-	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast / fumee inchangees.
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil).
+	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast recyclee (V113).
+	-- Fumee inchangee (leftover V114). V82 conquestPulse (check vagues).
+	-- V83 SelectionRing (check calques). V92 addWake (check navires).
+	-- V93 Bow (check navires). V94 LandingRamp (check navires).
+	-- V95 MissileBody (check navires). V96 Fin (check navires).
+	-- V98 CityWindows rest.X (check modeles). V99 beacons rest.Z
+	-- (check modeles). V100 trail offset.Z (check navires). V101
+	-- dirtyHead (check construction). V102 compact prefix (check
+	-- construction). V103 feedEntries (check fil).
 	local shockFound = false
 	local aShock
 	for _, node in overlay.root:GetChildren() do
@@ -2537,6 +2545,55 @@ check("navires, missiles et interpolation", function()
 		"shock Y"
 	)
 	assert(rawequal(overlay.wakeRot, bakedWake), "wakeRot recree a l'explosion")
+	-- V113 : Blast free-list blastFree. Recette feel N165 inline —
+	-- ne PAS merger 6512. Name Blast. PointLight enfant
+	-- FindFirstChildWhichIsA. Size (4,4,4) + Transparency 0.15 + Color
+	-- + CFrame avant Tween. Pas Destroy. testFlushDelays parque
+	-- (Parent = nil) ; 2e explosion recycle. BlastSmoke / Shockwave
+	-- Destroy conserves (leftover V114 / V115). Distinct de V112
+	-- (Ground/Border, check construction). Distinct de V81 (wakeRot).
+	-- Distinct de V111 (flame Size). Leftover V101/V102 restent verts.
+	local firstBlast
+	local firstLight
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "Blast" then
+			firstBlast = node
+			firstLight = node:FindFirstChildWhichIsA("PointLight")
+			break
+		end
+	end
+	assert(firstBlast ~= nil, "pas de Blast a l'explosion")
+	assert(firstBlast.CFrame ~= nil, "Blast sans CFrame")
+	assert(math.abs(firstBlast.CFrame.Y - 14) < 1e-6, "Blast Y")
+	assert(firstLight ~= nil, "Blast sans PointLight")
+	assert(type(overlay.blastFree) == "table", "blastFree absent")
+	assert(#overlay.blastFree == 0, "blastFree pre-park non vide")
+	testFlushDelays()
+	assert(firstBlast.Parent == nil, "Blast encore parent apres delay")
+	assert(#overlay.blastFree == 1, "blastFree non parque")
+	assert(rawequal(overlay.blastFree[1], firstBlast), "blastFree autre Part")
+	overlay:explosion(60, 60, 9)
+	local recycled
+	local shockAfter
+	local smokeN = 0
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "Blast" then
+			recycled = node
+		elseif node.Name == "Shockwave" then
+			shockAfter = node
+		elseif node.Name == "BlastSmoke" then
+			smokeN += 1
+		end
+	end
+	assert(rawequal(recycled, firstBlast), "Blast non recycle")
+	assert(firstBlast.Parent == overlay.root, "Blast recycle hors root")
+	assert(math.abs(firstBlast.CFrame.Y - 14) < 1e-6, "Blast Y recycle")
+	assert(rawequal(firstBlast:FindFirstChildWhichIsA("PointLight"), firstLight), "PointLight recree")
+	assert(#overlay.blastFree == 0, "blastFree non pop")
+	assert(overlay.blastFree[1] == nil, "blastFree leftover slot")
+	assert(shockAfter ~= nil, "Shockwave absent 2e explosion")
+	assert(not rawequal(shockAfter, aShock), "Shockwave recycle par erreur")
+	assert(smokeN == 5, "BlastSmoke count 2e explosion")
 end)
 
 check("vagues de conquete", function()
