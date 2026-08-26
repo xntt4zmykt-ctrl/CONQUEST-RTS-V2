@@ -54,7 +54,72 @@ export type Context = {
 	broadcastRoster: (() -> ())?,
 }
 
+-- N87 : Context 14 champs recycle (leftover N82). Un record, pas une map
+-- par slot. args en argument — ne pas require GameState (cycle). Closures
+-- slotOf / reply / refuse / broadcastRoster / now = references copiees,
+-- jamais recrees ici. Payload Intent reste live (N82 — ne pas pooler).
+-- Args nil / vides = champs a nil. Distinct de intentPool (N82).
+local contextBuf: any = {
+	state = nil,
+	matchPhase = nil,
+	matchId = nil,
+	slotOf = nil,
+	doctrineLockAt = nil,
+	now = nil,
+	buildings = nil,
+	navy = nil,
+	nukes = nil,
+	diplomacy = nil,
+	research = nil,
+	reply = nil,
+	refuse = nil,
+	broadcastRoster = nil,
+}
+
+local function resetContext(rec: any)
+	rec.state = nil
+	rec.matchPhase = nil
+	rec.matchId = nil
+	rec.slotOf = nil
+	rec.doctrineLockAt = nil
+	rec.now = nil
+	rec.buildings = nil
+	rec.navy = nil
+	rec.nukes = nil
+	rec.diplomacy = nil
+	rec.research = nil
+	rec.reply = nil
+	rec.refuse = nil
+	rec.broadcastRoster = nil
+end
+
+function IntentValidator.fillContext(args: any, buf: any?): any
+	local rec = buf or contextBuf
+	if args == nil or next(args) == nil then
+		resetContext(rec)
+		return rec
+	end
+	rec.state = args.state
+	rec.matchPhase = args.matchPhase
+	rec.matchId = args.matchId
+	rec.slotOf = args.slotOf
+	rec.doctrineLockAt = args.doctrineLockAt
+	rec.now = args.now
+	rec.buildings = args.buildings
+	rec.navy = args.navy
+	rec.nukes = args.nukes
+	rec.diplomacy = args.diplomacy
+	rec.research = args.research
+	rec.reply = args.reply
+	rec.refuse = args.refuse
+	rec.broadcastRoster = args.broadcastRoster
+	return rec
+end
+
 local queue: { Intent } = {}
+-- N82 contrat B : pool parallele. flush nil queue[i] (#queue == 0) sans
+-- detruire les records. enqueue reecrit intentPool[n] si present.
+local intentPool: { Intent } = {}
 local lastSequence: { [number]: number } = {} -- userId -> last accepted seq
 local windowStart: { [number]: number } = {}
 local windowCount: { [number]: number } = {}
@@ -72,6 +137,19 @@ local ACTION_ORDER = {
 	Research = 9,
 	Diplomacy = 10,
 	QuickChat = 11,
+}
+
+local DIPLOMACY_ACTIONS = {
+	request = true,
+	accept = true,
+	decline = true,
+	["break"] = true,
+	extend = true,
+	donateGold = true,
+	donateTroops = true,
+	embargo = true,
+	unembargo = true,
+	markTarget = true,
 }
 
 local function bumpRefuse(reason: string)
@@ -102,7 +180,10 @@ function IntentValidator.clearPlayer(userId: number)
 end
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value == math.floor(value)
+		and math.abs(value) ~= math.huge
 end
 
 local function checkRate(userId: number, now: number): boolean
@@ -154,7 +235,12 @@ function IntentValidator.enqueue(
 		return false, "UnknownAction"
 	end
 
-	-- Doctrine / ratio restent valides hors combat ; le reste exige la phase playing.
+	-- Partie terminee : plus aucun ordre. Doctrine / ratio restent valides
+	-- en lobby (waiting), pas une fois le match clos.
+	if ctx.matchPhase == "ended" then
+		bumpRefuse("NotPlaying")
+		return false, "NotPlaying"
+	end
 	if ctx.matchPhase ~= "playing" and actionType ~= "ChooseDoctrine" and actionType ~= "SetAttackRatio" then
 		bumpRefuse("NotPlaying")
 		return false, "NotPlaying"
@@ -174,6 +260,18 @@ function IntentValidator.enqueue(
 	end
 
 	if not checkRate(userId, now) then
+		bumpRefuse("RateLimited")
+		return false, "RateLimited"
+	end
+
+	local maxPending = Config.MAX_PENDING_INTENTS or 32
+	local pending = 0
+	for _, intent in queue do
+		if intent.userId == userId then
+			pending += 1
+		end
+	end
+	if pending >= maxPending then
 		bumpRefuse("RateLimited")
 		return false, "RateLimited"
 	end
@@ -213,7 +311,7 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
-		if not isInteger(kind) then
+		if not isInteger(kind) or Config.NUKE_STATS[kind] == nil then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
@@ -222,8 +320,10 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
+		-- Meme bornes que l'apply : un ratio extreme n'occupe pas la file.
+		payload.ratio = math.clamp(payload.ratio, 0.05, 1)
 	elseif actionType == "ChooseDoctrine" then
-		if not isInteger(payload.doctrineId) then
+		if not Doctrines.isValid(payload.doctrineId) then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
@@ -232,14 +332,31 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
+		if not DIPLOMACY_ACTIONS[payload.action] then
+			bumpRefuse("UnknownAction")
+			return false, "UnknownAction"
+		end
 		if payload.targetSlot < 1 or payload.targetSlot > Config.MAX_TOTAL_FACTIONS then
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
+		if payload.targetSlot == slot then
+			bumpRefuse("InvalidTarget")
+			return false, "InvalidTarget"
+		end
 	elseif actionType == "QuickChat" then
-		if typeof(payload.messageId) ~= "string" or not QuickChat.get(payload.messageId) then
+		local entry = if typeof(payload.messageId) == "string" then QuickChat.get(payload.messageId) else nil
+		if not entry then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
+		end
+		-- Un needsTarget sans 3e arg lisait un sequence (ex. 99) comme slot.
+		if entry.needsTarget then
+			local targetSlot = payload.targetSlot
+			if not isInteger(targetSlot) or targetSlot < 1 or targetSlot > Config.MAX_TOTAL_FACTIONS then
+				bumpRefuse("InvalidTarget")
+				return false, "InvalidTarget"
+			end
 		end
 	end
 
@@ -247,14 +364,29 @@ function IntentValidator.enqueue(
 		lastSequence[userId] = sequence
 	end
 
-	table.insert(queue, {
-		player = player,
-		userId = userId,
-		slot = slot,
-		sequence = sequence or 0,
-		actionType = actionType,
-		payload = payload,
-	})
+	-- N82 : reecrit un record recycle. payload = reference live (possession
+	-- RemoteEvent — ne pas la pooler). Truncate leftover = flush, pas ici.
+	local n = #queue + 1
+	local rec = intentPool[n]
+	if rec == nil then
+		rec = {
+			player = player,
+			userId = userId,
+			slot = slot,
+			sequence = sequence or 0,
+			actionType = actionType,
+			payload = payload,
+		}
+		intentPool[n] = rec
+	else
+		rec.player = player
+		rec.userId = userId
+		rec.slot = slot
+		rec.sequence = sequence or 0
+		rec.actionType = actionType
+		rec.payload = payload
+	end
+	queue[n] = rec
 	return true, nil
 end
 
@@ -274,7 +406,6 @@ local function applyOne(ctx: Context, intent: Intent)
 			if ps.awaitingSpawn then
 				local claimed = state:claimSpawn(slot, index)
 				if claimed then
-					ps.justClaimed = true
 					ok, message = true, "Territoire revendique."
 				else
 					ok, message = false, "Spawn invalide."
@@ -362,17 +493,21 @@ local function applyOne(ctx: Context, intent: Intent)
 			elseif not state.players[targetSlot] then
 				ok, message = false, "Cette faction n'existe plus."
 			else
-				ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
-				ok = true
+				ok = ctx.diplomacy.sendQuickChat(state, slot, payload.messageId, targetSlot)
+				if not ok then
+					message = "Message trop frequent."
+				end
 			end
 		else
-			ctx.diplomacy.sendQuickChat(
+			ok = ctx.diplomacy.sendQuickChat(
 				state,
 				slot,
 				payload.messageId,
 				if isInteger(payload.targetSlot) then payload.targetSlot else nil
 			)
-			ok = true
+			if not ok then
+				message = "Message trop frequent."
+			end
 		end
 	end
 
@@ -394,14 +529,12 @@ end
 	A appeler en tete de tick, avant bots et systemes.
 ]]
 function IntentValidator.flush(ctx: Context): number
-	if #queue == 0 then
+	local n = #queue
+	if n == 0 then
 		return 0
 	end
 
-	local batch = queue
-	queue = {}
-
-	table.sort(batch, function(a, b)
+	table.sort(queue, function(a, b)
 		if a.userId ~= b.userId then
 			return a.userId < b.userId
 		end
@@ -412,16 +545,20 @@ function IntentValidator.flush(ctx: Context): number
 	end)
 
 	local applied = 0
-	for _, intent in batch do
+	for i = 1, n do
+		local intent = queue[i]
 		-- Revalider presence : elimination entre enqueue et flush.
 		if not ctx.state.players[intent.slot] then
 			bumpRefuse("Eliminated")
 			ctx.refuse(intent.player, "Eliminated", "Faction eliminee.")
 			continue
 		end
-		if ctx.matchPhase ~= "playing"
-			and intent.actionType ~= "ChooseDoctrine"
-			and intent.actionType ~= "SetAttackRatio"
+		if ctx.matchPhase == "ended"
+			or (
+				ctx.matchPhase ~= "playing"
+				and intent.actionType ~= "ChooseDoctrine"
+				and intent.actionType ~= "SetAttackRatio"
+			)
 		then
 			bumpRefuse("NotPlaying")
 			ctx.refuse(intent.player, "NotPlaying", nil)
@@ -430,11 +567,23 @@ function IntentValidator.flush(ctx: Context): number
 		applyOne(ctx, intent)
 		applied += 1
 	end
+
+	-- N82 contrat B : #queue == 0, records conserves dans intentPool.
+	-- Un Intent fantome ici = double apply (le banc sequence / pending le voit).
+	for i = 1, n do
+		queue[i] = nil
+	end
 	return applied
 end
 
 function IntentValidator.pendingCount(): number
 	return #queue
 end
+
+-- Banc N82 : rawequal record [1], #queue == 0 apres flush. Pas replique.
+IntentValidator.queue = queue
+IntentValidator.intentPool = intentPool
+-- Banc N87 : rawequal Context. Pas replique.
+IntentValidator.contextBuf = contextBuf
 
 return IntentValidator

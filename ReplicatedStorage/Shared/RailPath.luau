@@ -67,6 +67,17 @@ local HEURISTIC_WEIGHT = 2
 ]]
 local MAX_EXPANDED = 24000
 
+-- N101 : Heap + hashes module (leftover N99). Heap.clear / table.clear
+-- avant chaque recherche — pas Heap.new() ni `= {}`. Le tableau
+-- retourne reste unique (N64 path) : Overlay construit des Parts
+-- dessus, un alias ferait sauter la voie. Distinct de N65
+-- (stationBuf serveur, le client retrace). Distinct de N99 (Heap
+-- Attack pendant la vie).
+local searchHeap = Heap.new()
+local cameFrom: { [number]: number } = {}
+local bestCost: { [number]: number } = {}
+local arrivedBy: { [number]: number } = {}
+
 --=============================================================================
 -- Recherche
 --=============================================================================
@@ -129,19 +140,21 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 
 	local goalX, goalY = MapGen.fromIndex(to)
 
-	local cameFrom: { [number]: number } = {}
-	local bestCost: { [number]: number } = { [from] = 0 }
+	-- Leftover cameFrom / bestCost = trace fantome (banc voies / N101).
+	table.clear(cameFrom)
+	table.clear(bestCost)
+	table.clear(arrivedBy)
+	bestCost[from] = 0
 	-- Delta d'indice par lequel on est arrive sur une case : sert a savoir si
 	-- le pas suivant est un virage.
-	local arrivedBy: { [number]: number } = {}
 
-	local heap = Heap.new()
-	Heap.push(heap, from, 0)
+	Heap.clear(searchHeap)
+	Heap.push(searchHeap, from, 0)
 
 	local expanded = 0
 
-	while not Heap.isEmpty(heap) do
-		local current = Heap.pop(heap)
+	while not Heap.isEmpty(searchHeap) do
+		local current = Heap.pop(searchHeap)
 		if not current then
 			break
 		end
@@ -190,7 +203,7 @@ function RailPath.find(terrain: buffer, from: number, to: number): { number }?
 				arrivedBy[neighbor] = delta
 
 				local remaining = math.abs(nx - goalX) + math.abs(ny - goalY)
-				Heap.push(heap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
+				Heap.push(searchHeap, neighbor, tentative + HEURISTIC_WEIGHT * remaining)
 			end
 		end
 	end
@@ -282,5 +295,7 @@ end
 
 RailPath.TURN_PENALTY = TURN_PENALTY
 RailPath.WATER_PENALTY = WATER_PENALTY
+-- Banc N101 : rawequal Heap module. Pas replique.
+RailPath.searchHeap = searchHeap
 
 return RailPath

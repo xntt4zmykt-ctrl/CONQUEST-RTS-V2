@@ -91,8 +91,13 @@ function AimFront.focus(state, atk, aimTile: number)
 		return
 	end
 
-	atk.frontier = Heap.new()
-	atk.queued = {}
+	-- N99 : recycle in-place (leftover N98). acquireAttack pose un Heap
+	-- neuf par vie d'Attack ; focus ne le jette plus. Un leftover
+	-- queued[index]=true d'une visee precedente = tuile fantome au debit
+	-- captures < 80. Ne pas Heap.new ici (alias interdit entre vies,
+	-- recycle pendant la vie).
+	Heap.clear(atk.frontier)
+	table.clear(atk.queued)
 
 	-- OF sourceTile : addNeighbors(source) seulement.
 	-- Si le clic est déjà une case cible au contact, c'est la source.

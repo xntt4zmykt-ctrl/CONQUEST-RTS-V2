@@ -347,7 +347,7 @@ end
 --[[
 	Metadonnees envoyees dans MapInit pour verifier le contrat client/serveur.
 ]]
-function MapGen.mapMeta(seed: number, terrain: buffer): {
+export type MapMeta = {
 	mapId: string,
 	mapVersion: number,
 	seed: number,
@@ -356,15 +356,35 @@ function MapGen.mapMeta(seed: number, terrain: buffer): {
 	width: number,
 	height: number,
 }
-	return {
-		mapId = Config.MAP_ID,
-		mapVersion = Config.MAP_VERSION,
-		seed = seed,
-		generatorVersion = Config.GENERATOR_VERSION,
-		terrainHash = MapGen.terrainHash(terrain),
-		width = W,
-		height = H,
-	}
+
+-- N91 : un record recycle (leftover N90). startMatch + late join ecrasent
+-- les 7 champs. Un leftover seed / terrainHash = client qui refuse la
+-- carte (contrat hash N4). table.clear interdit (ce n'est pas un hash).
+-- Pas de require GameState (cycle Shared). Distinct de profileBuf (N90)
+-- et de matchUpdateBuf (N86).
+local metaBuf: MapMeta = {
+	mapId = "",
+	mapVersion = 0,
+	seed = 0,
+	generatorVersion = 0,
+	terrainHash = 0,
+	width = 0,
+	height = 0,
+}
+
+function MapGen.mapMeta(seed: number, terrain: buffer): MapMeta
+	local rec = metaBuf
+	rec.mapId = Config.MAP_ID
+	rec.mapVersion = Config.MAP_VERSION
+	rec.seed = seed
+	rec.generatorVersion = Config.GENERATOR_VERSION
+	rec.terrainHash = MapGen.terrainHash(terrain)
+	rec.width = W
+	rec.height = H
+	return rec
 end
+
+-- Banc N91 : rawequal record. Pas replique.
+MapGen.metaBuf = metaBuf
 
 return MapGen
