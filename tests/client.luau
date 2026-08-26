@@ -1755,7 +1755,7 @@ check("menu radial : pages, contexte et sorties", function()
 	-- PlacementPreview N186. Skip WorldRenderer N185. Skip Overlay.
 	-- Skip init.client (radial unique, destroy absent). Recette
 	-- leftover N187, pas merger visual. Distinct leftover N152 flame.
-	-- Distinct leftover N189 VisualDirector effect().
+	-- Distinct leftover N189 (check direction visuelle).
 	local menu = RadialMenu.new(screenGui)
 	assert(not menu:isOpen(), "le menu est ouvert avant qu'on le demande")
 
@@ -1853,6 +1853,82 @@ check("menu radial : pages, contexte et sorties", function()
 	assert(not menu:isOpen(), "cliquer a cote ne ferme pas le menu")
 
 	menu:destroy()
+end)
+
+--[[
+	Direction visuelle (Lighting + Terrain).
+
+	Rojo / Play Solo laisse parfois un enfant Lighting homonyme de
+	mauvaise classe. Destroy tuait l'instance ; le pool N189 la
+	parque. Un mismatch Frame sur ConquestBloom ne doit pas detruire
+	le Bloom, et apply() deux fois doit renvoyer la meme Atmosphere.
+]]
+check("direction visuelle : reuse et mismatch", function()
+	-- N189 : effect() park mismatch, pas Destroy. apply() × 2
+	-- rawequal Atmosphere. Frame ConquestBloom → Parent nil + Bloom
+	-- existe. Take BloomEffect d'un leftover parke. Clouds Part
+	-- leftover → Parent nil + Clouds. Skip RadialMenu N188 (garder
+	-- menu:destroy() existant, pas second new()). Skip Minimap N187.
+	-- Skip Overlay. Skip init.client (apply unique, ScreenGui =
+	-- leftover N190). Distinct leftover N152 flame. Recette leftover
+	-- N188, pas merger visual.
+	local VisualDirector = __require("VisualDirector")
+	local Lighting = game:GetService("Lighting")
+	local Workspace = game:GetService("Workspace")
+
+	VisualDirector.apply()
+	local atmo = Lighting:FindFirstChild("ConquestAtmosphere")
+	assert(atmo ~= nil and atmo.ClassName == "Atmosphere", "Atmosphere absente")
+	VisualDirector.apply()
+	assert(rawequal(Lighting:FindFirstChild("ConquestAtmosphere"), atmo), "Atmosphere recreee")
+
+	local bloom = Lighting:FindFirstChild("ConquestBloom")
+	assert(bloom ~= nil, "Bloom absent avant mismatch")
+	bloom.Parent = nil
+	local fakeBloom = Instance.new("Frame")
+	fakeBloom.Name = "ConquestBloom"
+	fakeBloom.Parent = Lighting
+	VisualDirector.apply()
+	assert(fakeBloom.Parent == nil, "Frame mismatch pas parkee")
+	local bloomAfter = Lighting:FindFirstChild("ConquestBloom")
+	assert(bloomAfter ~= nil and bloomAfter.ClassName == "BloomEffect", "Bloom absent apres mismatch")
+
+	-- Take : BloomEffect leftover sur le nom Atmosphere, puis Frame
+	-- sur Bloom. Oubli de take = Instance.new a chaque mismatch.
+	local liveAtmo = Lighting:FindFirstChild("ConquestAtmosphere")
+	assert(liveAtmo, "Atmosphere absente avant take")
+	liveAtmo.Parent = nil
+	local leftoverBloom = Instance.new("BloomEffect")
+	leftoverBloom.Name = "ConquestAtmosphere"
+	leftoverBloom.Parent = Lighting
+	VisualDirector.apply()
+	assert(leftoverBloom.Parent == nil, "BloomEffect leftover pas parke")
+	assert(
+		Lighting:FindFirstChild("ConquestAtmosphere") ~= nil
+			and Lighting:FindFirstChild("ConquestAtmosphere").ClassName == "Atmosphere",
+		"Atmosphere absente apres leftover Bloom"
+	)
+	local currentBloom = Lighting:FindFirstChild("ConquestBloom")
+	assert(currentBloom, "Bloom absent avant take")
+	currentBloom.Parent = nil
+	local fakeTake = Instance.new("Frame")
+	fakeTake.Name = "ConquestBloom"
+	fakeTake.Parent = Lighting
+	VisualDirector.apply()
+	assert(fakeTake.Parent == nil, "Frame take mismatch pas parkee")
+	assert(rawequal(Lighting:FindFirstChild("ConquestBloom"), leftoverBloom), "BloomEffect pool non pris")
+
+	local terrain = Instance.new("Terrain")
+	terrain.Parent = Workspace
+	local fakeCloud = Instance.new("Part")
+	fakeCloud.Name = "ConquestClouds"
+	fakeCloud.Parent = terrain
+	VisualDirector.apply()
+	assert(fakeCloud.Parent == nil, "Part Clouds mismatch pas parkee")
+	local clouds = terrain:FindFirstChild("ConquestClouds")
+	assert(clouds ~= nil and clouds:IsA("Clouds"), "Clouds absent apres mismatch")
+	VisualDirector.apply()
+	assert(rawequal(terrain:FindFirstChild("ConquestClouds"), clouds), "Clouds recrees")
 end)
 
 --[[

@@ -334,6 +334,17 @@ InstanceMT.methods = {
 		return nil
 	end,
 
+	-- N189 : VisualDirector.apply Terrain. Distinct de WhichIsA
+	-- (heritage). WorldCamera Humanoid aussi. Pas Destroy.
+	FindFirstChildOfClass = function(self, className)
+		for _, child in rawget(self, "_children") do
+			if rawget(child, "ClassName") == className then
+				return child
+			end
+		end
+		return nil
+	end,
+
 	IsA = function(self, className)
 		local own = rawget(self, "ClassName")
 		if own == className then
