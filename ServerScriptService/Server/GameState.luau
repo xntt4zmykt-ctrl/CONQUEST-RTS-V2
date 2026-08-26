@@ -88,6 +88,12 @@ export type Attack = {
 	queued: { [number]: true },
 	-- Tick a partir duquel le front se degage, si la retraite a ete ordonnee.
 	retreatAt: number?,
+	-- Ancre de visee (AimFront) ou tuile debarquee (BoatFront). Nil = front terre non vise.
+	sourceTile: number?,
+	aimX: number?,
+	aimY: number?,
+	-- True seulement pour une tete de pont navale : ne se fusionne jamais avec un front terre.
+	isBeachhead: boolean?,
 }
 
 export type Boat = {
