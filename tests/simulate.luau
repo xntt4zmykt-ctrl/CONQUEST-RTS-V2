@@ -6110,6 +6110,84 @@ do
 end
 
 do
+	-- N70 : removePlayer recycle destroyBuf. Slot sans batiment → pas
+	-- d'erreur, buildingsBySlot nil. Deux joueurs : A a une CITY,
+	-- removePlayer(A), CITY de B a un autre index survit (leftover).
+	-- Slot deja absent → return. Recette feel 2b37 N89.
+	local state = GameState.new(1094)
+	local a = state:addPlayer(nil, "DestroyA", Random.new(94), 0)
+	local b = state:addPlayer(nil, "DestroyB", Random.new(95), 0)
+	if not a or not b then
+		fail("destroyBuf — spawn impossible")
+	else
+		local siteA: number? = nil
+		local siteB: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if
+				buffer.readu8(state.owner, index) == a.slot
+				and not state.buildings[index]
+				and state:isLand(index)
+			then
+				siteA = index
+				break
+			end
+		end
+		for index = 0, Config.TILE_COUNT - 1 do
+			if
+				buffer.readu8(state.owner, index) == b.slot
+				and not state.buildings[index]
+				and state:isLand(index)
+			then
+				siteB = index
+				break
+			end
+		end
+		if not siteA or not siteB or siteA == siteB then
+			fail("destroyBuf — tuiles CITY introuvables")
+		else
+			state:placeBuilding(siteA, Config.BUILDING.CITY, a.slot)
+			state:placeBuilding(siteB, Config.BUILDING.CITY, b.slot)
+			local gone = a.slot
+			state:removePlayer(gone)
+			if state.buildings[siteB] == nil then
+				fail("destroyBuf — leftover a detruit la CITY de B")
+			elseif state.buildings[siteB].slot ~= b.slot then
+				fail("destroyBuf — CITY de B change de camp")
+			elseif next(state.buildingsBySlot[gone] or {}) ~= nil then
+				fail("destroyBuf — buildingsBySlot[A] encore pose")
+			else
+				print("destroyBuf : A parti, CITY de B survit (N70)")
+				state:removePlayer(gone)
+				if state.buildings[siteB] == nil then
+					fail("destroyBuf — second removePlayer a detruit B")
+				else
+					print("destroyBuf : slot absent inerte (N70)")
+					local empty = GameState.new(1095)
+					local vacant = empty:addPlayer(nil, "DestroyV", Random.new(96), 0)
+					if not vacant then
+						fail("destroyBuf — spawn vacant impossible")
+					else
+						local cap = vacant.capitalTile
+						if cap then
+							empty:destroyBuilding(cap)
+						end
+						local vacantSlot = vacant.slot
+						empty:removePlayer(vacantSlot)
+						if next(empty.buildingsBySlot[vacantSlot] or {}) ~= nil then
+							fail("destroyBuf — slot sans batiment laisse l'index")
+						elseif #GameState.destroyBuf ~= 0 then
+							fail(`destroyBuf — leftover vacant (#{#GameState.destroyBuf})`)
+						else
+							print("destroyBuf : slot sans batiment, leftover 0 (N70)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	-- N49 : samsOf recycle samBuf (recette feel N68). Truncate entre
 	-- appels. Index present + set nil = zero SAM, meme si le hash
 	-- buildings contient un SAM orphelin (pas de fallback).
@@ -6723,6 +6801,73 @@ do
 						else
 							print("contextFor : rawequal, slot 99, resolve CITY, ownerAt lit B (N66)")
 						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N71 : validTiles recycle emptyTileBuf / candBuf. Tuile etrangere
+	-- → # == 0, rawequal second early-out. Deux resolve CITY successifs
+	-- → tile identique (pas de leftover). Hors carte / CAPITAL → # == 0.
+	-- Recette feel 2b37 N90. Ne pas editer PlacementPreview.
+	local state = GameState.new(1096)
+	local a = state:addPlayer(nil, "PlaceA", Random.new(41), 0)
+	local b = state:addPlayer(nil, "PlaceB", Random.new(42), 0)
+	if not a or not b then
+		fail("validTiles — spawn impossible")
+	else
+		local ctxA = Buildings.contextFor(state, a.slot)
+		local ctxB = Buildings.contextFor(state, b.slot)
+		local tileB: number? = nil
+		local tileA: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == b.slot and state:isLand(index) then
+				tileB = index
+				break
+			end
+		end
+		for index = 0, Config.TILE_COUNT - 1 do
+			if
+				buffer.readu8(state.owner, index) == a.slot
+				and not state.buildings[index]
+				and state:isLand(index)
+			then
+				tileA = index
+				break
+			end
+		end
+		if not ctxA or not ctxB or not tileB or not tileA then
+			fail("validTiles — ctx / tuiles absents")
+		else
+			-- Reconstruire ctxA : contextFor n'est pas reentrant (N66).
+			ctxA = Buildings.contextFor(state, a.slot)
+			local foreign = Placement.validTiles(ctxA :: any, tileB, Config.BUILDING.CITY)
+			local foreignAgain = Placement.validTiles(ctxA :: any, tileB, Config.BUILDING.CITY)
+			if #foreign ~= 0 then
+				fail(`validTiles — tuile etrangere non vide (#{#foreign})`)
+			elseif not rawequal(foreign, foreignAgain) then
+				fail("validTiles — emptyTileBuf rawequal")
+			else
+				local oob = Placement.validTiles(ctxA :: any, Config.TILE_COUNT, Config.BUILDING.CITY)
+				local cap = Placement.validTiles(ctxA :: any, tileA, Config.BUILDING.CAPITAL)
+				if #oob ~= 0 or not rawequal(oob, foreign) then
+					fail("validTiles — hors carte")
+				elseif #cap ~= 0 or not rawequal(cap, foreign) then
+					fail("validTiles — CAPITAL buildable")
+				else
+					print("validTiles : emptyTileBuf rawequal, etranger/hors carte/CAPITAL (N71)")
+					a.gold = 100000
+					local first, reason1 = Buildings.resolve(state, a.slot, tileA, Config.BUILDING.CITY)
+					local second, reason2 = Buildings.resolve(state, a.slot, tileA, Config.BUILDING.CITY)
+					if not first or not second then
+						fail(`validTiles — resolve CITY refuse ({reason1}/{reason2})`)
+					elseif first.tile ~= second.tile then
+						fail(`validTiles — leftover tiles[1] ({first.tile} vs {second.tile})`)
+					else
+						print("validTiles : deux resolve CITY, tile identique (N71)")
 					end
 				end
 			end
