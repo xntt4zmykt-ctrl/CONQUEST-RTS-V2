@@ -115,7 +115,10 @@ function IntentValidator.clearPlayer(userId: number)
 end
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value == math.floor(value)
+		and math.abs(value) ~= math.huge
 end
 
 local applyOne: (Context, Intent) -> ()
@@ -269,6 +272,10 @@ function IntentValidator.enqueue(
 			return false, "UnknownAction"
 		end
 		if payload.targetSlot < 1 or payload.targetSlot > Config.MAX_TOTAL_FACTIONS then
+			bumpRefuse("InvalidTarget")
+			return false, "InvalidTarget"
+		end
+		if payload.targetSlot == slot then
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end

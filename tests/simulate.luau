@@ -2459,6 +2459,28 @@ do
 				fail("intentions — QuickChat 3-args n'a pas marque")
 			end
 			print("intentions : QuickChat 2-args refuse, 3-args marque")
+
+			-- Diplomatie vers soi : refuse a l'enqueue (pas un apply metier).
+			IntentValidator.reset()
+			table.clear(refuses)
+			local okSelf, reasonSelf = IntentValidator.enqueue(
+				ctx,
+				fakePlayer,
+				"Diplomacy",
+				1,
+				{ action = "request", targetSlot = ps.slot }
+			)
+			if okSelf or reasonSelf ~= "InvalidTarget" then
+				fail(`intentions — diplomatie self acceptee ({tostring(reasonSelf)})`)
+			end
+
+			-- Sequence inf : isInteger doit exclure math.huge.
+			local okInf, reasonInf =
+				IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", math.huge, { ratio = 0.5 })
+			if okInf or reasonInf ~= "InvalidSchema" then
+				fail(`intentions — sequence inf acceptee ({tostring(reasonInf)})`)
+			end
+			print("intentions : diplomatie self et sequence inf refusees")
 		end
 	end
 end
@@ -3042,12 +3064,20 @@ do
 		fail("removePlayer GC — spawn impossible")
 	else
 		Diplomacy.request(state, a.slot, b.slot)
+		Diplomacy.setEmbargo(state, a.slot, b.slot, true)
 		local gone = b.slot
+		state.allianceExtensions[a.slot] = { [gone] = true }
 		state:removePlayer(gone)
 		if state.requests[a.slot] and state.requests[a.slot][gone] then
 			fail("removePlayer GC — proposition vers disparu conservee")
 		end
-		print("removePlayer GC : propositions vers disparu nettoyees")
+		if state.embargoes[a.slot] and state.embargoes[a.slot][gone] then
+			fail("removePlayer GC — embargo vers disparu conserve")
+		end
+		if state.allianceExtensions[a.slot] and state.allianceExtensions[a.slot][gone] then
+			fail("removePlayer GC — extension vers disparu conservee")
+		end
+		print("removePlayer GC : propositions / embargos / extensions vers disparu nettoyees")
 	end
 end
 
@@ -3108,6 +3138,98 @@ do
 			else
 				print("beachhead merge : front terre separe, troupes de pont intactes")
 			end
+		end
+	end
+end
+
+do
+	-- areAllied honore l'expiry AVANT Diplomacy.step (Bots/Navy/flush tournent avant).
+	local state = GameState.new(5155)
+	local a = state:addPlayer(nil, "Alpha", Random.new(91), 0)
+	local b = state:addPlayer(nil, "Beta", Random.new(92), 0)
+	if not a or not b then
+		fail("areAllied expiry — spawn impossible")
+	else
+		Diplomacy.request(state, a.slot, b.slot)
+		if not Diplomacy.accept(state, a.slot, b.slot) then
+			fail("areAllied expiry — accept refuse")
+		else
+			state.tick = Config.ALLIANCE_DURATION - 1
+			if not state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte vivant refuse avant terme")
+			end
+			local liveView = Diplomacy.viewFor(state, a.slot)
+			if not liveView.allies[b.slot] then
+				fail("areAllied expiry — HUD masque un pacte vivant")
+			end
+			state.tick = Config.ALLIANCE_DURATION
+			if state:areAllied(a.slot, b.slot) then
+				fail("areAllied expiry — pacte perime encore honore avant Diplomacy.step")
+			end
+			local staleView = Diplomacy.viewFor(state, a.slot)
+			if staleView.allies[b.slot] then
+				fail("areAllied expiry — HUD expose un pacte perime")
+			end
+			a.troops = 500
+			a.attackRatio = 1
+			local _ok, msg = state:launchAttack(a.slot, b.slot)
+			if typeof(msg) == "string" and string.find(msg, "allie", 1, true) then
+				fail("areAllied expiry — launchAttack encore bloque par un pacte perime")
+			end
+			print("areAllied expiry : pacte perime refuse avant step")
+		end
+	end
+end
+
+do
+	-- Debarquement sur une cote deja prise : restitution integrale, pas le malus.
+	local state = GameState.new(6161)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(61), 0)
+	if not invader then
+		fail("boat own-tile — spawn impossible")
+	else
+		local landing: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				landing = index
+				break
+			end
+		end
+		if not landing then
+			fail("boat own-tile — tuile terrestre introuvable")
+		else
+			state:setOwner(landing, invader.slot)
+			local committed = 500
+			invader.troops = 1000
+			table.insert(state.boats, {
+				id = 1,
+				slot = invader.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = committed,
+				x = 0,
+				y = 0,
+				path = { landing },
+				step = 1,
+				targetTile = landing,
+				homeTile = landing,
+				retreating = false,
+			})
+			Navy.step(state, Random.new(3))
+			local expected = 1000 + committed
+			if math.abs(invader.troops - expected) > 0.01 then
+				fail(`boat own-tile — troupes {invader.troops} attendu {expected} (malus retraite ?)`)
+			end
+			local leftover = 0
+			for _, boat in state.boats do
+				if boat.kind == Navy.KIND_TRANSPORT and boat.slot == invader.slot then
+					leftover += 1
+				end
+			end
+			if leftover ~= 0 then
+				fail(`boat own-tile — {leftover} transport(s) encore en mer`)
+			end
+			print("boat own-tile : restitution integrale, pas de malus")
 		end
 	end
 end

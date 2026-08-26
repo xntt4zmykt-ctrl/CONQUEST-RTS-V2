@@ -330,7 +330,9 @@ function Diplomacy.sendQuickChat(state: GameState, slot: number, messageId: stri
 		local allySet = state.alliances[slot]
 		if allySet then
 			for other in allySet do
-				state:notify(message, "info", other)
+				if state:areAllied(slot, other) then
+					state:notify(message, "info", other)
+				end
 			end
 		end
 	else
@@ -473,7 +475,9 @@ function Diplomacy.setTargetMark(state: GameState, from: number, targetSlot: num
 	local allySet = state.alliances[from]
 	if allySet then
 		for other in allySet do
-			state:notify(message, "info", other)
+			if state:areAllied(from, other) then
+				state:notify(message, "info", other)
+			end
 		end
 	end
 	return true, `{t.name} designee comme cible pour ton alliance.`

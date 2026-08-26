@@ -957,8 +957,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.requests[slot] = nil
 	self.embargoes[slot] = nil
 	self.targetMarks[slot] = nil
-	-- Propositions / embargos / marques *vers* ce slot : sinon viewFor et
-	-- canTrade gardent des cibles fantomes jusqu'au prochain Diplomacy.step.
+	-- Propositions / embargos / marques / prolongations *vers* ce slot :
+	-- sinon viewFor, canTrade et extend gardent des cibles fantomes, et
+	-- addPlayer recycle le slot avec un embargo / une extension herites.
 	for _, targets in self.requests do
 		targets[slot] = nil
 	end
@@ -969,6 +970,18 @@ function GameState.removePlayer(self: GameState, slot: number)
 		if target == slot then
 			self.targetMarks[marker] = nil
 		end
+	end
+	if self.allianceExtensions then
+		for _, set in self.allianceExtensions do
+			set[slot] = nil
+		end
+		self.allianceExtensions[slot] = nil
+	end
+	if self.quickChatSent then
+		self.quickChatSent[slot] = nil
+	end
+	if self.quickChatLast then
+		self.quickChatLast[slot] = nil
 	end
 
 	self.players[slot] = nil
@@ -1002,10 +1015,29 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 	return true
 end
 
+--[[
+	Un pacte stocke le tick d'echeance. Presence des deux directions ne suffit
+	pas : entre l'echeance et Diplomacy.step (Bots/Navy tourne avant), un Attack
+	flushé voyait encore "Tu es allie". `true` reste vivant pour les tests
+	d'alliance unidirectionnelle. Voir ISSUE-N34.
+]]
+local function pactStillLive(self: GameState, expiry: any): boolean
+	if expiry == nil then
+		return false
+	end
+	if typeof(expiry) == "number" then
+		return self.tick < expiry
+	end
+	return expiry == true
+end
+
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
 	local ab = self.alliances[a]
 	local ba = self.alliances[b]
-	return ab ~= nil and ab[b] ~= nil and ba ~= nil and ba[a] ~= nil
+	if not ab or not ba then
+		return false
+	end
+	return pactStillLive(self, ab[b]) and pactStillLive(self, ba[a])
 end
 
 --=============================================================================

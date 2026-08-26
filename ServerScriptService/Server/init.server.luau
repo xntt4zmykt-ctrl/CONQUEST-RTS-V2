@@ -551,7 +551,10 @@ end
 -- se fait dans IntentValidator (apply immediat, feel OF).
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value == math.floor(value)
+		and math.abs(value) ~= math.huge
 end
 
 local function slotOf(player: Player): number?

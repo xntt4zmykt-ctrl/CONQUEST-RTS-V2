@@ -256,7 +256,9 @@ local function resolveLanding(state: GameState, boat)
 	local targetOwner = buffer.readu8(state.owner, tile)
 
 	if targetOwner == boat.slot then
-		applyRetreatMalus(state, boat)
+		-- Arrivee sur notre terre (pas une retraite) : restitution integrale.
+		ps.troops += math.max(0, boat.troops)
+		boat.troops = 0
 		return
 	end
 
@@ -612,7 +614,18 @@ function Navy.step(state: GameState, rng: Random)
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then
 			local destOwner = buffer.readu8(state.owner, boat.targetTile)
 			local destLand = state:isLand(boat.targetTile)
-			if destOwner == boat.slot or not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
+			-- Cote deja a nous : les troupes debarquent, ce n'est pas une retraite.
+			-- Le malus BOAT_RETREAT_LOSS punirait un succes d'armes combinees.
+			if destOwner == boat.slot then
+				local owner = state.players[boat.slot]
+				if owner then
+					owner.troops += math.max(0, boat.troops)
+				end
+				boat.troops = 0
+				table.remove(state.boats, i)
+				continue
+			end
+			if not destLand or (destOwner ~= NEUTRAL and state:areAllied(boat.slot, destOwner)) then
 				Navy.beginRetreat(state, boat)
 				if boat.troops <= 0 then
 					table.remove(state.boats, i)
