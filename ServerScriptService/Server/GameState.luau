@@ -356,6 +356,19 @@ local collapseScratch = table.create(4, 0)
 -- collapseRemainBuf (N69, tuiles). Ne pas nommer `doomed`.
 local destroyBuf: { number } = table.create(16)
 GameState.destroyBuf = destroyBuf
+-- N89 : snapshot settledHumans recycle (leftover N88). Un record par
+-- slot (recette rosterRecPool N84). removePlayer reecrit. Slot bot
+-- → pas d'entree (N37). Pool module survit a GameState.new /
+-- settledHumans = {}. Ne pas require MatchLifecycle (cycle).
+type SettledRec = {
+	player: Player?,
+	betrayals: number,
+	capturedTiles: number,
+	capitalsCaptured: number,
+	buildingsBuilt: number,
+}
+local settledRecPool: { [number]: SettledRec } = {}
+GameState.settledRecPool = settledRecPool
 -- N83 : pool parallele. drainEvents / drainSounds nil les files
 -- (# == 0) sans detruire les records. notify / sound reecrivent
 -- eventPool[n] / soundPool[n]. Overlay HUD lit le payload tout de
@@ -1395,15 +1408,26 @@ function GameState.removePlayer(self: GameState, slot: number)
 
 	-- Humain elimine : graver les stats avant de detruire le PlayerState.
 	-- endMatch / onPlayerRemoving lisent settledHumans quand players[slot]
-	-- est deja nil (ISSUE-N37).
+	-- est deja nil (ISSUE-N37). N89 : record poole par slot, overwrite.
 	if not state.isBot and state.player then
-		self.settledHumans[slot] = {
-			player = state.player,
-			betrayals = state.betrayals,
-			capturedTiles = state.capturedTiles,
-			capitalsCaptured = state.capitalsCaptured,
-			buildingsBuilt = state.buildingsBuilt,
-		}
+		local rec = settledRecPool[slot]
+		if rec == nil then
+			rec = {
+				player = state.player,
+				betrayals = state.betrayals,
+				capturedTiles = state.capturedTiles,
+				capitalsCaptured = state.capitalsCaptured,
+				buildingsBuilt = state.buildingsBuilt,
+			}
+			settledRecPool[slot] = rec
+		else
+			rec.player = state.player
+			rec.betrayals = state.betrayals
+			rec.capturedTiles = state.capturedTiles
+			rec.capitalsCaptured = state.capitalsCaptured
+			rec.buildingsBuilt = state.buildingsBuilt
+		end
+		self.settledHumans[slot] = rec
 	end
 
 	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.

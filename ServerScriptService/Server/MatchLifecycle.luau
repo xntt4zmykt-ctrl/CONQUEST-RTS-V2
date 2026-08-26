@@ -249,4 +249,55 @@ MatchLifecycle.matchUpdateBuf = matchUpdateBuf
 MatchLifecycle.recordBuf = recordBuf
 MatchLifecycle.recordRecPool = recordRecPool
 
+export type ProfilePacket = {
+	betrayals: number,
+	matches: number,
+	wins: number,
+	xp: number,
+	level: number,
+	lastGain: number?,
+}
+
+-- N90 : packet HUD join / endMatch recycle (leftover N88). Un record,
+-- six champs. profile + lastGain en argument — ne pas require GameState
+-- ni Persistence (cycle / hors bundle). lastGain nil ecrase un leftover
+-- de gain. Profile nil / {} → zeros + lastGain nil (recette N86). Distinct
+-- de matchUpdateBuf (N86, salon 1 Hz) et de recordBuf (N88, gravure).
+-- Ne pas pooler Persistence.record / UpdateAsync (N6, possession DataStore).
+local profileBuf: ProfilePacket = {
+	betrayals = 0,
+	matches = 0,
+	wins = 0,
+	xp = 0,
+	level = 1,
+	lastGain = nil,
+}
+
+local function resetProfilePacket(rec: ProfilePacket)
+	rec.betrayals = 0
+	rec.matches = 0
+	rec.wins = 0
+	rec.xp = 0
+	rec.level = 1
+	rec.lastGain = nil
+end
+
+function MatchLifecycle.buildProfilePacket(profile: any, lastGain: number?, buf: ProfilePacket?): ProfilePacket
+	local rec = buf or profileBuf
+	if profile == nil or next(profile) == nil then
+		resetProfilePacket(rec)
+		return rec
+	end
+	rec.betrayals = profile.betrayals or 0
+	rec.matches = profile.matches or 0
+	rec.wins = profile.wins or 0
+	rec.xp = profile.xp or 0
+	rec.level = profile.level or 1
+	rec.lastGain = lastGain
+	return rec
+end
+
+-- Banc N90 : rawequal packet. Pas replique.
+MatchLifecycle.profileBuf = profileBuf
+
 return MatchLifecycle

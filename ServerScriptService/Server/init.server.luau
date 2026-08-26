@@ -111,14 +111,8 @@ local pendingMode = GameModes.DEFAULT
 local activeMode = GameModes.get(GameModes.DEFAULT)
 
 local function profilePacket(profile, lastGain: number?)
-	return {
-		betrayals = profile.betrayals,
-		matches = profile.matches,
-		wins = profile.wins,
-		xp = profile.xp,
-		level = profile.level,
-		lastGain = lastGain,
-	}
+	-- N90 : helper bundle (MatchLifecycle). FireClient reste ici.
+	return MatchLifecycle.buildProfilePacket(profile, lastGain)
 end
 
 --=============================================================================
