@@ -1237,6 +1237,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- textFree, Effects). Distinct de V122 (conquestPulse pulseFree).
 	-- Distinct de V125 (selectTile SelectedTerritory, Effects).
 	-- Distinct de V126 (clearSelection Parent=nil, Effects).
+	-- Distinct de V127 (clearActionPreview Parent=nil, Effects).
 	-- Pas reentrant. Evenement fil, pas 60 Hz. Ne pas nil les slots
 	-- du pool. Ne pas geler Size flame (V74).
 	local feedFree = self.feedFree
@@ -1761,6 +1762,9 @@ function HUD.buildChatSheet(self: HUD)
 end
 
 function HUD.refreshChatSheet(self: HUD)
+	-- V127 : Effects clearActionPreview Parent=nil deja.
+	-- Leftover suivant = feel N170 (chatFree, pas feedFree).
+	-- Destroy enfants chatBody conserve.
 	for _, child in self.chatBody:GetChildren() do
 		child:Destroy()
 	end

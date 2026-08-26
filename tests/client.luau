@@ -1000,7 +1000,7 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse. V126 clearSelection Parent=nil.
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V124 feedFree (check fil). V125 selectTile reuse. V126 clearSelection Parent=nil. V127 clearActionPreview Parent=nil.
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
@@ -1056,20 +1056,46 @@ check("calques d'entites, effets et apercu", function()
 	end
 	assert(ringCount == 1, "SelectionRing fuite au 2e clic")
 	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
+	local aPreview = effects.actionPreview
+	assert(aPreview ~= nil and aPreview.CFrame, "ActionPreview absent")
+	assert(aPreview.Name == "ActionPreview", "Name ActionPreview perdu")
+	assert(math.abs(aPreview.Size.Y - 0.18) < 1e-6, "preview Size Y visuel")
+	assert(
+		math.abs(aPreview.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2001) + 0.42)) < 1e-6,
+		"preview Y visuel"
+	)
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
+	assert(rawequal(effects.actionPreview, aPreview), "ActionPreview recree au 2e hover")
+	assert(math.abs(aPreview.Size.Y - 0.18) < 1e-6, "reuse preview Size Y visuel")
+	assert(
+		math.abs(aPreview.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2002) + 0.42)) < 1e-6,
+		"reuse preview Y visuel"
+	)
 	effects:clearActionPreview()
 	effects:clearSelection()
 	local ringLeft = false
 	local markerLeft = false
+	local previewLeft = false
 	for _, node in effects.root:GetChildren() do
 		if node.Name == "SelectionRing" then
 			ringLeft = true
 		elseif node.Name == "SelectedTerritory" then
 			markerLeft = true
+		elseif node.Name == "ActionPreview" then
+			previewLeft = true
 		end
 	end
 	assert(not ringLeft, "SelectionRing survit clearSelection")
 	assert(not markerLeft, "SelectedTerritory survit clearSelection")
+	assert(not previewLeft, "ActionPreview survit clearActionPreview")
+	-- V127 : clearActionPreview parque (feel N169 inline — ne PAS
+	-- merger e839 / a72c / 2188). Parent = nil, garder
+	-- self.actionPreview, pas Destroy. Pas de skip N154.
+	-- Leftover V126 park select doit rester vert. Leftover
+	-- V125 deux selectTile sans clear doit rester vert.
+	-- Leftover V83 Y +0.48 doit rester vert.
+	assert(aPreview.Parent == nil, "ActionPreview pas parque")
+	assert(rawequal(effects.actionPreview, aPreview), "clearActionPreview nil le marqueur")
 	-- V126 : clearSelection parque (feel N168 inline — ne PAS
 	-- merger a72c). Parent = nil, garder self.selection /
 	-- self.selectionRing, pas Destroy. Leftover V125 deux
@@ -1103,6 +1129,24 @@ check("calques d'entites, effets et apercu", function()
 	assert(aRing.Parent == nil, "SelectionRing pas reparque")
 	assert(rawequal(effects.selection, aMarker), "2e clear nil le marqueur")
 	assert(rawequal(effects.selectionRing, aRing), "2e clear nil le ring")
+	-- V127 : 2e previewTile reparent. Size Y == 0.18 / Y =
+	-- surface+0.42 visuels. Pas de skip N154. Re-parker pour
+	-- ne pas polluer V121 (ActionPreview Name != ConquestPulse
+	-- compterait comme tileFlash). Leftover V121 flashFree
+	-- doit rester vert. Leftover V126 park select doit rester
+	-- vert.
+	effects:previewTile(2003, Color3.fromRGB(52, 152, 219), true)
+	assert(rawequal(effects.actionPreview, aPreview), "ActionPreview recree apres clear")
+	assert(aPreview.Parent == effects.root, "ActionPreview pas reparente")
+	assert(aPreview.Name == "ActionPreview", "Name ActionPreview perdu au reparent")
+	assert(math.abs(aPreview.Size.Y - 0.18) < 1e-6, "reparent preview Size Y visuel")
+	assert(
+		math.abs(aPreview.CFrame.Y - (WorldSpace.surfaceHeight(terrain, 2003) + 0.42)) < 1e-6,
+		"reparent preview Y visuel"
+	)
+	effects:clearActionPreview()
+	assert(aPreview.Parent == nil, "ActionPreview pas reparque")
+	assert(rawequal(effects.actionPreview, aPreview), "2e clear nil le preview")
 end)
 
 check("pose et capture de chaque type de batiment", function()

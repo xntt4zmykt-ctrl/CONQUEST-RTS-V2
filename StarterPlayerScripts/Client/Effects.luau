@@ -65,8 +65,10 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- inline, pas merger a72c / 0b3d / ba8a). V126 :
 	-- clearSelection Parent = nil, garder self.selection
 	-- (feel N168 inline, pas merger a72c). SelectionRing meme
-	-- traitement. clearActionPreview Destroy conserve
-	-- (feel N169 = leftover suivant).
+	-- traitement. V127 : clearActionPreview Parent = nil,
+	-- garder self.actionPreview (feel N169 inline, pas merger
+	-- e839 / a72c / 2188). HUD refreshChatSheet Destroy
+	-- conserve (feel N170 = leftover suivant).
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	-- V120 : free-list floatingText PAR Effects (pas goldFree Overlay /
@@ -130,9 +132,10 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 	-- nil (apres clearSelection park). Distinct de V124 (feedFree
 	-- HUD). Distinct de V123 (ringFree BuildingModels). Distinct
 	-- de V122 (pulseFree). Distinct de V83 (pulseRot deja).
-	-- Distinct de previewTile (ActionPreview, Y +0.42). Pas
-	-- reentrant. Geste joueur, pas 60 Hz. Ne pas porter Size /
-	-- Transparency / Y feel. Ne pas geler Size flame (V74).
+	-- Distinct de previewTile (ActionPreview, Y +0.42, V127
+	-- park). Pas reentrant. Geste joueur, pas 60 Hz. Ne pas
+	-- porter Size / Transparency / Y feel. Ne pas geler Size
+	-- flame (V74).
 	local marker = self.selection
 	if not marker then
 		marker = Instance.new("Part")
@@ -194,10 +197,10 @@ function Effects.clearSelection(self: Effects)
 	-- V126 : Parent = nil, garder self.selection. Recette analogique
 	-- V125 / feel N168 inline — ne PAS merger a72c. Pas Destroy,
 	-- pas self.selection = nil. SelectionRing meme traitement.
-	-- previewTile / clearActionPreview Destroy conserves
-	-- (feel N169 = leftover suivant). Pas de pool selectionFree.
-	-- Distinct de V125 (reuse pendant la vie). Distinct de V124
-	-- (feedFree HUD). Distinct de V83 (pulseRot deja). Pas
+	-- V127 parque clearActionPreview (Parent = nil). Pas de
+	-- pool selectionFree. Distinct de V125 (reuse pendant la
+	-- vie). Distinct de V127 (ActionPreview park). Distinct de
+	-- V124 (feedFree HUD). Distinct de V83 (pulseRot deja). Pas
 	-- reentrant. Geste joueur, pas 60 Hz. Ne pas porter Size /
 	-- Transparency / Y feel. Ne pas geler Size flame (V74).
 	if self.selection then
@@ -210,10 +213,23 @@ end
 
 -- Apercu leger de l'action sous le curseur. V125 recycle deja
 -- SelectedTerritory entre deux clics (geste, pas 60 Hz) ;
--- V126 parque clearSelection (Parent = nil). `previewTile`
--- reste le chemin 60 Hz (raycast). `clearActionPreview`
--- Destroy conserve (feel N169 = leftover).
+-- V126 parque clearSelection (Parent = nil). V127 parque
+-- clearActionPreview (Parent = nil). `previewTile` reste le
+-- chemin 60 Hz (raycast). Pas de skip N154 (feel-only).
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
+	-- V127 : reuse ActionPreview. Recette analogique V126 /
+	-- feel N169 inline — ne PAS merger e839 / a72c / 2188.
+	-- Size visuel TILE*1.04 × 0.18 inchange. Y = surfaceHeight
+	-- + 0.42 inchange. Transparency 0.5 / 0.72 inchangee. Pas
+	-- de skip N154 (index+valid+color — feel-only, ≠ visual
+	-- V77 PlacementPreview). V127 : reparent self.root si
+	-- Parent nil (apres clearActionPreview park). Distinct de
+	-- V126 (clearSelection park). Distinct de V125 (reuse
+	-- SelectedTerritory pendant la vie). Distinct de V124
+	-- (feedFree HUD). Pas reentrant. Chemin hover 60 Hz
+	-- (raycast). Ne pas porter Size / Transparency / Y feel.
+	-- Ne pas geler Size flame (V74). HUD refreshChatSheet
+	-- Destroy conserve (feel N170 = leftover suivant).
 	local marker = self.actionPreview
 	if not marker then
 		marker = Instance.new("Part")
@@ -227,6 +243,8 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 		marker.Size = Vector3.new(Config.TILE_SIZE * 1.04, 0.18, Config.TILE_SIZE * 1.04)
 		marker.Parent = self.root
 		self.actionPreview = marker
+	elseif marker.Parent == nil then
+		marker.Parent = self.root
 	end
 
 	local base = WorldSpace.indexToWorld(index)
@@ -238,9 +256,18 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 end
 
 function Effects.clearActionPreview(self: Effects)
+	-- V127 : Parent = nil, garder self.actionPreview. Recette
+	-- analogique V126 / feel N169 inline — ne PAS merger e839
+	-- / a72c / 2188. Pas Destroy, pas self.actionPreview = nil.
+	-- Pas de skip N154 (feel-only). Pas de pool
+	-- actionPreviewFree. HUD refreshChatSheet Destroy conserve
+	-- (feel N170 = leftover suivant). Distinct de V126
+	-- (clearSelection park). Distinct de V125 (reuse pendant
+	-- la vie). Pas reentrant. Chemin hover 60 Hz. Ne pas porter
+	-- Size / Transparency / Y feel. Ne pas geler Size flame
+	-- (V74).
 	if self.actionPreview then
-		self.actionPreview:Destroy()
-		self.actionPreview = nil
+		self.actionPreview.Parent = nil
 		self.actionPreviewIndex = nil
 	end
 end
