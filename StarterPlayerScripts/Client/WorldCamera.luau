@@ -57,6 +57,9 @@ function WorldCamera.new(): WorldCamera
 
 	self.camera = Workspace.CurrentCamera
 	self.focus = Vector3.zero
+	self.focusX = 0
+	self.focusY = 0
+	self.focusZ = 0
 	self.targetFocus = Vector3.zero
 	self.distance = 320
 	self.targetDistance = 320
@@ -105,7 +108,7 @@ function WorldCamera.bindActions(self: WorldCamera)
 		local newDistance = math.clamp(oldDistance * (1 - input.Position.Z * 0.12), MIN_DISTANCE, MAX_DISTANCE)
 		if newDistance ~= oldDistance then
 			--[[
-				Zoom vers le curseur, la signature du jeu de reference : le
+				Zoom vers le curseur, la signature CONQUEST : le
 				point sous la souris reste sous la souris. Sans ca, zoomer sur
 				une cible exige de reframer a chaque coup de molette — la mire
 				ne bougeant jamais, c'est toujours le centre de l'ecran qui
@@ -221,6 +224,9 @@ function WorldCamera.focusTile(self: WorldCamera, index: number, instant: boolea
 	self.targetFocus = Vector3.new(position.X, 0, position.Z)
 	if instant then
 		self.focus = self.targetFocus
+		self.focusX = self.targetFocus.X
+		self.focusY = self.targetFocus.Y
+		self.focusZ = self.targetFocus.Z
 	end
 end
 
@@ -509,7 +515,18 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	-- Lissage exponentiel encadre : reste correct quel que soit le framerate,
 	-- contrairement a un simple `dt * k` qui devient instable sous 30 FPS.
 	local alpha = 1 - math.exp(-12 * dt)
-	self.focus += (self.targetFocus - self.focus) * alpha
+	-- N121 : lerp focus en nombres. Plus de += / - / * Vector3 60 Hz.
+	-- N122 : champs focusX/Y/Z. Plus de Vector3.new 60 Hz idle.
+	-- self.focus n'est plus reecrit ici (geste focusTile seulement).
+	-- Offset ox/oy/oz inchange (N120). Shake sx/sy/sz inchange (N119).
+	-- Pose CFrame.new * rotation inchangee (N118). Recette visual V69
+	-- ouverte — portee pas mergee.
+	local fx = self.focusX + (self.targetFocus.X - self.focusX) * alpha
+	local fy = self.focusY + (self.targetFocus.Y - self.focusY) * alpha
+	local fz = self.focusZ + (self.targetFocus.Z - self.focusZ) * alpha
+	self.focusX = fx
+	self.focusY = fy
+	self.focusZ = fz
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
@@ -517,13 +534,36 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	self.fovKick += (0 - self.fovKick) * (1 - math.exp(-7 * dt))
 
 	local rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)
-	local offset = rotation:VectorToWorldSpace(Vector3.new(0, 0, self.distance))
-	local shake = Vector3.new(
-		math.sin(self.clock * 31) * self.shake * 0.65,
-		math.cos(self.clock * 37) * self.shake * 0.42,
-		math.sin(self.clock * 23) * self.shake * 0.5
-	)
-	self.camera.CFrame = CFrame.lookAt(self.focus + offset + shake, self.focus + shake * 0.18)
+	-- N118 : pose = translation * rotation deja calculee. Plus de lookAt
+	-- deux Vector3 60 Hz. L'oeil tremble encore (shake sur la translation) ;
+	-- le biais lookAt(..., focus + shake * 0.18) est abandonne (visee
+	-- cosmétique, yaw/pitch portés par `rotation`).
+	-- N119 : shake en nombres sx/sy/sz. Coeffs 0.65 / 0.42 / 0.5 et
+	-- frequences 31 / 37 / 23 identiques. Recette visual V66 leftover
+	-- shake, portee pas mergee (`926d`).
+	-- N120 : offset local (0,0,distance) en nombres. Plus de Vector3.new
+	-- ni VectorToWorldSpace 60 Hz. YXZ, rz=0 :
+	--   ox = d * cos(pitch) * sin(yaw)
+	--   oy = d * sin(pitch)
+	--   oz = d * cos(pitch) * cos(yaw)
+	-- Recette visual V67 deja sur `b2f1`, portee pas mergee.
+	-- N121 : oeil depuis fx/fy/fz (pas self.focus.X apres le write).
+	-- N122 : fx vient de focusX, plus de Vector3.new d'ecriture.
+	-- Overlay unites / camion inchanges (N117 / N116 / N115).
+	local d = self.distance
+	local pitch, yaw = self.pitch, self.yaw
+	local cosPitch, sinPitch = math.cos(pitch), math.sin(pitch)
+	local cosYaw, sinYaw = math.cos(yaw), math.sin(yaw)
+	local ox = d * cosPitch * sinYaw
+	local oy = d * sinPitch
+	local oz = d * cosPitch * cosYaw
+	local sx = math.sin(self.clock * 31) * self.shake * 0.65
+	local sy = math.cos(self.clock * 37) * self.shake * 0.42
+	local sz = math.sin(self.clock * 23) * self.shake * 0.5
+	local ex = fx + ox + sx
+	local ey = fy + oy + sy
+	local ez = fz + oz + sz
+	self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation
 	local zoomRatio = math.clamp((self.distance - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
 	local targetFov = 56 + zoomRatio * 7 + self.fovKick
 	self.camera.FieldOfView += (targetFov - self.camera.FieldOfView) * (1 - math.exp(-8 * dt))
