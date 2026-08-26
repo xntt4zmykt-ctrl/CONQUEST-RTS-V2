@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier 5 — isolation des fronts bateau (OpenFront AttackExecution).
+	Chantier 5 — isolation des fronts bateau (CONQUEST AttackExecution).
 
 	OF : si sourceTile != null, l'attaque ne se combine jamais avec un front terre.
 	seedBeachhead créait / renforçait le même Attack que le land → bug.
@@ -15,6 +15,13 @@ local Heap = require(ReplicatedStorage.Shared.Heap)
 local BoatFront = {}
 
 local priorityScratch = table.create(4, 0)
+-- Distinct de priorityScratch : enqueueFront l'ecrase via frontPriority.
+local neighborScratch = table.create(4, 0)
+-- N87 : wrap launchAttack recycle la liste des tetes de pont (recette
+-- collapsingBuf / N86). Attack live, pas des copies. Truncate leftover
+-- AVANT origLaunch — un leftover reinserait un pont fantome. Non reentrant
+-- (launchAttack synchrone). Distinct de seedBeachhead / AimFront / N5.
+local parkedBuf: { any } = table.create(8)
 
 local function frontPriority(state, index: number, attackerSlot: number): number
 	local n = MapGen.neighbors(index, priorityScratch)
@@ -44,7 +51,9 @@ function BoatFront.install(GameState)
 	end
 	GameState.__boatFront = true
 
-	-- Débarquement = toujours un Attack séparé avec sourceTile.
+	-- Debarquement = Attack separe (isBeachhead). La tuile debarquee est deja
+	-- a l'attaquant (setOwner dans Navy.resolveLanding) : l'enfiler comme
+	-- frontier ferait skip+heap vide+remboursement le meme tick.
 	function GameState.seedBeachhead(self, attackerSlot: number, targetSlot: number, troops: number, tile: number)
 		local attack = {
 			attacker = attackerSlot,
@@ -53,35 +62,46 @@ function BoatFront.install(GameState)
 			frontier = Heap.new(),
 			queued = {},
 			sourceTile = tile,
+			isBeachhead = true,
 		}
-		enqueueFront(self, attack, tile)
+		local n = MapGen.neighbors(tile, neighborScratch)
+		for i = 1, n do
+			local nb = neighborScratch[i]
+			if self:isLand(nb) and buffer.readu8(self.owner, nb) == targetSlot then
+				enqueueFront(self, attack, nb)
+			end
+		end
+		if Heap.isEmpty(attack.frontier) then
+			local attacker = self.players[attackerSlot]
+			if attacker then
+				attacker.troops += math.max(0, troops)
+			end
+			return
+		end
 		table.insert(self.attacks, attack)
 	end
 
-	-- launchAttack ne doit fusionner qu'avec des fronts terre (sourceTile nil).
-	-- On retire temporairement les fronts bateau pendant l'appel original.
+	-- launchAttack ne doit fusionner qu'avec des fronts terre. On gare les
+	-- tetes de pont (isBeachhead), pas les fronts vises (sourceTile = aim).
 	local origLaunch = GameState.launchAttack
 	function GameState.launchAttack(self, attackerSlot: number, targetSlot: number)
-		local parked = {}
+		local n = 0
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
-			if atk.sourceTile ~= nil then
-				table.insert(parked, atk)
+			if atk.isBeachhead then
+				n += 1
+				parkedBuf[n] = atk
 				table.remove(self.attacks, i)
 			end
+		end
+		for i = #parkedBuf, n + 1, -1 do
+			parkedBuf[i] = nil
 		end
 
 		local ok, message = origLaunch(self, attackerSlot, targetSlot)
 
-		for _, atk in parked do
-			table.insert(self.attacks, atk)
-		end
-
-		-- Marquer le front terre nouvellement créé / renforcé
-		for _, atk in self.attacks do
-			if atk.attacker == attackerSlot and atk.target == targetSlot and atk.sourceTile == nil then
-				-- ok land front
-			end
+		for i = 1, n do
+			table.insert(self.attacks, parkedBuf[i])
 		end
 
 		return ok, message
