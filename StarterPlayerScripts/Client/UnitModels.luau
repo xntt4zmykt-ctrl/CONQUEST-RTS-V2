@@ -131,7 +131,18 @@ local function buildCarrier(visual: Visual, faction: Color3)
 		mesh.Size = UnitModels.CARRIER_MESH_SCALE
 		mesh.CFrame = CFrame.new()
 		mesh.Parent = visual.model
-		table.insert(visual.parts, { part = mesh, offset = CFrame.new(), role = "hull" })
+		-- N148 : insert mesh dans visual.pieces. Plus de visual.parts.
+		-- Le type Visual n'a pas de champ parts : seulement pieces.
+		-- table.insert(nil, ...) leverait des que CARRIER_MESH_ID
+		-- n'est plus "". place() itere visual.pieces : sans cet
+		-- insert le MeshPart resterait a l'identite. Name =
+		-- "CarrierMesh", Size, CFrame, flags collision, return
+		-- precoce (pas de addWake mesh) inchanges. CARRIER_MESH_ID
+		-- reste "". Distinct Fin N147 (roll Z). Distinct Bow N144.
+		-- Distinct N106 chunks. Coque procedurale (Hull / FlightDeck
+		-- / Island / jets) / Fin / MissileBody / LandingRamp /
+		-- addWake / Overlay / BuildingModels / place inchanges.
+		table.insert(visual.pieces, { part = mesh, offset = CFrame.new(), role = "hull" })
 		return
 	end
 
@@ -273,7 +284,7 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 		-- Vector3.new(0.22, 1.65, 1.4), NAVY_DARK, Metal, Name = "Fin"
 		-- inchanges. Distinct MissileBody N146 (Y=90 cylindre). Distinct
 		-- rampe N145 (pitch -8°). Distinct cylinder() N139 (Z=90
-		-- bâtiments). Distinct leftover mesh visual.parts. Nez / bandes /
+		-- bâtiments). Distinct leftover mesh N148 visual.parts. Nez / bandes /
 		-- flamme sans euler. MissileBody N146 / LandingRamp N145 / Bow
 		-- N144 / addWake N143 / Overlay / BuildingModels / place
 		-- inchanges.
