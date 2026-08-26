@@ -88,6 +88,12 @@ export type Attack = {
 	queued: { [number]: true },
 	-- Tick a partir duquel le front se degage, si la retraite a ete ordonnee.
 	retreatAt: number?,
+	-- Ancre de visee (AimFront) ou tuile debarquee (BoatFront). Nil = front terre non vise.
+	sourceTile: number?,
+	aimX: number?,
+	aimY: number?,
+	-- True seulement pour une tete de pont navale : ne se fusionne jamais avec un front terre.
+	isBeachhead: boolean?,
 }
 
 export type Boat = {
@@ -885,30 +891,47 @@ function GameState.addPlayer(
 	return state
 end
 
+--[[
+	Rend les troupes engagees a l'attaquant. Pas de malus de retraite : le
+	front meurt sans combat (defenseur disparu, pacte). Met atk.troops a 0
+	pour qu'un second appel ne double pas le credit.
+]]
+function GameState.returnCommittedTroops(self: GameState, atk: Attack)
+	local attacker = self.players[atk.attacker]
+	if attacker then
+		attacker.troops += math.max(0, atk.troops)
+	end
+	atk.troops = 0
+end
+
 function GameState.removePlayer(self: GameState, slot: number)
 	local state = self.players[slot]
 	if not state then
 		return
 	end
 
-	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
-	-- dans la boucle de tick.
-	for index = 0, Config.TILE_COUNT - 1 do
-		if buffer.readu8(self.owner, index) == slot then
-			buffer.writeu8(self.owner, index, NEUTRAL)
-			self.dirty[index] = true
-		end
-	end
-
+	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
 	for index, building in self.buildings do
 		if building.slot == slot then
 			self:destroyBuilding(index)
 		end
 	end
 
+	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
+	-- (deconnexion), jamais dans la boucle de tick.
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(self.owner, index) == slot then
+			self:setOwner(index, NEUTRAL)
+		end
+	end
+
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
+		if atk.attacker == slot then
+			-- La faction disparait : ses troupes engagees disparaissent avec elle.
+			table.remove(self.attacks, i)
+		elseif atk.target == slot then
+			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
 		end
 	end
@@ -937,8 +960,31 @@ function GameState.removePlayer(self: GameState, slot: number)
 		set[slot] = nil
 	end
 	self.allianceCooldowns[slot] = nil
+	-- Inbound : sinon un embargo / une proposition / une intention de
+	-- prolongation vise encore un slot recycle par le prochain addPlayer.
+	for _, set in self.requests do
+		set[slot] = nil
+	end
 	self.requests[slot] = nil
+	for _, set in self.embargoes do
+		set[slot] = nil
+	end
 	self.embargoes[slot] = nil
+	if self.allianceExtensions then
+		for _, set in self.allianceExtensions do
+			set[slot] = nil
+		end
+		self.allianceExtensions[slot] = nil
+	end
+	if self.quickChatSent then
+		self.quickChatSent[slot] = nil
+	end
+	if self.quickChatLast then
+		self.quickChatLast[slot] = nil
+	end
+	if self.targetMarks then
+		self.targetMarks[slot] = nil
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
@@ -971,9 +1017,31 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 	return true
 end
 
+--[[
+	Un pacte n'est honorable que s'il est symetrique ET encore dans son delai.
+
+	flush() tourne avant Diplomacy.step : sans le garde d'expiry, Attack / Boat /
+	Nuke / dons voient encore 1 tick de paix fantome (le meme bug que viewFor
+	sur les propositions). Une valeur non numerique (`true` dans les tests)
+	reste un pacte vivant — la production n'ecrit que des ticks d'echeance.
+]]
+local function pactStillLive(self: GameState, expiry: any): boolean
+	if expiry == nil then
+		return false
+	end
+	if typeof(expiry) == "number" then
+		return self.tick < expiry
+	end
+	return expiry == true
+end
+
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
-	local set = self.alliances[a]
-	return set ~= nil and set[b] ~= nil
+	local ab = self.alliances[a]
+	local ba = self.alliances[b]
+	if not ab or not ba then
+		return false
+	end
+	return pactStillLive(self, ab[b]) and pactStillLive(self, ba[a])
 end
 
 --=============================================================================
@@ -1384,7 +1452,12 @@ function GameState.stepAttacks(self: GameState)
 		local attacker = self.players[atk.attacker]
 		local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
 
-		if not attacker or (atk.target ~= NEUTRAL and not defender) then
+		if not attacker then
+			table.remove(self.attacks, i)
+			continue
+		end
+		if atk.target ~= NEUTRAL and not defender then
+			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
 			continue
 		end
@@ -1392,7 +1465,7 @@ function GameState.stepAttacks(self: GameState)
 		-- Le delai de retraite est ecoule : les survivants rentrent au pays,
 		-- comme lorsqu'un front s'epuise naturellement.
 		if atk.retreatAt and self.tick >= atk.retreatAt then
-			attacker.troops += math.max(0, atk.troops)
+			attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
 			table.remove(self.attacks, i)
 			continue
 		end

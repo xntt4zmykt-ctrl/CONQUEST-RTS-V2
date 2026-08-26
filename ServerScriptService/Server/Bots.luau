@@ -438,7 +438,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 
 		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
 			for other, ps2 in state.players do
-				if other ~= slot and other ~= leader and not allies[other] then
+				if other ~= slot and other ~= leader and not state:areAllied(slot, other) then
 					Diplomacy.request(state, slot, other)
 					return
 				end
@@ -453,6 +453,9 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
 	for ally in allies do
+		if not state:areAllied(slot, ally) then
+			continue
+		end
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
 		local protectedByCoalition = threatened and ally ~= leader
