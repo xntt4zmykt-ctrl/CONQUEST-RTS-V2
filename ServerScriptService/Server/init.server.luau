@@ -102,7 +102,8 @@ local currentMapMeta: any = nil
 -- N2 : dernier UnitSnapshot envoye etait vide-vide. Reset a startMatch
 -- (premier vide du match DOIT fire). Ne pas comparer l'identite de
 -- boatSnapBuf / missileSnapBuf (buffers mutes).
--- N2 StateDelta : xor-fold des 7 nombres HUD. Reset nil a startMatch
+-- N2 StateDelta : xor-fold des 10 nombres HUD (7 + maxTroops +
+-- eraProgress×1000 + logisticsIncome×100). Reset nil a startMatch
 -- (premier lot DOIT fire). Ne pas rawequal(stats) — statsBuf mute.
 local lastUnitEmpty = false
 local lastStatsFp: number? = nil
@@ -150,8 +151,11 @@ end
 
 -- N2 StateDelta : empreinte HUD. XOR par record (ordre des cles hash
 -- indifferent). Slot apparait / disparait change le fold. Pas de clone.
--- Ne pas hasher buildPrices / attackTargets / eraProgress (N75 / N74) —
--- leftover N2 HUD etendu. bit32 tronque ; or de RTS << 2^32.
+-- 10 nombres : 7 + maxTroops + eraProgress + logisticsIncome.
+-- eraProgress 0..1 (N77) et logisticsIncome centiemes (N76) : bit32
+-- tronque, donc ×1000 / ×100 avant le mix — sinon la rampe HUD est
+-- invisible. Ne pas hasher buildPrices / attackTargets (N75 / N74,
+-- tables recyclees). bit32 tronque ; or de RTS << 2^32.
 local function statsFingerprint(stats): number
 	local fp = 0
 	local n = 0
@@ -164,6 +168,9 @@ local function statsFingerprint(stats): number
 		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.era)
 		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.activeAttacks)
 		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.committedTroops)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), rec.maxTroops or 0)
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), math.floor((rec.eraProgress or 0) * 1000))
+		recFp = bit32.bxor(bit32.lrotate(recFp, 5), math.floor((rec.logisticsIncome or 0) * 100 + 0.5))
 		fp = bit32.bxor(fp, recFp)
 	end
 	return bit32.bxor(fp, n)
