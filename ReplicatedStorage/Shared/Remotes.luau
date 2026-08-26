@@ -7,33 +7,38 @@ local RunService = game:GetService("RunService")
 
 local NAMES = {
 	-- Serveur -> client
-	"MapInit", -- (seed, slot, roster)
+	"MapInit", -- (seed, slot, roster, capital?, profile?, mapMeta?)
 	"StateDelta", -- (ownerDelta: buffer?, stats)
 	"RosterUpdate", -- (roster)
 	"BuildingDelta", -- ({BuildingSnapshot})
 	"UnitSnapshot", -- ({BoatSnapshot}, {MissileSnapshot})
+	"OwnerSnapshot", -- (owner: buffer, tick, structureHash) : resync complet
 	"DiplomacyUpdate", -- (Diplomacy)
 	"MatchUpdate", -- (MatchInfo)
 	"ProfileUpdate", -- (Profile) : niveau, XP et bilan persistant
 	"Notify", -- (text, kind)
+	"IntentReject", -- (reason: string, detail: string?) : refus enumere
 	"Explosion", -- (x, y, radius)
 	"Sfx", -- (soundName)
 	"Plunder", -- (tuile, slot du vainqueur, or) : le "+X or" de la mise a mort
 	"TradeEvent", -- ("dispatch", usine, gare, slot, trajetTicks) | ("arrival", gare, slot, or)
 
 	-- Client -> serveur
-	"AttackOrder", -- (targetTileIndex), le serveur derive la faction
-	"RetreatOrder", -- (targetTileIndex), rappelle l'offensive contre ce proprietaire
-	"SetAttackRatio", -- (ratio)
-	"ChooseDoctrine", -- (doctrineId)
-	"BuildOrder", -- (tileIndex, buildingKind)
-	"UpgradeBuildingOrder", -- (tileIndex), actuellement reserve aux villes
-	"BoatOrder", -- (targetTileIndex)
-	"NukeOrder", -- (targetTileIndex, nukeKind)
-	"DiplomacyOrder", -- (action: string, targetSlot: number)
-	"QuickChat", -- (messageId: string, targetSlot: number?) : message rapide predefini
-	"ResearchOrder", -- () : avancer d'une ere
+	-- Tous les ordres acceptent un clientSequence optionnel en DERNIER argument
+	-- pour idempotence. Sans sequence : accepte mais non idempotent (compat).
+	"AttackOrder", -- (targetTileIndex, clientSequence?)
+	"RetreatOrder", -- (targetTileIndex, clientSequence?)
+	"SetAttackRatio", -- (ratio, clientSequence?)
+	"ChooseDoctrine", -- (doctrineId, clientSequence?)
+	"BuildOrder", -- (tileIndex, buildingKind, clientSequence?)
+	"UpgradeBuildingOrder", -- (tileIndex, clientSequence?)
+	"BoatOrder", -- (targetTileIndex, clientSequence?)
+	"NukeOrder", -- (targetTileIndex, nukeKind, clientSequence?)
+	"DiplomacyOrder", -- (action: string, targetSlot: number, clientSequence?)
+	"QuickChat", -- (messageId: string, targetSlot: number?, clientSequence?)
+	"ResearchOrder", -- (clientSequence?)
 	"JoinRequest", -- (nationId: number, modeId: string) : deploiement depuis le menu
+	"RequestSnapshot", -- () : resync rate-limite si chunkVersion impossible
 }
 
 local Remotes = {}

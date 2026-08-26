@@ -34,6 +34,17 @@ export type Overlay = typeof(setmetatable({} :: any, Overlay))
 
 local colorFor = Theme.factionColor
 local DARK = Color3.fromRGB(29, 35, 43)
+-- N103 : conversion tuile → monde en nombres (meme formule que WorldSpace.tileToWorld).
+-- Le helper allouerait un Vector3 par unite / frame ; il reste le point unique
+-- serveur / batiments / splash — on ne le change pas. Recette visual V56.
+local TILE = Config.TILE_SIZE
+local HALF_W = Config.WORLD_WIDTH / 2
+local HALF_D = Config.WORLD_DEPTH / 2
+local TILE_HALF = TILE / 2
+-- N105 : lift camion en constante. path[i] reste au niveau chaussee ;
+-- on ajoute TRUCK_LIFT sans Vector3.new(0, 0.8, 0) 60 Hz.
+-- Recette visual V57, portee pas mergee. Unites inchangees (N103).
+local TRUCK_LIFT = 0.8
 
 --=============================================================================
 -- Construction
@@ -63,14 +74,76 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	return self
 end
 
+-- N175 / N176 / N177 : snapshot Transparency/Color construction une
+-- fois, avant tween despawn ou park clear. Hoisté pour Overlay.clear
+-- (N177) sans cycle. takeShip / takeOgive plus bas.
+local function rememberShipRest(visual: any)
+	if visual.restTransparency then
+		return
+	end
+	local restT = {}
+	local restC = {}
+	for i, piece in visual.pieces do
+		restT[i] = piece.part.Transparency
+		restC[i] = piece.part.Color
+	end
+	visual.restTransparency = restT
+	visual.restColor = restC
+end
+
 function Overlay.clear(self: Overlay)
 	table.clear(self.counts)
+	-- N179 : recycle les Model bâtiments live. Plus de Destroy.
+	-- Push buildingFree existant (N178). Skip si Parent nil
+	-- (déjà parké par applyBuildingDelta kind==0). Skip unités
+	-- N177. Skip routes N180. Pas de delay. Recette leftover
+	-- N178. Pas merger visual V116. Distinct leftover N152
+	-- flame. Ne pas vider buildingFree. Kind+Level déjà
+	-- attributs. takeBuilding N178 inchangé.
 	for _, part in self.buildings do
-		part:Destroy()
+		if part.Parent then
+			part.Parent = nil
+			local pool = self.buildingFree
+			if not pool then
+				pool = {}
+				self.buildingFree = pool
+			end
+			pool[#pool + 1] = part
+		end
 	end
+	-- N177 : recycle les Model unités live. Plus de Destroy.
+	-- Navire → shipFree (N175 déjà). Ogive → ogiveFree (N176 déjà).
+	-- Pas de troisième liste. Skip si Parent nil (déjà parké par
+	-- applyUnits). rememberShipRest + visual.slot pour kind+slot
+	-- match au take. Skip bâtiments. Skip routes. Pas de delay.
+	-- Recette leftover N176. Pas merger visual V114 / V113.
+	-- Distinct leftover N152 flame. init.client non câblé.
 	for _, unit in self.units do
-		unit.visual.model:Destroy()
+		local visual = unit.visual
+		if visual.model.Parent then
+			visual.model.Parent = nil
+			rememberShipRest(visual)
+			visual.slot = unit.slot
+			if unit.isMissile then
+				local pool = self.ogiveFree
+				if not pool then
+					pool = {}
+					self.ogiveFree = pool
+				end
+				pool[#pool + 1] = visual
+			else
+				local pool = self.shipFree
+				if not pool then
+					pool = {}
+					self.shipFree = pool
+				end
+				pool[#pool + 1] = visual
+			end
+		end
 	end
+	-- Leftover N180 : teardown routes encore Destroy.
+	-- N179 parque seulement self.buildings. Ne pas vider
+	-- buildingFree. Skip unités N177. Skip applyBuildingDelta.
 	for _, route in self.routes do
 		route.model:Destroy()
 	end
@@ -157,6 +230,7 @@ local function makeBuilding(
 	model:SetAttribute("Kind", kind)
 	model:SetAttribute("Slot", slot)
 	model:SetAttribute("Level", level)
+	model:SetAttribute("Index", index)
 	model:SetAttribute("TintR", color.R)
 	model:SetAttribute("TintG", color.G)
 	model:SetAttribute("TintB", color.B)
@@ -214,6 +288,7 @@ local function applyRouteProgress(construction: any, progress: number)
 
 	for _, segment in construction.segments do
 		local visible = math.clamp(covered - segment.startsAt, 0, segment.length)
+		local dx, dy, dz = segment.dx, segment.dy, segment.dz
 		for _, layer in segment.layers do
 			local part = layer.part
 			--[[
@@ -228,8 +303,16 @@ local function applyRouteProgress(construction: any, progress: number)
 			]]
 			local shown = math.max(0.01, visible * layer.ratio)
 			part.Size = Vector3.new(layer.width, layer.thickness, shown)
-			local centre = segment.origin + segment.direction * (visible - shown / 2)
-			part.CFrame = CFrame.lookAt(centre, centre + segment.direction) + Vector3.new(0, layer.lift, 0)
+			-- N113 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+			-- 60 Hz. Lerp nombres inchange (N111). Size inchange (API). Lift
+			-- cuit inchange (N110). Cable / camion / houle / feuillage /
+			-- unites inchanges (N109/N105/N107/N108/N103). Recette visual V63,
+			-- portee pas mergee.
+			local t = visible - shown / 2
+			local cx = layer.ox + dx * t
+			local cy = layer.oy + dy * t
+			local cz = layer.oz + dz * t
+			part.CFrame = CFrame.new(cx, cy, cz) * segment.rot
 			part.Transparency = if visible <= 0.01
 				then 1
 				elseif layer.ratio < 1 then 0.28
@@ -303,29 +386,45 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		local frame = CFrame.lookAt(a + span * 0.5, b)
 		local direction = span.Unit
 		local origin = a - direction * (tileSize / 2)
+		local dx, dy, dz = direction.X, direction.Y, direction.Z
+		local ox, oy, oz = origin.X, origin.Y, origin.Z
+		-- N113 : orientation cuit une fois (grille HV, un axe ≈ 0).
+		-- applyRouteProgress compose translation * rot, plus de lookAt 60 Hz.
+		-- Recette visual V63, portee pas mergee.
+		local rot = CFrame.lookAt(Vector3.zero, direction)
 
 		-- Largeurs a l'echelle du monde : une chaussee de deux studs se perdrait
 		-- sur une tuile qui en fait douze.
 		local k = Config.WORLD_SCALE
+		local shoulderLift = 0
+		local asphaltLift = 0.08 * k
+		local stripeLift = 0.18 * k
 		local shoulder = routePart(model, "Shoulder", Vector3.new(2.7 * k, 0.12 * k, length), Color3.fromRGB(39, 43, 48), Enum.Material.Concrete)
 		shoulder.CFrame = frame
 		local asphalt = routePart(model, "Road", Vector3.new(1.9 * k, 0.16 * k, length), Color3.fromRGB(52, 58, 66), Enum.Material.Asphalt)
-		asphalt.CFrame = frame + Vector3.new(0, 0.08 * k, 0)
+		asphalt.CFrame = frame + Vector3.new(0, asphaltLift, 0)
 		local stripe = routePart(model, "CenterMark", Vector3.new(0.1 * k, 0.2 * k, length * 0.58), Color3.fromRGB(237, 207, 123), Enum.Material.Neon)
 		stripe.Transparency = 0.28
-		stripe.CFrame = frame + Vector3.new(0, 0.18 * k, 0)
+		stripe.CFrame = frame + Vector3.new(0, stripeLift, 0)
 
 		table.insert(segments, {
 			-- Chaque calque garde sa largeur et sa hauteur propres : seule la
 			-- longueur est animee, et la bande centrale reste plus courte que
-			-- la chaussee qui la porte.
+			-- la chaussee qui la porte. Lift cuit dans origin (N110). N111 :
+			-- ox/oy/oz + dx/dy/dz cuits ici. applyRouteProgress n'additionne
+			-- plus origin + direction * t a 60 Hz.
+			-- N113 : rot cuit ici. applyRouteProgress n'appelle plus lookAt 60 Hz.
 			layers = {
-				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, lift = 0, ratio = 1 },
-				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, lift = 0.08 * k, ratio = 1 },
-				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, lift = 0.18 * k, ratio = 0.58 },
+				{ part = shoulder, width = 2.7 * k, thickness = 0.12 * k, origin = origin + Vector3.new(0, shoulderLift, 0), ox = ox, oy = oy + shoulderLift, oz = oz, ratio = 1 },
+				{ part = asphalt, width = 1.9 * k, thickness = 0.16 * k, origin = origin + Vector3.new(0, asphaltLift, 0), ox = ox, oy = oy + asphaltLift, oz = oz, ratio = 1 },
+				{ part = stripe, width = 0.1 * k, thickness = 0.2 * k, origin = origin + Vector3.new(0, stripeLift, 0), ox = ox, oy = oy + stripeLift, oz = oz, ratio = 0.58 },
 			},
 			origin = origin,
 			direction = direction,
+			rot = rot,
+			dx = dx,
+			dy = dy,
+			dz = dz,
 			length = length,
 			startsAt = totalLength,
 		})
@@ -358,6 +457,21 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	local path: { Vector3 } = { worldAt(tiles[1]) }
 	for _, run in runs do
 		table.insert(path, worldAt(run.toIndex))
+	end
+
+	-- N115 : orientation camion cuite une fois par segment (grille HV, Y
+	-- identique aux deux bouts — le lift TRUCK_LIFT s'annule). stepInterpolation
+	-- compose translation * segRot, plus de lookAt 60 Hz. Magnitude < 0.01 →
+	-- rot precedente (ou identite au premier), jamais un lookAt degenere.
+	-- Recette visual V64, portee pas mergee. Chantier segment.rot inchange (N113).
+	local segRot: { CFrame } = {}
+	for i = 1, #path - 1 do
+		local d = path[i + 1] - path[i]
+		if d.Magnitude < 0.01 then
+			segRot[i] = if i > 1 then segRot[i - 1] else CFrame.new(0, 0, 0)
+		else
+			segRot[i] = CFrame.lookAt(Vector3.zero, d)
+		end
 	end
 
 	local from = path[1]
@@ -409,6 +523,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 		from = from + Vector3.new(0, 0.8, 0),
 		to = to + Vector3.new(0, 0.8, 0),
 		path = path,
+		segRot = segRot,
 		slot = slot,
 		delivery = nil,
 		-- Chantier en cours, s'il y en a un. Voir applyRouteProgress.
@@ -449,7 +564,7 @@ end
 --[[
 	"+X or" flottant au-dessus d'une gare, la signature d'une livraison
 	reussie — le seul retour du commerce terrestre, exactement comme dans le
-	jeu de reference.
+	regles CONQUEST.
 ]]
 --[[
 	Notre slot, pour savoir quelles livraisons nous concernent.
@@ -465,16 +580,62 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	local base = WorldSpace.indexToWorld(tileIndex)
 	local y = WorldSpace.surfaceHeight(self.terrain, tileIndex)
 
-	local anchor = Instance.new("Part")
-	anchor.Name = "GoldPopup"
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanQuery = false
-	anchor.CanTouch = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.one
-	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
-	anchor.Parent = self.root
+	-- N159 : free-list goldFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.5 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). floatingText
+	-- réutilise déjà (N158, textFree — ne pas partager).
+	-- conquestPulse réutilise déjà (N157). tileFlash réutilise
+	-- déjà (N156). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157.
+	-- Distinct floatingText N158 (textFree, ne pas partager).
+	-- Distinct visual V82 ConquestPulse pulseRot (ne pas merger
+	-- 490f — ce n'est pas un GoldPopup). Arbre Billboard
+	-- conservé au reuse (Part + Board + TextLabel). Reset
+	-- TextTransparency / TextStrokeTransparency ours vs rival
+	-- (le tween les avait mises à 1). Name GoldPopup conservé
+	-- (banc livraison compte sans flush). Tween Create conservé
+	-- (CFrame lift + TextTransparency restart). Recette leftover
+	-- N158, pas merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / onTradeEvent inchangés.
+	local free = self.goldFree
+	if not free then
+		free = {}
+		self.goldFree = free
+	end
+	local n = #free
+	local anchor
+	local board
+	local text
+	if n > 0 then
+		anchor = free[n]
+		free[n] = nil
+		board = anchor:FindFirstChild("Board") :: BillboardGui
+		text = board:FindFirstChildWhichIsA("TextLabel") :: TextLabel
+	else
+		anchor = Instance.new("Part")
+		anchor.Name = "GoldPopup"
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanQuery = false
+		anchor.CanTouch = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.one
+
+		board = Instance.new("BillboardGui")
+		board.Name = "Board"
+		board.StudsOffset = Vector3.new(0, 1.5, 0)
+		board.AlwaysOnTop = true
+		board.Parent = anchor
+
+		text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.FontFace = Theme.font.display
+		text.TextColor3 = Theme.color.gold
+		text.Parent = board
+	end
 
 	--[[
 		Notre livraison se lit, celle du voisin se devine.
@@ -487,25 +648,15 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 		l'attention.
 	]]
 	local ours = mine ~= false
-	local board = Instance.new("BillboardGui")
-	board.Name = "Board"
+	anchor.CFrame = CFrame.new(base.X, y + 7 * Config.WORLD_SCALE, base.Z)
 	board.Size = UDim2.fromOffset(if ours then 120 else 80, if ours then 32 else 22)
-	board.StudsOffset = Vector3.new(0, 1.5, 0)
-	board.AlwaysOnTop = true
-	board.Parent = anchor
-
-	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
-	text.BackgroundTransparency = 1
-	text.FontFace = Theme.font.display
 	text.TextSize = if ours then 22 else 15
-	text.TextColor3 = Theme.color.gold
 	text.TextStrokeTransparency = if ours then 0.35 else 0.7
 	text.TextTransparency = if ours then 0 else 0.35
 	-- "+1.24K or" plutot que "+1240" : meme format que le reste du jeu, et
 	-- l'unite dit de quelle ressource il s'agit.
 	text.Text = `+{Format.compact(gold)} or`
-	text.Parent = board
+	anchor.Parent = self.root
 
 	local lift = TweenService:Create(anchor, TweenInfo.new(1.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = anchor.CFrame + Vector3.new(0, 5 * Config.WORLD_SCALE, 0),
@@ -517,7 +668,9 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 	}):Play()
 	task.delay(1.5, function()
 		if anchor.Parent then
-			anchor:Destroy()
+			anchor.Parent = nil
+			local pool = self.goldFree
+			pool[#pool + 1] = anchor
 		end
 	end)
 end
@@ -557,6 +710,139 @@ function Overlay.tally(self: Overlay, slot: number?, kind: number?, sign: number
 	bucket[kind] = math.max(0, (bucket[kind] or 0) + sign)
 end
 
+-- N178 : recycle les Model bâtiments au destroy / rebuild
+-- applyBuildingDelta. Plus de Destroy. Free-list buildingFree
+-- (pas shipFree / ogiveFree / ringFree). Take Kind+Level
+-- (silhouette palier N140). Name Building{index} + CFrame +
+-- Marker StudsOffsetWorldSpace à réécrire (l'index tuile
+-- change). Recapture same kind+level recolor déjà — aucun
+-- park. syncFactoryRoutes kind==0 AVANT le park. Overlay.clear
+-- bâtiments aussi N179. Skip syncFactoryRoutes Destroy
+-- (leftover N180). Recette leftover
+-- N177, pas merger visual V116 (eaa4). Distinct leftover N152
+-- flame. makeBuilding construction si mismatch. Pas de delay.
+local function parkBuilding(self: Overlay, model: Model)
+	if not model.Parent then
+		return
+	end
+	model.Parent = nil
+	local pool = self.buildingFree
+	if not pool then
+		pool = {}
+		self.buildingFree = pool
+	end
+	pool[#pool + 1] = model
+end
+
+local function takeBuilding(self: Overlay, kind: number, level: number): Model?
+	local free = self.buildingFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last:GetAttribute("Kind") == kind and last:GetAttribute("Level") == level then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand:GetAttribute("Kind") == kind and cand:GetAttribute("Level") == level then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+local function poseBuilding(
+	model: Model,
+	parent: Instance,
+	index: number,
+	kind: number,
+	slot: number,
+	level: number,
+	terrain: buffer
+)
+	local base = WorldSpace.indexToWorld(index)
+	local ground = WorldSpace.surfaceHeight(terrain, index)
+	local destX, destY, destZ = base.X, ground, base.Z
+	local oldIndex = model:GetAttribute("Index") :: number?
+	if typeof(oldIndex) ~= "number" then
+		oldIndex = tonumber(string.sub(model.Name, 9))
+	end
+	local originX, originY, originZ = destX, destY, destZ
+	if typeof(oldIndex) == "number" then
+		local oldBase = WorldSpace.indexToWorld(oldIndex)
+		originX = oldBase.X
+		originY = WorldSpace.surfaceHeight(terrain, oldIndex)
+		originZ = oldBase.Z
+	end
+	local dx, dy, dz = destX - originX, destY - originY, destZ - originZ
+	if dx ~= 0 or dy ~= 0 or dz ~= 0 then
+		local delta = Vector3.new(dx, dy, dz)
+		for _, part in model:GetChildren() do
+			if part:IsA("BasePart") then
+				local rest = part:GetAttribute("RestCFrame")
+				if rest then
+					part.CFrame = rest + delta
+				else
+					part.CFrame = part.CFrame + delta
+				end
+				part:SetAttribute("RestCFrame", part.CFrame)
+			end
+		end
+	else
+		for _, part in model:GetChildren() do
+			if part:IsA("BasePart") then
+				local rest = part:GetAttribute("RestCFrame")
+				if rest then
+					part.CFrame = rest
+				end
+			end
+		end
+	end
+
+	model.Name = `Building{index}`
+	model:SetAttribute("Index", index)
+
+	local nextColor = colorFor(slot)
+	local prevSlot = model:GetAttribute("Slot")
+	if prevSlot ~= slot then
+		local previous = Color3.new(
+			model:GetAttribute("TintR") :: number,
+			model:GetAttribute("TintG") :: number,
+			model:GetAttribute("TintB") :: number
+		)
+		BuildingModels.recolor(model, previous, nextColor)
+		local tintAnchor = model:FindFirstChildWhichIsA("BasePart")
+		local tintMarker = tintAnchor and tintAnchor:FindFirstChild("Marker")
+		local tintLabel = tintMarker and tintMarker:FindFirstChild("Symbol")
+		if tintLabel and tintLabel:IsA("TextLabel") then
+			tintLabel.TextColor3 = nextColor
+		end
+	end
+	model:SetAttribute("Slot", slot)
+	model:SetAttribute("TintR", nextColor.R)
+	model:SetAttribute("TintG", nextColor.G)
+	model:SetAttribute("TintB", nextColor.B)
+
+	local anchor = model:FindFirstChildWhichIsA("BasePart")
+	if anchor then
+		local marker = anchor:FindFirstChild("Marker")
+		if marker then
+			marker.StudsOffsetWorldSpace =
+				Vector3.new(base.X, ground + BuildingModels.heightOf(kind, level) + 3, base.Z) - anchor.Position
+		end
+	end
+
+	model.Parent = parent
+end
+
 function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnapshot })
 	for _, entry in deltas do
 		local existing = self.buildings[entry.index]
@@ -574,7 +860,7 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		if entry.kind == 0 then
 			self:syncFactoryRoutes(entry.index, nil, 0)
 			if existing then
-				existing:Destroy()
+				parkBuilding(self, existing)
 				self.buildings[entry.index] = nil
 			end
 			continue
@@ -614,10 +900,15 @@ function Overlay.applyBuildingDelta(self: Overlay, deltas: { Types.BuildingSnaps
 		end
 
 		if existing then
-			existing:Destroy()
+			parkBuilding(self, existing)
 		end
 
-		local model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		local model = takeBuilding(self, entry.kind, level)
+		if model then
+			poseBuilding(model, self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		else
+			model = makeBuilding(self.root, entry.index, entry.kind, entry.slot, level, self.terrain)
+		end
 		self.buildings[entry.index] = model
 		if entry.kind == Config.BUILDING.FACTORY then
 			model:SetAttribute("Routes", if entry.links then #entry.links else 0)
@@ -651,84 +942,404 @@ end
 --[[
 	Les instantanes arrivent a 10 Hz. On stocke la position cible et on
 	interpole a chaque frame, sinon les navires avancent par saccades visibles.
+
+	N98 : `trackUnit` est hisse au module — plus de closure par lot.
+	Extra missile pose une fois a l'insert, puis mute (tx/ty). Navire : extra
+	reste nil (la retraite N56 vit sur `retreatTinted`, pas une table 10 Hz).
+
+	N101 : `targetX`/`targetY` + `currentX`/`currentY` nombres (recette visual
+	V55). Vector2 Roblox est immuable : un `Vector2.new` par unite et par lot
+	(10 Hz) plus un userdata par lerp (60 Hz). Insert : poser les quatre
+	nombres. Update : muter `targetX`/`targetY`. Lerp numerique dans
+	`stepInterpolation`. Extra missile inchange (N98).
+	N103 : pose 60 Hz = X/Z monde en nombres (recette visual V56). Distinct
+	de N101 (nombres cible) / N98 (extra).
+	N116 : immobile (`mag <= 0.01`) = `CFrame.new` (regard -Z). Distinct de
+	N115 (camion HV cuisable).
+	N117 : mouvement = `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`
+	(recette visual V65). Plus de lookAt deux Vector3 60 Hz.
+	N125 : roulis navire `fromEulerAnglesYXZ(rx, 0, rz)` (recette visual V71,
+	portee pas mergee). Plus de CFrame.Angles 60 Hz.
+	N126 : roues camion `fromEulerAnglesYXZ(spin, 0, 0)` (recette visual
+	V72, portee pas mergee). Camera N118 deja. Pas de RemoteFunction.
+	HUD / UnitModels / serveur non touches.
 ]]
+
+-- N175 : recycle les Model navire au despawn delay 0.95 s. Distinct
+-- splashFree (N161, cylindre despawn). Distinct wakeFree (N160, cylindre
+-- spawn). Distinct dismissFree (N174). Distinct valueFree (N173).
+-- Kind match obligatoire (transport / cargo / carrier). Slot match
+-- obligatoire (recolor non sûr + teinte retraite N56). Missiles :
+-- ogiveFree N176 (liste séparée, pas shipFree). Overlay.clear parque
+-- les live dans shipFree / ogiveFree (N177). createBoat construction
+-- inchangée. Pas visual V112 (ne pas merger 3ba1). Distinct leftover
+-- N152 flame. rememberShipRest hoisté au-dessus de Overlay.clear.
+local function restoreShip(visual: any, parent: Instance)
+	local restT = visual.restTransparency
+	local restC = visual.restColor
+	for i, piece in visual.pieces do
+		piece.part.Transparency = if restT then restT[i] else 0
+		if restC and restC[i] then
+			piece.part.Color = restC[i]
+		end
+	end
+	visual.model.Parent = parent
+end
+
+local function takeShip(self: Overlay, kind: number, slot: number): any
+	local free = (self :: any).shipFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.kind == kind and last.slot == slot then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.kind == kind and cand.slot == slot then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+-- N176 : Overlay.applyUnits branche isMissile. Plus de Destroy
+-- immédiat : Parent = nil + ogiveFree. Recette leftover N175
+-- (shipFree déjà, delay 0.95 s — ne pas partager, pas de delay
+-- ici). Nommer ogiveFree, pas missileFree (clash Nukes.missileFree
+-- serveur) ni shipFree / splashFree / wakeFree. Kind+slot match
+-- obligatoire (recolor Warhead / GuidanceBand non sûr). Snapshot
+-- rest Transparency/Color à l'insert (place() anime trail ; park
+-- sans tween Transparency=1). PointLight enfant de EngineFlame
+-- survit au Parent=nil — ne pas en recréer. extra tx/ty vit sur
+-- le record unité, pas le Visual. Overlay.clear parque live
+-- (N177, mêmes listes). createMissile construction inchangée. Pas
+-- visual V113 (ne pas merger 1aab). Distinct leftover N152 flame.
+local function restoreOgive(visual: any, parent: Instance)
+	restoreShip(visual, parent)
+end
+
+local function takeOgive(self: Overlay, kind: number, slot: number): any
+	local free = (self :: any).ogiveFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.kind == kind and last.slot == slot then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.kind == kind and cand.slot == slot then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+local function trackUnit(
+	self: Overlay,
+	id: number,
+	slot: number,
+	kind: number,
+	x: number,
+	y: number,
+	isMissile: boolean,
+	extra: any?
+)
+	local unit = self.units[id]
+	if not unit then
+		local visual
+		if isMissile then
+			-- N176 : pop ogiveFree O(1) depuis la fin si kind+slot
+			-- match. Sinon scan court (n petit). Mismatch / vide =
+			-- createMissile une fois. Ne pas pop un navire (jamais
+			-- poussé ici). Reset Transparency / Color construction
+			-- (place() anime trail Transparency ; park sans tween
+			-- à 1). Parent = self.root. visual.pieces / PointLight
+			-- enfant conservés. extra n'est pas sur le Visual.
+			visual = takeOgive(self, kind, slot)
+			if visual then
+				restoreOgive(visual, self.root)
+			else
+				visual = UnitModels.createMissile(self.root, slot, kind)
+				rememberShipRest(visual)
+			end
+			visual.slot = slot
+		else
+			-- N175 : pop shipFree O(1) depuis la fin si kind+slot
+			-- match. Sinon scan court (n petit). Mismatch / vide =
+			-- createBoat une fois. Ne pas pop un carrier pour un
+			-- transport. Ne pas pop une ogive (ogiveFree séparé).
+			-- Reset Transparency / Color construction
+			-- (tween despawn pose Transparency=1 ; retraite teinte
+			-- les Color). Parent = self.root. visual.pieces conservé.
+			visual = takeShip(self, kind, slot)
+			if visual then
+				restoreShip(visual, self.root)
+			else
+				visual = UnitModels.createBoat(self.root, slot, kind)
+				rememberShipRest(visual)
+			end
+			visual.slot = slot
+		end
+		unit = {
+			visual = visual,
+			currentX = x,
+			currentY = y,
+			targetX = x,
+			targetY = y,
+			isMissile = isMissile,
+			phase = (id % 31) / 31 * math.pi * 2,
+			extra = extra,
+			slot = slot,
+		}
+		self.units[id] = unit
+		if not isMissile then
+			local origin = WorldSpace.tileToWorld(x, y)
+			-- N160 : free-list wakeFree, pop O(1) depuis la fin. Pas de
+			-- Destroy a 0.8 s : Parent = nil + push si encore parenté
+			-- (un delay fantôme ne double-push pas). goldPopup
+			-- réutilise déjà (N159, goldFree — ne pas partager).
+			-- conquestPulse réutilise déjà (N157). floatingText
+			-- réutilise déjà (N158). Distinct flame leftover N152
+			-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+			-- N153. Distinct previewTile N154. Distinct selectTile N155.
+			-- Distinct tileFlash N156. Distinct conquestPulse N157.
+			-- Distinct floatingText N158. Distinct goldPopup N159
+			-- (goldFree, ne pas partager). Distinct N130 (euler
+			-- LaunchWake déjà inline). Distinct visual V78 LaunchWake
+			-- wakeRot (ne pas merger 6183). Distinct LandingSplash
+			-- leftover N161 (Destroy, ne pas fusionner). Name LaunchWake
+			-- conservé. Reset Size (0.16, 2.5, 2.5) + Transparency 0.34
+			-- au reuse (le tween les avait mises à (0.16, 9, 9) / 1).
+			-- Euler N130 inline conservé. Tween Create conservé
+			-- (Size + Transparency restart). routePart non modifié
+			-- (LandingSplash / DeliveryPulse / Shockwave / BlastSmoke).
+			-- Recette leftover N159, pas merger visual. HUD /
+			-- UnitModels / Effects / PlacementPreview / goldPopup /
+			-- applyUnits despawn / stepInterpolation inchangés.
+			local free = self.wakeFree
+			if not free then
+				free = {}
+				self.wakeFree = free
+			end
+			local n = #free
+			local wake
+			if n > 0 then
+				wake = free[n]
+				free[n] = nil
+			else
+				wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+				wake.Shape = Enum.PartType.Cylinder
+			end
+			wake.Size = Vector3.new(0.16, 2.5, 2.5)
+			wake.Transparency = 0.34
+			-- N130 : insert navire LaunchWake. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- Offset Y OCEAN_LEVEL + 0.12 inchange. Garde not isMissile
+			-- inchangee. Tween Size/Transparency + task.delay
+			-- (Parent = nil, plus Destroy). Distinct footprint N129
+			-- (60 Hz hover). Distinct roulis N125. Distinct
+			-- splash/pulse/shockwave (leftover). Recette visual V75
+			-- leftover evenements Overlay. stepInterpolation non
+			-- touche. UnitModels / PlacementPreview inchanges.
+			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+			wake.Parent = self.root
+			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.16, 9, 9),
+				Transparency = 1,
+			}):Play()
+			task.delay(0.8, function()
+				if wake.Parent then
+					wake.Parent = nil
+					local pool = self.wakeFree
+					pool[#pool + 1] = wake
+				end
+			end)
+		end
+	else
+		if extra then
+			local stored = unit.extra
+			if stored then
+				stored.tx = extra.tx
+				stored.ty = extra.ty
+			else
+				unit.extra = extra
+			end
+		end
+	end
+	unit.targetX = x
+	unit.targetY = y
+	self.seen[id] = true
+end
+
 function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missiles: { Types.MissileSnapshot })
 	table.clear(self.seen)
 
-	local function track(id: number, slot: number, kind: number, x: number, y: number, isMissile: boolean, extra: any?)
-		local unit = self.units[id]
-		if not unit then
-			local visual = if isMissile
-				then UnitModels.createMissile(self.root, slot, kind)
-				else UnitModels.createBoat(self.root, slot, kind)
-			unit = {
-				visual = visual,
-				current = Vector2.new(x, y),
-				target = Vector2.new(x, y),
-				isMissile = isMissile,
-				phase = (id % 31) / 31 * math.pi * 2,
-				extra = extra,
-			}
-			self.units[id] = unit
-			if not isMissile then
-				local origin = WorldSpace.tileToWorld(x, y)
-				local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-				wake.Shape = Enum.PartType.Cylinder
-				wake.Transparency = 0.34
-				wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.16, 9, 9),
-					Transparency = 1,
-				}):Play()
-				task.delay(0.8, function()
-					if wake.Parent then
-						wake:Destroy()
-					end
-				end)
+	for _, boat in boats do
+		trackUnit(self, boat.id, boat.slot, boat.kind, boat.x, boat.y, false, nil)
+		-- N56 option A : teinte froide des que le serveur marque la retraite.
+		if boat.retreating then
+			local unit = self.units[boat.id]
+			if unit and not unit.retreatTinted then
+				unit.retreatTinted = true
+				for _, piece in unit.visual.pieces do
+					piece.part.Color = piece.part.Color:Lerp(Color3.fromRGB(168, 206, 222), 0.42)
+				end
 			end
 		end
-		unit.target = Vector2.new(x, y)
-		unit.extra = extra
-		self.seen[id] = true
-	end
-
-	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
 	end
 
 	for _, missile in missiles do
-		track(missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
-			tx = missile.tx,
-			ty = missile.ty,
-		})
+		local unit = self.units[missile.id]
+		if unit and unit.extra then
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, nil)
+			unit.extra.tx = missile.tx
+			unit.extra.ty = missile.ty
+		else
+			trackUnit(self, missile.id, missile.slot, missile.kind, missile.x, missile.y, true, {
+				tx = missile.tx,
+				ty = missile.ty,
+			})
+		end
 	end
 
 	-- Toute unite absente de l'instantane a disparu cote serveur.
 	for id, unit in self.units do
 		if not self.seen[id] then
 			if not unit.isMissile then
-				local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
-				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-				splash.Shape = Enum.PartType.Cylinder
-				splash.Transparency = 0.18
-				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.18, 15, 15),
-					Transparency = 1,
-				}):Play()
+				-- N56 : une retraite auto ne doit pas jouer le splash d'arrivee
+				-- (le client interpolait vers l'ancienne cible et confondait
+				-- avec un debarquement).
+				local retreating = (unit.extra and unit.extra.retreating) or unit.retreatTinted
+				if not retreating then
+					local last = WorldSpace.tileToWorld(unit.currentX, unit.currentY)
+					-- N161 : free-list splashFree, pop O(1) depuis la fin. Pas de
+					-- Destroy a 0.95 s : Parent = nil + push si encore parenté
+					-- (un delay fantôme ne double-push pas). LaunchWake
+					-- réutilise déjà (N160, wakeFree — ne pas partager).
+					-- goldPopup réutilise déjà (N159, goldFree — ne pas
+					-- partager). Distinct flame leftover N152
+					-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+					-- N153. Distinct previewTile N154. Distinct selectTile N155.
+					-- Distinct tileFlash N156. Distinct conquestPulse N157.
+					-- Distinct floatingText N158. Distinct goldPopup N159.
+					-- Distinct LaunchWake N160 (wakeFree, ne pas partager).
+					-- Distinct N131 (euler LandingSplash déjà inline).
+					-- Distinct visual V79 LandingSplash wakeRot (ne pas
+					-- merger 54d6). Distinct DeliveryPulse leftover N162
+					-- (Destroy, ne pas fusionner). Name LandingSplash conservé.
+					-- Reset Size (0.18, 3, 3) + Transparency 0.18 au reuse
+					-- (le tween les avait mises à (0.18, 15, 15) / 1).
+					-- Euler N131 inline conservé. Tween Create conservé
+					-- (Size + Transparency restart). routePart non modifié
+					-- (LaunchWake / DeliveryPulse / Shockwave / BlastSmoke).
+					-- N175 : Destroy du modèle navire → Parent = nil +
+					-- shipFree (0.95 s, pas le splash). Recette leftover
+					-- N174, pas merger visual V112. HUD / UnitModels /
+					-- Effects / PlacementPreview / goldPopup /
+					-- stepInterpolation inchangés. trackUnit insert pop.
+					local free = self.splashFree
+					if not free then
+						free = {}
+						self.splashFree = free
+					end
+					local n = #free
+					local splash
+					if n > 0 then
+						splash = free[n]
+						free[n] = nil
+					else
+						splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
+						splash.Shape = Enum.PartType.Cylinder
+					end
+					splash.Size = Vector3.new(0.18, 3, 3)
+					splash.Transparency = 0.18
+					-- N131 : despawn navire LandingSplash. Plus de CFrame.Angles.
+					-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+					-- Offset Y OCEAN_LEVEL + 0.14 inchange. Gardes not isMissile /
+					-- not retreating (N56) inchangees. Tween Size/Transparency +
+					-- task.delay (Parent = nil, plus Destroy). Distinct LaunchWake
+					-- N130/N160 (spawn, Y + 0.12). Distinct pulse N132 (route.to
+					-- terre). Distinct footprint N129. Distinct roulis N125.
+					-- Recette visual V75 leftover evenements Overlay.
+					-- stepInterpolation / trackUnit insert non touches.
+					-- UnitModels / PlacementPreview inchanges.
+					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+					splash.Parent = self.root
+					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+						Size = Vector3.new(0.18, 15, 15),
+						Transparency = 1,
+					}):Play()
+					task.delay(0.95, function()
+						if splash.Parent then
+							splash.Parent = nil
+							local pool = self.splashFree
+							pool[#pool + 1] = splash
+						end
+					end)
+				end
 				for _, piece in unit.visual.pieces do
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
+				-- N175 : free-list shipFree, push si encore parenté
+				-- (un delay fantôme ne double-push pas). Pas Destroy.
+				-- Stocker le Visual entier (model + pieces + kind +
+				-- isMissile + rest Transparency/Color). Slot pour le
+				-- match takeShip. Skip missiles (branche else).
+				-- Overlay.clear parque live (N177, mêmes listes).
+				-- splashFree / wakeFree / ogiveFree non partagés.
+				-- Recette leftover N174.
 				task.delay(0.95, function()
-					if splash.Parent then
-						splash:Destroy()
-					end
 					if unit.visual.model.Parent then
-						unit.visual.model:Destroy()
+						unit.visual.model.Parent = nil
+						rememberShipRest(unit.visual)
+						unit.visual.slot = unit.slot
+						local pool = self.shipFree
+						if not pool then
+							pool = {}
+							self.shipFree = pool
+						end
+						pool[#pool + 1] = unit.visual
 					end
 				end)
 			else
-				unit.visual.model:Destroy()
+				-- N176 : free-list ogiveFree, push si encore parenté
+				-- (un despawn fantôme ne double-push pas). Pas Destroy.
+				-- Immédiat (pas le delay 0.95 s navire). Stocker le
+				-- Visual entier (model + pieces + kind + isMissile +
+				-- rest Transparency/Color). Slot pour le match
+				-- takeOgive. Skip navires (branche not isMissile).
+				-- Overlay.clear parque live (N177, mêmes listes).
+				-- shipFree / splashFree / wakeFree non partagés.
+				-- Recette leftover N175, pas merger visual V113.
+				if unit.visual.model.Parent then
+					unit.visual.model.Parent = nil
+					rememberShipRest(unit.visual)
+					unit.visual.slot = unit.slot
+					local pool = self.ogiveFree
+					if not pool then
+						pool = {}
+						self.ogiveFree = pool
+					end
+					pool[#pool + 1] = unit.visual
+				end
 			end
 			self.units[id] = nil
 		end
@@ -774,32 +1385,107 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		if delivery.progress >= 1 then
 			route.delivery = nil
 			route.truckModel.Parent = nil
-			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
-			pulse.Shape = Enum.PartType.Cylinder
+			-- N162 : free-list deliveryFree, pop O(1) depuis la fin. Pas de
+			-- Destroy a 0.85 s : Parent = nil + push si encore parenté
+			-- (un delay fantôme ne double-push pas). LandingSplash
+			-- réutilise déjà (N161, splashFree — ne pas partager).
+			-- LaunchWake réutilise déjà (N160, wakeFree — ne pas
+			-- partager). goldPopup réutilise déjà (N159, goldFree —
+			-- ne pas partager). Distinct flame leftover N152
+			-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+			-- N153. Distinct previewTile N154. Distinct selectTile N155.
+			-- Distinct tileFlash N156. Distinct conquestPulse N157
+			-- (pulseFree Effects — ne pas nommer deliveryFree
+			-- pulseFree). Distinct floatingText N158. Distinct
+			-- goldPopup N159. Distinct LaunchWake N160. Distinct
+			-- LandingSplash N161 (splashFree, ne pas partager).
+			-- Distinct N132 (euler DeliveryPulse déjà inline).
+			-- Distinct visual V80 DeliveryPulse wakeRot (ne pas
+			-- merger a597). Distinct Shockwave leftover N163
+			-- (Destroy, ne pas fusionner). Name DeliveryPulse
+			-- conservé. Reset Size (0.22, 2.8, 2.8) + Transparency
+			-- 0.28 + Color colorFor(route.slot) au reuse (le tween
+			-- avait Size (0.22, 11, 11) / Transparency 1 ; le slot
+			-- change). Euler N132 inline conservé. Tween Create
+			-- conservé (Size + Transparency restart). routePart non
+			-- modifié (LaunchWake / LandingSplash / Shockwave /
+			-- BlastSmoke). truckModel.Parent = nil obligatoire.
+			-- Recette leftover N161, pas merger visual. HUD /
+			-- UnitModels / Effects / PlacementPreview / goldPopup /
+			-- LaunchWake / LandingSplash / applyUnits /
+			-- applyRouteProgress inchangés.
+			local free = self.deliveryFree
+			if not free then
+				free = {}
+				self.deliveryFree = free
+			end
+			local n = #free
+			local pulse
+			if n > 0 then
+				pulse = free[n]
+				free[n] = nil
+			else
+				pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
+				pulse.Shape = Enum.PartType.Cylinder
+			end
+			pulse.Size = Vector3.new(0.22, 2.8, 2.8)
 			pulse.Transparency = 0.28
-			pulse.CFrame = CFrame.new(route.to) * CFrame.Angles(0, 0, math.rad(90))
+			pulse.Color = colorFor(route.slot)
+			-- N132 : fin de delivery DeliveryPulse. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+			-- route.to deja Vector3 (gare) inchange. Tween Size/Transparency +
+			-- task.delay (Parent = nil, plus Destroy). truckModel.Parent = nil
+			-- inchange. Distinct splash N131/N161 (mer, last.X, Y + 0.14).
+			-- Distinct LaunchWake N130/N160. Distinct roues N126. Distinct
+			-- chantier N113/N115. Recette visual V75 leftover evenements
+			-- Overlay. applyUnits / applyRouteProgress non touches.
+			-- PlacementPreview / UnitModels inchanges.
+			pulse.CFrame = CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+			pulse.Parent = self.root
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,
 			}):Play()
 			task.delay(0.85, function()
 				if pulse.Parent then
-					pulse:Destroy()
+					pulse.Parent = nil
+					local pool = self.deliveryFree
+					pool[#pool + 1] = pulse
 				end
 			end)
 			continue
 		end
-		local scaled = delivery.progress * (#route.path - 1)
-		local segmentIndex = math.min(#route.path - 1, math.floor(scaled) + 1)
-		local segmentProgress = scaled - math.floor(scaled)
-		local a = route.path[segmentIndex] + Vector3.new(0, 0.8, 0)
-		local b = route.path[segmentIndex + 1] + Vector3.new(0, 0.8, 0)
-		local direction = b - a
-		local position = a + direction * segmentProgress
-		local frame = CFrame.lookAt(position, position + direction)
+		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
+		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
+		-- N115 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
+		-- 60 Hz. N126 : roues fromEulerAnglesYXZ(spin, 0, 0). Plus de
+		-- CFrame.Angles 60 Hz. Facteur π * 20 inchange. Pieces non-Wheel
+		-- inchangees (frame * offset). Unites inchangees (N117 / N116 /
+		-- N125). Chantier segment.rot inchange (N113). Recette visual V72
+		-- leftover, portee pas mergee. Extra missile inchange (N98).
+		-- targetX inchange (N101). Une voie sans delivery ne rentre pas ici.
+		local path = route.path
+		local nSeg = #path - 1
+		local scaled = delivery.progress * nSeg
+		local floorScaled = math.floor(scaled)
+		local segmentIndex = math.min(nSeg, floorScaled + 1)
+		local segmentProgress = scaled - floorScaled
+		local a = path[segmentIndex]
+		local b = path[segmentIndex + 1]
+		local ax, ay, az = a.X, a.Y + TRUCK_LIFT, a.Z
+		local bx, by, bz = b.X, b.Y + TRUCK_LIFT, b.Z
+		local dx, dy, dz = bx - ax, by - ay, bz - az
+		local px = ax + dx * segmentProgress
+		local py = ay + dy * segmentProgress
+		local pz = az + dz * segmentProgress
+		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
 		for _, piece in route.truck do
-			local spin = if piece.part.Name == "Wheel" then CFrame.Angles(delivery.progress * math.pi * 20, 0, 0) else CFrame.new()
-			piece.part.CFrame = frame * piece.offset * spin
+			if piece.part.Name == "Wheel" then
+				local spin = delivery.progress * math.pi * 20
+				piece.part.CFrame = frame * piece.offset * CFrame.fromEulerAnglesYXZ(spin, 0, 0)
+			else
+				piece.part.CFrame = frame * piece.offset
+			end
 		end
 	end
 
@@ -808,10 +1494,17 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 	end
 
 	for _, unit in self.units do
-		unit.current += (unit.target - unit.current) * alpha
+		-- N101 : lerp numerique. `Vector2.current +=` aurait alloue 60 Hz.
+		unit.currentX += (unit.targetX - unit.currentX) * alpha
+		unit.currentY += (unit.targetY - unit.currentY) * alpha
 
-		local x, y = unit.current.X, unit.current.Y
-		local ground = WorldSpace.tileToWorld(x, y)
+		local x, y = unit.currentX, unit.currentY
+		-- N103 : X/Z monde en nombres. Plus de tileToWorld / Vector3.Unit /
+		-- CFrame.new(position) par unite. Un seul lookAt (N116 : immobile =
+		-- CFrame.new, plus de lookAt). Extra missile inchange (N98).
+		-- Recette visual V56, portee pas mergee. targetX inchange (N101).
+		local worldX = x * TILE - HALF_W + TILE_HALF
+		local worldZ = y * TILE - HALF_D + TILE_HALF
 
 		local height
 		if unit.isMissile then
@@ -830,19 +1523,37 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		end
 
 		local bob = if unit.isMissile then 0 else math.sin(now * 2.4 + unit.phase) * 0.24
-		local position = Vector3.new(ground.X, height + bob, ground.Z)
-		local direction = unit.target - unit.current
-
-		if direction.Magnitude > 0.01 then
-			local look = Vector3.new(direction.X, 0, direction.Y).Unit
-			local frame = CFrame.lookAt(position, position + look)
-			if not unit.isMissile then
-				frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
-			end
-			UnitModels.place(unit.visual, frame, now + unit.phase, direction.Magnitude)
+		local py = height + bob
+		local dx = unit.targetX - unit.currentX
+		local dy = unit.targetY - unit.currentY
+		local mag = math.sqrt(dx * dx + dy * dy)
+		-- N116 : immobile = translation seule (regard -Z). Plus de deux
+		-- Vector3 60 Hz hors deplacement.
+		-- N117 : mouvement = translation * yaw euler (regard -Z vers la
+		-- cible). `dy` tuile = monde Z. Plus de lookAt deux Vector3.
+		-- Recette visual V65, portee pas mergee.
+		-- N125 : compose translation*yaw * euler. Plus de CFrame.Angles
+		-- 60 Hz. fromEulerAnglesYXZ(rx, 0, rz) ≡ Angles(rx, 0, rz)
+		-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
+		-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
+		-- Radar / flag / boom inchanges (N124). Yaw inchange (N117).
+		-- Roues camion N126. Immobile : zero compose.
+		-- Recette visual V71, portee pas mergee. Extra missile inchange
+		-- (N98). Camion / chantier inchanges (N115 / N113).
+		-- UnitModels.place inchange. Camera inchangee (N118).
+		local frame
+		if mag <= 0.01 then
+			frame = CFrame.new(worldX, py, worldZ)
 		else
-			UnitModels.place(unit.visual, CFrame.new(position), now + unit.phase, 0)
+			frame = CFrame.new(worldX, py, worldZ)
+				* CFrame.fromEulerAnglesYXZ(0, math.atan2(dx, -dy), 0)
+			if not unit.isMissile then
+				local rx = math.sin(now * 1.7 + unit.phase) * 0.018
+				local rz = math.sin(now * 2.1 + unit.phase) * 0.035
+				frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)
+			end
 		end
+		UnitModels.place(unit.visual, frame, now + unit.phase, if mag > 0.01 then mag else 0)
 	end
 end
 
@@ -858,15 +1569,62 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	local ground = WorldSpace.tileToWorld(x, y)
 	local worldRadius = radius * Config.TILE_SIZE
 
-	local sphere = Instance.new("Part")
-	sphere.Name = "Blast"
-	sphere.Shape = Enum.PartType.Ball
-	sphere.Anchored = true
-	sphere.CanCollide = false
-	sphere.CanTouch = false
-	sphere.CanQuery = false
-	sphere.CastShadow = false
-	sphere.Material = Enum.Material.Neon
+	-- N165 : free-list blastFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.3 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). BlastSmoke
+	-- réutilise déjà (N164, smokeFree — ne pas partager).
+	-- Shockwave réutilise déjà (N163, shockFree — ne pas
+	-- partager). DeliveryPulse réutilise déjà (N162,
+	-- deliveryFree — ne pas partager). LandingSplash réutilise
+	-- déjà (N161, splashFree — ne pas partager). LaunchWake
+	-- réutilise déjà (N160, wakeFree — ne pas partager).
+	-- goldPopup réutilise déjà (N159, goldFree — ne pas
+	-- partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer blastFree pulseFree
+	-- ni smokeFree ni shockFree). Distinct floatingText N158.
+	-- Distinct goldPopup N159. Distinct LaunchWake N160.
+	-- Distinct LandingSplash N161. Distinct DeliveryPulse N162.
+	-- Distinct Shockwave N163 (shockFree, ne pas partager).
+	-- Distinct BlastSmoke N164 (smokeFree, ne pas partager).
+	-- Distinct PointLight (enfant de Blast — FindFirstChildWhichIsA
+	-- au reuse, pas un 2e pool). Name Blast conservé. Reset
+	-- Size (4, 4, 4) + Transparency 0.15 + Color 255,190,110 +
+	-- CFrame ground.X, 14, ground.Z **avant** Tween
+	-- (worldRadius et ground varient ; le tween avait Size
+	-- worldRadius * 2 / Transparency 1). Tween Create conservé
+	-- (Size / Transparency restart). PointLight reset
+	-- Brightness 8 / Range min(worldRadius * 2, 60) / Color
+	-- 255,200,120 puis Tween Brightness → 0. routePart non
+	-- modifié (LaunchWake / LandingSplash / DeliveryPulse /
+	-- Shockwave / BlastSmoke). Recette leftover N164, pas
+	-- merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / goldPopup / LaunchWake / LandingSplash /
+	-- DeliveryPulse / Shockwave / BlastSmoke / applyUnits /
+	-- stepInterpolation inchangés.
+	local blastFree = self.blastFree
+	if not blastFree then
+		blastFree = {}
+		self.blastFree = blastFree
+	end
+	local nBlast = #blastFree
+	local sphere
+	if nBlast > 0 then
+		sphere = blastFree[nBlast]
+		blastFree[nBlast] = nil
+	else
+		sphere = Instance.new("Part")
+		sphere.Name = "Blast"
+		sphere.Shape = Enum.PartType.Ball
+		sphere.Anchored = true
+		sphere.CanCollide = false
+		sphere.CanTouch = false
+		sphere.CanQuery = false
+		sphere.CastShadow = false
+		sphere.Material = Enum.Material.Neon
+	end
 	sphere.Color = Color3.fromRGB(255, 190, 110)
 	sphere.Transparency = 0.15
 	sphere.Size = Vector3.new(4, 4, 4)
@@ -875,10 +1633,66 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Onde horizontale : elle communique la portee bien mieux qu'une simple
 	-- sphere et reste visible quand la camera regarde presque a la verticale.
-	local shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
-	shockwave.Shape = Enum.PartType.Cylinder
+	-- N163 : free-list shockFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). DeliveryPulse
+	-- réutilise déjà (N162, deliveryFree — ne pas partager).
+	-- LandingSplash réutilise déjà (N161, splashFree — ne pas
+	-- partager). LaunchWake réutilise déjà (N160, wakeFree — ne
+	-- pas partager). goldPopup réutilise déjà (N159, goldFree —
+	-- ne pas partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer shockFree pulseFree).
+	-- Distinct floatingText N158. Distinct goldPopup N159.
+	-- Distinct LaunchWake N160. Distinct LandingSplash N161.
+	-- Distinct DeliveryPulse N162 (deliveryFree, ne pas
+	-- partager). Distinct N133 (euler Shockwave déjà inline).
+	-- Distinct visual V81 Shockwave wakeRot (ne pas merger
+	-- 47c0). Distinct BlastSmoke N164 (smokeFree, ne pas
+	-- partager). Distinct Blast sphère N165 (blastFree, ne pas
+	-- fusionner). Name Shockwave conservé.
+	-- Reset Size (0.32, 5, 5) + Transparency 0.12 + Color
+	-- 255,229,181 au reuse (le tween avait Size (0.32,
+	-- worldRadius * 2.5, worldRadius * 2.5) / Transparency 1 ;
+	-- worldRadius change). Euler N133 inline conservé. Tween
+	-- Create conservé (Size + Transparency restart). routePart
+	-- non modifié (LaunchWake / LandingSplash / DeliveryPulse /
+	-- BlastSmoke). Blast N165 blastFree obligatoire. Recette leftover
+	-- N162, pas merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / goldPopup / LaunchWake / LandingSplash /
+	-- DeliveryPulse / applyUnits / stepInterpolation
+	-- inchangés.
+	local free = self.shockFree
+	if not free then
+		free = {}
+		self.shockFree = free
+	end
+	local n = #free
+	local shockwave
+	if n > 0 then
+		shockwave = free[n]
+		free[n] = nil
+	else
+		shockwave = routePart(self.root, "Shockwave", Vector3.new(0.32, 5, 5), Color3.fromRGB(255, 229, 181), Enum.Material.Neon)
+		shockwave.Shape = Enum.PartType.Cylinder
+	end
+	shockwave.Size = Vector3.new(0.32, 5, 5)
 	shockwave.Transparency = 0.12
-	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	shockwave.Color = Color3.fromRGB(255, 229, 181)
+	-- N133 : explosion Shockwave. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- Hauteur PLAINS + 0.5 inchangee. Tween Size/Transparency +
+	-- task.delay (Parent = nil, plus Destroy). Sphere / fumee /
+	-- PointLight sans euler. Distinct pulse N132/N162 (route.to
+	-- gare). Distinct splash N131/N161 (mer). Distinct LaunchWake
+	-- N130/N160. Distinct Effects ring N134 (Y = 3). Recette
+	-- visual V75 leftover evenements Overlay. applyUnits /
+	-- stepInterpolation non touches. Effects / PlacementPreview /
+	-- UnitModels inchanges.
+	shockwave.CFrame = CFrame.new(ground.X, Config.TERRAIN_HEIGHT[Config.TERRAIN.PLAINS] + 0.5, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+	shockwave.Parent = self.root
 	TweenService:Create(shockwave, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 		Size = Vector3.new(0.32, worldRadius * 2.5, worldRadius * 2.5),
 		Transparency = 1,
@@ -886,11 +1700,58 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 
 	-- Colonne de fumee en volumes superposes. Elle est courte et stylisee pour
 	-- rester lisible de loin sans texture de particules externe.
+	-- N164 : free-list smokeFree, pop O(1) depuis la fin **par
+	-- itération**. Pas de Destroy a 2.5 s : Parent = nil + push
+	-- si encore parenté (un delay fantôme ne double-push pas).
+	-- Shockwave réutilise déjà (N163, shockFree — ne pas
+	-- partager). DeliveryPulse réutilise déjà (N162,
+	-- deliveryFree — ne pas partager). LandingSplash réutilise
+	-- déjà (N161, splashFree — ne pas partager). LaunchWake
+	-- réutilise déjà (N160, wakeFree — ne pas partager).
+	-- goldPopup réutilise déjà (N159, goldFree — ne pas
+	-- partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer smokeFree pulseFree
+	-- ni shockFree). Distinct floatingText N158. Distinct
+	-- goldPopup N159. Distinct LaunchWake N160. Distinct
+	-- LandingSplash N161. Distinct DeliveryPulse N162.
+	-- Distinct Shockwave N163 (shockFree, ne pas partager).
+	-- Distinct Blast sphère N165 (blastFree, ne pas
+	-- fusionner). Distinct PointLight (enfant de Blast N165). Name
+	-- BlastSmoke conservé. Boucle i = 1, 5 inchangée (cinq
+	-- pops). Reset Size (5+i, 5+i, 5+i) + Transparency
+	-- 0.22 + i * 0.07 + Color 82+i*7, 76+i*6, 71+i*5 + CFrame
+	-- **avant** Tween (i et ground varient ; le tween lit
+	-- smoke.CFrame + Vector3 et smoke.Size * 2.1). Tween Create
+	-- conservé (CFrame / Size / Transparency restart).
+	-- routePart non modifié (LaunchWake / LandingSplash /
+	-- DeliveryPulse / Shockwave). Blast N165 blastFree obligatoire.
+	-- PointLight enfant N165. Recette leftover N163, pas merger
+	-- visual. HUD / UnitModels / Effects / PlacementPreview /
+	-- goldPopup / LaunchWake / LandingSplash / DeliveryPulse /
+	-- Shockwave / applyUnits / stepInterpolation inchangés.
+	local smokeFree = self.smokeFree
+	if not smokeFree then
+		smokeFree = {}
+		self.smokeFree = smokeFree
+	end
 	for i = 1, 5 do
-		local smoke = routePart(self.root, "BlastSmoke", Vector3.new(5 + i, 5 + i, 5 + i), Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5), Enum.Material.SmoothPlastic)
-		smoke.Shape = Enum.PartType.Ball
+		local nSmoke = #smokeFree
+		local smoke
+		if nSmoke > 0 then
+			smoke = smokeFree[nSmoke]
+			smokeFree[nSmoke] = nil
+		else
+			smoke = routePart(self.root, "BlastSmoke", Vector3.new(5 + i, 5 + i, 5 + i), Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5), Enum.Material.SmoothPlastic)
+			smoke.Shape = Enum.PartType.Ball
+		end
+		smoke.Size = Vector3.new(5 + i, 5 + i, 5 + i)
 		smoke.Transparency = 0.22 + i * 0.07
+		smoke.Color = Color3.fromRGB(82 + i * 7, 76 + i * 6, 71 + i * 5)
 		smoke.CFrame = CFrame.new(ground.X + math.sin(i * 2.1) * 2, 7 + i * 5, ground.Z + math.cos(i * 1.7) * 2)
+		smoke.Parent = self.root
 		TweenService:Create(smoke, TweenInfo.new(1.7 + i * 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			CFrame = smoke.CFrame + Vector3.new(0, 18 + i * 3, 0),
 			Size = smoke.Size * 2.1,
@@ -898,7 +1759,9 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		}):Play()
 		task.delay(2.5, function()
 			if smoke.Parent then
-				smoke:Destroy()
+				smoke.Parent = nil
+				local pool = self.smokeFree
+				pool[#pool + 1] = smoke
 			end
 		end)
 	end
@@ -908,19 +1771,28 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		Transparency = 1,
 	}):Play()
 
-	local light = Instance.new("PointLight")
+	local light = sphere:FindFirstChildWhichIsA("PointLight")
+	if not light then
+		light = Instance.new("PointLight")
+		light.Parent = sphere
+	end
 	light.Brightness = 8
 	light.Range = math.min(worldRadius * 2, 60)
 	light.Color = Color3.fromRGB(255, 200, 120)
-	light.Parent = sphere
 	TweenService:Create(light, TweenInfo.new(1.1), { Brightness = 0 }):Play()
 
 	task.delay(1.3, function()
-		sphere:Destroy()
+		if sphere.Parent then
+			sphere.Parent = nil
+			local pool = self.blastFree
+			pool[#pool + 1] = sphere
+		end
 	end)
 	task.delay(1, function()
 		if shockwave.Parent then
-			shockwave:Destroy()
+			shockwave.Parent = nil
+			local pool = self.shockFree
+			pool[#pool + 1] = shockwave
 		end
 	end)
 end
