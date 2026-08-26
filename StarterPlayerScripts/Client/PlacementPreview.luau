@@ -107,9 +107,9 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	-- V75 : rotation cylindre plat cuite une fois (recette V63 segment.rot).
 	-- Plus de CFrame.Angles 60 Hz hover. fromEulerAnglesYXZ(0, 0, rad(90))
 	-- ≡ Angles(0, 0, 90°) (rx=0, ry=0 → Z seul). Hauteurs +0.42 / +0.38
-	-- inchangees. Size footprint/pulse inchange (API rayon, leftover V76).
-	-- Radar/flag unites inchanges (V73). Flame Size inchange (V74 API).
-	-- Overlay / BuildingModels / WorldCamera non edites.
+	-- inchangees. V76 : Size pose dans setKind (rayon = kind). Radar/flag
+	-- unites inchanges (V73). Flame Size inchange (V74 API). Overlay /
+	-- BuildingModels / WorldCamera non edites.
 	self.footprintRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
@@ -174,8 +174,22 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 
 	if not kind then
 		self.footprint.Transparency = 1
+		self.pulse.Transparency = 1
 		return
 	end
+
+	-- V76 : rayon = kind seulement. Le bunker montre son rayon d'effet
+	-- complet (DEFENSE_RADIUS * TILE * 2) : c'est la seule facon de le
+	-- placer intelligemment plutot qu'au hasard. Autres kinds : TILE * 3.
+	-- pulseSize = radius * 1.08. Plus de Vector3.new Size 60 Hz hover.
+	-- Distinct de V74 (flame Z pulse sin(time*18)). Distinct de V75
+	-- (CFrame translation, rot deja cuit). Placeholder 10×10 / 8×8 du
+	-- new n'est pas le rayon reel — ne pas geler Size ici.
+	local radius = if kind == Config.BUILDING.DEFENSE
+		then Config.DEFENSE_RADIUS * Config.TILE_SIZE * 2
+		else Config.TILE_SIZE * 3
+	self.footprint.Size = Vector3.new(0.35, radius, radius)
+	self.pulse.Size = Vector3.new(0.12, radius * 1.08, radius * 1.08)
 
 	-- Le fantome est construit une fois puis simplement deplace : le recreer a
 	-- chaque mouvement de souris produirait des dizaines de modeles par seconde.
@@ -240,21 +254,14 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 		end
 	end
 
-	-- Le bunker montre son rayon d'effet complet : c'est la seule facon de le
-	-- placer intelligemment plutot qu'au hasard.
-	local radius = if self.kind == Config.BUILDING.DEFENSE
-		then Config.DEFENSE_RADIUS * Config.TILE_SIZE * 2
-		else Config.TILE_SIZE * 3
-
+	-- V76 : Size deja pose dans setKind. Hover ne reecrit que CFrame
+	-- (V75, le curseur bouge) + couleur / transparence (leftover V77).
 	self.footprint.Transparency = 0.52
 	self.footprint.Color = color
-	self.footprint.Size = Vector3.new(0.35, radius, radius)
 	self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * self.footprintRot
 
 	self.pulse.Transparency = 0.72
 	self.pulse.Color = color
-	local pulseSize = radius * 1.08
-	self.pulse.Size = Vector3.new(0.12, pulseSize, pulseSize)
 	self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * self.pulseRot
 end
 

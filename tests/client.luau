@@ -907,9 +907,9 @@ check("pose et capture de chaque type de batiment", function()
 	-- l'autre. V72 : roues fromEulerAnglesYXZ pendant la livraison (spin
 	-- π×20, garde Wheel). Leftover V63 (rot chantier) plus haut. Leftover
 	-- V56 (unités) / V71 (roulis) / V73 (UnitModels radar/flag) restent
-	-- dans le check navires. V74 flame Size = API. Leftover V75
-	-- (footprint/pulse rot) dans le check apercu. Leftover V76 (Size
-	-- rayon preview) separe. Voies encore vivantes ici ; la destruction
+	-- dans le check navires. V74 flame Size = API. V75 rot + V76 Size
+	-- rayon dans le check apercu. Leftover V77 (Color/Transparency
+	-- hover). Voies encore vivantes ici ; la destruction
 	-- plus bas les vide (le check livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
@@ -1038,8 +1038,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- animate ne lève pas (0 câble = zéro alloc Vector3). Roulis navire
 	-- V71 (check navires). Roues camion V72 (check pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
-	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76
-	-- (Size rayon preview) separe.
+	-- V75 rot + V76 Size rayon dans le check apercu. Leftover V77
+	-- (Color/Transparency hover).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1084,9 +1084,10 @@ end)
 
 check("apercu de placement pour chaque batiment", function()
 	-- V75 : rot cuit a new (recette V63 segment.rot). Plus de
-	-- CFrame.Angles 60 Hz hover. Leftover V51/V53 (resolve) dans le
-	-- check accrochage. Leftover V73 (radar/flag) dans le check navires.
-	-- Leftover V76 (Size rayon) separe. Hauteurs +0.42 / +0.38.
+	-- CFrame.Angles 60 Hz hover. V76 : Size pose dans setKind
+	-- (rayon = kind). Leftover V51/V53 (resolve) dans le check
+	-- accrochage. Leftover V73 (radar/flag) dans le check navires.
+	-- Leftover V77 (Color/Transparency hover). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1116,6 +1117,30 @@ check("apercu de placement pour chaque batiment", function()
 	assert(preview.footprint.CFrame.Z == preview.pulse.CFrame.Z, "Z footprint != pulse")
 	assert(rawequal(preview.footprintRot, bakedFoot), "footprintRot recree au second hover")
 	assert(rawequal(preview.pulseRot, bakedPulse), "pulseRot recree au second hover")
+
+	-- V76 : Size pose dans setKind. Ville = TILE*3 ; bunker =
+	-- DEFENSE_RADIUS*TILE*2. Hover ne recree pas Size. Leftover V75
+	-- (rot cuit) au-dessus. Leftover V51/V53 accrochage.
+	local cityRadius = Config.TILE_SIZE * 3
+	preview:setKind(Config.BUILDING.CITY)
+	local bakedFootSize = preview.footprint.Size
+	local bakedPulseSize = preview.pulse.Size
+	assert(bakedFootSize.X == 0.35 and bakedFootSize.Y == cityRadius and bakedFootSize.Z == cityRadius, "rayon ville")
+	assert(bakedPulseSize.X == 0.12, "pulse epaisseur")
+	assert(math.abs(bakedPulseSize.Y - cityRadius * 1.08) < 1e-6, "pulse ville")
+	assert(math.abs(bakedPulseSize.Z - cityRadius * 1.08) < 1e-6, "pulse ville Z")
+	preview:update(1000, "exact")
+	preview:update(1200, "snap")
+	assert(rawequal(preview.footprint.Size, bakedFootSize), "footprint Size recree pendant hover")
+	assert(rawequal(preview.pulse.Size, bakedPulseSize), "pulse Size recree pendant hover")
+	local defenseRadius = Config.DEFENSE_RADIUS * Config.TILE_SIZE * 2
+	preview:setKind(Config.BUILDING.DEFENSE)
+	assert(preview.footprint.Size.Y == defenseRadius and preview.footprint.Size.Z == defenseRadius, "rayon bunker")
+	assert(math.abs(preview.pulse.Size.Y - defenseRadius * 1.08) < 1e-6, "pulse bunker")
+	assert(not rawequal(preview.footprint.Size, bakedFootSize), "Size bunker alias ville")
+	preview:update(1000, "exact")
+	assert(preview.footprint.Size.Y == defenseRadius, "rayon bunker perdu au hover")
+	assert(rawequal(preview.footprintRot, bakedFoot), "footprintRot recree au setKind Size")
 	preview:hide()
 end)
 
@@ -1502,8 +1527,8 @@ check("navires, missiles et interpolation", function()
 	overlay:stepInterpolation(1 / 60)
 	-- V73 : radar/flag fromEulerAnglesYXZ. Premier stepInterpolation
 	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
-	-- Leftover V71 / V65 / V55 / V52. V74 flame Size = API. V75
-	-- (footprint/pulse rot) dans le check apercu. Leftover V76 (Size).
+	-- Leftover V71 / V65 / V55 / V52. V74 flame Size = API. V75 rot
+	-- + V76 Size rayon dans le check apercu. Leftover V77 (Color).
 	local radarPiece, flagPiece
 	for _, piece in overlay.units[1].visual.pieces do
 		if piece.role == "radar" then
@@ -1552,7 +1577,7 @@ check("navires, missiles et interpolation", function()
 	-- reste dans le check modeles. Leftover V72 (roues camion) reste
 	-- dans le check pose/capture.
 	-- V73 : radar/flag fromEulerAnglesYXZ. V74 flame Size = API.
-	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76.
+	-- V75 rot + V76 Size rayon dans le check apercu. Leftover V77.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
@@ -1617,8 +1642,8 @@ check("camera strategique", function()
 	-- V65 (yaw unites) / V64 (segRot) restent. Radar/flag V70 (modeles).
 	-- Roulis navire V71 (check navires). Roues camion V72 (pose/capture).
 	-- UnitModels radar/flag V73 (check navires). V74 flame Size = API.
-	-- V75 (footprint/pulse rot) dans le check apercu. Leftover V76
-	-- (Size rayon preview) separe.
+	-- V75 rot + V76 Size rayon dans le check apercu. Leftover V77
+	-- (Color/Transparency hover).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
