@@ -1031,7 +1031,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V60 : câble Y depuis rest, plus de Vector3.new. Leftover V59 (feuillage)
 	-- reste dans construction du monde. V70 : radar / flag / boom rotation
 	-- via fromEulerAnglesYXZ, pas CFrame.Angles. Factory sans câble :
-	-- animate ne lève pas (0 câble = zéro alloc Vector3).
+	-- animate ne lève pas (0 câble = zéro alloc Vector3). Roulis navire
+	-- V71 (check navires). Roues camion leftover V72.
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1494,6 +1495,9 @@ check("navires, missiles et interpolation", function()
 	-- V65 : yaw fromEulerAnglesYXZ, plus de lookAt deux Vector3. Immobile
 	-- (premier stepInterpolation plus haut) ne casse pas. Leftover V64
 	-- (segRot camion) reste dans le check pose/capture.
+	-- V71 : roulis navire fromEulerAnglesYXZ, plus de CFrame.Angles.
+	-- Garde mag / missile inchangee. Leftover V70 (radar/flag/boom)
+	-- reste dans le check modeles. Leftover V72 (roues camion).
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
@@ -1552,7 +1556,7 @@ check("camera strategique", function()
 	-- V69 : champs focusX/Y/Z. V68 lerp nombres. V67 offset (0,0,d) :
 	-- pitch=0 yaw=0 → Z == focusZ + distance. Leftover V66 (pose) /
 	-- V65 (yaw unites) / V64 (segRot) restent. Radar/flag V70 (modeles).
-	-- Roulis navire leftover V71.
+	-- Roulis navire V71 (check navires). Roues camion leftover V72.
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
