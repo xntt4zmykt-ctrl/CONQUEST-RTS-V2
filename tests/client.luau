@@ -79,12 +79,14 @@ end)
 
 check("selection de chaque nation et de chaque mode", function()
 	-- N171 : drawFlag Parent=nil + flagFree, garder UICorner parent,
-	-- Reset Rotation. Pas de testFlushDelays. Leftover N170 chatFree
-	-- (check messages rapides) et leftover N152 flame (check navires)
-	-- et leftover N169 preview (check calques) doivent rester verts.
-	-- Recette leftover N170, pas merger visual V107. HUD / Effects /
-	-- Overlay / UnitModels / drawTerrainPreview non touches. Pas
-	-- d'assert Name. Parent = playerFlag (argument), pas chatBody.
+	-- Reset Rotation. N172 : drawTerrainPreview Parent=nil + previewFree,
+	-- pas flagFree, shade frère conservé, Reset Size/ZIndex. Pas de
+	-- testFlushDelays. Leftover N170 chatFree (check messages rapides)
+	-- et leftover N152 flame (check navires) et leftover N169 preview
+	-- (check calques) doivent rester verts. Recette leftover N171, pas
+	-- merger visual V108. HUD / Effects / Overlay / UnitModels /
+	-- drawFlag non retouchés. Pas d'assert Name. Parent flag = playerFlag
+	-- (argument). Parent tuile = featuredPreview (argument).
 	local snapshot = nil
 	for _, child in menu.playerFlag:GetChildren() do
 		if child:IsA("Frame") then
@@ -137,9 +139,53 @@ check("selection de chaque nation et de chaque mode", function()
 		end
 	end
 
+	-- N172 : drawTerrainPreview Parent=nil + previewFree, pas flagFree.
+	-- Shade frère conservé. Snapshot avant selectMode. Pas d'assert Name.
+	-- Pas #previewFree == 32*20 (océan non dessiné). Parent = featuredPreview
+	-- (argument), pas chatBody / playerFlag. Recette leftover N171, pas
+	-- merger visual V108.
+	local previewSnap = nil
+	for _, child in menu.featuredPreview:GetChildren() do
+		if child:IsA("Frame") then
+			previewSnap = child
+			break
+		end
+	end
+	assert(previewSnap, "snapshot tuile preview manquant")
+	local shadeBefore = false
+	for _, child in menu.featuredPreview.Parent:GetChildren() do
+		if child ~= menu.featuredPreview and child:IsA("Frame") and child:FindFirstChildWhichIsA("UIGradient") then
+			shadeBefore = true
+			break
+		end
+	end
+	assert(shadeBefore, "shade frère manquant avant")
+
 	for _, mode in GameModes.LIST do
 		menu:selectMode(mode.id)
 	end
+
+	if previewSnap.Parent == nil then
+		local inFree = false
+		for _, tile in MainMenu.previewFree do
+			if rawequal(tile, previewSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "tuile ni reparentee ni dans previewFree")
+	else
+		assert(rawequal(previewSnap.Parent, menu.featuredPreview), "tuile recree")
+	end
+
+	local shadeAfter = false
+	for _, child in menu.featuredPreview.Parent:GetChildren() do
+		if child ~= menu.featuredPreview and child:IsA("Frame") and child:FindFirstChildWhichIsA("UIGradient") then
+			shadeAfter = true
+			break
+		end
+	end
+	assert(shadeAfter, "shade frère détruit")
 end)
 
 --[[

@@ -78,8 +78,8 @@ export type MainMenu = typeof(setmetatable({} :: any, MainMenu))
 --=============================================================================
 
 -- N171 : recycle les Frame bandes. Distinct chatFree (N170, catalogue HUD).
--- Distinct feedFree (N167, fil notify). Distinct drawTerrainPreview leftover
--- N172 (Destroy miniature conserve). Pas de Theme.corner sur les bandes —
+-- Distinct feedFree (N167, fil notify). Distinct previewFree N172 (tuiles
+-- miniature, listes séparées). Pas de Theme.corner sur les bandes —
 -- le UICorner vit sur le parent (pastille / cellule). Parent = argument
 -- parent (playerFlag, identityFlag, flagCell, Intro.flagFrame). Pas
 -- chatFree. Pas visual V107 (ne pas merger ee95).
@@ -135,8 +135,8 @@ function MainMenu.drawFlag(parent: GuiObject, flag: Nations.Flag)
 	-- N171 : Parent = nil + push flagFree. Pas Destroy. Filtre IsA("Frame")
 	-- conserve (UICorner / UIStroke / TextLabel du parent intacts). Reset
 	-- Rotation obligatoire (diagonal -30 vs vertical 0). Distinct N170
-	-- chatFree. Distinct leftover N152 flame. Distinct leftover N172
-	-- drawTerrainPreview. Pas Theme.corner au reuse. Pas de Name.
+	-- chatFree. Distinct leftover N152 flame. Distinct N172 previewFree
+	-- (listes séparées). Pas Theme.corner au reuse. Pas de Name.
 	parkFlagBands(parent)
 
 	local function band(position: UDim2, size: UDim2, color: Color3, rotation: number?)
@@ -177,23 +177,71 @@ end
 -- Apercu de terrain
 --=============================================================================
 
+-- N172 : recycle les Frame tuiles. Distinct flagFree (N171, bandes drapeau).
+-- Distinct chatFree (N170, catalogue HUD). Distinct feedFree (N167). Shade
+-- est frère du preview (enfant de la carte), pas enfant de `frame` — ne pas
+-- parcourir card:GetChildren(). Pas de Theme.corner sur les tuiles. Parent
+-- = argument frame (featuredPreview 32×20, cartes mode 24×12). Océan non
+-- dessiné. Pas visual V108 (ne pas merger d46a).
+local previewFree: { Frame } = {}
+MainMenu.previewFree = previewFree
+
+local function parkPreviewTiles(frame: GuiObject)
+	for _, child in frame:GetChildren() do
+		if child:IsA("Frame") then
+			if child.Parent then
+				child.Parent = nil
+			end
+			previewFree[#previewFree + 1] = child :: Frame
+		end
+	end
+end
+
+local function takePreviewTile(frame: GuiObject, position: UDim2, size: UDim2, color: Color3, zIndex: number): Frame
+	local n = #previewFree
+	local tile: Frame
+	if n > 0 then
+		tile = previewFree[n]
+		previewFree[n] = nil
+		tile.BackgroundColor3 = color
+		tile.Position = position
+		tile.Size = size
+		tile.BackgroundTransparency = 0.05
+		tile.BorderSizePixel = 0
+		tile.ZIndex = zIndex
+		tile.Parent = frame
+	else
+		tile = Instance.new("Frame")
+		tile.BackgroundColor3 = color
+		tile.BorderSizePixel = 0
+		tile.BackgroundTransparency = 0.05
+		tile.Position = position
+		tile.Size = size
+		tile.ZIndex = zIndex
+		tile.Parent = frame
+	end
+	return tile
+end
+
 --[[
 	Remplit `frame` d'une miniature de la vraie generation procedurale : c'est
 	ce qui rend le choix concret sans charger aucun asset externe. Les tuiles
 	ocean ne sont pas dessinees — le fond du cadre porte deja leur couleur.
 ]]
 local function drawTerrainPreview(frame: GuiObject, seed: number, cellsX: number, cellsY: number)
-	for _, child in frame:GetChildren() do
-		if child:IsA("Frame") then
-			child:Destroy()
-		end
-	end
+	-- N172 : Parent = nil + push previewFree. Pas Destroy. Filtre IsA("Frame")
+	-- sur `frame` seulement (UICorner / shade / UIGradient de la carte
+	-- intacts). Reset Size / ZIndex obligatoire (32×20 vs 24×12). Distinct
+	-- N171 flagFree. Distinct leftover N152 flame. Pas Theme.corner au reuse.
+	-- Pas de Name. Océan non dessiné — ne pas remplir le pool avec de l'eau.
+	parkPreviewTiles(frame)
 
 	local terrain = MapGen.generate(seed)
 	local width = frame.AbsoluteSize.X > 0 and frame.AbsoluteSize.X or 360
 	local height = frame.AbsoluteSize.Y > 0 and frame.AbsoluteSize.Y or 220
 	local cellWidth = width / cellsX
 	local cellHeight = height / cellsY
+	local zIndex = frame.ZIndex + 1
 
 	for y = 0, cellsY - 1 do
 		for x = 0, cellsX - 1 do
@@ -201,14 +249,13 @@ local function drawTerrainPreview(frame: GuiObject, seed: number, cellsX: number
 			local sourceY = math.clamp(math.floor((y + 0.5) * Config.MAP_HEIGHT / cellsY), 0, Config.MAP_HEIGHT - 1)
 			local terrainKind = buffer.readu8(terrain, MapGen.toIndex(sourceX, sourceY))
 			if terrainKind ~= Config.TERRAIN.OCEAN then
-				local tile = Instance.new("Frame")
-				tile.BorderSizePixel = 0
-				tile.BackgroundColor3 = Config.TERRAIN_COLORS[terrainKind] or Config.TERRAIN_COLORS[2]
-				tile.BackgroundTransparency = 0.05
-				tile.Position = UDim2.fromOffset(math.floor(x * cellWidth), math.floor(y * cellHeight))
-				tile.Size = UDim2.fromOffset(math.ceil(cellWidth + 1), math.ceil(cellHeight + 1))
-				tile.ZIndex = frame.ZIndex + 1
-				tile.Parent = frame
+				takePreviewTile(
+					frame,
+					UDim2.fromOffset(math.floor(x * cellWidth), math.floor(y * cellHeight)),
+					UDim2.fromOffset(math.ceil(cellWidth + 1), math.ceil(cellHeight + 1)),
+					Config.TERRAIN_COLORS[terrainKind] or Config.TERRAIN_COLORS[2],
+					zIndex
+				)
 			end
 		end
 	end
