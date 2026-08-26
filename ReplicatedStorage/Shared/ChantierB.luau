@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier B-E : combat OpenFront, fallout, spawn, warships, SAM, tribus config.
+	Chantier B-E : combat CONQUEST, fallout, spawn, warships, SAM, tribus config.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

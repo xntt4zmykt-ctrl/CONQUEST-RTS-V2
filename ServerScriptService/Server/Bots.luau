@@ -346,7 +346,7 @@ local function decideBuild(state: GameState, ps: GameState.PlayerState, rng: Ran
 	--[[
 		La ville passe avant tout le reste.
 
-		C'est une regle explicite du jeu de reference, et l'avoir omise a coute
+		C'est une regle explicite CONQUEST, et l'avoir omise a coute
 		une phase entiere. Le score `manque / prix` favorise mecaniquement le pas
 		cher : une ville vaut huit bunkers, donc le bunker gagne meme avec un
 		manque bien plus faible. Mesure sans cette regle : 22 ports et 30 bunkers

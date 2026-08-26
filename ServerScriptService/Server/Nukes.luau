@@ -133,8 +133,8 @@ end
 --[[
 	Interception SAM — port OF SAMLauncherExecution.
 
-	Un seul SAM engage chaque missile (OF : exclusivite de cible).
-	Choix = plus proche batterie prete dans SAM_RANGE (OF defaultSamRange 70).
+	Un seul SAM engage chaque missile (: exclusivite de cible).
+	Choix = plus proche batterie prete dans SAM_RANGE (defaultSamRange 70).
 	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean
@@ -199,7 +199,7 @@ end
 --=============================================================================
 
 --[[
-	A mi-parcours, le MIRV libere ses ogives, modele OpenFront : chaque ogive
+	A mi-parcours, le MIRV libere ses ogives, regle CONQUEST : chaque ogive
 	devient un missile a part entiere, avec sa propre cible choisie SUR le
 	territoire de la victime, et chacune peut etre interceptee separement —
 	c'est ce qui rend une batterie SAM precieuse meme contre l'arme ultime.

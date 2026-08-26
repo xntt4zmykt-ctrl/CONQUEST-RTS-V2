@@ -35,6 +35,14 @@ local Research = require(script.Research)
 local WorldBuilder = require(script.WorldBuilder)
 local Bots = require(script.Bots)
 local Trade = require(script.Trade)
+local SystemsBootstrap = require(script.SystemsBootstrap)
+local IntentValidator = require(script.IntentValidator)
+local TickMetrics = require(script.TickMetrics)
+local MapGen = require(ReplicatedStorage.Shared.MapGen)
+
+SystemsBootstrap.install()
+IntentValidator.reset()
+TickMetrics.reset()
 
 type GameState = GameState.GameState
 
@@ -67,6 +75,9 @@ local nukeOrder = Remotes.get("NukeOrder")
 local diplomacyOrder = Remotes.get("DiplomacyOrder")
 local researchOrder = Remotes.get("ResearchOrder")
 local joinRequest = Remotes.get("JoinRequest")
+local requestSnapshot = Remotes.get("RequestSnapshot")
+local ownerSnapshot = Remotes.get("OwnerSnapshot")
+local intentReject = Remotes.get("IntentReject")
 
 --=============================================================================
 -- Etat du serveur
@@ -78,12 +89,16 @@ local slotByPlayer: { [Player]: number } = {}
 local resultRecorded: { [Player]: boolean } = {}
 
 local matchPhase = "waiting"
+local matchId = "0"
 local matchEndsAt = 0
 local restartAt = 0
 local doctrineLockAt = 0
 local combatStartsAt = 0
 local winnerSlot: number? = nil
 local winnerName: string? = nil
+local snapshotCooldown: { [number]: number } = {}
+local snapshotCount: { [number]: number } = {}
+local currentMapMeta: any = nil
 
 -- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
 -- se reconnait a son pays, pas a son pseudo Roblox.
@@ -226,6 +241,9 @@ local function activateMatch()
 	if humanCount == 0 then
 		return
 	end
+	if humanCount > Config.MAX_HUMAN_PLAYERS then
+		warn(`[{Config.GAME_NAME}] trop d'humains ({humanCount}/{Config.MAX_HUMAN_PLAYERS})`)
+	end
 
 	local now = os.clock()
 	matchPhase = "playing"
@@ -234,10 +252,10 @@ local function activateMatch()
 	doctrineLockAt = now + Config.DOCTRINE_CHOICE_DURATION
 	combatStartsAt = now + Config.PREPARATION_DURATION
 
-	-- `botCount` decrit maintenant le nombre total de nations affiche dans le
-	-- menu. Les humains sont poses d'abord et obtiennent donc un vrai choix de
-	-- spawn ; l'IA remplit seulement les places restantes.
-	local botsToSpawn = math.max(0, activeMode.botCount - humanCount)
+	-- `botCount` decrit le nombre total de nations du mode. Les humains sont
+	-- poses d'abord ; l'IA remplit le reste, plafonne par MAX_BOTS.
+	local desiredTotal = math.min(activeMode.botCount, Config.PUBLIC_MATCH_CAPACITY, Config.MAX_TOTAL_FACTIONS)
+	local botsToSpawn = math.max(0, math.min(desiredTotal - humanCount, Config.MAX_BOTS))
 	Bots.spawnAll(state, rng, botsToSpawn)
 	state:notify(
 		`Operation lancee : {Config.PREPARATION_DURATION} secondes pour coloniser et construire avant les guerres.`,
@@ -249,12 +267,18 @@ end
 local function startMatch()
 	local seed = Random.new():NextInteger(1, 2 ^ 24)
 	activeMode = GameModes.get(pendingMode)
+	matchId = `{seed}-{os.clock()}`
+	IntentValidator.reset()
+	TickMetrics.reset()
+	table.clear(snapshotCooldown)
+	table.clear(snapshotCount)
 
 	state = GameState.new(seed)
 	state.mode = activeMode
 	state.combatUnlocked = false
 	rng = Random.new(seed)
 	resultRecorded = {}
+	currentMapMeta = MapGen.mapMeta(seed, state.terrain)
 
 	matchPhase = "waiting"
 	winnerSlot = nil
@@ -288,11 +312,13 @@ local function startMatch()
 		local ps = state.players[slot]
 		local capital = if ps then ps.capitalTile else nil
 		local profile = Persistence.load(player.UserId)
-		mapInit:FireClient(player, seed, slot, roster, capital, profilePacket(profile))
+		mapInit:FireClient(player, seed, slot, roster, capital, profilePacket(profile), currentMapMeta)
 		spawnCharacterAt(player, capital)
 	end
 
-	print(`[{Config.GAME_NAME}] carte prete — seed {seed}, attente du premier deploiement`)
+	print(
+		`[{Config.GAME_NAME}] carte prete — seed {seed}, hash {currentMapMeta.terrainHash}, attente du premier deploiement`
+	)
 end
 
 local function experienceFor(ps, won: boolean): number
@@ -389,7 +415,15 @@ local function deployPlayer(player: Player, nationId: number)
 
 	slotByPlayer[player] = ps.slot
 	activateMatch()
-	mapInit:FireClient(player, state.seed, ps.slot, buildRoster(), ps.capitalTile, profilePacket(profile))
+	mapInit:FireClient(
+		player,
+		state.seed,
+		ps.slot,
+		buildRoster(),
+		ps.capitalTile,
+		profilePacket(profile),
+		currentMapMeta or MapGen.mapMeta(state.seed, state.terrain)
+	)
 	spawnCharacterAt(player, ps.capitalTile)
 	broadcastRoster()
 end
@@ -425,14 +459,17 @@ local function onPlayerRemoving(player: Player)
 	end
 	nationByPlayer[player] = nil
 	resultRecorded[player] = nil
+	IntentValidator.clearPlayer(player.UserId)
+	snapshotCooldown[player.UserId] = nil
+	snapshotCount[player.UserId] = nil
 	Persistence.release(player.UserId)
 end
 
 --=============================================================================
--- Ordres clients
+-- Ordres clients — file d'intentions validee
 --=============================================================================
--- Tout est revalide ici : le client n'envoie qu'une intention, jamais un
--- resultat. Chaque handler verifie le type avant de toucher a la simulation.
+-- Le client n'envoie qu'une intention (+ sequence optionnelle). Aucune mutation
+-- ici : IntentValidator enfile, puis flush en tete de tick.
 
 local function isInteger(value: any): boolean
 	return typeof(value) == "number" and value == value and value == math.floor(value)
@@ -452,180 +489,78 @@ local function reply(player: Player, ok: boolean, message: string?)
 	end
 end
 
-attackOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		warn(`[CONQUEST ATTACK] requete ignoree player={player.Name} slot={slot} phase={matchPhase}`)
-		return
+local function refuse(player: Player, reason: string, detail: string?)
+	intentReject:FireClient(player, reason, detail)
+	if detail then
+		notify:FireClient(player, detail, "bad")
 	end
-	if not isInteger(targetIndex) or targetIndex < 0 or targetIndex >= Config.TILE_COUNT then
-		reply(player, false, "Cible hors de la carte.")
-		warn(`[CONQUEST ATTACK] index invalide player={player.Name} value={targetIndex}`)
-		return
-	end
-	if not state:isLand(targetIndex) then
-		reply(player, false, "Impossible d'attaquer l'ocean. Choisis une terre.")
-		return
-	end
+end
 
-	-- La faction cible vient de l'etat serveur autoritaire. Le client peut
-	-- avoir un delta de retard au moment exact du clic ; son ancien owner ne
-	-- doit jamais faire partir l'offensive au mauvais endroit.
-	local targetSlot = buffer.readu8(state.owner, targetIndex)
-	local ok, message = state:launchAttack(slot, targetSlot)
-	reply(player, ok, message)
+local function intentContext()
+	return {
+		state = state,
+		matchPhase = matchPhase,
+		matchId = matchId,
+		slotOf = slotOf,
+		doctrineLockAt = doctrineLockAt,
+		now = os.clock,
+		buildings = Buildings,
+		navy = Navy,
+		nukes = Nukes,
+		diplomacy = Diplomacy,
+		research = Research,
+		reply = reply,
+		refuse = refuse,
+		broadcastRoster = broadcastRoster,
+	}
+end
+
+local function enqueueOrReject(player: Player, actionType: string, sequence: any, payload: { [string]: any })
+	local seq = if isInteger(sequence) then sequence else nil
+	local ok, reason = IntentValidator.enqueue(intentContext(), player, actionType, seq, payload)
+	if not ok and reason then
+		refuse(player, reason, nil)
+	end
+end
+
+attackOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any, sequence: any)
+	enqueueOrReject(player, "Attack", sequence, { index = targetIndex })
 end)
 
-retreatOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if not isInteger(targetIndex) or targetIndex < 0 or targetIndex >= Config.TILE_COUNT then
-		return
-	end
-	-- Comme pour l'attaque, la faction vient de l'etat serveur autoritaire :
-	-- un delta de retard cote client ne doit pas rappeler le mauvais front.
-	local targetSlot = buffer.readu8(state.owner, targetIndex)
-	local ok, message = state:retreatAttack(slot, targetSlot)
-	reply(player, ok, message)
+retreatOrder.OnServerEvent:Connect(function(player: Player, targetIndex: any, sequence: any)
+	enqueueOrReject(player, "Retreat", sequence, { index = targetIndex })
 end)
 
-setAttackRatio.OnServerEvent:Connect(function(player: Player, ratio: any)
-	local slot = slotOf(player)
-	if not slot then
-		return
-	end
-	if typeof(ratio) ~= "number" or ratio ~= ratio then
-		return
-	end
-	local ps = state.players[slot]
-	if ps then
-		ps.attackRatio = math.clamp(ratio, 0.05, 1)
-	end
+setAttackRatio.OnServerEvent:Connect(function(player: Player, ratio: any, sequence: any)
+	enqueueOrReject(player, "SetAttackRatio", sequence, { ratio = ratio })
 end)
 
-chooseDoctrine.OnServerEvent:Connect(function(player: Player, doctrineId: any)
-	local slot = slotOf(player)
-	if not slot or not isInteger(doctrineId) then
-		return
-	end
-	-- La doctrine se verrouille passe l'ouverture : c'est un engagement, pas
-	-- un curseur qu'on ajuste selon la situation.
-	if os.clock() > doctrineLockAt then
-		reply(player, false, "Ta doctrine est deja engagee.")
-		return
-	end
-	local ps = state.players[slot]
-	if ps then
-		ps.doctrine = Doctrines.get(doctrineId).id
-		broadcastRoster()
-		reply(player, true, `Doctrine {Doctrines.get(doctrineId).name} adoptee.`)
-	end
+chooseDoctrine.OnServerEvent:Connect(function(player: Player, doctrineId: any, sequence: any)
+	enqueueOrReject(player, "ChooseDoctrine", sequence, { doctrineId = doctrineId })
 end)
 
-buildOrder.OnServerEvent:Connect(function(player: Player, index: any, kind: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if not isInteger(index) or not isInteger(kind) then
-		return
-	end
-	local ok, message = Buildings.build(state, slot, index, kind)
-	reply(player, ok, message)
+buildOrder.OnServerEvent:Connect(function(player: Player, index: any, kind: any, sequence: any)
+	enqueueOrReject(player, "Build", sequence, { index = index, kind = kind })
 end)
 
-upgradeBuildingOrder.OnServerEvent:Connect(function(player: Player, index: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if not isInteger(index) then
-		return
-	end
-	local ok, message = Buildings.upgradeAt(state, slot, index)
-	reply(player, ok, message)
+upgradeBuildingOrder.OnServerEvent:Connect(function(player: Player, index: any, sequence: any)
+	enqueueOrReject(player, "Upgrade", sequence, { index = index })
 end)
 
-boatOrder.OnServerEvent:Connect(function(player: Player, targetTile: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if not isInteger(targetTile) then
-		return
-	end
-	local ok, message = Navy.launchInvasion(state, slot, targetTile)
-	reply(player, ok, message)
+boatOrder.OnServerEvent:Connect(function(player: Player, targetTile: any, sequence: any)
+	enqueueOrReject(player, "Boat", sequence, { index = targetTile })
 end)
 
-nukeOrder.OnServerEvent:Connect(function(player: Player, targetTile: any, kind: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if not isInteger(targetTile) or not isInteger(kind) then
-		return
-	end
-	local ok, message = Nukes.launch(state, slot, targetTile, kind)
-	reply(player, ok, message)
+nukeOrder.OnServerEvent:Connect(function(player: Player, targetTile: any, kind: any, sequence: any)
+	enqueueOrReject(player, "Nuke", sequence, { index = targetTile, kind = kind })
 end)
 
-researchOrder.OnServerEvent:Connect(function(player: Player)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	local ok, message = Research.advance(state, slot)
-	reply(player, ok, message)
+researchOrder.OnServerEvent:Connect(function(player: Player, sequence: any)
+	enqueueOrReject(player, "Research", sequence, {})
 end)
 
-diplomacyOrder.OnServerEvent:Connect(function(player: Player, action: any, targetSlot: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if typeof(action) ~= "string" or not isInteger(targetSlot) then
-		return
-	end
-	if targetSlot < 1 or targetSlot > Config.MAX_PLAYERS then
-		return
-	end
-
-	local ok, message
-	if action == "request" then
-		ok, message = Diplomacy.request(state, slot, targetSlot)
-	elseif action == "accept" then
-		ok, message = Diplomacy.accept(state, targetSlot, slot)
-	elseif action == "decline" then
-		ok, message = Diplomacy.decline(state, targetSlot, slot)
-	elseif action == "break" then
-		ok, message = Diplomacy.breakAlliance(state, slot, targetSlot)
-	elseif action == "extend" then
-		ok, message = Diplomacy.extend(state, slot, targetSlot)
-	elseif action == "donateGold" then
-		-- Le don est proportionnel : un dixieme du tresor, comme l'offrande
-		-- standard du jeu de reference. Le montant exact se calcule ici, cote
-		-- autoritaire, jamais cote client.
-		local ps = state.players[slot]
-		local amount = ps and math.floor(ps.gold * Config.DONATION_SHARE) or 0
-		ok, message = Diplomacy.donateGold(state, slot, targetSlot, amount)
-	elseif action == "donateTroops" then
-		local ps = state.players[slot]
-		local amount = ps and math.floor(ps.troops * Config.DONATION_SHARE) or 0
-		ok, message = Diplomacy.donateTroops(state, slot, targetSlot, amount)
-	elseif action == "embargo" then
-		ok, message = Diplomacy.setEmbargo(state, slot, targetSlot, true)
-	elseif action == "unembargo" then
-		ok, message = Diplomacy.setEmbargo(state, slot, targetSlot, false)
-	elseif action == "markTarget" then
-		ok, message = Diplomacy.setTargetMark(state, slot, targetSlot)
-	else
-		return
-	end
-
-	reply(player, ok, message)
+diplomacyOrder.OnServerEvent:Connect(function(player: Player, action: any, targetSlot: any, sequence: any)
+	enqueueOrReject(player, "Diplomacy", sequence, { action = action, targetSlot = targetSlot })
 end)
 
 --=============================================================================
@@ -635,40 +570,60 @@ end)
 --[[
 	Un message predefini, jamais de texte libre : le catalogue est la seule
 	source, ce qui ferme d'office insultes, liens et contournements de filtre.
-	La portee decide qui voit le message — coordination d'alliance ou annonce
-	publique — et certains messages designent leur cible pour toute l'alliance.
 ]]
 local quickChatEvent = Remotes.get("QuickChat")
 
-quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any)
-	local slot = slotOf(player)
-	if not slot or matchPhase ~= "playing" then
-		return
-	end
-	if typeof(messageId) ~= "string" then
-		return
-	end
-	local entry = QuickChat.get(messageId)
-	if not entry then
-		return
-	end
+quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any, sequence: any)
+	-- Compat : ancien client envoie (id, target) ; nouveau (id, target, seq).
+	-- Si targetSlot est un nombre et sequence nil, c'est l'ancien format.
+	enqueueOrReject(player, "QuickChat", sequence, { messageId = messageId, targetSlot = targetSlot })
+end)
 
-	-- La cible est validee ici parce qu'un humain merite un retour ; le refus
-	-- reste silencieux cote diffusion, ou seul l'anti-spam decide.
-	if entry.needsTarget then
-		if not isInteger(targetSlot) or targetSlot == slot then
-			reply(player, false, "Ce message demande une cible.")
-			return
-		end
-		if not state.players[targetSlot] then
-			reply(player, false, "Cette faction n'existe plus.")
-			return
+--=============================================================================
+-- Snapshot de resynchronisation
+--=============================================================================
+
+local function structureHash(): number
+	local hash = 2166136261
+	local indices = {}
+	for index in state.buildings do
+		table.insert(indices, index)
+	end
+	table.sort(indices)
+	for _, index in indices do
+		local b = state.buildings[index]
+		hash = bit32.bxor(hash, index)
+		hash = (hash * 16777619) % 4294967296
+		if b then
+			hash = bit32.bxor(hash, b.kind + b.slot * 17 + b.level * 31)
+			hash = (hash * 16777619) % 4294967296
 		end
 	end
+	return hash
+end
 
-	-- Une seule voie de diffusion, partagee avec les bots : deux copies de cette
-	-- logique auraient fini par ne plus dire la meme chose.
-	Diplomacy.sendQuickChat(state, slot, messageId, if isInteger(targetSlot) then targetSlot else nil)
+requestSnapshot.OnServerEvent:Connect(function(player: Player)
+	if not slotOf(player) or matchPhase == "waiting" then
+		return
+	end
+	local userId = player.UserId
+	local now = os.clock()
+	local last = snapshotCooldown[userId] or 0
+	if now - last < (Config.SNAPSHOT_COOLDOWN_SEC or 5) then
+		refuse(player, "RateLimited", "Resynchronisation trop frequente.")
+		return
+	end
+	local used = snapshotCount[userId] or 0
+	if used >= (Config.MAX_SNAPSHOTS_PER_MATCH or 12) then
+		refuse(player, "RateLimited", "Quota de snapshots epuise.")
+		return
+	end
+	snapshotCooldown[userId] = now
+	snapshotCount[userId] = used + 1
+
+	local ownerCopy = buffer.create(Config.TILE_COUNT)
+	buffer.copy(ownerCopy, 0, state.owner, 0, Config.TILE_COUNT)
+	ownerSnapshot:FireClient(player, ownerCopy, state.tick, structureHash())
 end)
 
 --=============================================================================
@@ -677,6 +632,7 @@ end)
 
 local function replicate()
 	local ownerDelta = state:flushOwnerDelta()
+	local changedTiles = if ownerDelta then buffer.len(ownerDelta) // 5 else 0
 
 	local activeAttacks: { [number]: number } = {}
 	local committedTroops: { [number]: number } = {}
@@ -780,13 +736,6 @@ local function replicate()
 			timeLeft = if matchPhase == "waiting"
 				then activeMode.duration
 				else math.max(0, matchEndsAt - os.clock()),
-			--[[
-				Mode et frequentation : ce que le salon du menu doit afficher.
-
-				Le message portait deja l'etat de la partie mais ni son mode ni
-				son monde. Le menu ne pouvait donc annoncer qu'une carte morte —
-				trois modes decrits, aucun qui dise ce qui se joue vraiment ici.
-			]]
 			mode = activeMode.id,
 			players = (function()
 				local n = 0
@@ -795,7 +744,11 @@ local function replicate()
 				end
 				return n
 			end)(),
-			maxPlayers = Config.MAX_PLAYERS,
+			maxPlayers = Config.PUBLIC_MATCH_CAPACITY,
+			maxHumans = Config.MAX_HUMAN_PLAYERS,
+			maxBots = Config.MAX_BOTS,
+			maxFactions = Config.MAX_TOTAL_FACTIONS,
+			renderMode = Config.RENDER_MODE,
 			winner = winnerSlot,
 			winnerName = winnerName,
 			restartIn = math.max(0, restartAt - os.clock()),
@@ -804,6 +757,7 @@ local function replicate()
 	end
 
 	flushEvents()
+	return changedTiles, ownerDelta
 end
 
 local function onExplosion(x: number, y: number, radius: number)
@@ -813,17 +767,24 @@ end
 local accumulator = 0
 
 local function stepOnce()
+	local tickStarted = os.clock()
+
 	if matchPhase == "waiting" then
 		-- Carte figee : aucun tick economique, aucune expansion et surtout aucun
 		-- bot ne joue derriere le menu de selection.
 		state.tick += 1 -- cadence uniquement la replication du lobby
-		replicate()
+		local changed, delta = replicate()
+		TickMetrics.record(state.tick, changed, delta, (os.clock() - tickStarted) * 1000)
 		return
 	elseif matchPhase == "playing" then
+		-- 1. Intentions validees depuis le dernier tick (ordre stable).
+		IntentValidator.flush(intentContext())
+
 		if not state.combatUnlocked and os.clock() >= combatStartsAt then
 			state.combatUnlocked = true
 			state:notify("⚔ Les frontieres sont ouvertes. Les guerres peuvent commencer.", "alert")
 		end
+		-- 2-5. Systemes puis economie / fronts / victoire.
 		Bots.step(state, rng)
 		Navy.step(state, rng)
 		Nukes.step(state, rng, onExplosion)
@@ -841,7 +802,14 @@ local function stepOnce()
 		end
 	end
 
-	replicate()
+	local changed, delta = replicate()
+	local tickMs = (os.clock() - tickStarted) * 1000
+	TickMetrics.record(state.tick, changed, delta, tickMs)
+
+	-- Rapport periodique : base de mesure avant tout changement de MAX_TILES_PER_TICK.
+	if matchPhase == "playing" and state.tick > 0 and state.tick % (Config.TICK_RATE * 30) == 0 then
+		print(`[{Config.GAME_NAME}] metrics {TickMetrics.formatReport()}`)
+	end
 end
 
 --=============================================================================
