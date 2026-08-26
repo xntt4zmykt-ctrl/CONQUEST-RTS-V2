@@ -1,11 +1,11 @@
-# Nightly report — passe 39 (revue PR #107)
+# Nightly report — passe 40 (revue PR #110)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-6b53` (PR #107, `3d3ab9d`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-1dbb`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-1dbb` (PR #110, `ceb587f`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-b677`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #107 (`Overlay.targetX`/`targetY` — HEAD visuel). Correctifs sûrs, sans merger feel `a963`/`1e43` ni hardening `b4c1`.
+Revue de PR #110 (`Overlay.lookAt` unique 60 Hz — HEAD visuel). Correctifs sûrs, sans merger feel `4a67`/`a963` ni hardening `a0f9`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,13 +15,13 @@ Revue de PR #107 (`Overlay.targetX`/`targetY` — HEAD visuel). Correctifs sûrs
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `Overlay.stepInterpolation` lookAt unique + X/Z nombres | `Overlay.luau` | V56 |
+| `Overlay.stepInterpolation` camion lerp X/Y/Z + lookAt unique | `Overlay.luau` | V57 |
 
-`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `init.client.luau` / `PlacementPreview.luau` / `WorldRenderer.luau` / `FactionLabels.luau` / `UnitModels.luau` / `WorldSpace.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Camion / explosion / wake / splash **inchangés** (V57).
+`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités lookAt (V56) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `init.client.luau` / `PlacementPreview.luau` / `WorldRenderer.luau` / `FactionLabels.luau` / `UnitModels.luau` / `WorldSpace.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Unités lookAt **inchangées** (V56). `buildFactoryRoute` / `route.path` Vector3 **inchangés**. Explosion / wake / splash **inchangés** (événement). Houle océan `WorldRenderer.step` **inchangée** (V58).
 
 ---
 
-## Constatations PR #107 (à ne pas casser)
+## Constatations PR #110 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence. `Placement` est partagé : Preview et serveur exécutent le même `resolve` ; la vérité reste `Buildings.build` côté serveur.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -42,19 +42,20 @@ Revue de PR #107 (`Overlay.targetX`/`targetY` — HEAD visuel). Correctifs sûrs
 - **Étiquettes :** `surveyTerritories` recycle `sumXBuf` / `sumYBuf` / `countBuf` (V49). `table.clear` **avant** le scan (leftover slot A = étiquette fantôme). Hash slot→nombre, pas d’array. **Pas réentrant.** Distinct de V48 (arrays) et de V35 (`contactBuf` serveur).
 - **Classement HUD :** `HUD.update` recycle `self.ranked` + inner records (V50). Truncate leftover **avant** `table.sort`. Pas de `table.insert`, pas de nouvelle table. Comparateur `rankByTiles` module (V54) — plus de `function` inline 10 Hz. Loi inchangée (tuiles desc, tie-break troupes). `VictoryScreen.show` lit tout de suite et copie vers `row.Text` — il ne stocke pas l’identité. **Pas réentrant.** Distinct de V49 (hash barycentre) et de V31 (`playerStatsForReplicate` serveur).
 - **Fantôme placement :** `PlacementPreview.resolve` recycle `previewCtxBuf` (V51). Six champs réécrits, pas de nouvelle table. Recette feel N92 **sans** merger feel. `Placement.resolve` lit tout de suite. **Pas réentrant.** Distinct de V40 (`ctxBuf` serveur) et de V47 (`validTiles`). Preview n’appelle pas `validTiles`. Closures `ownerAt` / `buildingAt` : désormais stables côté caller (V53).
-- **Unités Overlay :** `applyUnits` hoist `trackUnit` (V52). Insert missile : `unit.extra = { tx, ty }` **une fois** (copie, jamais l’alias `missileSnapBuf`). Déjà suivi : muter `tx`/`ty`, jamais remplacer le record. Navire : `extra` reste nil. `table.clear(self.seen)` déjà. **Pas réentrant.** Distinct de V26 (payload serveur). Cible : `targetX`/`targetY` + `currentX`/`currentY` nombres (V55) — insert pose une fois, update mute, lerp numérique. Splash / interpolation lisent `currentX`/`currentY`. Pose 60 Hz : X/Z monde en nombres (`x * TILE - HALF + TILE/2`, constantes Overlay depuis Config) + **un** `CFrame.lookAt` par unité (V56). Immobile = regard −Z (même pose que `CFrame.new(x,y,z)`). Plus de `WorldSpace.tileToWorld` / `Vector3.Unit` / `CFrame.new(position)` sur le chemin unités. Extra missile **inchangé**. `WorldSpace.tileToWorld` reste pour splash / explosion / bâtiments (événement, pas 60 Hz unités). Leftover : camion `Vector3`/`CFrame` 60 Hz (V57).
+- **Unités Overlay :** `applyUnits` hoist `trackUnit` (V52). Insert missile : `unit.extra = { tx, ty }` **une fois** (copie, jamais l’alias `missileSnapBuf`). Déjà suivi : muter `tx`/`ty`, jamais remplacer le record. Navire : `extra` reste nil. `table.clear(self.seen)` déjà. **Pas réentrant.** Distinct de V26 (payload serveur). Cible : `targetX`/`targetY` + `currentX`/`currentY` nombres (V55) — insert pose une fois, update mute, lerp numérique. Splash / interpolation lisent `currentX`/`currentY`. Pose 60 Hz : X/Z monde en nombres (`x * TILE - HALF + TILE/2`, constantes Overlay depuis Config) + **un** `CFrame.lookAt` par unité (V56). Immobile = regard −Z (même pose que `CFrame.new(x,y,z)`). Plus de `WorldSpace.tileToWorld` / `Vector3.Unit` / `CFrame.new(position)` sur le chemin unités. Extra missile **inchangé**. `WorldSpace.tileToWorld` reste pour splash / explosion / bâtiments (événement, pas 60 Hz unités).
+- **Camion Overlay :** boucle `route.delivery` de `stepInterpolation` (V57). Lerp X/Y/Z en nombres depuis `path[i].X/.Y/.Z` + `TRUCK_LIFT` (0.8, déjà cuit dans `route.from`/`route.to` — plus de `Vector3.new(0, 0.8, 0)`). Un `CFrame.lookAt` par camion. Pièces non-roue : `frame * piece.offset` **sans** `* CFrame.new()`. Roues : `CFrame.Angles` (spin) conservé. `buildFactoryRoute` / `route.path` Vector3 **inchangés** (posé à la construction). Voie sans `delivery` → `continue`, zéro alloc. Pulse / `Parent = nil` à l’arrivée **inchangés**. **Pas réentrant.** Distinct de V56 (unités), V55 (`targetX`), V52 (`extra`). Leftover : houle océan `WorldRenderer.step` (V58).
 - **Hover 60 Hz :** `previewOwnerAt` / `previewBuildingAt` module (V53). Capturent `world` / `overlay`. Overlay nil → `buildingAt` nil. World nil → `ownerAt` 0. Plus de `function` inline dans RenderStepped. **Pas réentrant** au sens V40 (un resolve / frame). Distinct de V51 (record ctx) et de V40 (serveur).
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
-- **PR #107 :** `targetX`/`currentX` nombres, lerp numérique, extra mute (V52) intact. Banc insert + second lot `x/y` différents → mute + `rawequal` du record. Rien à revert.
+- **PR #110 :** lookAt unique unités, lerp `currentX` **et** `currentY` (V56) intact. Banc insert + second lot `x/y` différents → mute + `rawequal` du record. Rien à revert.
 
 ---
 
 ## Specs worker (reste)
 
-Ne pas merger feel `a963`/`1e43` ni hardening `b4c1` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `4a67`/`a963` ni hardening `a0f9` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -110,29 +111,29 @@ Ne pas merger feel `a963`/`1e43` ni hardening `b4c1` sur cette branche sans reba
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V57 — camion `stepInterpolation` `Vector3`/`CFrame` 60 Hz
+### ISSUE-V58 — `WorldRenderer.step` houle `Vector3` 60 Hz
 
-**Problème.** V56 ferme `tileToWorld` / `Vector3.Unit` / `CFrame.new(position)` **sur les unités**. Reste, **par camion en livraison, à chaque frame** : `route.path[i] + Vector3.new(0, 0.8, 0)` × 2, `b - a`, `a + direction * t`, `CFrame.lookAt(position, position + direction)`, `CFrame.Angles` (roue) **ou** `CFrame.new()` (identité, chaque pièce non-roue). `route.path` est déjà un tableau de Vector3 (posé à la construction, pas 60 Hz). Distinct de V56 (unités), de V55 (`targetX`), de V52 (`extra`) et des allocs explosion / wake / splash (événement).
+**Problème.** V57 ferme camion `Vector3.new(0, 0.8, 0)` / `(b-a)` / `CFrame.new()` identité **sur la livraison**. Reste, **par reflet océan (jusqu’à 54), à chaque frame** : `ripple.part.CFrame = ripple.base + Vector3.new(wave * 0.45, 0, math.cos(time + ripple.phase) * 0.2)`. `ripple.base` est déjà un CFrame (posé à `buildOcean`, pas 60 Hz). Distinct de V57 (camion), de V56 (unités), des allocs explosion / wake / splash (événement) et de `applyRouteProgress` (chantier de voie, 0.35–3 s).
 
-**20K CCU.** Leftover V56. 8 clients × 60 Hz × livraisons visibles × (2–4 Vector3 + 1 lookAt + N `CFrame.new()` identité). Pas d’autorité (pose cosmétique). Changer `route.path` sans adapter Overlay casserait le virage à angle droit.
+**20K CCU.** Leftover V57. 8 clients × 60 Hz × ≤54 glints × 1 Vector3 + 1 CFrame `__add`. Pas d’autorité (pose cosmétique). Changer `ripple.base` sans adapter `step` casserait l’ancre.
 
 **Faire.**
 
-1. Dans la boucle **livraison** de `stepInterpolation` seulement : lerp X/Y/Z en nombres depuis `path[i].X/.Y/.Z` (le lift 0.8 déjà cuit dans `route.from`/`route.to` — ne pas re-ajouter `Vector3.new(0, 0.8, 0)`). Un `CFrame.lookAt` par camion. Pièces non-roue : `frame * piece.offset` **sans** `* CFrame.new()`. Roues : garder `CFrame.Angles` (spin). Unités **inchangées** (V56 déjà). Extra missile **inchangé** (V52). `targetX` **inchangé** (V55).
-2. Ne **pas** éditer `UnitModels.luau` / `HUD.luau` / `WorldSpace.luau`. Ne pas recycler explosion / wake / splash (événement). Ne pas changer `buildFactoryRoute` (path Vector3 à la pose). Après V56.
-3. Ne pas porter HUD `rankByTiles` (V54 déjà) ni Overlay unités (V56 déjà).
+1. Dans `WorldRenderer.step` seulement : lire `ripple.base.X/.Y/.Z` en nombres, poser `CFrame.new(bx + wave * 0.45, by, bz + math.cos(...) * 0.2)` **ou** muter un CFrame recyclé. `Transparency` inchangée. Camion / unités **inchangés** (V57/V56 déjà). Extra missile **inchangé** (V52). `targetX` **inchangé** (V55).
+2. Ne **pas** éditer `Overlay.luau` / `UnitModels.luau` / `HUD.luau` / `WorldSpace.luau`. Ne pas recycler explosion / wake / splash (événement). Ne pas changer `buildOcean` (glints posés une fois). Après V57.
+3. Ne pas porter Overlay camion (V57 déjà) ni Overlay unités (V56 déjà). Ne pas toucher `applyRouteProgress` (leftover séparé, chantier).
 
-**Contraintes.** Client-only. **V57 visual ≠ V56 (unités lookAt) ≠ V55 (nombres cible) ≠ V52 (extra).** Non réentrant. Client 34/34 (banc « navires, missiles et interpolation » **et** « livraison : le gain s'affiche sur la gare » **doivent rester verts**). **Ne pas** éditer le serveur. Une voie sans `delivery` ne doit rien allouer.
+**Contraintes.** Client-only. **V58 visual ≠ V57 (camion) ≠ V56 (unités lookAt) ≠ V55 (nombres cible).** Non réentrant. Client 34/34 (banc « construction du monde 3D » **et** « camera strategique » **doivent rester verts**). **Ne pas** éditer le serveur. 0 glint → zéro alloc.
 
-**Tester.** Banc client navires **doit rester vert**. Second `applyUnits` du même missile → extra mute (V52) **et** `targetX` mute (V55) **et** lerp `currentX`/`currentY` (V56). Dispatch + `stepInterpolation` jusqu’à l’arrivée → camion parenté puis `Parent = nil`, pulse. `./tests/run.sh`. Client 34/34.
+**Tester.** Banc client construction monde **doit rester vert**. `world:step(1/60)` deux fois → CFrame des glints distinct du `base` (la houle a bougé) sans recréer les Parts. Leftover V57 (dispatch camion + pulse) **doit rester vert**. `./tests/run.sh`. Client 34/34.
 
-**Fichiers.** `Overlay.luau` (`stepInterpolation` boucle `route.delivery` seulement). `tests/client.luau` **seulement si** un assert dans le check livraison existant. `UnitModels.luau` **non**. `HUD.luau` **non**. `WorldSpace.luau` **non**.
+**Fichiers.** `WorldRenderer.luau` (`step` boucle `oceanRipples` seulement). `tests/client.luau` **seulement si** un assert dans le check « construction du monde 3D » ou « camera strategique ». `Overlay.luau` **non**. `UnitModels.luau` **non**. `HUD.luau` **non**.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `a963`/`1e43` / hardening `b4c1` sur #39/#107.
+- Merger feel `4a67`/`a963` / hardening `a0f9` sur #40/#110.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -155,7 +156,11 @@ Ne pas merger feel `a963`/`1e43` ni hardening `b4c1` sur cette branche sans reba
 - `RadialMenu` `entries` à l’ouverture — geste joueur, pas 10 Hz.
 - `HUD.refreshDiplomacyPanel` `markers` — à la sélection, pas 10 Hz.
 - `CFrame` / `Vector3` unités dans `stepInterpolation` 60 Hz — **fermé** (V56). V55 ne touche que les nombres cible / lerp. `CFrame.Angles` roulis navire **conservé** (sinon `UnitModels.place` perd le tangage).
-- Camion `Vector3.new(0, 0.8, 0)` + `CFrame.new()` identité 60 Hz — **ouvert** (V57). V56 ne touche que les unités.
+- Camion `Vector3.new(0, 0.8, 0)` + `CFrame.new()` identité 60 Hz — **fermé** (V57). V56 ne touche que les unités. `CFrame.Angles` roues **conservé**.
+- Houle océan `WorldRenderer.step` Vector3 60 Hz — **ouvert** (V58). V57 ne touche que le camion.
+- `applyRouteProgress` Vector3/lookAt pendant chantier (0.35–3 s) — leftover séparé, pas 60 Hz match entier.
+- `BuildingModels.animate` `CFrame.Angles` / `PortCraneCable` Vector3 — leftover séparé (pièces nomméés, pas Overlay).
+- `UnitModels.place` `Vector3.new` Size flamme missile — leftover séparé (ne pas éditer UnitModels dans V58).
 - Explosion / wake / splash Vector3 — événement, pas 60 Hz.
 
 ---
@@ -167,7 +172,7 @@ Ne pas merger feel `a963`/`1e43` ni hardening `b4c1` sur cette branche sans reba
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–38 inchangées (passe 39 = client-only).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–39 inchangées (passe 40 = client-only).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Client V48 : check « deltas de terrain et conquetes classees » — prise slot 2→1 classée en gain, delta vide `# == 0` + `rawequal` pools.  
 Client V49 : check « etiquettes de faction : centre, contenu et disparition » — second refresh sans slot 1 détruit l’ancre (leftover `countBuf` interdirait ça).  
@@ -178,4 +183,5 @@ Client V52 : check « navires, missiles et interpolation » — second `applyUni
 Client V53 : check « apercu de placement » + « accrochage » — inchangés (Preview n’est pas édité ; les closures stables sont dans init.client, hors bundle du check Preview).  
 Client V55 : même check navires — `targetX`/`currentX` nombres ; second lot `x/y` différents → `targetX` mute + `rawequal` du record unité. Leftover V52 **doit rester vert**.  
 Client V56 : même check navires — `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY` (branche `mag > 0.01`, un lookAt). Premier `stepInterpolation` (unités immobiles, regard −Z) ne casse pas. Leftover V55 **doit rester vert**.  
+Client V57 : check « pose et capture de chaque type de batiment » — `onTradeEvent("dispatch")` après voie unique → `truckModel.Parent == model` ; un frame plus tard delivery encore vivant ; 12 × 0.02 s → `delivery == nil`, `Parent == nil`, `DeliveryPulse` dans `overlay.root`. Leftover V56 **doit rester vert**. Le check « livraison : le gain s'affiche sur la gare » ne peut pas porter ça : la destruction en fin de pose vide `overlay.routes`.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.

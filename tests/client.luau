@@ -846,6 +846,30 @@ check("pose et capture de chaque type de batiment", function()
 	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
 	overlay:stepInterpolation(1 / 60)
 
+	-- V57 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
+	-- Leftover V56 (unités) reste dans le check navires. Voies encore vivantes
+	-- ici ; la destruction plus bas les vide (le check livraison n'en a plus).
+	local _, liveRoute = routesOf(factoryEntry.index)
+	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
+	local pulseFound = false
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "DeliveryPulse" then
+			pulseFound = true
+			break
+		end
+	end
+	assert(pulseFound, "pas de pulse a l'arrivee")
+
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
 	for _, entry in deltas do
