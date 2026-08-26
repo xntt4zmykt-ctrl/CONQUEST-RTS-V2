@@ -202,6 +202,44 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5b. Index buildingsBySlot (V22) : chaque batiment est dans l'index de
+	-- son camp, et l'index ne pointe pas vers un fantome.
+	if state.buildingsBySlot then
+		for slot, set in state.buildingsBySlot do
+			for index in set do
+				local building = state.buildings[index]
+				if not building then
+					fail(`tick {tick} — buildingsBySlot[{slot}][{index}] orphelin`)
+				elseif building.slot ~= slot then
+					fail(`tick {tick} — buildingsBySlot[{slot}][{index}] slot={building.slot}`)
+				end
+			end
+		end
+		for index, building in state.buildings do
+			local set = state.buildingsBySlot[building.slot]
+			if not set or not set[index] then
+				fail(`tick {tick} — batiment {index} hors buildingsBySlot[{building.slot}]`)
+			end
+		end
+	end
+
+	-- 5c. coolingBuildings (V19) : uniquement les tuiles a cooldown > 0.
+	if state.coolingBuildings then
+		for index in state.coolingBuildings do
+			local building = state.buildings[index]
+			if not building then
+				fail(`tick {tick} — coolingBuildings[{index}] orphelin`)
+			elseif building.cooldown <= 0 then
+				fail(`tick {tick} — coolingBuildings[{index}] cooldown={building.cooldown}`)
+			end
+		end
+		for index, building in state.buildings do
+			if building.cooldown > 0 and not state.coolingBuildings[index] then
+				fail(`tick {tick} — cooldown {building.cooldown} hors coolingBuildings[{index}]`)
+			end
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -3407,6 +3445,216 @@ do
 end
 
 print("passe 19 : silosBySlot, samsOf, isolation clic OK")
+
+--[[
+	Nightly passe 20 — revue PR #57 : coolingBuildings + armCooldown (V19),
+	buildingsBySlot + bots (V22), samsOf buffer recycle (V25).
+]]
+do
+	local cool = GameState.new(2001)
+	local a = cool:addPlayer(nil, "Frappe", Random.new(41), 0)
+	local b = cool:addPlayer(nil, "Batterie", Random.new(42), 0)
+	if not a or not b then
+		fail("coolingBuildings — factions impossibles")
+	else
+		local samTile: number? = nil
+		local portTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(cool.owner, index) == b.slot and not cool.buildings[index] then
+				if not samTile then
+					samTile = index
+				elseif not portTile then
+					portTile = index
+					break
+				end
+			end
+		end
+		if not samTile or not portTile then
+			fail("coolingBuildings — tuiles libres introuvables")
+		else
+			cool:placeBuilding(samTile, Config.BUILDING.SAM, b.slot)
+			cool:placeBuilding(portTile, Config.BUILDING.PORT, b.slot)
+			local bx, by = MapGen.fromIndex(samTile)
+			table.insert(cool.missiles, {
+				id = 1,
+				slot = a.slot,
+				kind = Config.NUKE.ATOM,
+				x = bx,
+				y = by,
+				sx = bx,
+				sy = by,
+				tx = bx + 1,
+				ty = by,
+				progress = 0,
+				speed = 1,
+			})
+			Nukes.step(cool, Random.new(1), function() end)
+			if #cool.missiles ~= 0 then
+				fail("coolingBuildings — missile non intercepte")
+			elseif not cool.coolingBuildings[samTile] then
+				fail("tryIntercept — intercept n'a pas leve coolingBuildings")
+			elseif (cool.buildings[samTile].cooldown or 0) <= 0 then
+				fail("tryIntercept — SAM sans cooldown apres intercept")
+			end
+			if cool.coolingBuildings[portTile] then
+				fail("stepCooldowns — PORT inscrit dans coolingBuildings")
+			end
+
+			Buildings.armCooldown(cool, samTile, 3)
+			Buildings.stepCooldowns(cool)
+			Buildings.stepCooldowns(cool)
+			Buildings.stepCooldowns(cool)
+			if (cool.buildings[samTile].cooldown or 0) ~= 0 then
+				fail(`stepCooldowns — SAM cooldown={cool.buildings[samTile].cooldown} apres 3 ticks`)
+			elseif cool.coolingBuildings[samTile] then
+				fail("stepCooldowns — SAM encore dans coolingBuildings a 0")
+			end
+		end
+	end
+end
+
+do
+	local siloCool = GameState.new(2002)
+	local a = siloCool:addPlayer(nil, "Arsenal", Random.new(51), 0)
+	local b = siloCool:addPlayer(nil, "Cible", Random.new(52), 0)
+	if not a or not b then
+		fail("armCooldown silo — factions impossibles")
+	else
+		local siloTile: number? = nil
+		local target: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			local owner = buffer.readu8(siloCool.owner, index)
+			if not siloTile and owner == a.slot and not siloCool.buildings[index] then
+				siloTile = index
+			elseif not target and owner == b.slot then
+				target = index
+			end
+			if siloTile and target then
+				break
+			end
+		end
+		if not siloTile or not target then
+			fail("armCooldown silo — tuiles introuvables")
+		else
+			siloCool:placeBuilding(siloTile, Config.BUILDING.SILO, a.slot)
+			a.era = Eras.requiredForNuke(Config.NUKE.ATOM)
+			a.gold = 5000
+			siloCool.tick = (Config.SPAWN_NUKE_IMMUNITY or 5) * Config.TICK_RATE + 1
+			local ok, reason = Nukes.launch(siloCool, a.slot, target, Config.NUKE.ATOM)
+			if not ok then
+				fail("armCooldown silo — tir refuse: " .. tostring(reason))
+			elseif siloCool.buildings[siloTile].cooldown ~= Config.SILO_COOLDOWN then
+				fail("armCooldown silo — cooldown non pose")
+			elseif not siloCool.coolingBuildings[siloTile] then
+				fail("armCooldown silo — launch n'a pas leve coolingBuildings")
+			end
+		end
+	end
+end
+
+do
+	local idx = GameState.new(2003)
+	local a = idx:addPlayer(nil, "Indexeur", Random.new(61), 0)
+	local b = idx:addPlayer(nil, "Voisin", Random.new(62), 0)
+	if not a or not b then
+		fail("buildingsBySlot — factions impossibles")
+	elseif typeof(Bots.lowestUpgradable) ~= "function" or typeof(Bots.blastValue) ~= "function" then
+		fail("buildingsBySlot — helpers bots non exportes")
+	else
+		local cap = a.capitalTile
+		if not cap or not (idx.buildingsBySlot[a.slot] and idx.buildingsBySlot[a.slot][cap]) then
+			fail("buildingsBySlot — capitale non indexee")
+		end
+		local city: number? = nil
+		local other: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(idx.owner, index) == a.slot and not idx.buildings[index] then
+				if not city then
+					city = index
+				elseif not other then
+					other = index
+					break
+				end
+			end
+		end
+		if not city or not other then
+			fail("buildingsBySlot — tuiles libres introuvables")
+		else
+			idx:placeBuilding(city, Config.BUILDING.CITY, a.slot)
+			idx:placeBuilding(other, Config.BUILDING.CITY, a.slot)
+			if not (idx.buildingsBySlot[a.slot][city] and idx.buildingsBySlot[a.slot][other]) then
+				fail("buildingsBySlot — pose CITY non indexee")
+			end
+			idx:upgradeBuilding(city)
+			local lowest = Bots.lowestUpgradable(idx, a.slot)
+			if lowest ~= other then
+				fail(`buildingsBySlot — lowestUpgradable={tostring(lowest)} (attendu ville niv 1)`)
+			end
+			local vOwn = Bots.blastValue(idx, a.slot, cap, 0)
+			local vOther = Bots.blastValue(idx, b.slot, cap, 0)
+			if vOwn ~= 1 then
+				fail(`buildingsBySlot — blastValue camp={vOwn} (attendu 1 capitale)`)
+			elseif vOther ~= 0 then
+				fail(`buildingsBySlot — blastValue autre camp={vOther} (attendu 0)`)
+			end
+			idx:setOwner(city, b.slot)
+			if idx.buildingsBySlot[a.slot] and idx.buildingsBySlot[a.slot][city] then
+				fail("buildingsBySlot — capture laisse l'index chez le poseur")
+			elseif not (idx.buildingsBySlot[b.slot] and idx.buildingsBySlot[b.slot][city]) then
+				fail("buildingsBySlot — capture n'indexe pas chez le nouveau proprio")
+			end
+			local slotB = b.slot
+			idx:removePlayer(slotB)
+			if idx.buildingsBySlot[slotB] ~= nil then
+				fail("buildingsBySlot — removePlayer laisse l'index du slot recycle")
+			end
+			idx:destroyBuilding(other)
+			if idx.buildingsBySlot[a.slot] and idx.buildingsBySlot[a.slot][other] then
+				fail("buildingsBySlot — destroy laisse l'index")
+			end
+		end
+	end
+end
+
+do
+	local rec = GameState.new(2004)
+	local owner = rec:addPlayer(nil, "Batteries", Random.new(71), 0)
+	local heir = rec:addPlayer(nil, "Vide", Random.new(72), 0)
+	if not owner or not heir then
+		fail("samsOf recycle — factions impossibles")
+	else
+		local tiles = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(rec.owner, index) == owner.slot and not rec.buildings[index] then
+				table.insert(tiles, index)
+				if #tiles >= 3 then
+					break
+				end
+			end
+		end
+		if #tiles < 3 then
+			fail("samsOf recycle — moins de 3 tuiles libres")
+		else
+			for _, tile in tiles do
+				rec:placeBuilding(tile, Config.BUILDING.SAM, owner.slot)
+			end
+			local listed = Buildings.samsOf(rec, owner.slot)
+			if #listed ~= 3 then
+				fail(`samsOf recycle — pose #={#listed} (attendu 3)`)
+			end
+			local empty = Buildings.samsOf(rec, heir.slot)
+			if #empty ~= 0 then
+				fail(`samsOf recycle — slot vide #={#empty} (queue non tronquee)`)
+			end
+			local again = Buildings.samsOf(rec, owner.slot)
+			if #again ~= 3 then
+				fail(`samsOf recycle — refill #={#again} (attendu 3)`)
+			end
+		end
+	end
+end
+
+print("passe 20 : coolingBuildings, buildingsBySlot, samsOf recycle OK")
 
 do
 	local report = TickMetrics.formatReport()

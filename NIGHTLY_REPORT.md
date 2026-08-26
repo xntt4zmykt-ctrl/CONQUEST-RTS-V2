@@ -1,11 +1,11 @@
-# Nightly report — passe 19 (revue PR #54)
+# Nightly report — passe 20 (revue PR #57)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-121e` (PR #54, `dc4333b`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-cb10`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-cb10` (PR #57, `ea2a5a1`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-99ee`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #54 (aura morte, `CAPTURE_GUARD`, `samsBySlot` — HEAD visuel). Correctifs sûrs, sans merger feel `e735`/`7c38` ni hardening `a320`/`e91b`.
+Revue de PR #57 (`silosBySlot`, `samsOf` sans fallback, isolation clic — HEAD visuel). Correctifs sûrs, sans merger feel `1fb3`/`e735` ni hardening `239b`/`e91b`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,27 +15,30 @@ Revue de PR #54 (aura morte, `CAPTURE_GUARD`, `samsBySlot` — HEAD visuel). Cor
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `silosBySlot` : pose / capture / destroy / `removePlayer` | `GameState.luau` | V18 N60 |
-| `Nukes.launch` itère l’index (O(silos du camp), plus O(hash)) | `Nukes.luau` | V18 |
-| MIRV de test passe par `placeBuilding` (plus d’écriture brute du hash) | `tests/simulate.luau` | V18 / hardening N44 |
-| `samsOf` : slot sans SAM = `{}` (plus de rescan hash) | `Buildings.luau` | bug PR #54 |
-| `isSpawnIsolated` partagé `findSpawn` / `claimSpawn` | `GameState.luau`, `ChantierB.luau` | V16b N55 |
-| Clic spawn collé : **refus**, pas de snap `r=6` | `ChantierB.luau` | V16b |
+| `coolingBuildings` + `armCooldown` SAM **et** silos | `Buildings.luau`, `Nukes.luau`, `GameState.luau` | V19 N43 |
+| `Nukes.launch` / `tryIntercept` n’écrivent plus `cooldown` directement | `Nukes.luau` | V19 |
+| `destroyBuilding` évacue la tuile du set | `GameState.luau` | V19 |
+| `buildingsBySlot` : pose / capture / destroy / `removePlayer` snapshot | `GameState.luau` | V22 N62 |
+| `lowestUpgradable` / `blastValue` via l’index du camp | `Bots.luau` | V22 |
+| `refreshRailNetwork` collecte via `buildingsBySlot` (pas `IS_STATION`) | `GameState.luau` | V22 N64 |
+| `samsOf` buffer recyclé, queue tronquée | `Buildings.luau` | V25 N68 |
 
-Cooldown silo toujours écrit dans `launch` (`silo.cooldown = SILO_COOLDOWN`). Ne pas porter `armCooldown` (V19 / hardening N43).
+`silosBySlot` / `samsBySlot` / `bunkersBySlot` **non retouchés**. Cooldown silo toujours le champ `building.cooldown` ; `coolingBuildings` n’est que le set d’actifs.
 
 ---
 
-## Constatations PR #54 (à ne pas casser)
+## Constatations PR #57 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
 - **Combat vivant :** `ChantierB.stepAttacks`. Guard = `ChantierB.CAPTURE_GUARD` (80), **pas** `Config.MAX_TILES_PER_TICK` (56 après apply, 400 brut).
-- **Posted DEFENSE :** `bunkersBySlot` + `attackLogic`. Buffer `defense` mort pour le combat installé. Plus d’écritures `applyDefenseAura`.
-- **Posted SAM :** `samsBySlot` + `tryIntercept` / `samsOf`. Slot sans SAM ne rescane plus le hash (passe 19).
+- **Posted DEFENSE :** `bunkersBySlot` + `attackLogic`. Buffer `defense` mort. Plus d’écritures `applyDefenseAura`.
+- **Posted SAM :** `samsBySlot` + `tryIntercept` / `samsOf`. Slot sans SAM ne rescane plus le hash. `samsOf` recycle un buffer (passe 20) — **pas réentrant**.
 - **Posted SILO :** `silosBySlot` + `Nukes.launch`. Fantôme hors index ignoré.
+- **Cooldown 10 Hz :** `coolingBuildings` + `armCooldown` (SAM **et** silos). SAM-only gèlerait `SILO_COOLDOWN`.
+- **Posted tous kinds :** `buildingsBySlot`. Bots upgrade / score nuke / rail collect via l’index. `removePlayer` snapshot les clés (iterer le hash pendant `destroyBuilding` saute des tuiles).
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
-- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `silosBySlot` n’ajoute aucun require.
+- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `Buildings.armCooldown` n’ajoute aucun require.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
 
@@ -43,7 +46,7 @@ Cooldown silo toujours écrit dans `launch` (`silo.cooldown = SILO_COOLDOWN`). N
 
 ## Specs worker (reste)
 
-Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `1fb3`/`e735` ni hardening `239b`/`e91b` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -67,7 +70,7 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 
 ### ISSUE-V9b — Persistence debounce 30 s
 
-**Problème.** `record()` appelle encore `UpdateAsync` tout de suite (une écriture / humain). Le double-write `release`/`BindToClose` est corrigé ; la tempête de fin de match (8 writes synchrones) reste.
+**Problème.** `Persistence.record()` marque dirty **puis** appelle `save()` tout de suite (`UpdateAsync` / humain). Le double-write `release`/`BindToClose` est corrigé ; la tempête de fin de match (8 writes synchrones) reste.
 
 **20K CCU.** N salons × 8 humains × `endMatch` = burst DataStore.
 
@@ -99,23 +102,13 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V19 — `stepCooldowns` O(hash) 10 Hz
-
-**Problème.** `Buildings.stepCooldowns` décrémente **tous** les bâtiments chaque tick. Seuls SAM et silos portent un cooldown vivant. Passe 19 indexe les silos pour le **lancement**, pas pour le tick.
-
-**20K CCU.** 10 Hz × N bâtiments, dont villes/usines à cooldown 0.
-
-**Faire.** Recette hardening N43 : `coolingBuildings` + `armCooldown` SAM **et** silos (SAM-only gèlerait `SILO_COOLDOWN`). `Nukes.launch` / `tryIntercept` doivent appeler `armCooldown` (remplacer `silo.cooldown =` / `best.cooldown =`).
-
-**Tester.** SAM intercept → cooldown 90. Silo launch → `SILO_COOLDOWN`. Ville/usine jamais dans l’index. Passe 19 silosBySlot reste verte. P0 metrics.
-
 ### ISSUE-V20 — `Trade.step` flatten FACTORY 10 Hz
 
-**Problème.** Chaque tick, `Trade.step` alloue une liste, scannne le hash, **trie** les usines (déterminisme RNG). Feel a `factoriesBySlot` (N61) ; le sort 10 Hz reste (N66).
+**Problème.** Chaque tick, `Trade.step` alloue une liste, scannne le hash, **trie** les usines (déterminisme RNG). Feel a `factoriesBySlot` (N61) ; le sort 10 Hz reste (N66 feel = `factoryBuf` recycle).
 
 **20K CCU.** Alloc + sort sur le hot path économique.
 
-**Faire.** Porter **une** recette. N61 : `factoriesBySlot` + iteration déterministe (tri des clés de l’index, pas un flatten hash). N66 : buffer recyclé, tri seulement si dirty. Vague ≠ 45 ticks (c’est le maritime).
+**Faire.** Porter **une** recette. N61 : `factoriesBySlot` + iteration déterministe (tri des clés de l’index, pas un flatten hash). N66 : buffer recyclé, tri seulement si dirty / `n>=2`. Vague ≠ 45 ticks (c’est le maritime). Ne pas re-toucher `buildingsBySlot`.
 
 **Tester.** Or colis inchangé. Deux seeds identiques → mêmes livraisons. `./tests/run.sh`.
 
@@ -125,19 +118,9 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 
 **20K CCU.** Moins chaud que 10 Hz, mais pic + alloc sur 24 convois max.
 
-**Faire.** Recette hardening N40 (déjà portée feel N63) : `portsByTile` incrémental PORT only, early-out `MAX_TRADE_SHIPS` **et** `<2` avant flatten, `portsBuf`/`candidateBuf`. Distinct de `_carriersDirty` (NAVAL_BASE).
+**Faire.** Recette hardening N40 (déjà portée feel N63) : `portsByTile` incrémental PORT only, early-out `MAX_TRADE_SHIPS` **et** `<2` avant flatten, `portsBuf`/`candidateBuf`. Distinct de `_carriersDirty` (NAVAL_BASE). Distinct de `buildingsBySlot` (tous kinds).
 
 **Tester.** Cap 24 respecté. `<2` ports = pas de scan. P0 metrics. `./tests/run.sh`.
-
-### ISSUE-V22 — Bots upgrade + score nuke O(hash)
-
-**Problème.** `tryUpgradeBuilding` et `decideNuke` (valeur blast) parcourent tout `state.buildings`. Feel N62 a `buildingsBySlot` ; visual n’a que DEFENSE/SAM/SILO.
-
-**20K CCU.** Décision bot × 10 Hz × hash global, pile sur un tick de combat.
-
-**Faire.** Recette feel N62 : `buildingsBySlot` dirty pose/capture/destroy/`removePlayer` (snapshot les clés). `lowestUpgradable` / `blastValue` via l’index du camp. Ne pas re-toucher `silosBySlot` / `samsBySlot`.
-
-**Tester.** Upgrade bot choisit le plus bas palier du camp. Score nuke ignore les bâtiments d’un autre slot. `removePlayer` nil l’index. `./tests/run.sh`.
 
 ### ISSUE-V23 — `syncCarriers` spawn NAVAL_BASE O(B)
 
@@ -145,7 +128,7 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 
 **20K CCU.** Pose/destroy base = scan global, rare mais sur le même tick que le combat.
 
-**Faire.** Recette feel N65 : `navalBasesBySlot` + spawn via l’index. **Garder** `_carriersDirty`. Ne pas porter le ciblage obus listes (V24).
+**Faire.** Recette feel N65 : `navalBasesBySlot` + spawn via l’index. **Garder** `_carriersDirty`. Ne pas porter le ciblage obus listes (V24). Ne pas re-toucher `buildingsBySlot` / `coolingBuildings`.
 
 **Tester.** Pose / capture / destroy NAVAL_BASE indexé. Dirty false → pas de spawn. `./tests/run.sh`.
 
@@ -159,27 +142,19 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 
 **Tester.** 0 carrier → return immédiat. Priorité transport > carrier > trade inchangée. P0 metrics.
 
-### ISSUE-V25 — `samsOf` alloc table
-
-**Problème.** `Buildings.samsOf` alloue `{number}` à chaque appel (bots `decideNuke`). Passe 19 a fermé le rescan hash ; l’alloc reste. Feel N68.
-
-**20K CCU.** Décision nuke bot × alloc, même pour un camp à 0 SAM (table vide neuve).
-
-**Faire.** Buffer recyclé par slot **ou** itérateur interne qui n’alloue pas. Ne pas re-brancher le fallback hash.
-
-**Tester.** `samsOf` slot vide = 0 sans alloc visible (compteur / reuse). `./tests/run.sh`.
-
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `e735`/`7c38` / hardening `a320`/`e91b` sur #39/#54.
+- Merger feel `1fb3`/`e735` / hardening `239b`/`e91b` sur #39/#57.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` suffit.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
 - Fallout disque = rayon **inner** seulement (OF outer = spec produit).
 - Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
 - `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
 - Hover client `SpawnHint` (feel N58) — isolation serveur d’abord (V16b livré).
+- `samsOf` réentrant : un seul appelant (`decideNuke`). Dupliquer le buffer si un second appelant apparaît.
+- Feel N69 (`blastValue` × 90 tuiles de frontière) / N70 (`snapshotBoats`) — pas sur le HEAD visuel.
 
 ---
 
@@ -190,5 +165,6 @@ Ne pas merger feel `e735`/`7c38` ni hardening `a320`/`e91b` sur cette branche sa
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–18 + **passe 19** (`silosBySlot` pose/lancement plus proche prêt/capture/recycle/destroy, fantôme hash ignoré, `samsOf` sans fallback, isolation clic refus/accept).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–19 + **passe 20** (`coolingBuildings` intercept/launch/éviction, PORT jamais inscrit, `buildingsBySlot` pose/capture/recycle/destroy, `lowestUpgradable` / `blastValue` camp, `samsOf` queue tronquée).  
+Invariants 5b/5c : index `buildingsBySlot` et set `coolingBuildings` vs hash, chaque 500 ticks.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
