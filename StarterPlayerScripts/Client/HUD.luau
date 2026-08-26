@@ -1278,7 +1278,8 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- Distinct de feel N106 (recycle Ground/Border — non porte).
 	-- MAX_FEED_ENTRIES=3 inchange. Pas reentrant. Ne pas inventer un
 	-- pool de TextLabel. FactoryOutput / SiloWarning fermees (V104).
-	-- Feux navire fermes (V105). Wake Transparency leftover V106.
+	-- Feux navire fermes (V105). Wake Transparency fermee (V106).
+	-- Flag pitch leftover V107.
 	while #self.feedEntries > MAX_FEED_ENTRIES do
 		local entries = self.feedEntries
 		local n = #entries
