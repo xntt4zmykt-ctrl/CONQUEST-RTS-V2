@@ -133,7 +133,16 @@ function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color
 	local part = block(parent, size, offset, color)
 	part.Shape = Enum.PartType.Cylinder
 	-- Le cylindre de Roblox pointe le long de X : on le redresse.
-	part.CFrame = CFrame.new(offset) * CFrame.Angles(0, 0, math.rad(90))
+	-- N139 : cylinder() helper. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- block(...) puis Shape = Cylinder inchanges. Signature
+	-- (parent, size, offset, color) inchangee. Call sites
+	-- buildFactory / buildSilo non edites. Distinct BuildRing
+	-- N136 (evenement pose). Distinct trunks N137 (decor monde).
+	-- Distinct Rock N138 (yaw `phase`). Distinct toits leftover
+	-- N140 (Z=-12°). playConstruction / animate / WorldRenderer /
+	-- Overlay / Effects inchanges.
+	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
 

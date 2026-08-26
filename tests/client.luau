@@ -1144,6 +1144,12 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- N124 : radar / flag / boom rotation via fromEulerAnglesYXZ, pas
 	-- CFrame.Angles. Factory sans câble : animate ne lève pas.
 	-- Recette visual V70, portee pas mergee.
+	-- N139 : cylinder() fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Cylindre Z=90. Helper seulement. Leftover N124 radar, leftover
+	-- N109 câble Y, leftover N136 BuildRing (check pose) doivent
+	-- rester verts. Toits leftover N140 non touches. Recette leftover
+	-- N138, pas merger visual. WorldRenderer / Overlay / Effects
+	-- inchanges.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
