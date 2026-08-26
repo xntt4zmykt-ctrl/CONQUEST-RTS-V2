@@ -253,7 +253,7 @@ function WorldRenderer.buildDecorations(self: WorldRenderer)
 				-- table.insert animatedFoliage inchange. step non (N108).
 				-- Distinct OceanGlint N135 (yaw `angle`, buildOcean).
 				-- Distinct BuildRing N136 (playConstruction). Distinct
-				-- Rock leftover (yaw `phase`). Overlay / Effects /
+				-- Rock leftover N138 (yaw `phase`). Overlay / Effects /
 				-- BuildingModels inchanges.
 				local trunk = decorationPart(folder, "Part", "TreeTrunk", Vector3.new(height, 0.55, 0.55), Color3.fromRGB(91, 67, 47), CFrame.new(base.X, ground + height / 2, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90)), Enum.Material.Wood)
 				trunk.Shape = Enum.PartType.Cylinder
@@ -264,14 +264,24 @@ function WorldRenderer.buildDecorations(self: WorldRenderer)
 				-- N137 : meme euler Z=90 que TreeTrunk, offset Y
 				-- ground + 1.6 inchange. Shape Cylinder inchange.
 				-- Couronne Ball / animatedFoliage inchanges. Rock
-				-- leftover non touche.
+				-- leftover non touche N138.
 				local trunk = decorationPart(folder, "Part", "SavannaTrunk", Vector3.new(3.2, 0.45, 0.45), Color3.fromRGB(100, 70, 44), CFrame.new(base.X, ground + 1.6, base.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90)), Enum.Material.Wood)
 				trunk.Shape = Enum.PartType.Cylinder
 				local crown = decorationPart(folder, "Part", "SavannaCrown", Vector3.new(4.2, 1.5, 3.7), Color3.fromRGB(103, 131, 67), CFrame.new(base.X, ground + 3.5, base.Z), Enum.Material.LeafyGrass)
 				crown.Shape = Enum.PartType.Ball
 				table.insert(self.animatedFoliage, { part = crown, base = crown.CFrame, phase = phase })
 			elseif terrain >= Config.TERRAIN.HILLS then
-				local rock = decorationPart(folder, "WedgePart", "Rock", Vector3.new(1.8 + px % 3, 1.1 + py % 2, 1.8 + (px + py) % 2), Color3.fromRGB(103, 111, 118), CFrame.new(base.X, ground + 0.55, base.Z) * CFrame.Angles(0, phase, 0), Enum.Material.Rock)
+				-- N138 : Rock construction. Plus de CFrame.Angles.
+				-- fromEulerAnglesYXZ(0, phase, 0) ≡ Angles(0, phase, 0).
+				-- Yaw `phase` variable — ne pas figer a 0. Offset Y
+				-- ground + 0.55 inchange. WedgePart / taille / couleur /
+				-- CastShadow inchanges. Branche terrain >= HILLS
+				-- inchangee. Distinct trunks N137 (cylindre Z=90).
+				-- Distinct OceanGlint N135 (yaw `angle`, buildOcean).
+				-- Distinct BuildRing N136 (playConstruction). Overlay /
+				-- Effects / BuildingModels inchanges. TreeTrunk /
+				-- SavannaTrunk non touches.
+				local rock = decorationPart(folder, "WedgePart", "Rock", Vector3.new(1.8 + px % 3, 1.1 + py % 2, 1.8 + (px + py) % 2), Color3.fromRGB(103, 111, 118), CFrame.new(base.X, ground + 0.55, base.Z) * CFrame.fromEulerAnglesYXZ(0, phase, 0), Enum.Material.Rock)
 				rock.CastShadow = true
 			end
 		end

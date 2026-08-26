@@ -723,6 +723,11 @@ check("construction du monde 3D", function()
 	-- yaw, leftover N114 compact, leftover N108 feuillage Y doivent rester
 	-- verts. Check pose leftover N136 BuildRing. Rock leftover N138 non
 	-- touche. Recette leftover N136, pas merger visual.
+	-- N138 : Rock fromEulerAnglesYXZ (pas CFrame.Angles). Yaw `phase`
+	-- variable. Offset Y ground + 0.55. Leftover N137 trunks Z=90,
+	-- leftover N135 OceanGlint yaw, leftover N108 feuillage Y doivent
+	-- rester verts. Check pose leftover N136 BuildRing. Recette leftover
+	-- N137, pas merger visual. BuildingModels cylinder leftover.
 	local nRipple = #world.oceanRipples
 	assert(nRipple > 0, "aucun reflet ocean")
 	local first = world.oceanRipples[1]
