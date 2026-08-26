@@ -1797,8 +1797,14 @@ check("navires, missiles et interpolation", function()
 	-- flush + reuse rawequal est dans « vagues de conquete »).
 	-- Leftover N163 Shockwave, leftover N133 euler, leftover
 	-- N152 flame Size doivent rester verts. Recette leftover
-	-- N163, pas merger visual. Blast sphère leftover N165 non
-	-- touche. overlay:explosion plus bas ne leve pas.
+	-- N163, pas merger visual.
+	-- N165 : Blast sphère free-list blastFree. Pas de
+	-- testFlushDelays ici — la sphère reste parentée (le flush
+	-- + reuse rawequal est dans « vagues de conquete »).
+	-- Leftover N164 BlastSmoke, leftover N163 Shockwave,
+	-- leftover N133 euler, leftover N152 flame Size doivent
+	-- rester verts. Recette leftover N164, pas merger visual.
+	-- PointLight enfant. overlay:explosion plus bas ne leve pas.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1848,14 +1854,20 @@ check("vagues de conquete", function()
 	-- l'insert N160 ; apres les asserts N162, explosion(40,40,6)
 	-- (rayon ≠ 9) reparente la meme Part (rawequal Parent root,
 	-- Name Shockwave). Distinct deliveryFree / splashFree /
-	-- wakeFree / goldFree / pulseFree. Blast Destroy conservé.
+	-- wakeFree / goldFree / pulseFree.
 	-- N164 : BlastSmoke free-list. Le check navires n'a pas
 	-- flushé ; ce flush pousse smokeFree (# >= 5). Snapshot
 	-- avant l'insert N160 ; explosion(40,40,6) N163 consomme
 	-- 5 smokes (un par i). Réparente (rawequal d'au moins une
 	-- Part, Name BlastSmoke). Distinct shockFree / deliveryFree
-	-- / splashFree / wakeFree / goldFree / pulseFree. Blast
-	-- sphère leftover N165 Destroy conservé.
+	-- / splashFree / wakeFree / goldFree / pulseFree.
+	-- N165 : Blast sphère free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse blastFree (# >= 1). Snapshot
+	-- avant l'insert N160 ; explosion(40,40,6) N163/N164
+	-- consomme 1 Blast. Réparente (rawequal Parent root, Name
+	-- Blast). Distinct smokeFree / shockFree / deliveryFree /
+	-- splashFree / wakeFree / goldFree / pulseFree. PointLight
+	-- enfant réutilisé.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1956,6 +1968,20 @@ check("vagues de conquete", function()
 	assert(pooledSmoke ~= pooledGold, "smokeFree partage goldFree")
 	assert(pooledSmoke ~= pooledDelivery, "smokeFree partage deliveryFree")
 	assert(pooledSmoke ~= pooledRing, "smokeFree partage pulseFree")
+	-- N165 : flush ci-dessus a poussé le Blast de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse lors de explosion(40,40,6).
+	local blastPool = overlay.blastFree
+	assert(blastPool ~= nil and #blastPool >= 1, "spheres Blast non poolees")
+	local pooledBlast = blastPool[#blastPool]
+	assert(pooledBlast.Parent == nil, "sphere Blast encore parentee")
+	assert(pooledBlast.Name == "Blast", "Name Blast perdu")
+	assert(pooledBlast ~= pooledSmoke, "blastFree partage smokeFree")
+	assert(pooledBlast ~= pooledShock, "blastFree partage shockFree")
+	assert(pooledBlast ~= pooledWake, "blastFree partage wakeFree")
+	assert(pooledBlast ~= pooledSplash, "blastFree partage splashFree")
+	assert(pooledBlast ~= pooledGold, "blastFree partage goldFree")
+	assert(pooledBlast ~= pooledDelivery, "blastFree partage deliveryFree")
+	assert(pooledBlast ~= pooledRing, "blastFree partage pulseFree")
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -2004,13 +2030,16 @@ check("vagues de conquete", function()
 	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu au reuse")
 	-- N163 : explosion(40, 40, 6) — rayon ≠ 9 du check navires.
 	-- Reset Size (0.32, 5, 5) + Transparency 0.12 avant Tween
-	-- (worldRadius change). Blast Destroy conservé.
+	-- (worldRadius change).
 	-- N164 : la même explosion consomme 5 BlastSmoke. Reset Size
 	-- (5+i, 5+i, 5+i) + Transparency + Color + CFrame avant Tween
-	-- (i et ground varient). Blast sphère leftover N165 Destroy
-	-- conservé.
+	-- (i et ground varient).
+	-- N165 : la même explosion consomme 1 Blast. Reset Size
+	-- (4, 4, 4) + Transparency 0.15 + Color + CFrame + PointLight
+	-- Brightness/Range avant Tween (worldRadius et ground varient).
 	local shockN = #shockPool
 	local smokeN = #smokePool
+	local blastN = #blastPool
 	overlay:explosion(40, 40, 6)
 	assert(#shockPool == shockN - 1, "onde choc non reutilise")
 	assert(rawequal(pooledShock.Parent, overlay.root), "onde choc non reparente")
@@ -2018,6 +2047,10 @@ check("vagues de conquete", function()
 	assert(#smokePool == smokeN - 5, "fumee non reutilisee")
 	assert(rawequal(pooledSmoke.Parent, overlay.root), "fumee non reparentee")
 	assert(pooledSmoke.Name == "BlastSmoke", "Name BlastSmoke perdu au reuse")
+	assert(#blastPool == blastN - 1, "sphere Blast non reutilisee")
+	assert(rawequal(pooledBlast.Parent, overlay.root), "sphere Blast non reparentee")
+	assert(pooledBlast.Name == "Blast", "Name Blast perdu au reuse")
+	assert(pooledBlast:FindFirstChildWhichIsA("PointLight") ~= nil, "PointLight enfant perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()

@@ -1212,15 +1212,62 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	local ground = WorldSpace.tileToWorld(x, y)
 	local worldRadius = radius * Config.TILE_SIZE
 
-	local sphere = Instance.new("Part")
-	sphere.Name = "Blast"
-	sphere.Shape = Enum.PartType.Ball
-	sphere.Anchored = true
-	sphere.CanCollide = false
-	sphere.CanTouch = false
-	sphere.CanQuery = false
-	sphere.CastShadow = false
-	sphere.Material = Enum.Material.Neon
+	-- N165 : free-list blastFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.3 s : Parent = nil + push si encore parenté
+	-- (un delay fantôme ne double-push pas). BlastSmoke
+	-- réutilise déjà (N164, smokeFree — ne pas partager).
+	-- Shockwave réutilise déjà (N163, shockFree — ne pas
+	-- partager). DeliveryPulse réutilise déjà (N162,
+	-- deliveryFree — ne pas partager). LandingSplash réutilise
+	-- déjà (N161, splashFree — ne pas partager). LaunchWake
+	-- réutilise déjà (N160, wakeFree — ne pas partager).
+	-- goldPopup réutilise déjà (N159, goldFree — ne pas
+	-- partager). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156. Distinct conquestPulse N157
+	-- (pulseFree Effects — ne pas nommer blastFree pulseFree
+	-- ni smokeFree ni shockFree). Distinct floatingText N158.
+	-- Distinct goldPopup N159. Distinct LaunchWake N160.
+	-- Distinct LandingSplash N161. Distinct DeliveryPulse N162.
+	-- Distinct Shockwave N163 (shockFree, ne pas partager).
+	-- Distinct BlastSmoke N164 (smokeFree, ne pas partager).
+	-- Distinct PointLight (enfant de Blast — FindFirstChildWhichIsA
+	-- au reuse, pas un 2e pool). Name Blast conservé. Reset
+	-- Size (4, 4, 4) + Transparency 0.15 + Color 255,190,110 +
+	-- CFrame ground.X, 14, ground.Z **avant** Tween
+	-- (worldRadius et ground varient ; le tween avait Size
+	-- worldRadius * 2 / Transparency 1). Tween Create conservé
+	-- (Size / Transparency restart). PointLight reset
+	-- Brightness 8 / Range min(worldRadius * 2, 60) / Color
+	-- 255,200,120 puis Tween Brightness → 0. routePart non
+	-- modifié (LaunchWake / LandingSplash / DeliveryPulse /
+	-- Shockwave / BlastSmoke). Recette leftover N164, pas
+	-- merger visual. HUD / UnitModels / Effects /
+	-- PlacementPreview / goldPopup / LaunchWake / LandingSplash /
+	-- DeliveryPulse / Shockwave / BlastSmoke / applyUnits /
+	-- stepInterpolation inchangés.
+	local blastFree = self.blastFree
+	if not blastFree then
+		blastFree = {}
+		self.blastFree = blastFree
+	end
+	local nBlast = #blastFree
+	local sphere
+	if nBlast > 0 then
+		sphere = blastFree[nBlast]
+		blastFree[nBlast] = nil
+	else
+		sphere = Instance.new("Part")
+		sphere.Name = "Blast"
+		sphere.Shape = Enum.PartType.Ball
+		sphere.Anchored = true
+		sphere.CanCollide = false
+		sphere.CanTouch = false
+		sphere.CanQuery = false
+		sphere.CastShadow = false
+		sphere.Material = Enum.Material.Neon
+	end
 	sphere.Color = Color3.fromRGB(255, 190, 110)
 	sphere.Transparency = 0.15
 	sphere.Size = Vector3.new(4, 4, 4)
@@ -1247,15 +1294,15 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- partager). Distinct N133 (euler Shockwave déjà inline).
 	-- Distinct visual V81 Shockwave wakeRot (ne pas merger
 	-- 47c0). Distinct BlastSmoke N164 (smokeFree, ne pas
-	-- partager). Distinct Blast sphère leftover N165
-	-- (Destroy, ne pas fusionner). Name Shockwave conservé.
+	-- partager). Distinct Blast sphère N165 (blastFree, ne pas
+	-- fusionner). Name Shockwave conservé.
 	-- Reset Size (0.32, 5, 5) + Transparency 0.12 + Color
 	-- 255,229,181 au reuse (le tween avait Size (0.32,
 	-- worldRadius * 2.5, worldRadius * 2.5) / Transparency 1 ;
 	-- worldRadius change). Euler N133 inline conservé. Tween
 	-- Create conservé (Size + Transparency restart). routePart
 	-- non modifié (LaunchWake / LandingSplash / DeliveryPulse /
-	-- BlastSmoke). Blast Destroy obligatoire. Recette leftover
+	-- BlastSmoke). Blast N165 blastFree obligatoire. Recette leftover
 	-- N162, pas merger visual. HUD / UnitModels / Effects /
 	-- PlacementPreview / goldPopup / LaunchWake / LandingSplash /
 	-- DeliveryPulse / applyUnits / stepInterpolation
@@ -1314,8 +1361,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- goldPopup N159. Distinct LaunchWake N160. Distinct
 	-- LandingSplash N161. Distinct DeliveryPulse N162.
 	-- Distinct Shockwave N163 (shockFree, ne pas partager).
-	-- Distinct Blast sphère leftover N165 (Destroy, ne pas
-	-- fusionner). Distinct PointLight (parenté à Blast). Name
+	-- Distinct Blast sphère N165 (blastFree, ne pas
+	-- fusionner). Distinct PointLight (enfant de Blast N165). Name
 	-- BlastSmoke conservé. Boucle i = 1, 5 inchangée (cinq
 	-- pops). Reset Size (5+i, 5+i, 5+i) + Transparency
 	-- 0.22 + i * 0.07 + Color 82+i*7, 76+i*6, 71+i*5 + CFrame
@@ -1323,8 +1370,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- smoke.CFrame + Vector3 et smoke.Size * 2.1). Tween Create
 	-- conservé (CFrame / Size / Transparency restart).
 	-- routePart non modifié (LaunchWake / LandingSplash /
-	-- DeliveryPulse / Shockwave). Blast Destroy obligatoire.
-	-- PointLight obligatoire. Recette leftover N163, pas merger
+	-- DeliveryPulse / Shockwave). Blast N165 blastFree obligatoire.
+	-- PointLight enfant N165. Recette leftover N163, pas merger
 	-- visual. HUD / UnitModels / Effects / PlacementPreview /
 	-- goldPopup / LaunchWake / LandingSplash / DeliveryPulse /
 	-- Shockwave / applyUnits / stepInterpolation inchangés.
@@ -1367,15 +1414,22 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 		Transparency = 1,
 	}):Play()
 
-	local light = Instance.new("PointLight")
+	local light = sphere:FindFirstChildWhichIsA("PointLight")
+	if not light then
+		light = Instance.new("PointLight")
+		light.Parent = sphere
+	end
 	light.Brightness = 8
 	light.Range = math.min(worldRadius * 2, 60)
 	light.Color = Color3.fromRGB(255, 200, 120)
-	light.Parent = sphere
 	TweenService:Create(light, TweenInfo.new(1.1), { Brightness = 0 }):Play()
 
 	task.delay(1.3, function()
-		sphere:Destroy()
+		if sphere.Parent then
+			sphere.Parent = nil
+			local pool = self.blastFree
+			pool[#pool + 1] = sphere
+		end
 	end)
 	task.delay(1, function()
 		if shockwave.Parent then
