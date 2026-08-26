@@ -81,9 +81,11 @@ local function addWake(visual: Visual)
 	-- comme V91 rampRot / V90 doorRot / V89 roofRot / V88 cylinderRot /
 	-- V86 trunkRot interdits). Distinct de V91 (rampes SAM, pitch
 	-- X=-31°, BuildingModels — ne PAS retoucher les Interceptor).
-	-- Distinct de leftover V93 (Bow yaw Y=π, carrier + transport).
-	-- Distinct de V78 (LaunchWake Overlay, wakeRot cuit, Y =
-	-- OCEAN+0.12 — autre objet). Construction de modele, pas 60 Hz.
+	-- Distinct de V93 (Bow yaw Y=π, carrier + transport — ne PAS
+	-- retoucher les Bow). Distinct de leftover V94 (LandingRamp
+	-- pitch X=-8°, kind==1). Distinct de V78 (LaunchWake Overlay,
+	-- wakeRot cuit, Y = OCEAN+0.12 — autre objet). Construction
+	-- de modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
 	-- frame * offset ensuite. Size 1.15, 0.08, 6.5 / FOAM / Neon /
 	-- Transparency 0.62 / role wake / Name Wake inchanges. Call sites
@@ -142,7 +144,20 @@ local function buildCarrier(visual: Visual, faction: Color3)
 	-- Coque longue et pont d'envol : deux volumes portent l'essentiel de la
 	-- lecture, le reste n'est que detail.
 	addPart(visual, "Part", "Hull", Vector3.new(5.6, 1.6, 18), NAVY_DARK, CFrame.new(0, -0.2, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- V93 : translation * fromEulerAnglesYXZ (yaw Y=π fixe). Plus
+	-- de CFrame.Angles a Bow. Recette feel N144 inline — ne PAS
+	-- cuire un bowRot (translations Y/Z distinctes carrier vs
+	-- transport/cargo, comme V92 wakeRot / V91 rampRot / V90 doorRot /
+	-- V89 roofRot / V88 cylinderRot / V86 trunkRot interdits).
+	-- Distinct de V92 (sillages, yaw Y=±11°, addWake — ne PAS
+	-- retoucher les Wake). Distinct de leftover V94 (LandingRamp
+	-- pitch X=-8°, kind==1). Distinct de V78 (LaunchWake Overlay —
+	-- autre objet). Construction de modele, pas 60 Hz.
+	-- addPart pose part.CFrame = offset ; Overlay place compose
+	-- frame * offset ensuite. Size 5.6, 1.6, 3.6 / NAVY / Metal /
+	-- Name Bow / WedgePart inchanges. Call site buildCarrier
+	-- (kind==3). Ne pas merger feel c62f.
+	addPart(visual, "WedgePart", "Bow", Vector3.new(5.6, 1.6, 3.6), NAVY, CFrame.new(0, -0.2, -10.8) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "FlightDeck", Vector3.new(8.4, 0.35, 19.5), DECK, CFrame.new(0, 0.78, 0), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "DeckLine", Vector3.new(0.35, 0.06, 15), WHITE, CFrame.new(-1.1, 0.98, 0), Enum.Material.SmoothPlastic)
 
@@ -177,7 +192,11 @@ function UnitModels.createBoat(parent: Instance, slot: number, kind: number): Vi
 	-- Coque basse, proue inclinee et pont superieur : trois volumes suffisent a
 	-- casser instantanement la silhouette de cube du placeholder historique.
 	addPart(visual, "Part", "Keel", Vector3.new(4.8, 1.15, 9.2), NAVY_DARK, CFrame.new(0, -0.15, 0), Enum.Material.Metal)
-	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.Angles(0, math.pi, 0), Enum.Material.Metal)
+	-- V93 : meme recette, translation Y=0.05 / Z=-5.9. Size 4.8,
+	-- 1.65, 3.3 / NAVY / Metal / Name Bow / WedgePart inchanges.
+	-- Call site createBoat kind==1/2 (avant pont). Ne pas merger
+	-- feel c62f. Ne PAS retoucher LandingRamp (leftover V94).
+	addPart(visual, "WedgePart", "Bow", Vector3.new(4.8, 1.65, 3.3), NAVY, CFrame.new(0, 0.05, -5.9) * CFrame.fromEulerAnglesYXZ(0, math.pi, 0), Enum.Material.Metal)
 	addPart(visual, "Part", "Deck", Vector3.new(4.25, 0.22, 8.3), DECK, CFrame.new(0, 0.58, 0.3), Enum.Material.DiamondPlate)
 	addPart(visual, "Part", "FactionStripe", Vector3.new(4.92, 0.3, 3.2), faction, CFrame.new(0, 0.22, -1.7), Enum.Material.SmoothPlastic)
 
