@@ -4033,6 +4033,348 @@ end
 
 print("passe 21 : factoriesBySlot, portsByTile, navalBasesBySlot OK")
 
+--[[
+	Nightly passe 22 — revue PR #64 : carrierBuf/targetBuf (V24), fillBlastBuf (V27).
+]]
+do
+	-- V24 : ciblage warships (recette feel N67 / hardening N39).
+	-- 0 carrier → pas de tir. 1 carrier + transport ennemi a portee → obus.
+	-- Allie via areAllied ignore. Own-slot (0 autre slot) → early-out.
+	local emptyState = GameState.new(2201)
+	local ghost = emptyState:addPlayer(nil, "Fantome", Random.new(90), 0)
+	if not ghost then
+		fail("warships empty — spawn impossible")
+	else
+		local destLand: number? = nil
+		local farOcean: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if not destLand and emptyState:isLand(index) and buffer.readu8(emptyState.owner, index) == Config.NEUTRAL_SLOT then
+				destLand = index
+			end
+			if not farOcean and not emptyState:isLand(index) then
+				farOcean = index
+			end
+			if destLand and farOcean then
+				break
+			end
+		end
+		if not destLand or not farOcean then
+			fail("warships empty — tuile neutre / ocean introuvable")
+		else
+			table.insert(emptyState.boats, {
+				id = emptyState:nextId(),
+				slot = ghost.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 400,
+				x = 10,
+				y = 10,
+				path = { farOcean },
+				step = 1,
+				targetTile = destLand,
+				homeTile = destLand,
+			})
+			emptyState.tick = Config.WARSHIP_SHELL_RATE or 20
+			Navy.step(emptyState, Random.new(91))
+			if #emptyState.boats ~= 1 or emptyState.boats[1].troops ~= 400 then
+				fail("warships empty — 0 carrier a mute un transport")
+			end
+		end
+	end
+
+	local fireState = GameState.new(2202)
+	local admiral = fireState:addPlayer(nil, "Amiral", Random.new(92), 0)
+	local prey = fireState:addPlayer(nil, "Convoi", Random.new(93), 0)
+	if not admiral or not prey then
+		fail("warships fire — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(fireState.owner, index) == admiral.slot and not fireState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("warships fire — tuile libre introuvable")
+		else
+			fireState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, admiral.slot)
+			Navy.step(fireState, Random.new(94))
+			local carrier = nil
+			for _, boat in fireState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					carrier = boat
+				end
+			end
+			if not carrier then
+				fail("warships fire — carrier absent")
+			else
+				local cx, cy = carrier.x, carrier.y
+				local troopsBefore = 1000
+				local destLand: number? = nil
+				local farOcean: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						not destLand
+						and fireState:isLand(index)
+						and buffer.readu8(fireState.owner, index) == Config.NEUTRAL_SLOT
+					then
+						destLand = index
+					end
+					if not farOcean and not fireState:isLand(index) then
+						local ox, oy = MapGen.fromIndex(index)
+						if (ox - cx) * (ox - cx) + (oy - cy) * (oy - cy) > 400 then
+							farOcean = index
+						end
+					end
+					if destLand and farOcean then
+						break
+					end
+				end
+				if not destLand or not farOcean then
+					fail("warships fire — tuile neutre / ocean introuvable")
+				else
+					table.insert(fireState.boats, {
+						id = fireState:nextId(),
+						slot = prey.slot,
+						kind = Navy.KIND_TRANSPORT,
+						troops = troopsBefore,
+						x = cx,
+						y = cy,
+						path = { farOcean },
+						step = 1,
+						targetTile = destLand,
+						homeTile = destLand,
+					})
+					fireState.tick = Config.WARSHIP_SHELL_RATE or 20
+					Navy.step(fireState, Random.new(94))
+					local transport = nil
+					for _, boat in fireState.boats do
+						if boat.kind == Navy.KIND_TRANSPORT and boat.slot == prey.slot then
+							transport = boat
+						end
+					end
+					local expected = troopsBefore * (1 - (Config.WARSHIP_TRANSPORT_DAMAGE or 0.28))
+					if not transport then
+						fail("warships fire — transport disparu")
+					elseif transport.troops >= troopsBefore then
+						fail(`warships fire — pas d'obus ({transport.troops} inchange)`)
+					elseif transport.troops > expected + 1e-6 then
+						fail(`warships fire — degats trop faibles ({transport.troops} > {expected})`)
+					elseif (carrier.lastShellTick or 0) ~= fireState.tick then
+						fail(`warships fire — lastShellTick={carrier.lastShellTick}, attendu {fireState.tick}`)
+					end
+				end
+			end
+		end
+	end
+
+	local allyState = GameState.new(2203)
+	local host = allyState:addPlayer(nil, "Hote", Random.new(95), 0)
+	local friend = allyState:addPlayer(nil, "Allie", Random.new(96), 0)
+	if not host or not friend then
+		fail("warships ally — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(allyState.owner, index) == host.slot and not allyState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("warships ally — tuile libre introuvable")
+		else
+			allyState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, host.slot)
+			Navy.step(allyState, Random.new(97))
+			local carrier = nil
+			for _, boat in allyState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					carrier = boat
+				end
+			end
+			if not carrier then
+				fail("warships ally — carrier absent")
+			else
+				allyState.alliances[host.slot][friend.slot] = allyState.tick + 5000
+				allyState.alliances[friend.slot][host.slot] = allyState.tick + 5000
+				local destLand: number? = nil
+				local farOcean: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						not destLand
+						and allyState:isLand(index)
+						and buffer.readu8(allyState.owner, index) == Config.NEUTRAL_SLOT
+					then
+						destLand = index
+					end
+					if not farOcean and not allyState:isLand(index) then
+						local ox, oy = MapGen.fromIndex(index)
+						if (ox - carrier.x) * (ox - carrier.x) + (oy - carrier.y) * (oy - carrier.y) > 400 then
+							farOcean = index
+						end
+					end
+					if destLand and farOcean then
+						break
+					end
+				end
+				if not destLand or not farOcean then
+					fail("warships ally — tuile neutre / ocean introuvable")
+				else
+					table.insert(allyState.boats, {
+						id = allyState:nextId(),
+						slot = friend.slot,
+						kind = Navy.KIND_TRANSPORT,
+						troops = 800,
+						x = carrier.x,
+						y = carrier.y,
+						path = { farOcean },
+						step = 1,
+						targetTile = destLand,
+						homeTile = destLand,
+					})
+					allyState.tick = Config.WARSHIP_SHELL_RATE or 20
+					Navy.step(allyState, Random.new(97))
+					local still = nil
+					for _, boat in allyState.boats do
+						if boat.kind == Navy.KIND_TRANSPORT and boat.slot == friend.slot then
+							still = boat
+						end
+					end
+					if not still or still.troops ~= 800 then
+						fail(`warships ally — areAllied ignore ({if still then still.troops else "coule"})`)
+					end
+				end
+			end
+		end
+	end
+
+	local ownState = GameState.new(2204)
+	local solo = ownState:addPlayer(nil, "Solo", Random.new(98), 0)
+	if not solo then
+		fail("warships own — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(ownState.owner, index) == solo.slot and not ownState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("warships own — tuile libre introuvable")
+		else
+			ownState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, solo.slot)
+			Navy.step(ownState, Random.new(99))
+			local carrier = nil
+			for _, boat in ownState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					carrier = boat
+				end
+			end
+			if not carrier then
+				fail("warships own — carrier absent")
+			else
+				local destLand: number? = nil
+				local farOcean: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						not destLand
+						and ownState:isLand(index)
+						and buffer.readu8(ownState.owner, index) == Config.NEUTRAL_SLOT
+					then
+						destLand = index
+					end
+					if not farOcean and not ownState:isLand(index) then
+						farOcean = index
+					end
+					if destLand and farOcean then
+						break
+					end
+				end
+				if not destLand or not farOcean then
+					fail("warships own — tuile neutre / ocean introuvable")
+				else
+					table.insert(ownState.boats, {
+						id = ownState:nextId(),
+						slot = solo.slot,
+						kind = Navy.KIND_TRANSPORT,
+						troops = 600,
+						x = carrier.x,
+						y = carrier.y,
+						path = { farOcean },
+						step = 1,
+						targetTile = destLand,
+						homeTile = destLand,
+					})
+					local shellBefore = carrier.lastShellTick or 0
+					ownState.tick = Config.WARSHIP_SHELL_RATE or 20
+					Navy.step(ownState, Random.new(99))
+					local still = nil
+					for _, boat in ownState.boats do
+						if boat.kind == Navy.KIND_TRANSPORT then
+							still = boat
+						end
+					end
+					if not still or still.troops ~= 600 then
+						fail("warships own — early-out a mute le transport du camp")
+					elseif (carrier.lastShellTick or 0) ~= shellBefore then
+						fail("warships own — lastShellTick avance sans autre slot")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V27 : fillBlastBuf. Index present + set nil = 0 (pas de fallback hash).
+	-- Restore + truncate : deux visees successives ne fuient pas.
+	local blast = GameState.new(2205)
+	local owner = blast:addPlayer(nil, "Viseur", Random.new(73), 0)
+	if not owner then
+		fail("blastBuf — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(blast.owner, index) == owner.slot and not blast.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 3 then
+					break
+				end
+			end
+		end
+		if #sites < 3 then
+			fail("blastBuf — tuiles libres insuffisantes")
+		else
+			blast:placeBuilding(sites[1], Config.BUILDING.CITY, owner.slot)
+			blast:placeBuilding(sites[2], Config.BUILDING.CITY, owner.slot)
+			local blast2 = 8
+			local rich = Bots.blastValue(blast, owner.slot, sites[1], blast2)
+			local poor = Bots.blastValue(blast, owner.slot, sites[3], 0)
+			if rich < 1 then
+				fail(`blastBuf — cluster {rich}, attendu >= 1`)
+			elseif poor ~= 0 then
+				fail(`blastBuf — tuile vide score {poor}, attendu 0`)
+			else
+				local saved = blast.buildingsBySlot[owner.slot]
+				blast.buildingsBySlot[owner.slot] = nil
+				local afterNil = Bots.blastValue(blast, owner.slot, sites[1], blast2)
+				if afterNil ~= 0 then
+					fail(`blastBuf — set nil score {afterNil}, attendu 0 (V27)`)
+				else
+					blast.buildingsBySlot[owner.slot] = saved
+					local restored = Bots.blastValue(blast, owner.slot, sites[1], blast2)
+					if restored ~= rich then
+						fail(`blastBuf — restore {restored} != {rich} (truncate/fuite V27)`)
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 22 : carrierBuf/targetBuf, fillBlastBuf OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
