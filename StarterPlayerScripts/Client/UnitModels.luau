@@ -75,6 +75,20 @@ local function baseVisual(kind: number, isMissile: boolean): Visual
 end
 
 local function addWake(visual: Visual)
+	-- V92 : translation * fromEulerAnglesYXZ (yaw Y=±11° fixe). Plus
+	-- de CFrame.Angles a addWake. Recette feel N143 inline — ne PAS
+	-- cuire un wakeRot (signes Y opposes + translations side distinctes,
+	-- comme V91 rampRot / V90 doorRot / V89 roofRot / V88 cylinderRot /
+	-- V86 trunkRot interdits). Distinct de V91 (rampes SAM, pitch
+	-- X=-31°, BuildingModels — ne PAS retoucher les Interceptor).
+	-- Distinct de leftover V93 (Bow yaw Y=π, carrier + transport).
+	-- Distinct de V78 (LaunchWake Overlay, wakeRot cuit, Y =
+	-- OCEAN+0.12 — autre objet). Construction de modele, pas 60 Hz.
+	-- addPart pose part.CFrame = offset ; Overlay place compose
+	-- frame * offset ensuite. Size 1.15, 0.08, 6.5 / FOAM / Neon /
+	-- Transparency 0.62 / role wake / Name Wake inchanges. Call sites
+	-- createBoat kind==3 (carrier) et kind==1/2 (ligne apres pont)
+	-- non edites hors ce helper. Ne pas merger feel c62f.
 	for side = -1, 1, 2 do
 		local wake = addPart(
 			visual,
@@ -82,7 +96,7 @@ local function addWake(visual: Visual)
 			"Wake",
 			Vector3.new(1.15, 0.08, 6.5),
 			FOAM,
-			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.Angles(0, math.rad(side * 11), 0),
+			CFrame.new(side * 2.15, -0.68, 5.5) * CFrame.fromEulerAnglesYXZ(0, math.rad(side * 11), 0),
 			Enum.Material.Neon,
 			"wake"
 		)
