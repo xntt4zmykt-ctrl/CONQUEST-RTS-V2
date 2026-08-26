@@ -1519,10 +1519,9 @@ check("camera strategique", function()
 	camera:setMode("overview")
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
-	-- V67 : offset (0,0,d) en nombres. pitch=0 yaw=0 → (0,0,d), Z == focus.Z + distance.
-	-- Leftover V66 (pose translation * rotation) reste. Leftover V65 (yaw unites)
-	-- reste dans le check navires. Leftover V64 (segRot camion) reste dans le
-	-- check pose/capture. Lerp focus leftover V68.
+	-- V68 : lerp focus en nombres. V67 offset (0,0,d) : pitch=0 yaw=0 → Z ==
+	-- focus.Z + distance. Leftover V66 (pose) / V65 (yaw unites) / V64 (segRot)
+	-- restent. Champ focusX/Y/Z leftover V69.
 	camera.pitch = 0
 	camera.targetPitch = 0
 	camera.yaw = 0
@@ -1544,6 +1543,25 @@ check("camera strategique", function()
 	assert(pose.X == camera.focus.X + ox, "oeil X hors formule")
 	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors formule")
 	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors formule")
+	-- V68 : un frame rapproche sans sauter. Pose utilise fx/fy/fz.
+	local beforeX = camera.focus.X
+	local beforeY = camera.focus.Y
+	local beforeZ = camera.focus.Z
+	camera.targetFocus = camera.focus + Vector3.new(40, 0, 0)
+	camera:step(1 / 60)
+	assert(camera.focus.X > beforeX, "lerp focus n'avance pas")
+	assert(camera.focus.X < camera.targetFocus.X, "lerp focus saute la cible")
+	assert(camera.focus.Y == beforeY, "lerp focus mute Y")
+	assert(camera.focus.Z == beforeZ, "lerp focus mute Z")
+	pose = camera.camera.CFrame
+	d = camera.distance
+	ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
+	oy = d * math.sin(camera.pitch)
+	oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
+	assert(pose.X == camera.focus.X + ox, "oeil X hors lerp")
+	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors lerp")
+	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors lerp")
+	camera.focus = camera.targetFocus
 	camera:punch(1)
 	assert(camera.shake > 0, "punch n'arme pas le shake")
 	camera:step(1 / 60)
