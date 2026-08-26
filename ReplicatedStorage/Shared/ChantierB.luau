@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier B-E : combat OpenFront, fallout, spawn, warships, SAM, tribus config.
+	Chantier B-E : combat CONQUEST, fallout, spawn, warships, SAM, tribus config.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -73,8 +73,7 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 		if fallout then
 			attackerTroopLoss *= Config.FALLOUT_DEFENSE_MULT
 		end
-		attackerTroopLoss /= state:doctrineOf(attacker.slot).attack
-		attackerTroopLoss *= Doctrines.get(defender.doctrine).defense
+		-- Tables OF brutes : pas de multiplicateur de doctrine sur la perte.
 		return attackerTroopLoss, defenderTroopLoss, tilesPerTickUsed
 	else
 		local attackerTroopLoss = if attacker.isBot then mag / 10 else mag / 5
@@ -167,7 +166,21 @@ function ChantierB.apply(cfg)
 	cfg.WARSHIP_RESPAWN_TICKS = 300
 	cfg.CARRIER_PATROL_RADIUS = 40
 	cfg.CARRIER_INTERCEPT_RANGE = 65
-	cfg.RETREAT_LOSS = 0.25
+	cfg.RETREAT_LOSS = 0.25 -- malusForRetreat contre joueur ; neutre = 0 (voir stepAttacks)
+	cfg.RETREAT_LOSS_NEUTRAL = 0
+	cfg.COLLAPSE_MIN_TILES = 100
+	cfg.COLLAPSE_TILE_RATIO = 0
+	-- Anti-blob OF : MIDPOINT 150k / DECAY ln2/50k sur carte pleine ; ici on
+	-- scale au landCount pour garder le meme profil relatif.
+	cfg.LARGE_EMPIRE_MIDPOINT_RATIO = 0.55 -- ~ OF 150k / ~270k terres typiques
+	cfg.LARGE_EMPIRE_SPREAD = 1 / 3
+	cfg.LARGE_DEFENDER_FLOOR = 0.70
+	cfg.LARGE_ATTACKER_THRESHOLD_RATIO = 100000 / 150000 -- OF : bonus au-dela de 100k vs midpoint 150k
+	cfg.LARGE_ATTACKER_SPEED_EXPONENT = 0.6
+	cfg.LARGE_ATTACKER_COST_EXPONENT = 0.35
+	cfg.LARGE_ATTACKER_SPEED_FLOOR = 0.35
+	cfg.SPAWN_NUKE_IMMUNITY = 5
+	cfg.PREPARATION_DURATION = 0
 	cfg.MISSILE_SPEED = 14
 	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
@@ -182,7 +195,7 @@ function ChantierB.apply(cfg)
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
 	cfg.DEPLOY_DURATION = 15
-	-- Tribus OF (TribeSpawner)
+	-- Tribus PvE (TribeSpawner)
 	cfg.TRIBE_COUNT = 6
 	cfg.TRIBE_START_TROOPS = 4000
 	-- Trains / commerce (TrainExecution feel)
@@ -265,7 +278,9 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
@@ -293,6 +308,7 @@ function ChantierB.placeDisk(state, slot, center)
 	if ps then
 		ps.capitalTile = center
 		ps.awaitingSpawn = false
+		ps.spawnTick = state.tick
 	end
 end
 
@@ -376,10 +392,17 @@ function ChantierB.install(GameState, Nukes)
 				continue
 			end
 			if atk.retreatAt and self.tick >= atk.retreatAt then
-				attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
+				-- OF malusForRetreat : 25 % contre joueur, 0 % contre neutre.
+				local loss = if atk.target == NEUTRAL
+					then (Config.RETREAT_LOSS_NEUTRAL or 0)
+					else (Config.RETREAT_LOSS or 0.25)
+				attacker.troops += math.max(0, atk.troops) * (1 - loss)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
@@ -471,6 +494,10 @@ function ChantierB.install(GameState, Nukes)
 			if slot == leaderSlot or ps.tiles >= required then
 				self.doomWarnedAt[slot] = nil
 				self.doomUnderSince[slot] = nil
+				continue
+			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une armee fantome.
+			if ps.awaitingSpawn or ps.tiles == 0 then
 				continue
 			end
 			if not self.doomWarnedAt[slot] then

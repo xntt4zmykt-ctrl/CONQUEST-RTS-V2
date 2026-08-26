@@ -266,7 +266,7 @@ Config.MAX_TRADE_SHIPS = 24
 	Commerce terrestre, meme philosophie que le maritime : l'or n'est plus un
 	revenu abstrait verse au tick, il arrive **avec le colis**.
 
-	Trois regles, calquees sur le jeu de reference :
+	Trois regles, alignees sur notre boucle territoriale :
 
 	  1. Une usine n'a qu'UN colis en route a la fois. Le debit d'une usine,
 	     c'est sa cadence, pas le nombre de villes dans son cercle.
@@ -298,7 +298,7 @@ Config.DEFAULT_ATTACK_RATIO = 0.25
 Config.MIN_ATTACK_TROOPS = 20
 Config.ATTACK_SPEND_RATE = 0.035 -- part du corps expeditionnaire depensee par tick
 -- Delai avant qu'une retraite soit honoree, en ticks : le front continue de
--- se battre pendant ce temps. Calque sur le jeu de reference (20 ticks).
+-- se battre pendant ce temps. Aligne sur notre boucle territoriale (20 ticks).
 Config.RETREAT_DELAY = 20
 Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
@@ -309,7 +309,9 @@ Config.MAX_TILES_PER_TICK = 400
 -- Ouverture lisible : on peut coloniser et construire immediatement, mais les
 -- guerres entre nations attendent quelques secondes. Deux fronts simultanes
 -- restent possibles ; au-dela le jeu devient une suite d'ordres illisibles.
-Config.PREPARATION_DURATION = 75
+Config.PREPARATION_DURATION = 0 -- OpenFront : pas de gel des guerres ; le combat ouvre tout de suite
+-- Immunite nucleaire post-spawn (OF : 5 s), distincte de la preparation.
+Config.SPAWN_NUKE_IMMUNITY = 5
 Config.DOCTRINE_CHOICE_DURATION = 120
 Config.MAX_ACTIVE_ATTACKS_PER_PLAYER = 2
 
@@ -356,7 +358,7 @@ Config.XP_LEVEL_BASE = 220
 	pas les moyens d'en construire, sans jamais gener celui qui en avait dix.
 
 	Le remplacement s'indexe directement sur **la taille de l'empire**, comme
-	OpenFront. Trois effets continus, sans seuil brutal :
+	CONQUEST. Trois effets continus, sans seuil brutal :
 
 	  1. un gros defenseur defend moins bien (sa densite de troupes s'effondre) ;
 	  2. un gros attaquant conquiert plus lentement ;
@@ -395,8 +397,8 @@ Config.LARGE_ATTACKER_COST_EXPONENT = 0.35 -- compensation : il perd moins par t
 	autres a n'importe quel voisin hostile. La condition "pendant qu'on
 	l'attaque" est ce qui protege un joueur qui vient de spawner.
 ]]
-Config.COLLAPSE_TILE_RATIO = 0.0025 -- part des terres sous laquelle on s'effondre
-Config.COLLAPSE_MIN_TILES = 24 -- plancher absolu, pour les tres petites cartes
+Config.COLLAPSE_TILE_RATIO = 0 -- OF : seuil absolu, pas un ratio de carte
+Config.COLLAPSE_MIN_TILES = 100 -- handleDeadDefender : sous 100 tuiles, absorption
 
 --=============================================================================
 -- Cadran de la fin du monde (anti-impasse)
@@ -449,7 +451,8 @@ Config.CARRIER_INTERCEPT_DAMAGE = 0.075 -- part des troupes du transport, par ti
 -- imprenable. C'est la mecanique qui ouvre la carte.
 
 Config.BOAT_SPEED = 0.85 -- tuiles par tick
-Config.BOAT_TROOP_RATIO = 0.4 -- part max de la reserve embarquee
+-- Charge 1/5 (port OF). La valeur 0.4 n'etait jamais lue : Navy embarquait `troops / 5`.
+Config.BOAT_TROOP_RATIO = 0.2 -- part max de la reserve embarquee
 Config.MIN_BOAT_TROOPS = 30
 Config.BOAT_MAX_RANGE = 220 -- longueur max du trajet, en tuiles
 Config.BOAT_LANDING_BONUS = 1.35 -- surcout d'un debarquement contre une cote defendue
@@ -510,7 +513,7 @@ Config.CAPITAL_PLUNDER = 150 -- or pris par l'assaillant
 	fil de notifications — la recompense de l'effort le plus long du jeu etait
 	invisible.
 
-	Les proportions viennent du jeu de reference : tout l'or d'un bot, la moitie
+	Les proportions viennent CONQUEST : tout l'or d'un bot, la moitie
 	de celui d'un humain. L'asymetrie est deliberee — depouiller entierement un
 	joueur reel transformerait sa defaite en aubaine pour son bourreau, et
 	donnerait a tout le monde une raison de s'acharner sur le plus faible.
@@ -746,7 +749,7 @@ Config.GRUDGE_ATTACK_BONUS = 140
 	Plan de construction des bots : des ratios, pas des seuils.
 
 	Ce qui est remplace : une cascade de `elseif` avec des seuils en dur et des
-	`roll < 0.45`. Elle avait deux defauts que le jeu de reference evite.
+	`roll < 0.45`. Elle avait deux defauts que CONQUEST evite.
 
 	D'abord, tous les bots suivaient la MEME cascade dans le MEME ordre — douze
 	empires batis a l'identique, ce qui se remarque en une partie. Ensuite un
@@ -832,8 +835,36 @@ Config.COALITION_ALLY_CHANCE = 0.6 -- chance de proposer un pacte a un autre men
 
 Config.SPAWN_RADIUS = 3
 Config.NEUTRAL_SLOT = 0
-Config.MAX_PLAYERS = 48
-Config.BOT_COUNT = 12
+
+--[[
+	Capacite produit — ne jamais deduire humains/bots de MAX_PLAYERS seul.
+
+	MAX_TOTAL_FACTIONS (alias historique MAX_PLAYERS) est la capacite theorique
+	du slot u8 / palette, pas l'objectif de lancement. Le MVP public est 1 humain
+	+ bots ; l'alpha multi plafonne les humains separement.
+]]
+Config.MAX_TOTAL_FACTIONS = 48
+Config.MAX_PLAYERS = Config.MAX_TOTAL_FACTIONS -- compat : palette, boucles, remotes
+Config.MAX_HUMAN_PLAYERS = 8
+Config.MAX_BOTS = 16
+Config.PUBLIC_MATCH_CAPACITY = 12 -- MVP : 1 humain + jusqu'a 11 bots (mode classique)
+Config.BOT_COUNT = 12 -- defaut mode classique ; les GameModes peuvent surcharger
+
+-- Carte : identite et version pour hash / resync
+Config.MAP_ID = "procedural_continents"
+Config.MAP_VERSION = 1
+Config.GENERATOR_VERSION = 1
+
+-- Rendu : Blocks est le seul chemin de production. CanvasExperimental est
+-- reserve a des essais Studio instrumentes, jamais active par defaut.
+Config.RENDER_MODE = "Blocks" -- "Blocks" | "CanvasExperimental" | "LowDetail"
+
+-- Intentions reseau
+Config.INTENT_RATE_LIMIT_PER_SEC = 20
+Config.MAX_PENDING_INTENTS = 32 -- par joueur, file avant flush (dormant si apply immediat)
+Config.JOIN_COOLDOWN_SEC = 2 -- anti-spam JoinRequest
+Config.SNAPSHOT_COOLDOWN_SEC = 5
+Config.MAX_SNAPSHOTS_PER_MATCH = 12
 
 Config.VICTORY_LAND_RATIO = 0.65 -- part des terres a controler pour gagner
 Config.MATCH_DURATION = 25 * 60 -- secondes
