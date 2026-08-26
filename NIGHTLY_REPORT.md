@@ -1,11 +1,11 @@
-# Nightly report — passe 52 (revue PR #139)
+# Nightly report — passe 53 (revue PR #142)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-0231` (PR #139, `db5bc81`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-c5c9`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-c5c9` (PR #142, `d39a652`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-06ee`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #139 (`WorldCamera.step` lerp `focus` en nombres — HEAD visuel, V68). Correctifs sûrs, sans merger feel `bec6`/`ab04`/`846c` ni hardening `2c0f`/`e9e5`.
+Revue de PR #142 (`WorldCamera.step` champ `focusX/Y/Z` — HEAD visuel, V69). Correctifs sûrs, sans merger feel `b19e`/`bec6`/`ab04` ni hardening `4c70`/`2c0f`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,13 +15,13 @@ Revue de PR #139 (`WorldCamera.step` lerp `focus` en nombres — HEAD visuel, V6
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `WorldCamera.step` champ `focusX/Y/Z` nombres, plus de `Vector3.new` idle 60 Hz ; `Minimap.setFocus(x,y,z)` | `WorldCamera.luau`, `Minimap.luau`, `init.client.luau` | V69 |
+| `BuildingModels.animate` Radar / CapitalFlag / PortCraneBoom : `CFrame.new(rx,ry,rz) * fromEulerAnglesYXZ`, plus de `CFrame.Angles` 60 Hz | `BuildingModels.luau`, `tests/client.luau` | V70 |
 
-`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` nombres (V68) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `PlacementPreview.luau` / `FactionLabels.luau` / `UnitModels.luau` / `WorldSpace.luau` / `WorldRenderer.luau` / `BuildingModels.luau` / `Overlay.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60). Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68) — `fx` lit `focusX`. Radar / `CapitalFlag` / `PortCraneBoom` `CFrame.Angles` **inchangés** (leftover V70). Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. Explosion / wake / splash **inchangés** (événement). `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement — plus réécrit 60 Hz.
+`rankByTiles` / hover closures / `trackUnit` extra / `targetX`/`currentX` / unités monde nombres (V56) / camion lerp (V57) / houle (V58) / feuillage (V59) / câble PORT (V60) / lift cuit (V61) / interpolation nombres (V62) / `segment.rot` chantier (V63) / camion `segRot` (V64) / unités yaw (V65) / pose caméra translation (V66) / offset `ox/oy/oz` (V67) / lerp `focus` nombres (V68) / champ `focusX/Y/Z` (V69) / `previewCtxBuf` / `self.ranked` / `gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `HUD.luau` / `PlacementPreview.luau` / `FactionLabels.luau` / `UnitModels.luau` / `WorldSpace.luau` / `WorldRenderer.luau` / `WorldCamera.luau` / `Minimap.luau` / `Overlay.luau` / `init.client.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research. Extra missile **inchangé** (V52). `targetX`/`currentX` **inchangés** (V55). Conversion monde unités **inchangée** (V56). Camion lerp **inchangé** (V57). Houle `oceanRipples` **inchangée** (V58). Feuillage `animatedFoliage` **inchangé** (V59). Câble `PortCraneCable` **inchangé** (V60) — leftover Y **vert**. Lift `layer.origin` **inchangé** (V61). Lerp `ox/dx` **inchangé** (V62). `segment.rot` chantier **inchangé** (V63). Camion `segRot` **inchangé** (V64). Unités yaw **inchangées** (V65). Pose caméra `CFrame.new * rotation` **inchangée** (V66). Offset `ox/oy/oz` **inchangé** (V67). Lerp nombres **inchangé** (V68). Champ `focusX/Y/Z` **inchangé** (V69) — leftover camera **vert**. Transparency CityWindows / beacons / FactoryOutput / SiloWarning **inchangées**. `RestCFrame` posé à la construction **inchangé**. Explosion / wake / splash **inchangés** (événement). `part.Size = Vector3.new` chantier **inchangé** (API). `targetFocus` Vector3 et pan/clamp **inchangés** (gestes). `self.focus` Vector3 **conservé** pour `focusTile(instant)` seulement. Roulis navire Overlay `CFrame.Angles` **inchangé** (leftover V71). Roues camion `CFrame.Angles` **inchangées**. `UnitModels.place` radar/flag/flamme **inchangé**.
 
 ---
 
-## Constatations PR #139 (à ne pas casser)
+## Constatations PR #142 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence. `Placement` est partagé : Preview et serveur exécutent le même `resolve` ; la vérité reste `Buildings.build` côté serveur.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -36,31 +36,31 @@ Revue de PR #139 (`WorldCamera.step` lerp `focus` en nombres — HEAD visuel, V6
 - **Posted NAVAL_BASE :** `navalBasesBySlot`. Spawn seulement si `_carriersDirty`. Un PORT n’est jamais un carrier.
 - **Têtes de pont :** `launchAttack` recycle `parkedBuf` (V44). Truncate leftover **avant** `origLaunch`. Réinsert `1..n`. 0 pont → 1 front terre ; 2 `seedBeachhead` + terre → 3 Attack, mêmes objets. **Pas réentrant.** `seedBeachhead` visuel inchangé.
 - **Effondrement :** `collapseFaction` recycle `collapseRemainBuf` / `collapseLeftBuf` / `collapseScratch` (V45). Truncate **avant** plunder et **avant** swap. Slot 99 / victime à 0 inerte. **Pas réentrant.**
-- **Élimination bâtiments :** `removePlayer` recycle `destroyBuf` (V46). Snapshot **avant** `destroyBuilding` (destroy mute l’index). Fallback hash si `buildingsBySlot` nil. Truncate leftover **avant** la boucle destroy. Itérer `1..n`. **Pas réentrant.** Distinct de V37 (`elimBuf` slots) / V41 (`doomedBuf` hash d’Attack) / V45 (`collapseRemainBuf` tuiles). `GameState.destroyBuf` exposé banc (pas de filaire).
-- **Placement partagé :** `validTiles` recycle `blockBuf` / `candBuf` / `queueBuf` / `visitBuf` / `emptyTileBuf` (V47). Early-out kind/index/owner → `emptyTileBuf` (**jamais** d’insert). Truncate leftover **avant** BFS (queue) et **avant** le sort. Retourne `candBuf` (resolve lit `tiles[1]` tout de suite). `placeScratch` distinct de `GameState.scratch`. **Pas réentrant.** Distinct de V40 (`ctxBuf`). Preview n’appelle pas `validTiles` (seulement `resolve`).
-- **Deltas owner client :** `applyDelta` recycle `gainBuf` / `lossBuf` / `otherBuf` (V48). Truncate leftover **avant** return. Early-out `count == 0` → pools à `# == 0` (jamais `{}`). Loi inchangée (colonisation du neutre sans effet). Effects / init.client lisent tout de suite et n’en conservent pas l’identité. **Pas réentrant.** Distinct de V14b (filaire `buffer.create`).
-- **Étiquettes :** `surveyTerritories` recycle `sumXBuf` / `sumYBuf` / `countBuf` (V49). `table.clear` **avant** le scan (leftover slot A = étiquette fantôme). Hash slot→nombre, pas d’array. **Pas réentrant.** Distinct de V48 (arrays) et de V35 (`contactBuf` serveur).
-- **Classement HUD :** `HUD.update` recycle `self.ranked` + inner records (V50). Truncate leftover **avant** `table.sort`. Pas de `table.insert`, pas de nouvelle table. Comparateur `rankByTiles` module (V54) — plus de `function` inline 10 Hz. Loi inchangée (tuiles desc, tie-break troupes). `VictoryScreen.show` lit tout de suite et copie vers `row.Text` — il ne stocke pas l’identité. **Pas réentrant.** Distinct de V49 (hash barycentre) et de V31 (`playerStatsForReplicate` serveur).
-- **Fantôme placement :** `PlacementPreview.resolve` recycle `previewCtxBuf` (V51). Six champs réécrits, pas de nouvelle table. Recette feel N92 **sans** merger feel. `Placement.resolve` lit tout de suite. **Pas réentrant.** Distinct de V40 (`ctxBuf` serveur) et de V47 (`validTiles`). Preview n’appelle pas `validTiles`. Closures `ownerAt` / `buildingAt` : désormais stables côté caller (V53).
-- **Unités Overlay :** `applyUnits` hoist `trackUnit` (V52). Insert missile : `unit.extra = { tx, ty }` **une fois** (copie, jamais l’alias `missileSnapBuf`). Déjà suivi : muter `tx`/`ty`, jamais remplacer le record. Navire : `extra` reste nil. `table.clear(self.seen)` déjà. **Pas réentrant.** Distinct de V26 (payload serveur). Cible : `targetX`/`targetY` + `currentX`/`currentY` nombres (V55) — insert pose une fois, update mute, lerp numérique. Splash / interpolation lisent `currentX`/`currentY`. Pose 60 Hz : X/Z monde en nombres (`x * TILE - HALF + TILE/2`, constantes Overlay depuis Config) + **translation × yaw** (V56 + V65). `yaw = math.atan2(lookX, -lookZ)` ; `CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, yaw, 0)`. Immobile = `lookX = 0`, `lookZ = -1` → `atan2(0, 1) = 0` → identité (même pose que `CFrame.new(x,y,z)`). Plus de `WorldSpace.tileToWorld` / `Vector3.Unit` / `CFrame.new(position)` / `CFrame.lookAt` deux Vector3 sur le chemin unités. `CFrame.Angles` roulis navire **après** la pose, **conservé**. Extra missile **inchangé**. `WorldSpace.tileToWorld` reste pour splash / explosion / bâtiments (événement, pas 60 Hz unités). Leftover : Radar/flag/boom `CFrame.Angles` (V70).
-- **Camion Overlay :** boucle `route.delivery` de `stepInterpolation` (V57 + V64). Lerp X/Y/Z en nombres depuis `path[i].X/.Y/.Z` + `TRUCK_LIFT` (0.8, déjà cuit dans `route.from`/`route.to` — plus de `Vector3.new(0, 0.8, 0)`). `route.segRot[i] = CFrame.lookAt(Vector3.zero, path[i+1] - path[i])` cuit une fois dans `buildFactoryRoute` (Magnitude < 0.01 → rot précédente ou identité). Hot path : `CFrame.new(px, py, pz) * route.segRot[segmentIndex]`. Plus de `CFrame.lookAt` 60 Hz camion. Pièces non-roue : `frame * piece.offset` **sans** `* CFrame.new()`. Roues : `CFrame.Angles` (spin) conservé. `path` Vector3 **inchangé** (posé à la construction). Voie sans `delivery` → `continue`, zéro alloc. Pulse / `Parent = nil` à l’arrivée **inchangés**. **Pas réentrant.** Distinct de V65 (unités yaw, look **pas** constant — ne pas cuire un `segRot` d’unité), V55 (`targetX`), V52 (`extra`), V63 (chantier `segment.rot`).
-- **Houle océan :** boucle `oceanRipples` de `WorldRenderer.step` (V58). Lire `ripple.base.X/.Y/.Z` en nombres, poser `CFrame.new(bx + wave * 0.45, by, bz + math.cos(time + phase) * 0.2)`. Plus de `ripple.base + Vector3.new(...)`. `Transparency` inchangée (`0.73 + wave * 0.09`). `buildOcean` / `ripple.base` **inchangés** (glints posés une fois). 0 glint → zéro alloc. **Pas réentrant.** Distinct de V57 (camion), V56/V65 (unités), V55 (`targetX`). Rotation Y des glints (`CFrame.Angles` à `buildOcean`) n’est pas rejouée dans `step` : `CFrame.new(x,y,z)` pose l’identité — acceptable (vue stratégique, bandes minces).
-- **Feuillage :** boucle `animatedFoliage` de `WorldRenderer.step` (V59). Lire `leaf.base.X/.Y/.Z` en nombres, poser `CFrame.new(bx, by + math.sin(time * 1.2 + leaf.phase) * 0.018, bz)`. Plus de `leaf.base * CFrame.Angles(...)`. Amplitude 0.018 conservée en translation Y (Ball : tilt ≈ invisible). `buildDecorations` / `leaf.base` **inchangés**. 0 couronne → zéro alloc. **Pas réentrant.** Distinct de V58 (houle), V57 (camion), V56/V65 (unités), V60 (câble).
-- **Câble PORT :** branche `PortCraneCable` de `BuildingModels.animate` (V60). Lire `rest.X/.Y/.Z` en nombres, poser `CFrame.new(rx, ry + math.sin(time * 0.8) * 0.35, rz)`. Plus de `rest + Vector3.new(...)`. Amplitude 0.35 conservée. `RestCFrame` posé une fois à `create`. Radar / flag / boom `CFrame.Angles` **inchangés** (rotation visible — leftover V70). Transparency **inchangée**. 0 câble (usine, ville) → la branche n’alloue rien. **Pas réentrant.** Distinct de V59 (feuillage), V58 (houle), V57 (camion), V61 (chantier).
-- **Chantier de voie :** `applyRouteProgress` (V61 + V62 + V63). `layer.origin` / `layer.ox/oy/oz` cuits une fois dans `buildFactoryRoute` (shoulder = origin, asphalt = `+ (0, 0.08k, 0)`, stripe = `+ (0, 0.18k, 0)`). `segment.dx/dy/dz` cuits depuis `direction` (grille HV, un axe ≈ 0). `segment.rot = CFrame.lookAt(Vector3.zero, direction)` cuit une fois. Hot path : `t = visible - shown / 2` ; `cx, cy, cz = ox + dx*t, oy + dy*t, oz + dz*t` ; `CFrame.new(cx, cy, cz) * segment.rot`. Plus de `layer.origin + direction * t`. Plus de `CFrame.lookAt` 60 Hz. `part.Size = Vector3.new` **inchangé** (API). `layer.origin` / `segment.direction` conservés (construction, pas le hot path). 0 chantier (`construction == nil`) → `continue`, zéro alloc. **Pas réentrant.** Distinct de V60 (câble), V57/V64 (camion **livraison**), V61 (lift), V62 (lerp). Leftover : `Size = Vector3.new` 60 Hz (API) et Radar/flag/boom `CFrame.Angles` (V70).
-- **Caméra stratégique :** `WorldCamera.step` overview (V66 + V67 + V68 + V69). `rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)` inchangé. Offset local `(0,0,d)` en nombres (YXZ, `rz=0`) : `ox = d * cos(pitch) * sin(yaw)`, `oy = d * sin(pitch)`, `oz = d * cos(pitch) * cos(yaw)`. Shake `sx/sy/sz` en nombres (coeffs 0.65 / 0.42 / 0.5). Lerp mire en nombres **depuis** `focusX/Y/Z` : `fx = focusX + (targetFocus.X - focusX) * alpha` (idem Y/Z) ; **pas** de `self.focus = Vector3.new` 60 Hz. Œil `ex = fx + ox + sx`. Plus de `+=` / `-` / `*` Vector3 60 Hz. Plus de `CFrame.lookAt` 60 Hz. Plus de `Vector3.new(0, 0, distance)` ni `VectorToWorldSpace` 60 Hz. Plus de `Vector3.new` idle à l’écriture de la mire. Shake 0 : identique à `lookAt(focus+offset, focus)`. Shake > 0 : translation seulement, plus de tilt 18 %. FOV / lissage distance-yaw-pitch **inchangés**. `alpha = 1 - math.exp(-12 * dt)` **inchangé**. Overlay unités yaw **inchangé** (V65). Camion `segRot` **inchangé** (V64). **Pas réentrant** (une caméra). Distinct de V65 (N unités). Leftover : Radar/flag/boom `CFrame.Angles` (V70).
-- **Hover 60 Hz :** `previewOwnerAt` / `previewBuildingAt` module (V53). Capturent `world` / `overlay`. Overlay nil → `buildingAt` nil. World nil → `ownerAt` 0. Plus de `function` inline dans RenderStepped. **Pas réentrant** au sens V40 (un resolve / frame). Distinct de V51 (record ctx) et de V40 (serveur).
+- **Élimination bâtiments :** `removePlayer` recycle `destroyBuf` (V46). Snapshot **avant** `destroyBuilding`. Fallback hash si `buildingsBySlot` nil. Truncate leftover **avant** la boucle destroy. Distinct de V37 / V41 / V45. `GameState.destroyBuf` exposé banc.
+- **Placement partagé :** `validTiles` recycle `blockBuf` / `candBuf` / `queueBuf` / `visitBuf` / `emptyTileBuf` (V47). Early-out kind/index/owner → `emptyTileBuf`. Retourne `candBuf`. Preview n’appelle pas `validTiles`.
+- **Deltas owner client :** `applyDelta` recycle `gainBuf` / `lossBuf` / `otherBuf` (V48). Truncate leftover **avant** return. Early-out `count == 0` → pools à `# == 0`.
+- **Étiquettes :** `surveyTerritories` recycle `sumXBuf` / `sumYBuf` / `countBuf` (V49). `table.clear` **avant** le scan.
+- **Classement HUD :** `HUD.update` recycle `self.ranked` + inner records (V50). Comparateur `rankByTiles` module (V54).
+- **Fantôme placement :** `PlacementPreview.resolve` recycle `previewCtxBuf` (V51). Closures `ownerAt` / `buildingAt` stables (V53).
+- **Unités Overlay :** `applyUnits` hoist `trackUnit` (V52). Cible `targetX`/`currentX` (V55). Pose 60 Hz : X/Z monde + yaw `fromEulerAnglesYXZ` (V56 + V65). `CFrame.Angles` roulis navire **après** la pose, **conservé** (leftover V71). Extra missile **inchangé**.
+- **Camion Overlay :** lerp X/Y/Z + `route.segRot` (V57 + V64). Roues `CFrame.Angles` (spin) **conservé**.
+- **Houle / feuillage :** `WorldRenderer.step` nombres (V58 / V59).
+- **Câble PORT :** `BuildingModels.animate` Y nombres (V60). Amplitude 0.35. **Pas** une rotation.
+- **Radar / Flag / Boom :** `BuildingModels.animate` (V70). `RestCFrame` translation pure. Hot path : `CFrame.new(rest.X, rest.Y, rest.Z) * CFrame.fromEulerAnglesYXZ(ax, ay, az)` avec les **mêmes trois nombres** qu’avant (`Radar` : `(0, time*1.45, 0)` ; `CapitalFlag` : `(sin*0.045, 0, sin*0.035)` ; `PortCraneBoom` : `(0, sin*0.12, 0)`). `fromEulerAnglesYXZ` ≡ `Angles` ici : Radar/Boom n’ont que Y ; Flag a `ry=0` donc X puis Z. Plus de `CFrame.Angles` 60 Hz sur ces trois noms. Amplitude et fréquences **inchangées**. Ne **pas** convertir en translation (distinct de V60). **Pas réentrant** (un `animate` / modèle / frame). Transparency **inchangée**. 0 radar (PORT, usine) → la branche n’alloue rien. Distinct de V60 (câble), V69 (caméra), V65 (unités yaw), V71 (roulis navire Overlay).
+- **Chantier de voie :** `applyRouteProgress` lift + nombres + `segment.rot` (V61 + V62 + V63). `part.Size = Vector3.new` **inchangé** (API).
+- **Caméra stratégique :** `WorldCamera.step` overview (V66 + V67 + V68 + V69). Champ `focusX/Y/Z`. Plus de `Vector3.new` idle 60 Hz. `self.focus` Vector3 seulement au geste `focusTile(instant)`. Minimap `setFocus(x,y,z)`.
+- **Hover 60 Hz :** `previewOwnerAt` / `previewBuildingAt` module (V53).
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
 - **Inbound recycle** (passes 16–18) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
-- **PR #139 :** lerp caméra `fx/fy/fz` (V68) intact. Banc camera `targetFocus = focus + (40,0,0)` puis `step(1/60)` → mire avance sans sauter. Offset V67 intact. Unités yaw (V65) intact. Camion `segRot` (V64) intact. Rien à revert.
+- **PR #142 :** champ caméra `focusX/Y/Z` (V69) intact. Banc camera `type(focusX)=="number"` + `rawequal(camera.focus)` après `step` + lerp `focusX` avance. Offset V67 intact. Unités yaw (V65) intact. Camion `segRot` (V64) intact. Câble V60 intact. Rien à revert.
 
 ---
 
 ## Specs worker (reste)
 
-Ne pas merger feel `bec6`/`ab04`/`846c` ni hardening `2c0f`/`e9e5` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `b19e`/`bec6`/`ab04` ni hardening `4c70`/`2c0f` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
@@ -116,37 +116,37 @@ Ne pas merger feel `bec6`/`ab04`/`846c` ni hardening `2c0f`/`e9e5` sur cette bra
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V70 — BuildingModels Radar / Flag / Boom `CFrame.Angles` 60 Hz
+### ISSUE-V71 — Overlay navire `CFrame.Angles` roulis 60 Hz
 
-**Problème.** V69 ferme le champ `focusX/Y/Z`. Reste, **une fois par frame par pièce animée** dans `BuildingModels.animate` : `rest * CFrame.Angles(...)`. Trois branches :
+**Problème.** V70 ferme Radar / Flag / Boom. Reste, **une fois par frame par navire en mouvement** dans `Overlay.stepInterpolation` :
 
-- `Radar` : `rest * CFrame.Angles(0, time * 1.45, 0)`
-- `CapitalFlag` : `rest * CFrame.Angles(sin(time*2.4)*0.045, 0, sin(time*1.7)*0.035)`
-- `PortCraneBoom` : `rest * CFrame.Angles(0, sin(time*0.35)*0.12, 0)`
+```
+frame *= CFrame.Angles(math.sin(now * 1.7 + unit.phase) * 0.018, 0, math.sin(now * 2.1 + unit.phase) * 0.035)
+```
 
-`RestCFrame` de ces trois pièces est une **translation pure** (`block()` pose `CFrame.new(offset)`, `create` ajoute `position` — rotation identité). Donc `rest * Angles(rx,ry,rz)` ≡ `CFrame.new(rest.X, rest.Y, rest.Z) * Angles(rx,ry,rz)`. Distinct de V60 (câble = translation Y, **pas** une rotation). Distinct de V69 (caméra). Distinct des roues camion `CFrame.Angles` (spin réel, leftover séparé).
+Branche `mag > 0.01 and not unit.isMissile` seulement. `frame` a **déjà** translation × yaw (V65) : ce n’est **pas** un `RestCFrame` identité. Donc on ne peut **pas** réduire à `CFrame.new(x,y,z) * euler` (recette V70). `fromEulerAnglesYXZ(rx, 0, rz)` ≡ `Angles(rx, 0, rz)` ici (`ry=0` → X puis Z). Distinct de V70 (BuildingModels, rest identité). Distinct de V65 (yaw `atan2`, immobile). Distinct des roues camion `CFrame.Angles` (spin `progress * π * 20`, leftover séparé). Distinct de `UnitModels.place` radar/flag (offset pièce, leftover séparé). Wake / splash / pulse `CFrame.Angles` = événement, pas 60 Hz interpolation.
 
-**20K CCU.** Leftover V60. 8 clients × 60 Hz × (1 radar SAM + 1 drapeau capitale + 1 grue PORT) × `CFrame.Angles` + compose. Pas d’autorité (silhouette cosmétique). Un euler faux casserait la rotation du radar / le clapotis du drapeau / le lacet de la grue.
+**20K CCU.** Leftover V65. 8 clients × 60 Hz × N navires en mer × `CFrame.Angles` + compose. Pas d’autorité (silhouette cosmétique). Un euler faux casserait le clapotis des transports / porte-avions en route. Missiles (`isMissile`) n’ont pas ce roulis — ne pas l’ajouter.
 
 **Faire.**
 
-1. Dans `BuildingModels.animate` seulement : Radar / CapitalFlag / PortCraneBoom lisent `rest.X/.Y/.Z` en nombres, posent `CFrame.new(rx, ry, rz) * CFrame.fromEulerAnglesYXZ(ax, ay, az)` avec **les mêmes trois nombres** actuellement passés à `CFrame.Angles` (Radar : `(0, time*1.45, 0)` ; Flag : `(sin*0.045, 0, sin*0.035)` ; Boom : `(0, sin*0.12, 0)`). `fromEulerAnglesYXZ` ≡ `Angles` ici : Radar/Boom n’ont que Y ; Flag a `ry=0` donc X puis Z. Plus de `CFrame.Angles` 60 Hz sur ces trois noms.
+1. Dans `Overlay.stepInterpolation` seulement, branche navire en mouvement : lire les deux `sin` dans des locaux `rx` / `rz`, poser `frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)`. Plus de `CFrame.Angles` 60 Hz sur le hot path unités. Amplitude 0.018 / 0.035 et fréquences 1.7 / 2.1 **inchangées**. Garde `mag > 0.01 and not unit.isMissile` **inchangée**.
 
-2. **Garder la rotation.** Ne **pas** convertir en translation (V59 feuillage / V60 câble). Amplitude et fréquences **inchangées**.
+2. **Garder la rotation.** Ne **pas** convertir en translation (V59 feuillage). Ne **pas** cuire un `segRot` d’unité (le look change chaque frame — V65). Ne pas « fermer » le yaw `fromEulerAnglesYXZ(0, atan2, 0)` (V65 déjà).
 
-3. Ne **pas** splitter `RestCFrame`. Ne pas « fermer » Transparency CityWindows / beacons / FactoryOutput / SiloWarning. Ne pas « fermer » `PortCraneCable` (V60 déjà). Ne pas porter Overlay unités (V65 déjà) ni camion (V64 déjà) ni caméra (V69 déjà). Ne pas « fermer » `Size` chantier (API). Ne pas « fermer » `CFrame.Angles` roues camion (spin réel). Ne pas merger feel.
+3. Ne **pas** éditer `BuildingModels` (V70 déjà). Ne pas « fermer » roues camion. Ne pas « fermer » `UnitModels.place` radar/flag/flamme. Ne pas « fermer » Transparency CityWindows. Ne pas merger feel.
 
-**Contraintes.** Client-only. **V70 visual ≠ V69 (focusX) ≠ V60 (câble translation).** Non réentrant (un `animate` / modèle / frame). `RestCFrame` identité rotation **doit rester vrai** pour ces trois pièces — si un futur `block()` pose une rotation, cuire `RestRot` à `create` **dans le même commit**. Client 34/34 (banc « modeles procéduraux : le palier change la silhouette » : `Building.create(PORT)` + deux `animate(1)` / `animate(2)` → `rawequal` Part câble **et** boom `CFrame` Y inchangé / yaw change ; `Building.create` SAM + deux `animate` → radar tourne autour de Y, `rawequal` Part ; `Building.create(CAPITAL)` + deux `animate` → drapeau `CFrame` ≠ `RestCFrame`, `rawequal` Part. Leftover V60 câble Y **doit rester vert**. Leftover V69 camera `focusX` / `rawequal focus` **doit rester vert**. Leftover V65 lerp `currentX`/`currentY` **doit rester vert**. Leftover V64 `segRot` `rawequal` **doit rester vert**). **Ne pas** éditer le serveur. `time` argument **inchangé**.
+**Contraintes.** Client-only. **V71 visual ≠ V70 (Radar/Flag/Boom rest identité) ≠ V65 (yaw pose) ≠ V64 (camion segRot).** Non réentrant (un `stepInterpolation` / Overlay / frame). Immobile (`mag <= 0.01`) : **zéro** compose roulis — `atan2(0, 1) = 0` reste l’identité (leftover V65 **doit rester vert**). Missile : pas de roulis. Client 34/34 (banc « navires, missiles et interpolation » : second `applyUnits` extra mute V52 ; `targetX` V55 ; `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY` V65 ; premier `stepInterpolation` unités immobiles ne casse pas. Leftover V70 modeles radar/flag/boom **doit rester vert**. Leftover V64 `segRot` pose/capture **doit rester vert**. Leftover V69 camera `focusX` **doit rester vert**). **Ne pas** éditer le serveur.
 
-**Tester.** Banc client modèles **doit rester vert** : deux `animate` successifs, Parts stables, rotation visible (CFrame ≠ RestCFrame pour Radar/Flag/Boom). Check câble leftover V60 (`CFrame.Y ≠ RestCFrame.Y`). Check camera leftover V69 (`focusX` nombre, `rawequal(camera.focus)` après `step`). Check navires leftover V65. Check pose/capture leftover V64. `./tests/run.sh`. Client 34/34.
+**Tester.** Banc client navires **doit rester vert**. Check modeles procéduraux V70 (radar/flag/boom + câble V60) **doit rester vert**. Check camera V69 **doit rester vert**. Check pose/capture V64 **doit rester vert**. `./tests/run.sh`. Client 34/34.
 
-**Fichiers.** `BuildingModels.luau` (`animate` branches Radar / CapitalFlag / PortCraneBoom **seulement**). `tests/client.luau` **seulement si** le check « modeles procéduraux » ne distingue pas encore boom/radar/drapeau (ajouter des asserts rotation, **garder** le câble V60). `WorldCamera.luau` **non**. `Overlay.luau` **non**. `Minimap.luau` **non**. `init.client.luau` **non**.
+**Fichiers.** `Overlay.luau` (`stepInterpolation` branche `mag > 0.01 and not unit.isMissile` **seulement**). `tests/client.luau` **seulement si** le check navires ne mentionne pas encore V71 (commentaire leftover, **garder** V65/V55/V52). `BuildingModels.luau` **non**. `UnitModels.luau` **non**. `WorldCamera.luau` **non**.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `bec6`/`ab04`/`846c` / hardening `2c0f`/`e9e5` sur #139/#137.
+- Merger feel `b19e`/`bec6`/`ab04` / hardening `4c70`/`2c0f` sur #142/#139.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -168,22 +168,19 @@ Ne pas merger feel `bec6`/`ab04`/`846c` ni hardening `2c0f`/`e9e5` sur cette bra
 - `Overlay.applyUnits` track + extra — **fermé** (V52).
 - `RadialMenu` `entries` à l’ouverture — geste joueur, pas 10 Hz.
 - `HUD.refreshDiplomacyPanel` `markers` — à la sélection, pas 10 Hz.
-- `CFrame` / `Vector3` unités dans `stepInterpolation` 60 Hz — **fermé** (V56). V55 ne touche que les nombres cible / lerp. `CFrame.Angles` roulis navire **conservé** (sinon `UnitModels.place` perd le tangage). LookAt unités deux Vector3 — **fermé** (V65). Camion lookAt — **fermé** (V64).
-- Camion `Vector3.new(0, 0.8, 0)` + `CFrame.new()` identité 60 Hz — **fermé** (V57). V56 ne touche que les unités. `CFrame.Angles` roues **conservé**. LookAt camion deux Vector3 — **fermé** (V64, distinct de V63 chantier).
-- Houle océan `WorldRenderer.step` Vector3 60 Hz — **fermé** (V58). V57 ne touche que le camion. Rotation Y des glints (`CFrame.Angles` à `buildOcean`) n’est pas rejouée dans `step` : `CFrame.new(x,y,z)` pose l’identité — acceptable (vue stratégique, bandes minces).
-- Feuillage `animatedFoliage` `CFrame.Angles` 60 Hz — **fermé** (V59). V58 ne touche que la houle.
-- `BuildingModels.animate` `PortCraneCable` Vector3 60 Hz — **fermé** (V60). V59 ne touche que le feuillage. Radar / Flag / Boom `CFrame.Angles` = rotation réelle, leftover V70 (ne pas convertir en translation).
-- `applyRouteProgress` Vector3 lift pendant chantier — **fermé** (V61). V60 ne touche que le câble. `part.Size = Vector3.new` = API, ne pas « fermer ».
-- `applyRouteProgress` arithmétique `origin + direction * t` 60 Hz — **fermé** (V62). V61 ne touche que le lift cuit.
-- `applyRouteProgress` lookAt deux Vector3 60 Hz — **fermé** (V63). V62 ne touche que le lerp nombres. `Size` = API, leftover après V63. LookAt camion = **fermé** (V64). LookAt unités = **fermé** (V65).
-- Overlay camion lookAt deux Vector3 60 Hz — **fermé** (V64). V63 ne touche que le chantier. Unités lookAt = **fermé** (V65). Camera lookAt = **fermé** (V66).
-- Overlay unités lookAt deux Vector3 60 Hz — **fermé** (V65). V64 ne touche que le camion. Camera `lookAt` = **fermé** (V66). Offset `VectorToWorldSpace((0,0,distance))` = **fermé** (V67). Lerp `focus` Vector3 = **fermé** (V68). Champ `focusX/Y/Z` = **fermé** (V69). Radar/flag/boom `CFrame.Angles` = leftover V70.
-- Camera lookAt deux Vector3 60 Hz — **fermé** (V66). V65 ne touche que les unités Overlay. Offset `Vector3.new(0, 0, distance)` = **fermé** (V67). Lerp `focus` Vector3 = **fermé** (V68). Champ `focusX/Y/Z` = **fermé** (V69).
-- Camera offset `Vector3.new(0, 0, distance)` 60 Hz — **fermé** (V67). V66 ne touche que lookAt + shake nombres. Lerp `focus` Vector3 = **fermé** (V68). Champ `focusX/Y/Z` = **fermé** (V69).
-- Camera lerp `focus` Vector3 60 Hz — **fermé** (V68). V67 ne touche que l’offset nombres. Champ `focusX/Y/Z` = **fermé** (V69).
-- Camera champ `focusX/Y/Z` 60 Hz — **fermé** (V69). V68 ne touche que le lerp nombres. `targetFocus` Vector3 et pan/clamp = événements, leftover séparé. Radar/flag/boom `CFrame.Angles` = leftover V70.
-- Radar / `CapitalFlag` / `PortCraneBoom` `CFrame.Angles` 60 Hz — **ouvert** (V70). V69 ne touche que le stockage mire. Ne pas convertir en translation.
-- `UnitModels.place` `Vector3.new` Size flamme missile — leftover séparé (API Size, ne pas éditer UnitModels dans V70). Roues camion `CFrame.Angles` = spin réel, leftover séparé.
+- `CFrame` / `Vector3` unités dans `stepInterpolation` 60 Hz — **fermé** (V56). LookAt unités deux Vector3 — **fermé** (V65). Camion lookAt — **fermé** (V64).
+- Camion `Vector3.new(0, 0.8, 0)` + `CFrame.new()` identité 60 Hz — **fermé** (V57). LookAt camion deux Vector3 — **fermé** (V64).
+- Houle océan `WorldRenderer.step` Vector3 60 Hz — **fermé** (V58).
+- Feuillage `animatedFoliage` `CFrame.Angles` 60 Hz — **fermé** (V59).
+- `BuildingModels.animate` `PortCraneCable` Vector3 60 Hz — **fermé** (V60). Radar / Flag / Boom `CFrame.Angles` — **fermé** (V70). Ne pas reconvertir en translation.
+- `applyRouteProgress` Vector3 lift / arithmétique / lookAt — **fermés** (V61 / V62 / V63).
+- Overlay camion lookAt — **fermé** (V64). Unités lookAt — **fermé** (V65). Camera lookAt — **fermé** (V66).
+- Camera offset / lerp focus / champ `focusX/Y/Z` — **fermés** (V67 / V68 / V69).
+- Radar / `CapitalFlag` / `PortCraneBoom` `CFrame.Angles` 60 Hz — **fermé** (V70). V69 ne touche que le stockage mire. Roulis navire Overlay = leftover V71.
+- Overlay navire `CFrame.Angles` roulis 60 Hz — **ouvert** (V71). V70 ne touche que BuildingModels. Ne pas convertir en translation. Ne pas cuire un `segRot` d’unité.
+- Roues camion `CFrame.Angles` = spin réel, leftover séparé (ne pas éditer Overlay camion dans V71).
+- `UnitModels.place` radar/flag `CFrame.Angles` + Size flamme missile — leftover séparé (ne pas éditer UnitModels dans V71).
+- Transparency CityWindows / beacons / FactoryOutput / SiloWarning — leftover séparé (pas CFrame).
 - Explosion / wake / splash Vector3 — événement, pas 60 Hz.
 - Overlay `buildFactoryRoute` `CFrame.lookAt` (construction de voie / `segRot` / pose initiale camion) — une fois par route, pas 60 Hz.
 
@@ -196,28 +193,23 @@ Ne pas merger feel `bec6`/`ab04`/`846c` ni hardening `2c0f`/`e9e5` sur cette bra
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–51 inchangées (passe 52 = client-only).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–52 inchangées (passe 53 = client-only).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Client V48 : check « deltas de terrain et conquetes classees » — prise slot 2→1 classée en gain, delta vide `# == 0` + `rawequal` pools.  
-Client V49 : check « etiquettes de faction : centre, contenu et disparition » — second refresh sans slot 1 détruit l’ancre (leftover `countBuf` interdirait ça).  
+Client V49 : check « etiquettes de faction : centre, contenu et disparition » — second refresh sans slot 1 détruit l’ancre.  
 Client V50 : check « identite, ere, diplomatie et classement » — second `HUD.update` d’un seul slot → `#hud.ranked == 1` et `slot == 3`.  
-Client V54 : même check — deux slots tuiles égales (100/100), troupes 10 vs 40 → `ranked[1].slot == 8` (tie-break troupes). Leftover V50 **doit rester vert**.  
+Client V54 : même check — deux slots tuiles égales (100/100), troupes 10 vs 40 → `ranked[1].slot == 8`. Leftover V50 **doit rester vert**.  
 Client V51 : check « accrochage du placement et bascule en amelioration » — deux `resolve` successifs même tuile / même status.  
-Client V52 : check « navires, missiles et interpolation » — second `applyUnits` du même missile (`id=3`, `tx/ty` différents) → `extra.tx` = le second, `rawequal` du record extra ; navire `extra == nil` ; `applyUnits({}, {})` détruit.  
-Client V53 : check « apercu de placement » + « accrochage » — inchangés (Preview n’est pas édité ; les closures stables sont dans init.client, hors bundle du check Preview).  
+Client V52 : check « navires, missiles et interpolation » — second `applyUnits` du même missile → `extra.tx` = le second, `rawequal` du record extra ; navire `extra == nil`.  
+Client V53 : check « apercu de placement » + « accrochage » — inchangés.  
 Client V55 : même check navires — `targetX`/`currentX` nombres ; second lot `x/y` différents → `targetX` mute + `rawequal` du record unité. Leftover V52 **doit rester vert**.  
-Client V56 : même check navires — `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY` (branche `mag > 0.01`). Premier `stepInterpolation` (unités immobiles, regard −Z) ne casse pas. Leftover V55 **doit rester vert**.  
-Client V57 : check « pose et capture de chaque type de batiment » — `onTradeEvent("dispatch")` après voie unique → `truckModel.Parent == model` ; un frame plus tard delivery encore vivant ; 12 × 0.02 s → `delivery == nil`, `Parent == nil`, `DeliveryPulse` dans `overlay.root`. Leftover V56 **doit rester vert**. Le check « livraison : le gain s'affiche sur la gare » ne peut pas porter ça : la destruction en fin de pose vide `overlay.routes`.  
-Client V58 : check « construction du monde 3D » — `#oceanRipples > 0` ; deux `world:step(1/60)` → `rawequal` Part, CFrame X ou Z ≠ `base`, Transparency dans `[0.64, 0.82]` ; `oceanRipples = {}` puis `step` ne lève pas. Leftover V57 **doit rester vert**.  
-Client V59 : même check construction — `#animatedFoliage > 0` ; deux `world:step(1/60)` → `rawequal` Part, CFrame.Y ≠ `base` ; `animatedFoliage = {}` puis `step` ne lève pas. Leftover V58 **doit rester vert**.  
-Client V60 : check « modeles procéduraux : le palier change la silhouette » — `Building.create(PORT)` + deux `animate(1)` / `animate(2)` → `rawequal` Part câble, CFrame.Y ≠ `RestCFrame.Y` ; `animate(FACTORY)` (0 câble) ne lève pas. Leftover V59 **doit rester vert**.  
-Client V61 : check « pose et capture » — deux `stepInterpolation(1/60)` pendant chantier → `rawequal` Parts Shoulder/Road/CenterMark, `Road.CFrame.Y ≠ Shoulder.CFrame.Y` (lift cuit). Leftover V57 (dispatch) **et** leftover V60 (câble) **doivent rester verts**.  
-Client V62 : même check pose/capture — `type(dx/oy) == "number"`, `oy` asphalt ≠ shoulder, `pavedLength` croît. Leftover V61 **doit rester vert**.  
-Client V63 : même check pose/capture — `rot` à l’origine (`X/Y/Z == 0`), `rawequal` après deux `stepInterpolation`, Parts Shoulder/Road/CenterMark stables, Y asphalt ≠ shoulder. Leftover V62 **et** leftover V61 **et** leftover V57 (dispatch) **et** leftover V60 (câble) **doivent rester verts**.  
-Client V64 : même check pose/capture — `#segRot == #path - 1`, `segRot[1]` à l’origine, `rawequal` après deux `stepInterpolation` pendant une livraison. Leftover V63 **et** leftover V62 **et** leftover V61 **et** leftover V57 (dispatch → Parent + pulse) **et** leftover V60 (câble) **doivent rester verts**.  
-Client V65 : même check navires — `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY` (yaw `fromEulerAnglesYXZ`, plus de lookAt deux Vector3). Premier `stepInterpolation` (unités immobiles, `atan2(0, 1) = 0`) ne casse pas. Leftover V56 **et** leftover V55 **et** leftover V52 **et** leftover V64 (segRot pose/capture) **doivent rester verts**.  
-Client V66 : check « camera strategique » — pose `CFrame.new * rotation` (plus de lookAt deux Vector3). Leftover V65 **et** leftover V64 **doivent rester verts**.  
-Client V67 : même check camera — pitch=0 yaw=0 → `CFrame.X/Y == focusX/Y`, `CFrame.Z == focusZ + distance` ; pitch 58° suit `ox/oy/oz` (plus de `Vector3.new(0,0,d)` / `VectorToWorldSpace`). Leftover tactile pincement/torsion **et** leftover V65 (navires) **et** leftover V64 (segRot pose/capture) **et** leftover V66 (pose) **doivent rester verts**.  
-Client V68 : même check camera — `targetFocus = Vector3.new(focusX+40, focusY, focusZ)` puis `step(1/60)` → `focusX` avance sans sauter ; pose utilise `fx/fy/fz` ; Y/Z inchangés. Leftover V67 (offset) **et** leftover tactile **et** leftover V65 **et** leftover V64 **doivent rester verts**.  
-Client V69 : même check camera — `type(focusX/Y/Z) == "number"` ; `rawequal(camera.focus)` après `step` (Vector3 **pas** réécrit 60 Hz) ; pitch=0 yaw=0 → `Z == focusZ + distance` ; lerp `focusX` avance, `focus` Vector3 `rawequal` stale. Check minimap : `setFocus(0,0,0)` → marqueur 0.5/0.5 ; après `focusTile(5000,true)` + `step` → marqueur suit `focusX/Z`. Leftover V68 (lerp) **et** leftover V67 (offset) **et** leftover tactile **et** leftover V65 **et** leftover V64 **doivent rester verts**.  
+Client V56 : même check navires — `stepInterpolation` après cible déplacée avance `currentX` **et** `currentY`. Leftover V55 **doit rester vert**.  
+Client V57 : check « pose et capture de chaque type de batiment » — `onTradeEvent("dispatch")` → `truckModel.Parent == model` ; 12 × 0.02 s → `delivery == nil`, pulse. Leftover V56 **doit rester vert**.  
+Client V58 : check « construction du monde 3D » — `#oceanRipples > 0` ; deux `world:step(1/60)` → `rawequal` Part, CFrame X ou Z ≠ `base`. Leftover V57 **doit rester vert**.  
+Client V59 : même check construction — `#animatedFoliage > 0` ; deux `world:step` → CFrame.Y ≠ `base`. Leftover V58 **doit rester vert**.  
+Client V60 : check « modeles procéduraux : le palier change la silhouette » — `Building.create(PORT)` + deux `animate` → `rawequal` Part câble, CFrame.Y ≠ `RestCFrame.Y` ; `animate(FACTORY)` (0 câble) ne lève pas. Leftover V59 **doit rester vert**.  
+Client V61–V64 : check pose/capture — lift / `dx/oy` / `segment.rot` / `segRot` camion. Leftovers V60 câble **et** V57 dispatch **doivent rester verts**.  
+Client V65 : même check navires — yaw `fromEulerAnglesYXZ`, plus de lookAt deux Vector3. Leftover V56 / V55 / V52 / V64 **doivent rester verts**.  
+Client V66–V69 : check « camera strategique » — pose / offset / lerp / champ `focusX/Y/Z`. Leftover tactile **et** leftover V65 **et** leftover V64 **doivent rester verts**.  
+Client V70 : même check modeles — `Building.create(PORT)` boom `CFrame.Y == RestCFrame.Y` (pas une translation) + `not rawequal(CFrame, RestCFrame)` ; `Building.create(SAM)` radar `Y` inchangé + Part stable ; `Building.create(CAPITAL)` drapeau `CFrame ~= RestCFrame` + Part stable. Leftover V60 câble Y **doit rester vert**. Leftover V69 camera `focusX` / `rawequal focus` **doit rester vert**. Leftover V65 navires **doit rester vert**. Leftover V64 `segRot` **doit rester vert**.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
