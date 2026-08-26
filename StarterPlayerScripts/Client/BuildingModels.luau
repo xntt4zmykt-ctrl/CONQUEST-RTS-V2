@@ -127,8 +127,8 @@ local function buildFactory(model: Model, color: Color3, level: number?)
 	-- de modele, pas 60 Hz. block() pose d'abord CFrame.new(x, roofY, 0)
 	-- ; la ligne ecrase ensuite. teeth / x / roofY / Size / Color /
 	-- Material inchanges. Ne pas editer les cheminees / reservoir.
-	-- Ne pas toucher les portes silo (leftover V90). Ne pas merger
-	-- feel a8e1.
+	-- Portes silo V90 (check modeles). Ne pas toucher les rampes
+	-- SAM (leftover V91). Ne pas merger feel a8e1.
 	local teeth = 1 + tier
 	for i = 1, teeth do
 		local x = (i - (teeth + 1) / 2) * 2.4 - 0.3
@@ -181,9 +181,9 @@ function cylinder(parent: Instance, size: Vector3, offset: Vector3, color: Color
 	-- `angle` variable, buildOcean). Construction de modele, pas 60 Hz.
 	-- Shape = Cylinder pose AVANT le CFrame. block() pose d'abord
 	-- CFrame.new(offset) ; cylinder() ecrase ensuite. Call sites
-	-- buildFactory / buildSilo non edites. Toits usine V89 (check
-	-- modeles). Ne pas toucher les portes silo (leftover V90).
-	-- Ne pas merger feel a8e1.
+	-- buildFactory / buildSilo non edites. Toits usine V89 / portes
+	-- silo V90 (check modeles). Ne pas toucher les rampes SAM
+	-- (leftover V91). Ne pas merger feel a8e1.
 	part.CFrame = CFrame.new(offset) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	return part
 end
@@ -345,12 +345,26 @@ local function buildSilo(model: Model, color: Color3, _level: number?)
 	end
 
 	-- Deux portes blindees ouvertes rendent la fonction du silo evidente.
+	-- V90 : translation * fromEulerAnglesYXZ (Z=±18° fixe). Plus de
+	-- CFrame.Angles a buildSilo portes. Recette feel N141 inline —
+	-- ne PAS cuire un doorRot (signes Z opposes + translations
+	-- distinctes, comme V89 roofRot / V88 cylinderRot / V86 trunkRot
+	-- interdits). Distinct de V89 (toits usine, Z=-12°, même fichier,
+	-- buildFactory — ne PAS retoucher les toits). Distinct de V88
+	-- (cylinder helper, Z=90°, même buildSilo pour le tube/missile —
+	-- ne PAS retoucher le helper). Distinct de V87 (Rock yaw `phase`
+	-- variable, WorldRenderer). Distinct de leftover V91 (rampes SAM,
+	-- pitch X=-31°, buildSam). Construction de modele, pas 60 Hz.
+	-- block() pose d'abord CFrame.new(±3.6, 1.3, 0) ; la ligne ecrase
+	-- ensuite. STEEL / Size 4.4, 0.45, 6.5 / Material Metal / Name
+	-- SiloDoor inchanges. Ne pas editer le tube / missile / ogive.
+	-- Ne pas merger feel 4885.
 	local doorA = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(-3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorA.Name = "SiloDoor"
-	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(18))
+	doorA.CFrame = CFrame.new(-3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(18))
 	local doorB = block(model, Vector3.new(4.4, 0.45, 6.5), Vector3.new(3.6, 1.3, 0), STEEL, Enum.Material.Metal)
 	doorB.Name = "SiloDoor"
-	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.Angles(0, 0, math.rad(-18))
+	doorB.CFrame = CFrame.new(3.6, 1.3, 0) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(-18))
 	local warningStrip = block(model, Vector3.new(9, 0.18, 0.35), Vector3.new(0, 0.86, 4.2), WARNING, Enum.Material.Neon)
 	warningStrip.Name = "SiloWarning"
 end
