@@ -877,8 +877,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- V57 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
 		-- V64 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
-		-- 60 Hz. Roues : Angles conserve (leftover V72). Unites : V65 yaw
-		-- + V71 roulis fromEulerAnglesYXZ. Chantier segment.rot inchange
+		-- 60 Hz. V72 : roues fromEulerAnglesYXZ, plus de CFrame.Angles.
+		-- Unites : V65 yaw + V71 roulis. Chantier segment.rot inchange
 		-- (V63). Radar / flag / boom inchanges (V70).
 		local path = route.path
 		local nSeg = #path - 1
@@ -895,9 +895,15 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local py = ay + dy * segmentProgress
 		local pz = az + dz * segmentProgress
 		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
+		-- V72 : spin π×20 × progress, compose sur frame*offset. Plus de
+		-- CFrame.Angles 60 Hz. fromEulerAnglesYXZ(spin, 0, 0) ≡
+		-- Angles(spin, 0, 0) (ry=0, rz=0 → X seul). Garde Wheel inchangee.
+		-- Pieces non-Wheel : frame * offset inchange. Roulis navire
+		-- inchange (V71). Radar / flag / boom inchanges (V70).
+		local spin = delivery.progress * math.pi * 20
 		for _, piece in route.truck do
 			if piece.part.Name == "Wheel" then
-				piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
+				piece.part.CFrame = frame * piece.offset * CFrame.fromEulerAnglesYXZ(spin, 0, 0)
 			else
 				piece.part.CFrame = frame * piece.offset
 			end
@@ -954,7 +960,7 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			-- (ry=0 → X puis Z). Amplitude 0.018 / 0.035 et frequences
 			-- 1.7 / 2.1 inchangees. Garde mag / missile inchangee.
 			-- Radar / flag / boom inchanges (V70). Yaw inchange (V65).
-			-- Roues camion leftover V72. Immobile : zero compose.
+			-- Roues camion inchangees (V72). Immobile : zero compose.
 			local rx = math.sin(now * 1.7 + unit.phase) * 0.018
 			local rz = math.sin(now * 2.1 + unit.phase) * 0.035
 			frame = frame * CFrame.fromEulerAnglesYXZ(rx, 0, rz)
