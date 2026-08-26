@@ -8597,6 +8597,114 @@ do
 	end
 end
 
+do
+	-- N91 : MapGen.mapMeta recycle metaBuf. Deux appels → rawequal
+	-- record. seed change → champ a jour. terrainHash seed 1 vs 2
+	-- distinct. Banc N90 / N4 (hash 4242) inchanges. Pas N86 / N4
+	-- structureHash. Overlay n'ecrit pas ce packet.
+	local a = MapGen.generate(1)
+	local b = MapGen.generate(2)
+	local h1 = MapGen.terrainHash(a)
+	local h2 = MapGen.terrainHash(b)
+	local m1 = MapGen.mapMeta(1, a)
+	if m1.terrainHash ~= h1 or m1.seed ~= 1 or m1.width ~= Config.MAP_WIDTH then
+		fail("mapMeta pool — champs seed 1")
+	else
+		local m2 = MapGen.mapMeta(2, b)
+		if not rawequal(m1, m2) or not rawequal(m1, MapGen.metaBuf) then
+			fail("mapMeta pool — rawequal record")
+		elseif m2.seed ~= 2 or m2.terrainHash ~= h2 then
+			fail("mapMeta pool — seed/hash stale")
+		elseif h1 == h2 then
+			fail("mapMeta pool — terrainHash identique seed 1 vs 2")
+		elseif m2.mapId ~= Config.MAP_ID or m2.mapVersion ~= Config.MAP_VERSION then
+			fail("mapMeta pool — mapId/version")
+		elseif m2.generatorVersion ~= Config.GENERATOR_VERSION or m2.height ~= Config.MAP_HEIGHT then
+			fail("mapMeta pool — generator/height")
+		else
+			print("mapMeta pool : rawequal, seed a jour, hash distinct (N91)")
+		end
+	end
+end
+
+do
+	-- N92 : Trade.dispatch recycle deliveryPool[index]. Deux
+	-- expeditions meme usine (apres resolve + cooldown) → rawequal
+	-- record + Trade.deliveryPool[index]. Champs a jour. Destroy
+	-- usine → tradeDeliveries[index] == nil. Banc colis snapshot /
+	-- N45 flatten inchanges. Pas N40 / N85 / N89. Ne pas pooler
+	-- factory.links.
+	local state = GameState.new(1092)
+	local owner = state:addPlayer(nil, "ColisPool", Random.new(41), 0)
+	if not owner then
+		fail("delivery pool — spawn impossible")
+	else
+		local factoryTile: number? = nil
+		local cityTile: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local fx, fy = MapGen.fromIndex(index)
+				local cx, cy = fx + Config.TRUCK_SPEED + 3, fy
+				if MapGen.inBounds(cx, cy) then
+					local candidate = MapGen.toIndex(cx, cy)
+					if state:isLand(candidate) then
+						factoryTile, cityTile = index, candidate
+						break
+					end
+				end
+			end
+		end
+		if not factoryTile or not cityTile then
+			fail("delivery pool — paire terrestre introuvable")
+		else
+			state:setOwner(factoryTile, owner.slot)
+			state:setOwner(cityTile, owner.slot)
+			state:placeBuilding(factoryTile, Config.BUILDING.FACTORY, owner.slot)
+			state:placeBuilding(cityTile, Config.BUILDING.CITY, owner.slot)
+			state.tick += 1
+			Trade.step(state, Random.new(7), function() end)
+			local d1 = state.tradeDeliveries[factoryTile]
+			if not d1 then
+				fail("delivery pool — pas d'expedition")
+			elseif not rawequal(d1, Trade.deliveryPool[factoryTile]) then
+				fail("delivery pool — recPool[index] distinct")
+			else
+				local slot1 = d1.slot
+				state.tick = d1.arrivalTick
+				Trade.step(state, Random.new(9), function() end)
+				if state.tradeDeliveries[factoryTile] ~= nil then
+					fail("delivery pool — leftover vivant apres resolve")
+				else
+					state.tick = (state.tradeCooldowns[factoryTile] or 0)
+					Trade.step(state, Random.new(11), function() end)
+					local d2 = state.tradeDeliveries[factoryTile]
+					if not d2 then
+						fail("delivery pool — 2e expedition absente")
+					elseif not rawequal(d1, d2) then
+						fail("delivery pool — rawequal recycle")
+					elseif not rawequal(d2, Trade.deliveryPool[factoryTile]) then
+						fail("delivery pool — recPool perdu")
+					elseif d2.slot ~= slot1 or d2.slot ~= owner.slot then
+						fail("delivery pool — slot stale")
+					elseif d2.arrivalTick ~= state.tick + math.max(1, math.ceil(d2.distance / Config.TRUCK_SPEED)) then
+						fail("delivery pool — arrivalTick stale")
+					else
+						state:destroyBuilding(factoryTile)
+						Trade.step(state, Random.new(13), function() end)
+						if state.tradeDeliveries[factoryTile] ~= nil then
+							fail("delivery pool — destroy laisse le colis")
+						elseif Trade.deliveryPool[factoryTile] == nil then
+							fail("delivery pool — pool perdu au destroy")
+						else
+							print("delivery pool : rawequal index, destroy nil (N92)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 print("")
 if failures == 0 then
 	print("\27[32mTous les invariants tiennent.\27[0m")
