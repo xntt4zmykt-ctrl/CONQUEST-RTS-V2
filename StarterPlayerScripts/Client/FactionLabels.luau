@@ -2,7 +2,7 @@
 --[[
 	Nom et armee de chaque faction, poses sur son territoire.
 
-	C'est l'information que le jeu de reference affiche en permanence sur la
+	C'est l'information que CONQUEST affiche en permanence sur la
 	carte, et elle change completement la lecture d'une partie : sans elle, il
 	faut cliquer chaque voisin pour savoir lequel est dangereux. Avec, on voit
 	d'un coup d'oeil ou est la grosse armee — et la reponse n'est presque jamais
