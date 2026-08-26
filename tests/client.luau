@@ -709,6 +709,28 @@ check("construction du monde 3D", function()
 		guard += 1
 	end
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+	-- V101 : curseur dirtyHead, file drainee. Plus de table.remove(1).
+	-- Recette feel N112 inline — ne PAS merger 04e7. Truncate a la
+	-- consommation. Compact prefix leftover (feel N114). Recycle
+	-- Ground/Border (feel N106) non porte. Distinct de V100 (trail
+	-- offset.Z). Distinct de V48 (applyDelta). FactoryOutput /
+	-- SiloWarning leftover separe (pas de Position).
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
+	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
+	world:markChunkDirty(0)
+	world:markChunkDirty(1)
+	world:markChunkDirty(2)
+	world:markChunkDirty(3)
+	world:markChunkDirty(4)
+	assert(#world.dirtyQueue == 5, "dirtyQueue n'a pas enfile 5 chunks")
+	assert(world.dirtyHead == 1, "dirtyHead mute par markChunkDirty")
+	local rebuilt = world:stepRebuilds()
+	assert(rebuilt == Config.CHUNK_REBUILDS_PER_FRAME, "budget rebuild")
+	assert(world.dirtyHead == 1 + Config.CHUNK_REBUILDS_PER_FRAME, "curseur n'a pas avance")
+	assert(#world.dirtyQueue == 5, "table.remove a compacte la file")
+	world:stepRebuilds()
+	assert(world.dirtyHead == 1, "dirtyHead non reset apres consommation")
+	assert(#world.dirtyQueue == 0, "file non truncatee une fois consommee")
 
 	-- V58 : houle sans Vector3, Parts stables, CFrame distinct du base.
 	-- V59 : couronnes Y depuis base, plus de CFrame.Angles. Leftover V60
@@ -726,7 +748,7 @@ check("construction du monde 3D", function()
 	-- rockRot. Distinct de V86 (Z=90° fixe). Distinct de V84 (buildOcean).
 	-- V88 cylinder helper / V89 toits usine / V90 portes silo / V91
 	-- rampes SAM (check modeles). V92 addWake (check navires).
-	-- V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	-- Check calques V83, vagues V82 et modeles V85/V88/V89/V90/V91
 	-- et navires V92/V93/V94/V95 doivent rester verts.
 	local nRipple = #world.oceanRipples
@@ -797,7 +819,7 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
@@ -989,7 +1011,7 @@ check("pose et capture de chaque type de batiment", function()
 	-- + V79 LandingSplash (check navires). V80 DeliveryPulse (ci-dessous).
 	-- V81 Shockwave (check navires explosion). V82 conquestPulse
 	-- (check vagues). V83 SelectionRing (check calques). V84 OceanGlint
-	-- (check construction). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). Voies encore
+	-- (check construction). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). Voies encore
 	-- vivantes ici ; la destruction plus bas les vide (le check
 	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
@@ -1017,7 +1039,7 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
 	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
 	-- l'arrivee. Recette feel N132. V81 Shockwave (check navires).
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local pulseFound = false
 	local aPulse
 	for _, node in overlay.root:GetChildren() do
@@ -1125,7 +1147,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- (BuildRing playConstruction). Call sites chiminees / reservoir
 	-- non edites. V89 toits sheds (ci-dessous). V90 portes silo
 	-- (ci-dessous). V91 rampes SAM (ci-dessous). V92 addWake
-	-- (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local chimney = factory:FindFirstChild("Chimney", true)
 	assert(chimney, "usine : cheminee absente")
@@ -1135,7 +1157,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- 1 + tier → palier 1 = 2 toits. Y = roofY = 0.7 + 4.2. Ne pas
 	-- cuire un roofRot. Distinct de V88 (cylinder helper Z=90°).
 	-- V90 portes silo (ci-dessous). V91 rampes SAM (ci-dessous).
-	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). WORLD_SCALE
+	-- V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). WORLD_SCALE
 	-- applique par create.
 	local scale = Config.WORLD_SCALE
 	local roofN = 0
@@ -1163,7 +1185,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- Deux sites, signes Z opposes. Ne pas cuire un doorRot. Distinct
 	-- de V89 (toits usine Z=-12°). Distinct de V88 (cylinder helper
 	-- Z=90°). V91 rampes SAM (ci-dessous). V92 addWake (check
-	-- navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). WORLD_SCALE
+	-- navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). WORLD_SCALE
 	-- applique par create.
 	local doorN = 0
 	local aDoor
@@ -1186,7 +1208,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
 	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). V80
 	-- DeliveryPulse (check pose/capture). V81 Shockwave (check navires).
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1218,7 +1240,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- (MissileBody yaw Y=90°, check navires). Distinct de V96
 	-- (UnitModels Fin roll Z=axis·π/2, check navires). V97 mesh
 	-- carrier visual.pieces (check navires). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). WORLD_SCALE applique par create.
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). WORLD_SCALE applique par create.
 	local interceptN = 0
 	local aLaunch
 	for _, part in sam:GetChildren() do
@@ -1258,7 +1280,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V88 Chimney / StrategicMissile cylindre (ci-dessus). V89 toits
 	-- sheds Z=-12° (ci-dessus). V90 portes silo Z=±18° (ci-dessus).
 	-- V91 rampes SAM pitch X=-31° (ci-dessus). V92 addWake
-	-- (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V97 mesh carrier (check navires). V98 CityWindows rest.X (ci-dessous). V99 beacons rest.Z (ci-dessous). V100 trail offset.Z (check navires).
+	-- (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V97 mesh carrier (check navires). V98 CityWindows rest.X (ci-dessous). V99 beacons rest.Z (ci-dessous). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local city = Building.create(Config.BUILDING.CITY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	-- V98 : Transparency depuis rest.X. Plus de child.Position.X
 	-- 60 Hz. Recette feel N149 — ne PAS merger c450. Distinct de
@@ -1313,7 +1335,7 @@ check("apercu de placement pour chaque batiment", function()
 	-- dans le check navires. V78 wakeRot + V79 LandingSplash
 	-- (check navires). V80 DeliveryPulse (check pose/capture).
 	-- V81 Shockwave (check navires). V82 conquestPulse (check vagues).
-	-- V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). Hauteurs +0.42 / +0.38.
+	-- V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1779,7 +1801,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -1910,7 +1932,7 @@ check("navires, missiles et interpolation", function()
 	-- de V93 (Bow yaw Y=π). Distinct de V92 (Wake Y == -0.68). Ne
 	-- pas cuire un bodyRot. Recette feel N146 inline. V96 Fin
 	-- ci-dessous. V97 mesh carrier plus bas. V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local missileBodyN = 0
 	local aBody
 	for _, piece in overlay.units[3].visual.pieces do
@@ -1941,7 +1963,7 @@ check("navires, missiles et interpolation", function()
 	-- (LandingRamp pitch X=-8°, Y == 0.72). Distinct de V93
 	-- (Bow yaw Y=π). Distinct de V92 (Wake Y == -0.68). Ne pas
 	-- cuire un finRot. Recette feel N147 inline. V97 mesh carrier
-	-- ci-dessous. V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- ci-dessous. V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local missileFinN = 0
 	local aFin
 	for _, piece in overlay.units[3].visual.pieces do
@@ -1969,7 +1991,7 @@ check("navires, missiles et interpolation", function()
 	-- mesh mort — ne pas activer l'ID au banc (stub MeshPart).
 	-- Recette feel N148 inline. Distinct de V96 (Fin roll
 	-- Z=axis·π/2). Distinct de V93 (Bow yaw Y=π, meme
-	-- buildCarrier). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- buildCarrier). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local UnitModels = __require("UnitModels")
 	assert(UnitModels.CARRIER_MESH_ID == "", "CARRIER_MESH_ID active au banc")
 	local carrierMeshN = 0
@@ -2102,7 +2124,7 @@ check("navires, missiles et interpolation", function()
 	overlay:explosion(50, 50, 9)
 	-- V81 : Shockwave reutilise wakeRot. Plus de CFrame.Angles explosion.
 	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast / fumee inchangees.
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	local shockFound = false
 	local aShock
 	for _, node in overlay.root:GetChildren() do
@@ -2124,7 +2146,7 @@ check("vagues de conquete", function()
 	-- V82 : pulseRot cuit a new (recette V75 footprintRot / V78 wakeRot /
 	-- feel N134). Plus de CFrame.Angles a chaque onde. Height = surface
 	-- + 0.8 (pas Y = 3 feel). Name ConquestPulse. Leftover V81 Shockwave
-	-- dans le check navires. V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- dans le check navires. V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	assert(effects.pulseRot.X == 0 and effects.pulseRot.Y == 0 and effects.pulseRot.Z == 0, "pulseRot n'est pas a l'origine")
 	local bakedPulse = effects.pulseRot
@@ -2182,6 +2204,13 @@ check("deltas de terrain et conquetes classees", function()
 	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
 
 	world:stepRebuilds()
+	world:stepRebuilds()
+	-- V101 : curseur, pas table.remove. Tete avancee ou file truncatee.
+	-- Leftover V48 pools au-dessus. Compact prefix leftover (feel N114).
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead >= 1, "dirtyHead absent apres deltas")
+	if world.dirtyHead > #world.dirtyQueue then
+		assert(#world.dirtyQueue == 0 and world.dirtyHead == 1, "file non truncatee une fois consommee")
+	end
 end)
 
 check("camera strategique", function()
@@ -2197,7 +2226,7 @@ check("camera strategique", function()
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
 	-- V78 wakeRot + V79 LandingSplash (check navires). V80 DeliveryPulse
 	-- (check pose/capture). V81 Shockwave (check navires). V82
-	-- conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires).
+	-- conquestPulse (check vagues). V83 SelectionRing (check calques). V92 addWake (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V98 CityWindows rest.X (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
