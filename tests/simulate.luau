@@ -2708,6 +2708,47 @@ do
 		print("intentions : QuickChat cooldown honore")
 		print("intentions : ratio borne, QuickChat slot hors catalogue refuse")
 		print("intentions : diplomatie vers soi refusee")
+
+		-- N82 : flush ne droppe plus la file. Deux enqueue + flush, puis
+		-- deux enqueue → rawequal record [1] (pas une 3e table).
+		-- #queue == 0 / pendingCount == 0 apres flush. Schema / sequence
+		-- / rate inchanges (gardes ci-dessus). Pas N81 / N19 / N41 feel.
+		IntentValidator.reset()
+		local okPool1 = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 1, { ratio = 0.4 })
+		local okPool2 = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 2, { ratio = 0.5 })
+		local rec1 = IntentValidator.queue[1]
+		local rec2 = IntentValidator.queue[2]
+		if not okPool1 or not okPool2 or rec1 == nil or rec2 == nil then
+			fail("intent pool — enqueue refuse")
+		else
+			local appliedPool = IntentValidator.flush(ctx)
+			if appliedPool ~= 2 then
+				fail(`intent pool — flush attendu 2, obtenu {appliedPool}`)
+			elseif IntentValidator.pendingCount() ~= 0 or #IntentValidator.queue ~= 0 then
+				fail(`intent pool — leftover file (#={#IntentValidator.queue})`)
+			else
+				local okPool3 = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 3, { ratio = 0.6 })
+				local okPool4 = IntentValidator.enqueue(ctx, fakePlayer, "SetAttackRatio", 4, { ratio = 0.7 })
+				if not okPool3 or not okPool4 then
+					fail("intent pool — 2e vague refusee")
+				elseif not rawequal(rec1, IntentValidator.queue[1]) then
+					fail("intent pool — record [1] non recycle")
+				elseif not rawequal(rec2, IntentValidator.queue[2]) then
+					fail("intent pool — record [2] non recycle")
+				elseif not rawequal(rec1, IntentValidator.intentPool[1]) then
+					fail("intent pool — intentPool[1] distinct")
+				else
+					IntentValidator.flush(ctx)
+					if IntentValidator.pendingCount() ~= 0 or #IntentValidator.queue ~= 0 then
+						fail("intent pool — leftover apres 2e flush")
+					elseif math.abs(ps.attackRatio - 0.7) > 1e-9 then
+						fail(`intent pool — dernier ratio ({ps.attackRatio})`)
+					else
+						print("intent pool : rawequal [1], #queue=0 (N82)")
+					end
+				end
+			end
+		end
 	end
 end
 
@@ -7909,7 +7950,7 @@ do
 	-- le pool). rawequal d'un Sample (pas 601 tables).
 	-- formatReport encore parseable. Apres formatReport du run
 	-- principal — reset ici ne fausse pas ticks=6000. Leftover
-	-- snapshot return = N81. Pas N76 / N77 / N53 / N2.
+	-- snapshot return = N81 (ferme plus bas). Pas N76 / N77 / N53 / N2.
 	local delta = buffer.create(5)
 	buffer.writeu32(delta, 0, 1234)
 	buffer.writeu8(delta, 4, 1)
@@ -8001,6 +8042,37 @@ do
 		fail("metrics reset — formatReport ticks")
 	else
 		print("metrics reset : pool Sample, samples=1, ticks=1 (N80)")
+	end
+end
+
+do
+	-- N81 : TickMetrics.snapshot recycle snapBuf + p95Buf / p99Buf.
+	-- Deux snapshot → rawequal. Apres reset + 1 record, samples == 1
+	-- (pas 600 fantomes). formatReport lit tout de suite. N80 vient
+	-- de laisser 1 sample — reset ici pour l'assert samples==1.
+	-- Pas N79 / N80 / N82 / N53. Ne pas reset avant le formatReport du run.
+	local s0 = TickMetrics.snapBuf
+	local p0 = TickMetrics.p95Buf
+	local q0 = TickMetrics.p99Buf
+	local snap1 = TickMetrics.snapshot()
+	local snap2 = TickMetrics.snapshot()
+	if not rawequal(s0, TickMetrics.snapBuf) or not rawequal(snap1, snap2) then
+		fail("metrics snapBuf — rawequal snapBuf")
+	elseif not rawequal(p0, TickMetrics.p95Buf) or not rawequal(q0, TickMetrics.p99Buf) then
+		fail("metrics snapBuf — rawequal p95/p99")
+	elseif not rawequal(snap1.p95, TickMetrics.p95Buf) or not rawequal(snap1.p99, TickMetrics.p99Buf) then
+		fail("metrics snapBuf — nested distincts")
+	else
+		TickMetrics.reset()
+		TickMetrics.record(1, 1, nil, 0.25)
+		local snap = TickMetrics.snapshot()
+		if snap.samples ~= 1 or TickMetrics.snapBuf.samples ~= 1 then
+			fail(`metrics snapBuf — samples {snap.samples} fantomes`)
+		elseif not rawequal(s0, snap) then
+			fail("metrics snapBuf — snapshot apres reset distinct")
+		else
+			print("metrics snapBuf : rawequal, samples=1 (N81)")
+		end
 	end
 end
 
