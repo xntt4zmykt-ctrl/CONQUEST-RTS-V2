@@ -102,7 +102,11 @@ function IntentValidator.clearPlayer(userId: number)
 end
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value ~= math.huge
+		and value ~= -math.huge
+		and value == math.floor(value)
 end
 
 local applyOne: (Context, Intent) -> ()
@@ -232,7 +236,8 @@ function IntentValidator.enqueue(
 			return false, "InvalidSchema"
 		end
 	elseif actionType == "SetAttackRatio" then
-		if typeof(payload.ratio) ~= "number" or payload.ratio ~= payload.ratio then
+		local r = payload.ratio
+		if typeof(r) ~= "number" or r ~= r or r == math.huge or r == -math.huge then
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
@@ -288,7 +293,6 @@ local function applyOneImpl(ctx: Context, intent: Intent)
 			if ps.awaitingSpawn then
 				local claimed = state:claimSpawn(slot, index)
 				if claimed then
-					ps.justClaimed = true
 					ok, message = true, "Territoire revendique."
 				else
 					ok, message = false, "Spawn invalide."

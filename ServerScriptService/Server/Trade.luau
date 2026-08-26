@@ -19,6 +19,10 @@
 	fil de notifications non plus — une usine livre toutes les sept secondes,
 	le fil serait sature ; le "+X or" flottant au-dessus de la gare est le
 	seul retour, selon les regles CONQUEST.
+
+	Embargo : arme maritime seulement (Navy.canTrade). Le rail ignore l'embargo
+	parce que les colis ne quittent jamais le reseau de la faction. Ne pas
+	brancher canTrade ici sans un choix produit explicite (embargo total).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")

@@ -491,8 +491,8 @@ function Diplomacy.viewFor(state: GameState, slot: number)
 
 	local allySet = state.alliances[slot]
 	if allySet then
-		for other, expiry in allySet do
-			if expiry == true or (typeof(expiry) == "number" and state.tick < expiry) then
+		for other in allySet do
+			if state:areAllied(slot, other) then
 				allies[other] = true
 			end
 		end
