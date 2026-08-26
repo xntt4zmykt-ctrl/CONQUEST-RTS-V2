@@ -1749,6 +1749,13 @@ end)
 	jusqu'au moment ou un joueur clique droit et ne voit rien.
 ]]
 check("menu radial : pages, contexte et sorties", function()
+	-- N188 : destroy() parkVeil, pas Destroy. Garder destroy()
+	-- en fin (deja). Pas de second new() (volerait le voile).
+	-- Skip reconnect Activated. Skip Minimap N187. Skip
+	-- PlacementPreview N186. Skip WorldRenderer N185. Skip Overlay.
+	-- Skip init.client (radial unique, destroy absent). Recette
+	-- leftover N187, pas merger visual. Distinct leftover N152 flame.
+	-- Distinct leftover N189 VisualDirector effect().
 	local menu = RadialMenu.new(screenGui)
 	assert(not menu:isOpen(), "le menu est ouvert avant qu'on le demande")
 
