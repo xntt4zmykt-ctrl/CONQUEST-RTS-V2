@@ -891,18 +891,18 @@ function GameState.removePlayer(self: GameState, slot: number)
 		return
 	end
 
-	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
-	-- dans la boucle de tick.
-	for index = 0, Config.TILE_COUNT - 1 do
-		if buffer.readu8(self.owner, index) == slot then
-			buffer.writeu8(self.owner, index, NEUTRAL)
-			self.dirty[index] = true
-		end
-	end
-
+	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
 	for index, building in self.buildings do
 		if building.slot == slot then
 			self:destroyBuilding(index)
+		end
+	end
+
+	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
+	-- (deconnexion), jamais dans la boucle de tick.
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(self.owner, index) == slot then
+			self:setOwner(index, NEUTRAL)
 		end
 	end
 
@@ -972,8 +972,9 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 end
 
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
-	local set = self.alliances[a]
-	return set ~= nil and set[b] ~= nil
+	local ab = self.alliances[a]
+	local ba = self.alliances[b]
+	return ab ~= nil and ab[b] ~= nil and ba ~= nil and ba[a] ~= nil
 end
 
 --=============================================================================
