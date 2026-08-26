@@ -96,7 +96,7 @@ function Overlay.clear(self: Overlay)
 	-- N179 : recycle les Model bâtiments live. Plus de Destroy.
 	-- Push buildingFree existant (N178). Skip si Parent nil
 	-- (déjà parké par applyBuildingDelta kind==0). Skip unités
-	-- N177. Skip routes N180. Pas de delay. Recette leftover
+	-- N177. Skip routes N181. Pas de delay. Recette leftover
 	-- N178. Pas merger visual V116. Distinct leftover N152
 	-- flame. Ne pas vider buildingFree. Kind+Level déjà
 	-- attributs. takeBuilding N178 inchangé.
@@ -141,9 +141,10 @@ function Overlay.clear(self: Overlay)
 			end
 		end
 	end
-	-- Leftover N180 : teardown routes encore Destroy.
-	-- N179 parque seulement self.buildings. Ne pas vider
-	-- buildingFree. Skip unités N177. Skip applyBuildingDelta.
+	-- Leftover N181 : teardown routes encore Destroy.
+	-- N180 parque seulement syncFactoryRoutes. Ne pas vider
+	-- routeFree. Skip bâtiments N179. Skip unités N177.
+	-- Skip applyBuildingDelta. Park clear sans take = fuite.
 	for _, route in self.routes do
 		route.model:Destroy()
 	end
@@ -255,6 +256,77 @@ local function routePart(parent: Instance, name: string, size: Vector3, color: C
 	return part
 end
 
+-- N180 : recycle les records voie au relink / kind==0
+-- syncFactoryRoutes. Plus de Destroy. Free-list routeFree
+-- (pas buildingFree / shipFree / ogiveFree). Take
+-- factory+city (clé usine*100000+ville). truckModel.Parent
+-- = nil obligatoire (N162). segRot N115 conservé.
+-- Overlay.clear routes Destroy conservé (leftover N181).
+-- Overlay.clear bâtiments N179 inchangé. applyBuildingDelta
+-- N178 inchangé. Recette leftover N179, pas merger visual
+-- V118. Distinct leftover N152 flame. Pas de delay.
+local function parkRoute(self: Overlay, route: any)
+	local truckModel = route.truckModel
+	if truckModel and truckModel.Parent then
+		truckModel.Parent = nil
+	end
+	route.delivery = nil
+	if not route.model.Parent then
+		return
+	end
+	route.model.Parent = nil
+	local pool = self.routeFree
+	if not pool then
+		pool = {}
+		self.routeFree = pool
+	end
+	pool[#pool + 1] = route
+end
+
+local function takeRoute(self: Overlay, factoryIndex: number, cityIndex: number): any?
+	local free = self.routeFree
+	if not free then
+		return nil
+	end
+	local n = #free
+	if n == 0 then
+		return nil
+	end
+	local last = free[n]
+	if last.factory == factoryIndex and last.city == cityIndex then
+		free[n] = nil
+		return last
+	end
+	for i = n - 1, 1, -1 do
+		local cand = free[i]
+		if cand.factory == factoryIndex and cand.city == cityIndex then
+			free[i] = free[n]
+			free[n] = nil
+			return cand
+		end
+	end
+	return nil
+end
+
+local function poseRoute(self: Overlay, route: any, factoryIndex: number, cityIndex: number, slot: number)
+	local truckModel = route.truckModel
+	if truckModel and truckModel.Parent then
+		truckModel.Parent = nil
+	end
+	route.delivery = nil
+	if route.slot ~= slot then
+		local cab = truckModel and truckModel:FindFirstChild("Cab")
+		if cab and cab:IsA("BasePart") then
+			cab.Color = colorFor(slot)
+		end
+		route.slot = slot
+	end
+	route.factory = factoryIndex
+	route.city = cityIndex
+	route.model.Parent = self.root
+	self.routes[factoryIndex * 100000 + cityIndex] = route
+end
+
 --[[
 	Retrace toutes les routes d'une usine.
 
@@ -266,7 +338,10 @@ end
 function Overlay.syncFactoryRoutes(self: Overlay, factoryIndex: number, links: { number }?, slot: number)
 	for key, route in self.routes do
 		if route.factory == factoryIndex then
-			route.model:Destroy()
+			if typeof(route.city) ~= "number" then
+				route.city = key % 100000
+			end
+			parkRoute(self, route)
 			self.routes[key] = nil
 		end
 	end
@@ -334,6 +409,12 @@ end
 	deja. Une voie ne coute donc pas un octet de reseau.
 ]]
 function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityIndex: number, slot: number)
+	local reused = takeRoute(self, factoryIndex, cityIndex)
+	if reused then
+		poseRoute(self, reused, factoryIndex, cityIndex, slot)
+		return
+	end
+
 	local tiles = RailPath.find(self.terrain, factoryIndex, cityIndex)
 	if not tiles or #tiles < 2 then
 		return
@@ -517,6 +598,7 @@ function Overlay.buildFactoryRoute(self: Overlay, factoryIndex: number, cityInde
 	-- Cle composite : une usine peut avoir plusieurs routes simultanees.
 	self.routes[factoryIndex * 100000 + cityIndex] = {
 		factory = factoryIndex,
+		city = cityIndex,
 		model = model,
 		truck = truck,
 		truckModel = truckModel,
@@ -717,8 +799,9 @@ end
 -- Marker StudsOffsetWorldSpace à réécrire (l'index tuile
 -- change). Recapture same kind+level recolor déjà — aucun
 -- park. syncFactoryRoutes kind==0 AVANT le park. Overlay.clear
--- bâtiments aussi N179. Skip syncFactoryRoutes Destroy
--- (leftover N180). Recette leftover
+-- bâtiments aussi N179. syncFactoryRoutes aussi N180
+-- (routeFree, pas buildingFree). Overlay.clear routes
+-- Destroy leftover N181. Recette leftover
 -- N177, pas merger visual V116 (eaa4). Distinct leftover N152
 -- flame. makeBuilding construction si mismatch. Pas de delay.
 local function parkBuilding(self: Overlay, model: Model)

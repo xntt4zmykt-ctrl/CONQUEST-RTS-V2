@@ -1315,6 +1315,16 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	assert(citySnap ~= nil and citySnapIndex ~= nil, "snapshot ville N178 absent")
 
+	-- N180 : snapshot voie factory→city avant kind=0. Recapture
+	-- slot=2 inchangée. Pas overlay:clear() (Destroy routes
+	-- leftover N181). Recette leftover N179, pas merger visual
+	-- V118. Distinct leftover N152 flame. truckModel.Parent nil
+	-- (arrivée N162 déjà plus haut).
+	local routeSnap = overlay.routes[factoryEntry.index * 100000 + cityIndex]
+	assert(routeSnap ~= nil, "snapshot voie N180 absent")
+	assert(routeSnap.factory == factoryEntry.index, "factory voie N180 faux")
+	assert(routeSnap.city == cityIndex, "city voie N180 faux")
+
 	-- Destruction
 	for _, entry in deltas do
 		entry.kind = 0
@@ -1334,6 +1344,18 @@ check("pose et capture de chaque type de batiment", function()
 	assert(parked, "ville N178 absente de buildingFree")
 	assert(citySnap:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au park")
 	assert(citySnap:GetAttribute("Level") == 3, "Level perdu au park")
+	assert(routeSnap.model.Parent == nil, "voie N180 encore parentee")
+	assert(routeSnap.truckModel.Parent == nil, "camion N180 encore parent")
+	local routePool = overlay.routeFree
+	assert(routePool ~= nil and #routePool >= 1, "voies non poolees")
+	local routeParked = false
+	for _, rec in routePool do
+		if rawequal(rec, routeSnap) then
+			routeParked = true
+			break
+		end
+	end
+	assert(routeParked, "voie N180 absente de routeFree")
 
 	-- Reuse autre index, même kind+level. Name Building{index}
 	-- réécrit. Parent overlay.root. Pas Destroy. Kind+Level match.
@@ -1357,6 +1379,42 @@ check("pose et capture de chaque type de batiment", function()
 		local kind, slot, level = overlay:buildingAt(reuseIndex)
 		assert(kind == Config.BUILDING.CITY and slot == 2 and level == 3, "inspecteur N178 faux")
 	end
+
+	-- N180 : même couple usine+ville reprend le record. Pas Destroy.
+	-- Key factory*100000+city. Parent overlay.root **ou** free-list.
+	-- Pas overlay:clear(). truckModel.Parent nil jusqu'au dispatch.
+	-- animateFrom futur : pas de playConstruction (N166 ringFree
+	-- reste pour « vagues de conquete »).
+	local savedAnimate = overlay.animateFrom
+	overlay.animateFrom = os.clock() + 999
+	overlay:applyBuildingDelta({
+		{ index = factoryEntry.index, kind = Config.BUILDING.FACTORY, slot = 2, level = 1, links = { cityIndex } },
+	})
+	overlay.animateFrom = savedAnimate
+	if routeSnap.model.Parent == nil then
+		local inFree = false
+		for _, rec in routePool do
+			if rawequal(rec, routeSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "voie N180 ni reparentee ni dans routeFree")
+	else
+		assert(rawequal(routeSnap.model.Parent, overlay.root), "voie N180 recree")
+		assert(routeSnap.truckModel.Parent == nil, "camion N180 reparente au reuse")
+		assert(routeSnap.delivery == nil, "livraison fantome au reuse N180")
+		local live = overlay.routes[factoryEntry.index * 100000 + cityIndex]
+		assert(rawequal(live, routeSnap), "voie N180 pas a la cle usine+ville")
+	end
+
+	-- Remettre le slot usine vide : « vagues » N162 pose CITY+FACTORY
+	-- aux mêmes indices catalogue et doit consommer 2 BuildRing.
+	overlay:applyBuildingDelta({
+		{ index = factoryEntry.index, kind = 0, slot = 2, level = 1 },
+	})
+	overlay.animateFrom = savedAnimate
+	assert(next(overlay.routes) == nil, "voie N180 encore live apres park")
 end)
 
 --[[
@@ -2523,6 +2581,8 @@ check("vagues de conquete", function()
 	-- avant clear. Skip unités N177. Skip routes N180. Recette
 	-- leftover N178. Pas merger visual V116. Pas d'assert
 	-- applyBuildingDelta après clear (reuse id=55/44).
+	-- N180 testé dans pose (kind=0 + reuse, pas clear).
+	-- Overlay.clear routes Destroy leftover N181.
 	overlay:applyUnits({
 		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
 	}, {
