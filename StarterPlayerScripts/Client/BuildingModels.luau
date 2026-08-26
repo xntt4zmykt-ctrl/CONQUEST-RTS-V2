@@ -697,7 +697,7 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- Distinct de V60 (cable Y nombres). Distinct de V97
 			-- (mesh carrier, UnitModels — autre fichier). Distinct de
 			-- V99 (beacons rest.Z, elseif suivant). Distinct de
-			-- leftover V100 (trail offset.Z, UnitModels.place).
+			-- V100 (trail offset.Z, UnitModels.place — autre fichier).
 			-- FactoryOutput / SiloWarning n'ont PAS de Position — ne
 			-- pas les toucher. Radar / Flag / Boom (V70) et cable (V60)
 			-- inchanges. RestCFrame a la construction inchange.
@@ -710,7 +710,7 @@ function BuildingModels.animate(model: Model, time: number, _dt: number)
 			-- — ne PAS merger c450. Distinct de V98 (CityWindows
 			-- rest.X, elseif precedent). Distinct de V70 (Radar
 			-- CFrame yaw). Distinct de V60 (cable Y nombres). Distinct
-			-- de leftover V100 (trail offset.Z, UnitModels.place —
+			-- de V100 (trail offset.Z, UnitModels.place —
 			-- autre fichier). FactoryOutput / SiloWarning n'ont PAS
 			-- de Position — ne pas les toucher. Un elseif, trois
 			-- noms. Radar / Flag / Boom (V70) et cable (V60)
