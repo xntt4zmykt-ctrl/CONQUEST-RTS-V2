@@ -93,12 +93,23 @@ end
 
 function Overlay.clear(self: Overlay)
 	table.clear(self.counts)
-	-- Leftover N179 : teardown bâtiments encore Destroy. N178
-	-- parque seulement applyBuildingDelta (buildingFree). Un
-	-- Model Parent nil n'est pas dans self.buildings — clear
-	-- ne le voit pas. Ne pas vider buildingFree ici.
+	-- N179 : recycle les Model bâtiments live. Plus de Destroy.
+	-- Push buildingFree existant (N178). Skip si Parent nil
+	-- (déjà parké par applyBuildingDelta kind==0). Skip unités
+	-- N177. Skip routes N180. Pas de delay. Recette leftover
+	-- N178. Pas merger visual V116. Distinct leftover N152
+	-- flame. Ne pas vider buildingFree. Kind+Level déjà
+	-- attributs. takeBuilding N178 inchangé.
 	for _, part in self.buildings do
-		part:Destroy()
+		if part.Parent then
+			part.Parent = nil
+			local pool = self.buildingFree
+			if not pool then
+				pool = {}
+				self.buildingFree = pool
+			end
+			pool[#pool + 1] = part
+		end
 	end
 	-- N177 : recycle les Model unités live. Plus de Destroy.
 	-- Navire → shipFree (N175 déjà). Ogive → ogiveFree (N176 déjà).
@@ -130,6 +141,9 @@ function Overlay.clear(self: Overlay)
 			end
 		end
 	end
+	-- Leftover N180 : teardown routes encore Destroy.
+	-- N179 parque seulement self.buildings. Ne pas vider
+	-- buildingFree. Skip unités N177. Skip applyBuildingDelta.
 	for _, route in self.routes do
 		route.model:Destroy()
 	end
@@ -702,9 +716,9 @@ end
 -- (silhouette palier N140). Name Building{index} + CFrame +
 -- Marker StudsOffsetWorldSpace à réécrire (l'index tuile
 -- change). Recapture same kind+level recolor déjà — aucun
--- park. syncFactoryRoutes kind==0 AVANT le park. Skip
--- Overlay.clear bâtiments (leftover N179). Skip
--- syncFactoryRoutes Destroy (leftover N179). Recette leftover
+-- park. syncFactoryRoutes kind==0 AVANT le park. Overlay.clear
+-- bâtiments aussi N179. Skip syncFactoryRoutes Destroy
+-- (leftover N180). Recette leftover
 -- N177, pas merger visual V116 (eaa4). Distinct leftover N152
 -- flame. makeBuilding construction si mismatch. Pas de delay.
 local function parkBuilding(self: Overlay, model: Model)

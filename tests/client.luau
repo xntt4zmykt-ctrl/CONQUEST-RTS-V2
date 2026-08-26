@@ -2518,9 +2518,11 @@ check("vagues de conquete", function()
 	-- splash/wake encore parentés et Destroy les bâtiments N162.
 	-- Skip retraite splash N56. Distinct applyUnits despawn N176.
 	-- Pas #ogiveFree == 1. Pas d'assert autre Name. Recette leftover
-	-- N176. Pas merger visual V114. Bâtiments / routes Destroy
-	-- conservés (leftover N179). N178 buildingFree déjà (check
-	-- pose). Pas d'assert pool bâtiments ici.
+	-- N176. Pas merger visual V114. N179 : Overlay.clear
+	-- Parent=nil + buildingFree existant. Snapshot CITY N162
+	-- avant clear. Skip unités N177. Skip routes N180. Recette
+	-- leftover N178. Pas merger visual V116. Pas d'assert
+	-- applyBuildingDelta après clear (reuse id=55/44).
 	overlay:applyUnits({
 		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
 	}, {
@@ -2533,6 +2535,8 @@ check("vagues de conquete", function()
 	local clearOgive = liveOgive.visual
 	assert(clearShip.isMissile ~= true, "ogive spawn N177 dans navire")
 	assert(clearOgive.isMissile == true, "navire spawn N177 dans ogive")
+	local clearCity = overlay.buildings[cityIndex]
+	assert(clearCity ~= nil, "snapshot ville N179 absent")
 	overlay:clear()
 	assert(overlay.units[77] == nil and overlay.units[66] == nil, "units live apres clear")
 	assert(clearShip.model.Parent == nil, "navire clear encore parent")
@@ -2543,6 +2547,18 @@ check("vagues de conquete", function()
 	assert(ogivePoolClear ~= nil, "ogiveFree absent apres clear")
 	assert(next(overlay.buildings) == nil, "batiments survivant clear")
 	assert(next(overlay.routes) == nil, "routes survivant clear")
+	assert(clearCity.Parent == nil, "ville clear encore parentee")
+	local buildingPoolClear = overlay.buildingFree
+	assert(buildingPoolClear ~= nil, "buildingFree absent apres clear")
+	local cityInFree = false
+	for _, model in buildingPoolClear do
+		if rawequal(model, clearCity) then
+			cityInFree = true
+			break
+		end
+	end
+	assert(cityInFree, "ville N179 absente de buildingFree")
+	assert(clearCity:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au clear")
 	overlay:applyUnits({
 		{ id = 55, slot = 1, x = 20, y = 18, troops = 40, kind = 1 },
 	}, {
