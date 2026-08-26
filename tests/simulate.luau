@@ -4461,6 +4461,362 @@ do
 end
 
 do
+	-- N49 : retreatBoats filtre targetSlot (intention de launch), pas
+	-- owner[targetTile]. Flip de cote vers un tiers + retreatAttack(A, B)
+	-- rappelle encore le transport. Recette hardening N28 restant.
+	local state = GameState.new(1049)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(49), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(50), 0)
+	local third = state:addPlayer(nil, "Tiers", Random.new(51), 0)
+	if not invader or not defender or not third then
+		fail("boat retreat flip — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local fromTile: number? = nil
+		local toTile: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+			if fromTile then
+				break
+			end
+		end
+		if not fromTile or not toTile then
+			fail("boat retreat flip — aucune paire cotiere reliee")
+		else
+			state:setOwner(fromTile, invader.slot)
+			state:setOwner(toTile, defender.slot)
+			invader.troops = 8000
+			local okLaunch, launchMsg = Navy.launchInvasion(state, invader.slot, toTile :: number)
+			if not okLaunch then
+				fail(`boat retreat flip — launchInvasion refuse ({launchMsg})`)
+			else
+				local boat = state.boats[#state.boats]
+				if not boat or boat.kind ~= Navy.KIND_TRANSPORT then
+					fail("boat retreat flip — transport absent apres launch")
+				elseif boat.targetSlot ~= defender.slot then
+					fail(`boat retreat flip — targetSlot={boat.targetSlot} attendu {defender.slot}`)
+				else
+					state:setOwner(toTile :: number, third.slot)
+					if not state:retreatAttack(invader.slot, defender.slot) then
+						fail("boat retreat flip — retraite ignoree apres flip de cote")
+					elseif not boat.retreating and boat.troops > 0 then
+						fail("boat retreat flip — transport non rappele (encore en route vers le tiers)")
+					else
+						-- 2e geste : origRetreat dit deja ordonnee, le wrap
+						-- rappelle quand meme un transport tardif.
+						table.insert(state.boats, {
+							id = state:nextId(),
+							slot = invader.slot,
+							kind = Navy.KIND_TRANSPORT,
+							troops = 300,
+							x = boat.x,
+							y = boat.y,
+							path = boat.path,
+							step = 1,
+							targetTile = toTile,
+							targetSlot = defender.slot,
+							homeTile = fromTile,
+							retreating = false,
+						})
+						local late = state.boats[#state.boats]
+						if not state:retreatAttack(invader.slot, defender.slot) then
+							fail("boat retreat flip — 2e geste n'a pas rappele le transport tardif")
+						elseif not late.retreating and late.troops > 0 then
+							fail("boat retreat flip — transport tardif ignore par le wrap")
+						else
+							print("boat retreat flip : targetSlot honore, 2e geste rappele le tardif")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N50 C1 : findSpawn refuse un centre dans le rayon d'une ogive en vol.
+	-- On peint le buffer owner (pas setOwner) pour ne laisser de terre
+	-- neutre que dans le crater : sans C1, findSpawn y reussirait.
+	local state = GameState.new(1050)
+	local occupier = state:addPlayer(nil, "Occupe", Random.new(201), 0)
+	if not occupier then
+		fail("findSpawn splash — spawn impossible")
+	else
+		local stats = Config.NUKE_STATS[Config.NUKE.ATOM]
+		local blast = (stats and stats.radius) or 12
+		local ox, oy = MapGen.fromIndex(occupier.capitalTile or 0)
+		local impact: number? = nil
+		local minDist = (blast + Config.SPAWN_RADIUS + 20) * (blast + Config.SPAWN_RADIUS + 20)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - ox, y - oy
+				if dx * dx + dy * dy > minDist then
+					impact = index
+					break
+				end
+			end
+		end
+		if not impact then
+			fail("findSpawn splash — impact loin du spawn introuvable")
+		else
+			local ix, iy = MapGen.fromIndex(impact)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - ix, y - iy
+					if dx * dx + dy * dy > blast * blast then
+						buffer.writeu8(state.owner, index, occupier.slot)
+					else
+						buffer.writeu8(state.owner, index, 0)
+					end
+				end
+			end
+			table.insert(state.missiles, {
+				id = 50,
+				slot = occupier.slot,
+				kind = Config.NUKE.ATOM,
+				x = ix,
+				y = iy,
+				sx = ix,
+				sy = iy,
+				tx = ix,
+				ty = iy,
+				progress = 0.4,
+				speed = Config.MISSILE_SPEED,
+				radius = blast,
+			})
+			local center = state:findSpawn(Random.new(202))
+			if center then
+				fail("findSpawn splash — spawn dans le crater d'une ogive en vol")
+			else
+				print("findSpawn splash : crater d'ogive refuse")
+			end
+		end
+	end
+end
+
+do
+	-- N50 C2 : findSpawn refuse un disque encore sous fallout.
+	local state = GameState.new(1051)
+	local occupier = state:addPlayer(nil, "Occupe", Random.new(203), 0)
+	if not occupier then
+		fail("findSpawn fallout — spawn impossible")
+	else
+		local hotR = Config.SPAWN_RADIUS + 8
+		local ox, oy = MapGen.fromIndex(occupier.capitalTile or 0)
+		local pocket: number? = nil
+		local minDist = (hotR + 20) * (hotR + 20)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) then
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - ox, y - oy
+				if dx * dx + dy * dy > minDist then
+					pocket = index
+					break
+				end
+			end
+		end
+		if not pocket then
+			fail("findSpawn fallout — poche loin du spawn introuvable")
+		else
+			local px, py = MapGen.fromIndex(pocket)
+			state.fallout = state.fallout or {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					local x, y = MapGen.fromIndex(index)
+					local dx, dy = x - px, y - py
+					if dx * dx + dy * dy > hotR * hotR then
+						buffer.writeu8(state.owner, index, occupier.slot)
+					else
+						buffer.writeu8(state.owner, index, 0)
+						state.fallout[index] = state.tick + 100
+					end
+				end
+			end
+			local center = state:findSpawn(Random.new(204))
+			if center then
+				fail("findSpawn fallout — spawn sur fallout encore chaud")
+			else
+				print("findSpawn fallout : disque chaud refuse")
+			end
+		end
+	end
+end
+
+do
+	-- N51 : PORT d'arrivee detruit au combat SANS removePlayer. Contrat B
+	-- (recette fd1e / PR #37) : Navy.step coule le kind==2 des que
+	-- buildings[targetTile] n'est plus un PORT. Pas d'or. N48 recycle
+	-- reste vert.
+	local state = GameState.new(1052)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(127), 0)
+	local dest = state:addPlayer(nil, "Quai", Random.new(128), 0)
+	if not seller or not dest then
+		fail("trade port-detruit — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade port-detruit — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portB, dest.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, dest.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portB :: number)
+			if not path then
+				fail("trade port-detruit — route maritime introuvable")
+			else
+				local goldSeller, goldDest = seller.gold, dest.gold
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				state:destroyBuilding(portB :: number)
+				if state.players[dest.slot] == nil then
+					fail("trade port-detruit — destroyBuilding a recycle le slot")
+				else
+					state.tick = 1
+					Navy.step(state, Random.new(13))
+					local leftover = 0
+					for _, boat in state.boats do
+						if boat.kind == Navy.KIND_TRADE then
+							leftover += 1
+						end
+					end
+					if leftover ~= 0 then
+						fail(`trade port-detruit — {leftover} convoi(s) encore en mer`)
+					elseif math.abs(seller.gold - goldSeller) > 0.01 then
+						fail(`trade port-detruit — or vendeur {seller.gold} (paiement / malus ?)`)
+					elseif math.abs(dest.gold - goldDest) > 0.01 then
+						fail(`trade port-detruit — or acheteur {dest.gold} (paiement fantome)`)
+					else
+						print("trade port-detruit : convoi coule, pas d'or")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N51 : capture du PORT (transfer) — le batiment existe encore, le
+	-- convoi continue. Distinct de destroy.
+	local state = GameState.new(1053)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(129), 0)
+	local dest = state:addPlayer(nil, "Quai", Random.new(130), 0)
+	local corsair = state:addPlayer(nil, "Corsaire", Random.new(131), 0)
+	if not seller or not dest or not corsair then
+		fail("trade port-capture — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade port-capture — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portB, dest.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, dest.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portB :: number)
+			if not path then
+				fail("trade port-capture — route maritime introuvable")
+			else
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				state:transferBuilding(portB :: number, corsair.slot)
+				state.tick = 1
+				Navy.step(state, Random.new(14))
+				local leftover = 0
+				for _, boat in state.boats do
+					if boat.kind == Navy.KIND_TRADE then
+						leftover += 1
+					end
+				end
+				if leftover ~= 1 then
+					fail(`trade port-capture — convoi coule a la capture ({leftover} restant)`)
+				else
+					print("trade port-capture : PORT transfere, convoi survit")
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(

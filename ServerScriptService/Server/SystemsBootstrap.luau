@@ -100,6 +100,9 @@ function SystemsBootstrap.install()
 
 		local origRetreat = GameState.retreatAttack
 		function GameState.retreatAttack(self, attackerSlot, targetSlot)
+			-- Toujours retreatBoats, meme si origRetreat a dit « deja ordonnee »
+			-- (ISSUE-N49) : un 2e geste rappelle les transports lances apres
+			-- la premiere retraite terrestre.
 			local ok, message = origRetreat(self, attackerSlot, targetSlot)
 			local n = Navy.retreatBoats(self, attackerSlot, targetSlot)
 			if n > 0 then

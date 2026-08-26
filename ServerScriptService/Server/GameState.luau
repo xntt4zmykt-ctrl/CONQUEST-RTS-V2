@@ -102,6 +102,9 @@ export type Boat = {
 	path: { number },
 	step: number,
 	targetTile: number,
+	-- Faction visee au launchInvasion (ISSUE-N49). Distinct de targetTile :
+	-- la cote peut flipper (neutre / tiers) pendant le transit.
+	targetSlot: number?,
 	-- Porte-avions uniquement : base d'attache et angle d'orbite.
 	homeTile: number?,
 	angle: number?,
@@ -828,6 +831,9 @@ end
 function GameState.findSpawn(self: GameState, rng: Random): number?
 	local radius = Config.SPAWN_RADIUS
 	local check = radius + 3
+	local missiles = self.missiles
+	local fallout = self.fallout
+	local now = self.tick
 
 	for _ = 1, 6000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
@@ -836,18 +842,47 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 
 		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
 			local ok = true
-			for dy = -check, check do
-				for dx = -check, check do
-					local nx, ny = x + dx, y + dy
-					if MapGen.inBounds(nx, ny) then
-						if buffer.readu8(self.owner, MapGen.toIndex(nx, ny)) ~= NEUTRAL then
-							ok = false
-							break
+			-- N50 C1 : crater d'une ogive deja en vol (tiers inclus).
+			-- Rayon = missile.radius (ogive MIRV) ou NUKE_STATS[kind].radius.
+			-- Ne pas annuler la frappe (contrat B / N44). MIRV bus radius=0 : ignore.
+			if missiles then
+				for _, missile in missiles do
+					local stats = Config.NUKE_STATS[missile.kind]
+					local blast = missile.radius or (if stats then stats.radius else 8)
+					if typeof(blast) == "number" and blast > 0 then
+						local mx = math.floor(missile.tx)
+						local my = math.floor(missile.ty)
+						if MapGen.inBounds(mx, my) then
+							local dx, dy = x - mx, y - my
+							local limit = blast + radius
+							if dx * dx + dy * dy <= limit * limit then
+								ok = false
+								break
+							end
 						end
 					end
 				end
-				if not ok then
-					break
+			end
+			if ok then
+				for dy = -check, check do
+					for dx = -check, check do
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local idx = MapGen.toIndex(nx, ny)
+							if buffer.readu8(self.owner, idx) ~= NEUTRAL then
+								ok = false
+								break
+							end
+							-- N50 C2 : fallout encore chaud dans le disque de spawn.
+							if fallout and (fallout[idx] or 0) > now then
+								ok = false
+								break
+							end
+						end
+					end
+					if not ok then
+						break
+					end
 				end
 			end
 			if ok then
@@ -979,13 +1014,14 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
-	-- Transports AVANT setOwner (ISSUE-N43, recette 915c) : un bateau n'a pas
-	-- de targetSlot, on lit owner[targetTile]. Apres neutralisation,
-	-- destOwner==NEUTRAL et Navy.step ne retraite pas — resolveLanding pose
-	-- une tete de pont vs cote vide. Restitution 100 %, pas BOAT_RETREAT_LOSS.
-	-- kind 1 = transport. kind 2 = convoi (ISSUE-N48, recette 69b4) : couler,
-	-- pas d'or (le navire n'est pas arrive), pas de malus vendeur. Pas de
-	-- require Navy (cycle Navy -> GameState).
+	-- Transports AVANT setOwner (ISSUE-N43, recette 915c). N49 pose
+	-- targetSlot au launch, mais l'inbound GC lit encore owner[targetTile] :
+	-- un transport peut viser B alors que la cote a deja flippe vers un
+	-- tiers. Apres neutralisation, destOwner==NEUTRAL et Navy.step ne
+	-- retraite pas — resolveLanding pose une tete de pont vs cote vide.
+	-- Restitution 100 %, pas BOAT_RETREAT_LOSS. kind 1 = transport.
+	-- kind 2 = convoi (ISSUE-N48, recette 69b4) : couler, pas d'or, pas de
+	-- malus vendeur. Pas de require Navy (cycle Navy -> GameState).
 	for i = #self.boats, 1, -1 do
 		local boat = self.boats[i]
 		if boat.slot == slot then

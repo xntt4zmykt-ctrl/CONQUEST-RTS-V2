@@ -160,13 +160,26 @@ function Navy.beginRetreat(state: GameState, boat): boolean
 	return true
 end
 
+local function invasionTargetSlot(state: GameState, boat): number
+	-- Intention de launch, pas la souverainete courante (ISSUE-N49).
+	-- Fallback owner[targetTile] : transports deja en mer sans le champ.
+	if typeof(boat.targetSlot) == "number" then
+		return boat.targetSlot
+	end
+	local dest = boat.targetTile
+	if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+		return buffer.readu8(state.owner, dest)
+	end
+	return NEUTRAL
+end
+
 function Navy.retreatBoats(state: GameState, slot: number, targetOwner: number?): number
 	local n = 0
 	for _, boat in state.boats do
 		if boat.kind ~= KIND_TRANSPORT or boat.slot ~= slot or boat.retreating then
 			continue
 		end
-		local destOwner = buffer.readu8(state.owner, boat.targetTile)
+		local destOwner = invasionTargetSlot(state, boat)
 		if targetOwner == nil or destOwner == targetOwner then
 			if Navy.beginRetreat(state, boat) then
 				n += 1
@@ -232,6 +245,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	ps.attacksLaunched += 1
 
 	local ox, oy = MapGen.fromIndex(origin)
+	-- targetSlot = faction visee au launch (ISSUE-N49). Sans ca, retreatBoats
+	-- lit owner[targetTile] et rate une invasion dont la cote a deja flippe.
 	table.insert(state.boats, {
 		id = state:nextId(),
 		slot = slot,
@@ -242,6 +257,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 		path = path,
 		step = 1,
 		targetTile = targetTile,
+		targetSlot = targetOwner,
 		homeTile = origin,
 		retreating = false,
 	})
@@ -629,6 +645,20 @@ function Navy.step(state: GameState, rng: Random)
 		local boat = state.boats[i]
 		if boat.kind == KIND_CARRIER then
 			continue
+		end
+
+		-- N51 : PORT d'arrivee detruit au combat (pas recycle — c'est N48).
+		-- Recette hardening fd1e / PR #37 option B. Sans ca le kind==2 reste
+		-- en mer jusqu'a step > #path, occupe MAX_TRADE_SHIPS, puis
+		-- resolveTrade no-op. Pas d'or, pas de malus vendeur. Capture
+		-- (transfer) : le PORT existe encore, le convoi continue.
+		-- destSlot = N49 transports, pas ici.
+		if boat.kind == KIND_TRADE then
+			local dest = state.buildings[boat.targetTile]
+			if not dest or dest.kind ~= Config.BUILDING.PORT then
+				table.remove(state.boats, i)
+				continue
+			end
 		end
 
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then
