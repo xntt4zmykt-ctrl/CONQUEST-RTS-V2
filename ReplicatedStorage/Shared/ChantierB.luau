@@ -34,6 +34,15 @@ local doomedBuf: { [number]: boolean } = {}
 local collapsingBuf: { CollapseRec } = table.create(8)
 local collapseRecPool: { CollapseRec } = table.create(8)
 ChantierB.doomedBuf = doomedBuf
+-- N73 : liste temporaire du rot cadran (recette visual d3e2 V43).
+-- Array + truncate (recette N63 elimBuf). Distinct de N9 (scan
+-- O(carte) encore) et de N67 (collapsingBuf combat) et de N70
+-- (destroyBuf elimination). Truncate leftover AVANT l'arrachage ;
+-- reset n=0 / truncate a 0 APRES pour qu'un second slot du meme
+-- tick n'arrache pas les tuiles du premier. Pas reentrant.
+-- stepDoomsday unique par tick, mais boucle les slots.
+local stripBuf: { number } = table.create(64)
+ChantierB.stripBuf = stripBuf
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -605,16 +614,21 @@ function ChantierB.install(GameState, Nukes)
 			if quota <= 0 or ps.tiles <= 0 then
 				continue
 			end
-			local ripped, toStrip = 0, {}
+			local ripped, n = 0, 0
 			for index = 0, Config.TILE_COUNT - 1 do
 				if buffer.readu8(self.owner, index) == slot then
-					table.insert(toStrip, index)
-					if #toStrip >= quota * 4 then
+					n += 1
+					stripBuf[n] = index
+					if n >= quota * 4 then
 						break
 					end
 				end
 			end
-			for _, index in toStrip do
+			for i = #stripBuf, n + 1, -1 do
+				stripBuf[i] = nil
+			end
+			for i = 1, n do
+				local index = stripBuf[i]
 				if ripped >= quota then
 					break
 				end
@@ -625,6 +639,9 @@ function ChantierB.install(GameState, Nukes)
 					self:setOwner(index, NEUTRAL)
 					ripped += 1
 				end
+			end
+			for i = n, 1, -1 do
+				stripBuf[i] = nil
 			end
 		end
 	end

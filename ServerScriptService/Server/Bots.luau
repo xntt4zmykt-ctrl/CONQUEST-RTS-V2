@@ -59,6 +59,14 @@ local scratch = table.create(4, 0)
 -- jamais imbriques. Map, pas array : table.clear, pas de truncate.
 -- Slot sans joueur / sans frontiere → vide.
 local contactBuf: { [number]: number } = {}
+-- N72 : pactes recycles pour decideDiplomacy (recette visual d3e2 V42).
+-- Hash, table.clear, pas de truncate. Distinct de contactBuf (voisins
+-- de tuiles) et de viewBuf (HUD). Appels sequentiels par bot
+-- (Bots.step) — un second clear au bot suivant est voulu. Pas
+-- reentrant. Snapshot areAllied, pas la table brute alliances[]
+-- (Diplomacy.step tourne APRES Bots.step). Banc N72 : leftover
+-- apres breakAlliance (un clear oublie ferait une coalition fantome).
+local allyBuf: { [number]: boolean } = {}
 -- N62 : emplacements de pose recycles (recette feel 2f5d/b62d N81).
 -- Unique appelant synchrone (decideBuild). Array + truncate (recette
 -- N49), pas table.clear. Cap DEFENSE = 60. Non reentrant — decideBuild
@@ -467,7 +475,12 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 		end
 	end
 
-	local allies = state.alliances[slot] or {}
+	table.clear(allyBuf)
+	for other in state.players do
+		if other ~= slot and state:areAllied(slot, other) then
+			allyBuf[other] = true
+		end
+	end
 	local leader, coalitionActive = dominantLeader(state)
 	local threatened = coalitionActive and leader ~= slot
 
@@ -492,7 +505,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 
 		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
 			for other, ps2 in state.players do
-				if other ~= slot and other ~= leader and not state:areAllied(slot, other) then
+				if other ~= slot and other ~= leader and not allyBuf[other] then
 					Diplomacy.request(state, slot, other)
 					return
 				end
@@ -506,10 +519,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	--
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
-	for ally in allies do
-		if not state:areAllied(slot, ally) then
-			continue
-		end
+	for ally in allyBuf do
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
 		local protectedByCoalition = threatened and ally ~= leader
@@ -533,9 +543,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	if rng:NextNumber() < 0.3 then
 		local contacts = Bots.neighborFactions(state, slot)
 		for other in contacts do
-			-- areAllied, pas la table brute : un pacte perime reste dans
-			-- alliances[] jusqu'a Diplomacy.step, qui tourne APRES Bots.step.
-			if other ~= NEUTRAL and not state:areAllied(slot, other) and not (threatened and other == leader) then
+			if other ~= NEUTRAL and not allyBuf[other] and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
 					Diplomacy.request(state, slot, other)
 					return
@@ -977,5 +985,8 @@ end
 -- Banc N46 : selection / score sans passer par le rng de decide*.
 Bots.lowestUpgradable = lowestUpgradable
 Bots.blastValue = blastValue
+Bots.decideDiplomacy = decideDiplomacy
+-- Banc N72 : leftover apres breakAlliance. Pas replique.
+Bots.allyBuf = allyBuf
 
 return Bots
