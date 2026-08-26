@@ -1519,19 +1519,24 @@ check("camera strategique", function()
 	camera:setMode("overview")
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
-	-- V68 : lerp focus en nombres. V67 offset (0,0,d) : pitch=0 yaw=0 → Z ==
-	-- focus.Z + distance. Leftover V66 (pose) / V65 (yaw unites) / V64 (segRot)
-	-- restent. Champ focusX/Y/Z leftover V69.
+	-- V69 : champs focusX/Y/Z. V68 lerp nombres. V67 offset (0,0,d) :
+	-- pitch=0 yaw=0 → Z == focusZ + distance. Leftover V66 (pose) /
+	-- V65 (yaw unites) / V64 (segRot) restent. Radar/flag leftover V70.
+	assert(type(camera.focusX) == "number", "focusX absent")
+	assert(type(camera.focusY) == "number", "focusY absent")
+	assert(type(camera.focusZ) == "number", "focusZ absent")
+	local focusAtInstant = camera.focus
 	camera.pitch = 0
 	camera.targetPitch = 0
 	camera.yaw = 0
 	camera.targetYaw = 0
 	camera:step(1 / 60)
+	assert(rawequal(camera.focus, focusAtInstant), "focus Vector3 reecrit 60 Hz")
 	local pose = camera.camera.CFrame
 	assert(type(pose.X) == "number", "camera CFrame absent")
-	assert(pose.X == camera.focus.X, "oeil X hors focus")
-	assert(pose.Y == camera.focus.Y, "oeil Y hors focus")
-	assert(pose.Z == camera.focus.Z + camera.distance, "oeil Z hors offset")
+	assert(pose.X == camera.focusX, "oeil X hors focus")
+	assert(pose.Y == camera.focusY, "oeil Y hors focus")
+	assert(pose.Z == camera.focusZ + camera.distance, "oeil Z hors offset")
 	camera.pitch = math.rad(58)
 	camera.targetPitch = math.rad(58)
 	camera:step(1 / 60)
@@ -1540,28 +1545,33 @@ check("camera strategique", function()
 	local ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
 	local oy = d * math.sin(camera.pitch)
 	local oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
-	assert(pose.X == camera.focus.X + ox, "oeil X hors formule")
-	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors formule")
-	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors formule")
-	-- V68 : un frame rapproche sans sauter. Pose utilise fx/fy/fz.
-	local beforeX = camera.focus.X
-	local beforeY = camera.focus.Y
-	local beforeZ = camera.focus.Z
-	camera.targetFocus = camera.focus + Vector3.new(40, 0, 0)
+	assert(pose.X == camera.focusX + ox, "oeil X hors formule")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors formule")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors formule")
+	-- V69 : un frame rapproche sans sauter. Pose utilise focusX/Y/Z.
+	-- self.focus reste le Vector3 du geste (pas reecrit).
+	local beforeX = camera.focusX
+	local beforeY = camera.focusY
+	local beforeZ = camera.focusZ
+	local staleFocus = camera.focus
+	camera.targetFocus = Vector3.new(beforeX + 40, beforeY, beforeZ)
 	camera:step(1 / 60)
-	assert(camera.focus.X > beforeX, "lerp focus n'avance pas")
-	assert(camera.focus.X < camera.targetFocus.X, "lerp focus saute la cible")
-	assert(camera.focus.Y == beforeY, "lerp focus mute Y")
-	assert(camera.focus.Z == beforeZ, "lerp focus mute Z")
+	assert(rawequal(camera.focus, staleFocus), "lerp reecrit focus Vector3")
+	assert(camera.focusX > beforeX, "lerp focus n'avance pas")
+	assert(camera.focusX < camera.targetFocus.X, "lerp focus saute la cible")
+	assert(camera.focusY == beforeY, "lerp focus mute Y")
+	assert(camera.focusZ == beforeZ, "lerp focus mute Z")
 	pose = camera.camera.CFrame
 	d = camera.distance
 	ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
 	oy = d * math.sin(camera.pitch)
 	oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
-	assert(pose.X == camera.focus.X + ox, "oeil X hors lerp")
-	assert(pose.Y == camera.focus.Y + oy, "oeil Y hors lerp")
-	assert(pose.Z == camera.focus.Z + oz, "oeil Z hors lerp")
-	camera.focus = camera.targetFocus
+	assert(pose.X == camera.focusX + ox, "oeil X hors lerp")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors lerp")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors lerp")
+	camera.focusX = camera.targetFocus.X
+	camera.focusY = camera.targetFocus.Y
+	camera.focusZ = camera.targetFocus.Z
 	camera:punch(1)
 	assert(camera.shake > 0, "punch n'arme pas le shake")
 	camera:step(1 / 60)
@@ -1669,7 +1679,20 @@ check("minimap", function()
 		buffer.writeu8(delta, 4, 3)
 		minimap:applyDelta(delta)
 		minimap:flush()
-		minimap:setFocus(Vector3.new(0, 0, 0))
+		-- V69 : (x, y, z) nombres. Origine monde → centre de la carte.
+		minimap:setFocus(0, 0, 0)
+		assert(minimap.marker.Position.X.Scale == 0.5, "marqueur X hors centre")
+		assert(minimap.marker.Position.Y.Scale == 0.5, "marqueur Y hors centre")
+		local camera = WorldCamera.new()
+		camera:setMode("overview")
+		camera:setDistance(300, true)
+		camera:focusTile(5000, true)
+		camera:step(1 / 60)
+		minimap:setFocus(camera.focusX, camera.focusY, camera.focusZ)
+		local u = math.clamp((camera.focusX + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
+		local v = math.clamp((camera.focusZ + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
+		assert(minimap.marker.Position.X.Scale == u, "marqueur ne suit pas focusX")
+		assert(minimap.marker.Position.Y.Scale == v, "marqueur ne suit pas focusZ")
 		minimap:destroy()
 	end
 end)
