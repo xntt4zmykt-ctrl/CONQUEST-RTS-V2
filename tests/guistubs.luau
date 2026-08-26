@@ -20,7 +20,23 @@ local function makeSignal()
 	local signal = { handlers = {} }
 	function signal:Connect(fn)
 		table.insert(self.handlers, fn)
-		return { Disconnect = function() end, Connected = true }
+		local conn = { Connected = true }
+		-- V128 : Disconnect doit vraiment retirer le handler. Les
+		-- boutons QuickChat recycles reconnectent Activated ; un
+		-- no-op laissait l'ancien envoi partir en double au Fire.
+		function conn:Disconnect()
+			if not self.Connected then
+				return
+			end
+			self.Connected = false
+			for i, handler in signal.handlers do
+				if handler == fn then
+					table.remove(signal.handlers, i)
+					break
+				end
+			end
+		end
+		return conn
 	end
 	function signal:Once(fn)
 		return self:Connect(fn)

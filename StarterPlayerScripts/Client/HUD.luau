@@ -1238,6 +1238,7 @@ function HUD.notify(self: HUD, text: string, kind: string)
 	-- Distinct de V125 (selectTile SelectedTerritory, Effects).
 	-- Distinct de V126 (clearSelection Parent=nil, Effects).
 	-- Distinct de V127 (clearActionPreview Parent=nil, Effects).
+	-- Distinct de V128 (refreshChatSheet chatFree, meme fichier).
 	-- Pas reentrant. Evenement fil, pas 60 Hz. Ne pas nil les slots
 	-- du pool. Ne pas geler Size flame (V74).
 	local feedFree = self.feedFree
@@ -1746,8 +1747,8 @@ function HUD.buildChatSheet(self: HUD)
 		self.chatTabs[category.id] = tab
 	end
 
-	-- Zone des messages, a droite : reconstruite a chaque changement
-	-- d'onglet, elle est trop simple pour meriter un recyclage.
+	-- Zone des messages, a droite. V128 recycle les boutons
+	-- (chatFree, pas feedFree) et garde le UIGridLayout.
 	local body = Instance.new("Frame")
 	body.BackgroundTransparency = 1
 	body.Position = UDim2.fromOffset(S.md + 94, 26)
@@ -1762,28 +1763,86 @@ function HUD.buildChatSheet(self: HUD)
 end
 
 function HUD.refreshChatSheet(self: HUD)
-	-- V127 : Effects clearActionPreview Parent=nil deja.
-	-- Leftover suivant = feel N170 (chatFree, pas feedFree).
-	-- Destroy enfants chatBody conserve.
-	for _, child in self.chatBody:GetChildren() do
-		child:Destroy()
+	-- V128 : Parent = nil + chatFree (pas feedFree). Recette analogique
+	-- V127 / feel N170 inline — ne PAS merger a4af / e839 / ee71.
+	-- Garder UIGridLayout (ne pas Destroy le layout). Disconnect
+	-- Activated avant park. Take n'importe quel TextButton. Parent =
+	-- self.chatBody au reuse. Name / Text / TextColor3 reecrits.
+	-- Lazy-init chatFree ici (pas HUD.new). Distinct de V124
+	-- (feedFree fil). Distinct de V127 (ActionPreview park, Effects).
+	-- Distinct de V126 (park select). Distinct de V123 (ringFree).
+	-- Dismiss delay Destroy conserve (V124). Pas de skip N154.
+	-- Pas reentrant. Geste catalogue, pas 60 Hz. Ne pas geler Size
+	-- flame (V74). Leftover suivant = Overlay applyBuildingDelta
+	-- Destroy modeles (V129).
+	local chatFree = self.chatFree
+	if not chatFree then
+		chatFree = {}
+		self.chatFree = chatFree
 	end
+	local chatConns = self.chatConns
+	if not chatConns then
+		chatConns = {}
+		self.chatConns = chatConns
+	end
+
+	for _, child in self.chatBody:GetChildren() do
+		if child:IsA("UIGridLayout") then
+			continue
+		end
+		local conn = chatConns[child]
+		if conn then
+			conn:Disconnect()
+			chatConns[child] = nil
+		end
+		child.Parent = nil
+		chatFree[#chatFree + 1] = child
+	end
+
 	for id, tab in self.chatTabs do
 		setSelected(tab, id == self.chatCategory)
 	end
 
-	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.new(0.5, -3, 0, 24)
-	grid.CellPadding = UDim2.fromOffset(6, 6)
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.Parent = self.chatBody
+	local grid = self.chatGrid
+	if not grid or not grid.Parent then
+		grid = Instance.new("UIGridLayout")
+		grid.CellSize = UDim2.new(0.5, -3, 0, 24)
+		grid.CellPadding = UDim2.fromOffset(6, 6)
+		grid.SortOrder = Enum.SortOrder.LayoutOrder
+		grid.Parent = self.chatBody
+		self.chatGrid = grid
+	end
+
+	local function takeChatButton(text: string): TextButton
+		local n = #chatFree
+		local b: TextButton
+		if n > 0 then
+			b = chatFree[n] :: TextButton
+			chatFree[n] = nil
+			b.Name = "ChatButton"
+			b.Text = text
+			b.TextColor3 = C.textMuted
+			b.TextXAlignment = Enum.TextXAlignment.Center
+			b.BackgroundColor3 = C.surfaceRaised
+			b:SetAttribute("Selected", false)
+			b.Parent = self.chatBody
+		else
+			b = button(self.chatBody, text, T.tiny)
+			b.Name = "ChatButton"
+		end
+		return b
+	end
+
+	local function bindAction(b: TextButton, fn: () -> ())
+		chatConns[b] = b.Activated:Connect(fn)
+	end
 
 	-- Deuxieme temps : la designation de la cible du message choisi.
 	local pending = self.chatPending
 	if pending then
-		local back = button(self.chatBody, "\u{2190} Retour", T.tiny)
+		local back = takeChatButton("\u{2190} Retour")
 		back.LayoutOrder = 0
-		back.Activated:Connect(function()
+		bindAction(back, function()
 			self.chatPending = nil
 			self:refreshChatSheet()
 		end)
@@ -1792,10 +1851,10 @@ function HUD.refreshChatSheet(self: HUD)
 		for slot, entry in self.roster do
 			if slot ~= self.mySlot then
 				order += 1
-				local b = button(self.chatBody, entry.name, T.tiny)
+				local b = takeChatButton(entry.name)
 				b.LayoutOrder = order
 				b.TextColor3 = Theme.factionColor(slot)
-				b.Activated:Connect(function()
+				bindAction(b, function()
 					self:sendQuickChat(pending, slot)
 				end)
 			end
@@ -1810,10 +1869,10 @@ function HUD.refreshChatSheet(self: HUD)
 			-- Le trou de la cible se lit "..." dans le catalogue : le joueur
 			-- sait qu'il devra la designer au clic.
 			local label = string.gsub(entry.text, "{target}", "...")
-			local b = button(self.chatBody, label, T.tiny)
+			local b = takeChatButton(label)
 			b.LayoutOrder = order
 			b.TextXAlignment = Enum.TextXAlignment.Left
-			b.Activated:Connect(function()
+			bindAction(b, function()
 				if entry.needsTarget then
 					self.chatPending = entry
 					self:refreshChatSheet()

@@ -67,8 +67,9 @@ function Effects.new(parent: Instance, terrain: buffer): Effects
 	-- (feel N168 inline, pas merger a72c). SelectionRing meme
 	-- traitement. V127 : clearActionPreview Parent = nil,
 	-- garder self.actionPreview (feel N169 inline, pas merger
-	-- e839 / a72c / 2188). HUD refreshChatSheet Destroy
-	-- conserve (feel N170 = leftover suivant).
+	-- e839 / a72c / 2188). V128 : HUD refreshChatSheet
+	-- chatFree (feel N170, autre fichier). Leftover suivant =
+	-- Overlay applyBuildingDelta Destroy modeles (V129).
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 
 	-- V120 : free-list floatingText PAR Effects (pas goldFree Overlay /
@@ -229,7 +230,8 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	-- (feedFree HUD). Pas reentrant. Chemin hover 60 Hz
 	-- (raycast). Ne pas porter Size / Transparency / Y feel.
 	-- Ne pas geler Size flame (V74). HUD refreshChatSheet
-	-- Destroy conserve (feel N170 = leftover suivant).
+	-- chatFree (V128, autre fichier). Leftover suivant =
+	-- Overlay applyBuildingDelta Destroy modeles (V129).
 	local marker = self.actionPreview
 	if not marker then
 		marker = Instance.new("Part")
@@ -260,8 +262,9 @@ function Effects.clearActionPreview(self: Effects)
 	-- analogique V126 / feel N169 inline — ne PAS merger e839
 	-- / a72c / 2188. Pas Destroy, pas self.actionPreview = nil.
 	-- Pas de skip N154 (feel-only). Pas de pool
-	-- actionPreviewFree. HUD refreshChatSheet Destroy conserve
-	-- (feel N170 = leftover suivant). Distinct de V126
+	-- actionPreviewFree. HUD refreshChatSheet chatFree (V128,
+	-- autre fichier). Leftover suivant = Overlay
+	-- applyBuildingDelta Destroy modeles (V129). Distinct de V126
 	-- (clearSelection park). Distinct de V125 (reuse pendant
 	-- la vie). Pas reentrant. Chemin hover 60 Hz. Ne pas porter
 	-- Size / Transparency / Y feel. Ne pas geler Size flame

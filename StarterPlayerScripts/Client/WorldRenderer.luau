@@ -69,7 +69,9 @@ local otherBuf: { number } = table.create(16)
 -- Effects conquestPulse recyclee (V122). BuildingModels BuildRing
 -- recyclee (V123). HUD notify recyclee (V124). Effects selectTile
 -- recyclee (V125). Effects clearSelection parque (V126).
--- Effects clearActionPreview parque (V127).
+-- Effects clearActionPreview parque (V127). HUD refreshChatSheet
+-- recyclee (V128). Leftover suivant = Overlay applyBuildingDelta
+-- Destroy modeles (V129).
 local DIRTY_COMPACT_HEAD = 32
 
 local WorldRenderer = {}
