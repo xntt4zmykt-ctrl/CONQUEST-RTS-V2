@@ -116,13 +116,25 @@ end
 --=============================================================================
 
 local function makeService(name)
-	return {
+	local service = {
 		Name = name,
 		GetPlayers = function()
 			return {}
 		end,
 		BindToClose = function() end,
 	}
+	-- RunService est interroge au chargement de Remotes (IsServer) : sans ces
+	-- methodes, tout module qui tire Remotes fait planter le banc serveur.
+	if name == "RunService" then
+		service.IsServer = function()
+			return true
+		end
+		service.IsClient = function()
+			return false
+		end
+		service.Heartbeat = { Connect = function() end }
+	end
+	return service
 end
 
 local services = {}
@@ -230,13 +242,27 @@ local INSTANCE_CLASS_PARENTS = {
 local InstanceMT = {}
 
 local function newInstance(className)
-	return setmetatable({
+	local inst = setmetatable({
 		ClassName = className,
 		Name = className,
 		_children = {},
 		_attributes = {},
 		_parent = nil,
 	}, InstanceMT)
+	-- RemoteEvent : OnServerEvent.Connect est appele au bind des intentions.
+	if className == "RemoteEvent" then
+		inst.OnServerEvent = {
+			Connect = function(_self, _fn)
+				return { Disconnect = function() end }
+			end,
+		}
+		inst.OnClientEvent = {
+			Connect = function(_self, _fn)
+				return { Disconnect = function() end }
+			end,
+		}
+	end
+	return inst
 end
 
 InstanceMT.__index = function(t, key)
@@ -334,11 +360,29 @@ InstanceMT.methods = {
 
 	FireClient = function() end,
 	FireAllClients = function() end,
+	Connect = function(_self, _fn)
+		return { Disconnect = function() end }
+	end,
 }
 
 Instance = {}
 Instance.new = function(className)
 	return newInstance(className)
+end
+
+-- Workspace serveur : WorldBuilder.build (N191) relit FindFirstChild /
+-- GetChildren / Parent. Terrain:Clear no-op (SmoothTerrain d'une
+-- partie precedente). Distinct leftover N192 clearDefaultScene
+-- (Baseplate Destroy). Pas de GuiObject.
+do
+	local workspaceInst = newInstance("Workspace")
+	workspaceInst.Name = "Workspace"
+	local terrainInst = newInstance("Terrain")
+	terrainInst.Name = "Terrain"
+	terrainInst.Clear = function() end
+	terrainInst.Parent = workspaceInst
+	workspaceInst.Terrain = terrainInst
+	services["Workspace"] = workspaceInst
 end
 
 -- Expose au banc d'essai de quoi fabriquer un faux Player : c'est le seul
