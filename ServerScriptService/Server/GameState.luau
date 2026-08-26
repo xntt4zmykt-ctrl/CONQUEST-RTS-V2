@@ -76,6 +76,8 @@ export type PlayerState = {
 	attacksLaunched: number,
 	-- Tick de pose de capitale (immunite nucleaire OF).
 	spawnTick: number?,
+	-- Centre du disque de spawn (min-distance findSpawn). Nil si awaitingSpawn.
+	spawnCenter: number?,
 }
 
 export type Attack = {
@@ -90,6 +92,9 @@ export type Attack = {
 	queued: { [number]: true },
 	-- Tick a partir duquel le front se degage, si la retraite a ete ordonnee.
 	retreatAt: number?,
+	-- Tete de pont navale : ne se fusionne pas avec un front terre.
+	isBeachhead: boolean?,
+	sourceTile: number?,
 }
 
 export type Boat = {
@@ -169,6 +174,10 @@ export type GameState = typeof(setmetatable(
 		quickChatLast: { [number]: string },
 		dirty: { [number]: true },
 		buildingDirty: { [number]: true },
+		-- Index posted DEFENSE par camp (combat installé, O(bunkers) pas O(hash)).
+		bunkersBySlot: { [number]: { [number]: true } },
+		-- Index SAM par camp (tryIntercept / samsOf, O(SAM) pas O(hash)).
+		samsBySlot: { [number]: { [number]: true } },
 		freeSlots: { number },
 		nextEntityId: number,
 		capitalEvents: number,
@@ -193,6 +202,8 @@ local borderScratch = table.create(4, 0)
 -- Troisieme tampon : frontPriority est appele depuis la boucle de stepAttacks,
 -- qui itere deja sur `scratch`. Le partager ecraserait la liste en cours.
 local priorityScratch = table.create(4, 0)
+-- Recycle du packing owner-delta : le buffer reste exact (format [u32][u8]).
+local deltaIndices: { number } = {}
 
 --=============================================================================
 -- Construction
@@ -228,6 +239,8 @@ function GameState.new(seed: number): GameState
 	self.quickChatLast = {}
 	self.dirty = {}
 	self.buildingDirty = {}
+	self.bunkersBySlot = {}
+	self.samsBySlot = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
 	self.sounds = {}
@@ -407,7 +420,9 @@ end
 -- Batiments
 --=============================================================================
 
--- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+-- Corps historique. Apres SystemsBootstrap.install(), le combat lit
+-- `bunkersBySlot` (posted booléen) et ignore ce buffer. Conservé pour
+-- `tileCost` hors install. Ne plus appeler depuis place/destroy.
 function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
 	local cx, cy = MapGen.fromIndex(index)
 	local radius = Config.DEFENSE_RADIUS
@@ -690,6 +705,22 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+local function setSlotIndex(map: { [number]: { [number]: true } }, slot: number, index: number, on: boolean)
+	if on then
+		local set = map[slot]
+		if not set then
+			set = {}
+			map[slot] = set
+		end
+		set[index] = true
+	else
+		local set = map[slot]
+		if set then
+			set[index] = nil
+		end
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -699,7 +730,10 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self:countBuilding(slot, kind, 1, 1)
 
 	if kind == B.DEFENSE then
-		self:applyDefenseAura(index, 1)
+		setSlotIndex(self.bunkersBySlot, slot, index, true)
+	end
+	if kind == B.SAM then
+		setSlotIndex(self.samsBySlot, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -754,6 +788,14 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	if building.kind == B.NAVAL_BASE then
 		self._carriersDirty = true
 	end
+	if building.kind == B.DEFENSE then
+		setSlotIndex(self.bunkersBySlot, previousSlot, index, false)
+		setSlotIndex(self.bunkersBySlot, newSlot, index, true)
+	end
+	if building.kind == B.SAM then
+		setSlotIndex(self.samsBySlot, previousSlot, index, false)
+		setSlotIndex(self.samsBySlot, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -768,7 +810,10 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousSlot = building.slot
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
-		self:applyDefenseAura(index, -1)
+		setSlotIndex(self.bunkersBySlot, previousSlot, index, false)
+	end
+	if building.kind == B.SAM then
+		setSlotIndex(self.samsBySlot, previousSlot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -826,7 +871,7 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 			end
 			if ok then
 				for _, ps in self.players do
-					local other = ps.spawnCenter
+					local other = ps.spawnCenter or ps.capitalTile
 					if other then
 						local ox, oy = MapGen.fromIndex(other)
 						local dx, dy = ox - x, oy - y
@@ -925,6 +970,7 @@ function GameState.addPlayer(
 	-- La capitale est posee par le moteur, jamais achetee.
 	self:placeBuilding(center, B.CAPITAL, slot)
 	state.capitalTile = center
+	state.spawnCenter = center
 	state.spawnTick = self.tick
 
 	return state
@@ -1058,6 +1104,14 @@ function GameState.removePlayer(self: GameState, slot: number)
 				self.targetMarks[marker] = nil
 			end
 		end
+	end
+	self.quickChatSent[slot] = nil
+	self.quickChatLast[slot] = nil
+	if self.bunkersBySlot then
+		self.bunkersBySlot[slot] = nil
+	end
+	if self.samsBySlot then
+		self.samsBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil
@@ -1297,9 +1351,13 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 		return false, "Pas assez de troupes engagees."
 	end
 
-	-- Une seule offensive par couple attaquant/cible : relancer la renforce.
+	-- Une seule offensive terrestre par couple : relancer la renforce.
+	-- isBeachhead est un autre Attack (BoatFront le parque avant cet appel) ;
+	-- on le saute ici aussi si le wrap n'est pas installe.
+	-- areAllied / combatUnlocked sont deja verifies plus haut : pas de nouveau
+	-- commit si le pacte a ete signe ou si la prep n'est pas levee.
 	for _, atk in self.attacks do
-		if atk.attacker == attackerSlot and atk.target == targetSlot then
+		if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 			attacker.troops -= committed
 			atk.troops += committed
 			return true, `Front renforce : {committed} troupes supplementaires.`
@@ -1524,6 +1582,9 @@ function GameState.collapseFaction(self: GameState, victimSlot: number, captorSl
 	end
 end
 
+-- Corps historique. Apres SystemsBootstrap.install(), ChantierB remplace
+-- cette fonction ; ATTACK_SPEND_RATE / MAX_TILES_PER_TICK / defense buffer
+-- n'agissent plus sur le combat vivant. Debit = ChantierB.CAPTURE_GUARD.
 function GameState.stepAttacks(self: GameState)
 	local collapsing: { { victim: number, captor: number } } = {}
 
@@ -1698,19 +1759,21 @@ end
 	[u32 index][u8 slot] repete. On n'envoie jamais la carte entiere.
 ]]
 function GameState.flushOwnerDelta(self: GameState): buffer?
-	local indices = {}
+	table.clear(deltaIndices)
 	for index in self.dirty do
-		table.insert(indices, index)
+		table.insert(deltaIndices, index)
 	end
 	table.clear(self.dirty)
 
-	local count = #indices
+	local count = #deltaIndices
 	if count == 0 then
 		return nil
 	end
 
+	-- Taille exacte obligatoire : un tampon trop grand serait lu comme des
+	-- tuiles fantomes (pas d'en-tete de compteur sur le fil).
 	local buf = buffer.create(count * 5)
-	for i, index in indices do
+	for i, index in deltaIndices do
 		local offset = (i - 1) * 5
 		buffer.writeu32(buf, offset, index)
 		buffer.writeu8(buf, offset + 4, buffer.readu8(self.owner, index))

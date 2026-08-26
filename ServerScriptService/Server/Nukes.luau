@@ -142,11 +142,18 @@ end
 	Interception SAM — port OF SAMLauncherExecution.
 
 	Un seul SAM engage chaque missile (: exclusivite de cible).
-	Choix = plus proche batterie prete dans SAM_RANGE (defaultSamRange 70).
+	Choix = plus proche batterie prete dans la portee OF (samRange ≈ 70 au lvl 1).
+	Index `samsBySlot` : O(SAM) par missile, pas O(hash bâtiments).
 	Cooldown apres tir ; succes selon SAM_INTERCEPT_CHANCE.
 ]]
-local function samRange(level: number): number
+-- Portee OF : 150 - 480/(level+5) ≈ 70 au niveau 1, ~90 au palier 3.
+-- Exporté pour que les bots previewent la même couverture que tryIntercept.
+function Nukes.samRange(level: number): number
 	return 150 - 480 / (level + 5)
+end
+
+local function samRange(level: number): number
+	return Nukes.samRange(level)
 end
 
 local function tryIntercept(state: GameState, missile: GameState.Missile, rng: Random): boolean
@@ -157,33 +164,62 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 	local best = nil
 	local bestDist = math.huge
 	local bestRange = 0
+	local samKind = Config.BUILDING.SAM
+	local samsBySlot = state.samsBySlot
 
-	for index, building in state.buildings do
-		if building.kind ~= Config.BUILDING.SAM then
-			continue
+	if samsBySlot then
+		for slot, sams in samsBySlot do
+			if slot == missile.slot or state:areAllied(slot, missile.slot) then
+				continue
+			end
+			for index in sams do
+				local building = state.buildings[index]
+				if not building or building.kind ~= samKind or (building.cooldown or 0) > 0 then
+					continue
+				end
+				local range = samRange(building.level or 1)
+				local range2 = range * range
+				local x, y = MapGen.fromIndex(index)
+				local dx, dy = x - missile.x, y - missile.y
+				local d2 = dx * dx + dy * dy
+				if d2 > range2 then
+					continue
+				end
+				if d2 < bestDist then
+					best = building
+					bestDist = d2
+					bestRange = range
+				end
+			end
 		end
-		if building.slot == missile.slot then
-			continue
-		end
-		if state:areAllied(building.slot, missile.slot) then
-			continue
-		end
-		if building.cooldown > 0 then
-			continue
-		end
+	else
+		for index, building in state.buildings do
+			if building.kind ~= samKind then
+				continue
+			end
+			if building.slot == missile.slot then
+				continue
+			end
+			if state:areAllied(building.slot, missile.slot) then
+				continue
+			end
+			if building.cooldown > 0 then
+				continue
+			end
 
-		local range = samRange(building.level or 1)
-		local range2 = range * range
-		local x, y = MapGen.fromIndex(index)
-		local dx, dy = x - missile.x, y - missile.y
-		local d2 = dx * dx + dy * dy
-		if d2 > range2 then
-			continue
-		end
-		if d2 < bestDist then
-			best = building
-			bestDist = d2
-			bestRange = range
+			local range = samRange(building.level or 1)
+			local range2 = range * range
+			local x, y = MapGen.fromIndex(index)
+			local dx, dy = x - missile.x, y - missile.y
+			local d2 = dx * dx + dy * dy
+			if d2 > range2 then
+				continue
+			end
+			if d2 < bestDist then
+				best = building
+				bestDist = d2
+				bestRange = range
+			end
 		end
 	end
 

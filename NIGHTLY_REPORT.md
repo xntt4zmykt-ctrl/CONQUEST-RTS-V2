@@ -1,11 +1,11 @@
-# Nightly report — passe 16 (revue PR #44)
+# Nightly report — passe 18 (revue PR #50)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-420a` (PR #44, `7d98ea9`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-ec5b`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-5c92` (PR #50, `4ff5fbf`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-121e`  
 **Date :** 2026-08-26  
-**Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**.
+**Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #44 (autorité + recycle inbound sur le HEAD visuel). Correctifs sûrs portés ici, sans merger feel `df65` ni hardening `9f25`.
+Revue de PR #50 (bunkersBySlot, recycle slot, autorité — HEAD visuel). Correctifs sûrs, sans merger feel `e735`/`5c74` ni hardening `e91b`/`f8c8`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,67 +15,47 @@ Revue de PR #44 (autorité + recycle inbound sur le HEAD visuel). Correctifs sû
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `justClaimed` ne avale plus le premier Attack réel | `SystemsBootstrap.luau`, `IntentValidator.luau` | V12 |
-| `areAllied` : expiry non-nombre → `false` (`true` legacy vivant) | `GameState.luau` | — |
-| `viewFor` s’aligne sur `areAllied` (plus d’allié fantôme unilatéral) | `Diplomacy.luau` | — |
-| Missiles **outbound** purgés dans `removePlayer` | `GameState.luau` | — |
-| `stripTerritory` : `tiles = 0` + skip élimination / éco si `awaitingSpawn` | `ChantierB.luau`, `GameState.luau` | — |
-| `setOwner` refuse un slot sans `players[slot]` | `GameState.luau` | — |
-| `±inf` refusé (sequence, ratio, cibles entières) | `IntentValidator.luau`, `init.server.luau` | — |
-| JoinRequest `ended` : notify client | `init.server.luau` | — |
-| Lobby / ended : replication **1 Hz** (playing 10 Hz inchangé) | `init.server.luau` | V9 |
-| Persistence : `release` / `BindToClose` n’écrivent plus si déjà flush | `Persistence.luau` | V9 partiel |
-| `findSeaPath` poolé (`visitBuf` / `parent` / `queue`) | `Navy.luau` | V2 |
-| `tryAnnex` poolé (`visited` / `queue` / `pocket`) | `ChantierB.luau` | V5 |
-| `syncCarriers` dirty NAVAL_BASE + `carrierSeen` recyclé | `Navy.luau`, `GameState.luau` | V3 |
-| Own-tile / allié : restitution **100 %** (plus de malus 25 % via `beginRetreat`) | `Navy.luau` | — |
-| `targetOwner` au launch + `retreatBoats` par intention + auto-retraite si flip | `Navy.luau` | V6 / N49+N53 |
-| `spawnTradeShips` : `math.clamp` crashait si `< 4` ports étrangers | `Navy.luau` | bug net (crash tick) |
-| Embargo terrestre = maritime only (doc) | `Trade.luau` | V10 |
-| Clés Config mortes commentées | `Config.luau`, `ChantierB.luau` | V12 |
-| Cap 8 pulses de conquête live | `Effects.luau` | V11 partiel |
-| Factory : `tradeDeliveries` / `tradeCooldowns` au destroy | `GameState.luau` | — |
+| Plus d’écritures `applyDefenseAura` à la pose/capture/destroy | `GameState.luau` | V4b Option A |
+| Capture bunker : `bunkersBySlot` suit le camp (index helper partagé) | `GameState.luau` | V4 suite |
+| Debit vivant nommé `ChantierB.CAPTURE_GUARD = 80` ; `MAX_TILES_PER_TICK` documenté mort | `ChantierB.luau`, `Config.luau`, `TickMetrics.luau` | V17 |
+| `samsBySlot` : pose / capture / destroy / `removePlayer` | `GameState.luau` | V16 N57 |
+| `Buildings.samsOf` lit l’index | `Buildings.luau` | V16 N57 |
+| `tryIntercept` itère `samsBySlot` (O(SAM), plus O(hash)) | `Nukes.luau` | V16 N57 |
+| Smoke / `PointLight.Shadows` absents si qualité < 4 ; pcall défaut = garder | `BuildingModels.luau` | V11b |
 
-V8 (convoi vs PORT détruit) était **déjà** correct : `resolveTrade` no-op, le bateau est retiré, pas d’or. Capture de PORT = continue.
+La fonction `applyDefenseAura` est **conservée** pour `tileCost` hors install. Le combat vivant ne la lit pas.
 
 ---
 
-## Constatations PR #44 (à ne pas casser)
+## Constatations PR #50 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
-- **Combat vivant :** `ChantierB.stepAttacks`. `GameState.stepAttacks` est mort après install.
-- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique).
+- **Combat vivant :** `ChantierB.stepAttacks`. Guard = `ChantierB.CAPTURE_GUARD` (80), **pas** `Config.MAX_TILES_PER_TICK` (56 après apply, 400 brut).
+- **Posted DEFENSE :** `bunkersBySlot` + `attackLogic`. Buffer `defense` mort pour le combat installé.
+- **Posted SAM :** `samsBySlot` + `tryIntercept` / `samsOf`. Preview bot = `Nukes.samRange(level)`.
+- **BoatFront :** parque tous les `isBeachhead` pendant `launchAttack` ; le skip dans `GameState` est un filet.
+- **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `samsBySlot` n’ajoute aucun require.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
-- **Crash évité :** `math.clamp(floor(n/3), 4, n)` avec `n < 4` plantait `Navy.step` dès 2 ports. Un salon alpha à 2 humains + peu de ports = serveur down.
+- **Inbound recycle** (passes 16–17) : transports 100 %, missiles contrat B, convois `kind==2`, cadran/colis, alliances, quick-chat — inchangé.
 
 ---
 
 ## Specs worker (reste)
 
-Ne pas merger feel `df65` ni hardening `9f25` sur cette branche sans rebase. Porter **une** recette à la fois.
+Ne pas merger feel `e735`/`5c74` ni hardening `e91b`/`f8c8` sur cette branche sans rebase. Porter **une** recette à la fois.
 
 ### ISSUE-V1 — Packing spawn 18 factions
 
-**Problème.** `SPAWN_RADIUS=18` + `SPAWN_MIN_PLAYER_DISTANCE=30` : les seeds 7 / 99991 / 1234567 / 424242 placent 11–15 factions sur 18. Les tribus sautent.
+**Problème.** `SPAWN_RADIUS=18` + `SPAWN_MIN_PLAYER_DISTANCE=30` : les seeds 7 / 99991 / 1234567 / 424242 placent 11–15 factions sur 18. Les tribus sautent. `spawnCenter` est vivant (passe 17) mais le disque 21² reste trop large : occupancy ≫ minDist.
 
-**20K CCU.** Un salon Classique sous-peuplé fausse l’éco, les bots et le climax nucléaire (0 frappe en 10 min sur le run principal).
+**20K CCU.** Un salon Classique sous-peuplé fausse l’éco, les bots et le climax nucléaire.
 
-**Faire.** `GameState.findSpawn` : recherche spirale / rejet plus souple pour `isTribe` (dist min 20) **ou** disque tribu plus petit (`TRIBE_SPAWN_RADIUS`). Ne pas réduire le disque humain.
+**Faire.** Recherche spirale / rejet plus souple pour `isTribe` (dist min 20) **ou** `TRIBE_SPAWN_RADIUS` plus petit. Ne pas réduire le disque humain. Ne pas re-poser `spawnCenter`.
 
-**Contraintes.** Server-only. Ne pas toucher `claimSpawn` visuel. `addPlayer` déjà rollback si `findSpawn` nil.
+**Contraintes.** Server-only. `addPlayer` rollback si `findSpawn` nil. `stripTerritory` doit continuer d’effacer `spawnCenter`.
 
 **Tester.** `EXTRA_SEEDS` + seed 424242 : `spawned == BOT_COUNT + TRIBE_COUNT`. `./tests/run.sh`.
-
-### ISSUE-V4 — `bunkersBySlot` (scan restant)
-
-**Problème.** `attackLogic` short-circuit si 0 bunker, sinon O(bâtiments) **par tuile conquise**. `applyDefenseAura` écrit encore un buffer ignoré par le combat installé.
-
-**20K CCU.** Front large × 10 Hz × scan hash bâtiments = pics CPU combat.
-
-**Faire.** Recette feel N42 Option B : `bunkersBySlot[slot][tile]`. Posted = O(bunkers du défenseur). Puis Option A feel N45 : plus d’appels `applyDefenseAura` (fonction conservée pour `tileCost` hors install). Dirty sur `placeBuilding` / `destroyBuilding` / `transferBuilding` si `DEFENSE`.
-
-**Tester.** Bunker pose/capture/destroy ; posted bonus ×5 / speed ×3 uniquement si défenseur a un bunker in-range. P0 metrics inchangés.
 
 ### ISSUE-V7 — `findSpawn` / `claimSpawn` anti-splash
 
@@ -93,61 +73,92 @@ Ne pas merger feel `df65` ni hardening `9f25` sur cette branche sans rebase. Por
 
 **Faire.** `record()` marque dirty **sans** `save`. Flush 30 s + `endMatch` + `release` + `BindToClose`. Une écriture / userId / match.
 
-**Contraintes.** Ne pas perdre l’XP d’un éliminé si le salon crash avant flush : flush immédiat sur `settledHumans` **ou** accepter ≤1 write / éliminé.
+**Contraintes.** Ne pas perdre l’XP d’un éliminé si le salon crash avant flush : flush immédiat sur `settledHumans` **ou** accepter ≤1 write / éliminé. Hors bundle (`Persistence`).
 
-**Tester.** Hors bundle (`Persistence`). Studio : 8 humains `endMatch` = ≤8 writes, disconnect après `record` = 0 write supplémentaire.
-
-### ISSUE-V11b — Smoke / shadows construction
-
-**Problème.** `BuildingModels` : `Smoke` + `PointLight.Shadows` par usine/SAM. Les pulses sont plafonnés (8). La fumée ne l’est pas.
-
-**Faire.** Pas de Smoke/shadows si `UserGameSettings.SavedQualityLevel` bas (pcall, défaut = garder). Pas de logique de jeu côté client.
-
-**Tester.** `tests/client.luau` (ne pas casser le banc). Studio : rush de poses.
+**Tester.** Studio : 8 humains `endMatch` = ≤8 writes, disconnect après `record` = 0 write supplémentaire.
 
 ### ISSUE-V13 — Rot doomsday O(carte)
 
 **Problème.** `ChantierB.stepDoomsday` parcourt `TILE_COUNT` par joueur marqué pour arracher `quota` tuiles.
 
-**20K CCU.** 10 Hz × 40 960 lectures buffer quand le cadran tourne = pic en fin de partie, pile quand le HUD explose déjà.
+**20K CCU.** 10 Hz × 40 960 lectures buffer quand le cadran tourne = pic en fin de partie.
 
 **Faire.** Liste incrémentale des tuiles par slot (même structure que `border`) **ou** reservoir sampling sur un index compact. Ne pas changer la formule `Doomsday.rotQuota`.
 
 **Tester.** Cadran existant + 1 humain sous quota. Invariants `tiles` vs buffer.
 
-### ISSUE-V14 — `flushOwnerDelta` alloue chaque tick
+### ISSUE-V14b — En-tête de compteur pour `flushOwnerDelta`
 
-**Problème.** Table `indices` + `buffer.create` à chaque `replicate()` playing 10 Hz.
+**Problème.** Passe 17 recycle `deltaIndices` mais `buffer.create(count * 5)` reste obligatoire : un tampon trop grand serait lu comme des tuiles fantômes (slot 0).
 
-**Faire.** Scratch module `deltaScratch` pré-dimensionné, growth only. Nil si `dirty` vide (déjà le cas).
+**20K CCU.** 10 Hz playing × alloc buffer = pression GC sur 8 clients.
 
-**Tester.** Match 6000 ticks, P0 metrics. Pas de changement de format `[u32][u8]`.
+**Faire.** Préfixer le payload `[u32 count][u32 index][u8 slot]…` **ou** RemoteEvent séparé pour la longueur. Adapter le client (`WorldRenderer` / init.client). Growth-only ensuite.
 
-### ISSUE-V15 — Reinforce mid-combat
+**Contraintes.** Changer client **et** serveur dans le même commit. Ne pas casser `RequestSnapshot` (carte entière, autre remote).
 
-**Problème.** `GameState` (et le combat installé) peut ajouter des troupes à un front existant sans re-checker `combatUnlocked` / `areAllied` si l’état a changé entre deux ticks.
+**Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-**Faire.** Au reinforce : si `areAllied` ou pas `combatUnlocked`, skip (le front existant continue, pas de nouveau commit). Documenter le contrat.
+### ISSUE-V16b — Isolation clic spawn
 
-**Tester.** Alliance signée pendant un front : plus de troupes ne partent pas ; le front n’est pas annulé (c’est `Diplomacy.accept` qui casse les fronts).
+**Problème.** Feel N55 (disque isolation `claimSpawn`) absent du HEAD visuel. Passe 18 porte N57 (`samsBySlot`). Un clic collé à une capitale ennemie reste accepté.
 
-### ISSUE-V16 — Isolation clic spawn / SAM index
+**Faire.** Recette feel N55 uniquement : `isSpawnIsolated` (carré `SPAWN_RADIUS+3`) partagé `findSpawn` / `claimSpawn`. Ne pas re-toucher `samsBySlot`.
 
-**Problème.** Feel N55 (disque isolation `claimSpawn`) et N57 (index SAM O(B) au lieu du scan) absents du HEAD visuel.
+**Tester.** Clic spawn collé à une capitale ennemie → refus / autre tuile. `./tests/run.sh`.
 
-**Faire.** Porter **une** recette. N55 : `claimSpawn` refuse un disque trop proche d’une autre capitale. N57 : `samsBySlot` comme `bunkersBySlot`.
+### ISSUE-V18 — `Nukes.launch` scan silos O(hash)
 
-**Tester.** Clic spawn collé à une capitale ennemie. Interception SAM inchangée (chance 1.0, lock exclusif).
+**Problème.** `Nukes.launch` parcourt tout `state.buildings` pour trouver le silo prêt le plus proche. `tryIntercept` ne le fait plus (passe 18) ; le lancement si.
+
+**20K CCU.** Un tir = scan hash global, pile sur un tick de combat / SAM.
+
+**Faire.** Recette feel N60 `silosBySlot` : dirty `placeBuilding` / `destroyBuilding` / `transferBuilding` / `removePlayer` si SILO (même helper `setSlotIndex` que DEFENSE/SAM). `Nukes.launch` itère `silosBySlot[slot]`. Ne pas geler `SILO_COOLDOWN` (toujours armé dans `launch`).
+
+**Tester.** Pose / capture / destroy SILO indexé. Lancement choisit le plus proche prêt. `./tests/run.sh`.
+
+### ISSUE-V19 — `stepCooldowns` O(hash) 10 Hz
+
+**Problème.** `Buildings.stepCooldowns` décrémente **tous** les bâtiments chaque tick. Seuls SAM et silos portent un cooldown vivant.
+
+**20K CCU.** 10 Hz × N bâtiments, dont villes/usines à cooldown 0.
+
+**Faire.** Recette hardening N43 : `coolingBuildings` + `armCooldown` SAM **et** silos (SAM-only gèlerait `SILO_COOLDOWN`). `Nukes.launch` / `tryIntercept` doivent appeler `armCooldown`.
+
+**Tester.** SAM intercept → cooldown 90. Silo launch → `SILO_COOLDOWN`. Ville/usine jamais dans l’index. P0 metrics.
+
+### ISSUE-V20 — `Trade.step` flatten FACTORY 10 Hz
+
+**Problème.** Chaque tick, `Trade.step` alloue une liste, scannne le hash, **trie** les usines (déterminisme RNG). Feel a `factoriesBySlot` (N61) ; le sort 10 Hz reste (N66).
+
+**20K CCU.** Alloc + sort sur le hot path économique.
+
+**Faire.** Porter **une** recette. N61 : `factoriesBySlot` + iteration déterministe (tri des clés de l’index, pas un flatten hash). N66 : buffer recyclé, tri seulement si dirty. Vague ≠ 45 ticks (c’est le maritime).
+
+**Tester.** Or colis inchangé. Deux seeds identiques → mêmes livraisons. `./tests/run.sh`.
+
+### ISSUE-V21 — `spawnTradeShips` O(ports²)
+
+**Problème.** Vague maritime (`TRADE_SHIP_INTERVAL=45`) flatten tous les PORT du hash puis paires. Hardening N40 a `portsByTile` + early-out cap + buffers recyclés. Visual ne l’a pas.
+
+**20K CCU.** Moins chaud que 10 Hz, mais pic + alloc sur 24 convois max.
+
+**Faire.** Recette hardening N40 (déjà portée feel N63) : `portsByTile` incrémental PORT only, early-out `MAX_TRADE_SHIPS` **et** `<2` avant flatten, `portsBuf`/`candidateBuf`. Distinct de `_carriersDirty` (NAVAL_BASE).
+
+**Tester.** Cap 24 respecté. `<2` ports = pas de scan. P0 metrics. `./tests/run.sh`.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `df65` / hardening `9f25` sur #39/#44.
-- Spatial hash warships (buffers recyclés côté hardening — porter plus tard).
+- Merger feel `e735` / hardening `e91b` sur #39/#50.
+- Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` suffit.
+- `buildingsBySlot` générique (feel N62/N64) — V18 silos d’abord, une kind à la fois.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
 - Fallout disque = rayon **inner** seulement (OF outer = spec produit).
-- Brancher les clés Config mortes (commentées seulement).
+- Brancher les clés Config mortes (`ATTACK_SPEND_RATE`, `FRONT_TILES_PER_CONTACT`, `BOAT_LANDING_BONUS`).
+- `combatUnlocked` forcé à `true` chaque tick playing (`init.server`) : prep=0, pas un leak client.
+- `syncCarriers` spawn NAVAL_BASE encore O(B) quand dirty (feel N65) — dirty déjà vivant, scan rare.
 
 ---
 
@@ -157,6 +168,6 @@ Ne pas merger feel `df65` ni hardening `9f25` sur cette branche sans rebase. Por
 ./tests/run.sh
 ```
 
-Client : 34 checks.  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + **passe 16** (`areAllied` corrompu, `±inf` ratio, missiles outbound, spawn wait tiles=0, premier Attack après claim, own-tile 100 %, `targetSlot` après flip, pool `findSeaPath`, carriers dirty).  
+Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–17 + **passe 18** (`CAPTURE_GUARD=80` ≠ `MAX_TILES_PER_TICK`, aura buffer=0, capture bunker index, `samsBySlot` pose/intercept/capture/recycle/destroy).  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
