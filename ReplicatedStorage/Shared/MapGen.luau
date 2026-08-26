@@ -314,4 +314,57 @@ function MapGen.countLand(terrain: buffer): number
 	return count
 end
 
+--[[
+	Hash stable d'un buffer de tuiles (terrain ou owner).
+
+	FNV-1a 32 bits sur les octets : deterministe, sans flottant, comparable
+	entre client et serveur pour detecter une desync de generation.
+]]
+function MapGen.hashBuffer(buf: buffer): number
+	local hash = 2166136261
+	local len = buffer.len(buf)
+	for i = 0, len - 1 do
+		hash = bit32.bxor(hash, buffer.readu8(buf, i))
+		-- FNV prime 16777619 ; pas de bit32.mul en Luau.
+		hash = (hash * 16777619) % 4294967296
+	end
+	return hash
+end
+
+function MapGen.terrainHash(terrain: buffer): number
+	return MapGen.hashBuffer(terrain)
+end
+
+function MapGen.countByBiome(terrain: buffer): { [number]: number }
+	local counts: { [number]: number } = {}
+	for i = 0, W * H - 1 do
+		local kind = buffer.readu8(terrain, i)
+		counts[kind] = (counts[kind] or 0) + 1
+	end
+	return counts
+end
+
+--[[
+	Metadonnees envoyees dans MapInit pour verifier le contrat client/serveur.
+]]
+function MapGen.mapMeta(seed: number, terrain: buffer): {
+	mapId: string,
+	mapVersion: number,
+	seed: number,
+	generatorVersion: number,
+	terrainHash: number,
+	width: number,
+	height: number,
+}
+	return {
+		mapId = Config.MAP_ID,
+		mapVersion = Config.MAP_VERSION,
+		seed = seed,
+		generatorVersion = Config.GENERATOR_VERSION,
+		terrainHash = MapGen.terrainHash(terrain),
+		width = W,
+		height = H,
+	}
+end
+
 return MapGen

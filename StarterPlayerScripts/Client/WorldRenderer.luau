@@ -635,6 +635,17 @@ function WorldRenderer.applyDelta(
 	return count, gains, losses, others
 end
 
+--[[
+	Remplace le buffer owner entier (resync) et salit tous les chunks.
+]]
+function WorldRenderer.applyOwnerSnapshot(self: WorldRenderer, owner: buffer)
+	local len = math.min(buffer.len(owner), buffer.len(self.owner))
+	buffer.copy(self.owner, 0, owner, 0, len)
+	for chunk = 0, self.totalChunks - 1 do
+		self:markChunkDirty(chunk)
+	end
+end
+
 -- Avancement de la construction initiale, entre 0 et 1.
 function WorldRenderer.initialProgress(self: WorldRenderer): number
 	return self.builtCount / math.max(1, self.totalChunks)
