@@ -523,7 +523,14 @@ function BuildingModels.playConstruction(model: Model, ground: Vector3, duration
 	ring.Color = Color3.fromRGB(255, 200, 110)
 	ring.Transparency = 0.25
 	ring.Size = Vector3.new(0.5, 4, 4)
-	ring.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	-- V85 : translation * fromEulerAnglesYXZ (Z=90° fixe, cylindre plat).
+	-- Plus de CFrame.Angles a playConstruction. Recette feel N136
+	-- inline — ne PAS cuire un ringRot (événement unique). Ne PAS
+	-- réutiliser Effects.pulseRot (module distinct). Distinct de V84
+	-- (OceanGlint yaw `angle` variable). Distinct de V83/V82 (pulseRot
+	-- Effects). Distinct de V75 (PlacementPreview.pulseRot, hover).
+	-- Événement construction, pas 60 Hz. ground Vector3 inchangé.
+	ring.CFrame = CFrame.new(ground) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = model
 
 	local light = Instance.new("PointLight")
