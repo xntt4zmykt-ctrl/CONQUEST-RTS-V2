@@ -101,7 +101,8 @@ local function describeBuild(state: GameState, slot: number, index: number, kind
 	local suffix = if snapped then " (reporte sur la case libre la plus proche)" else ""
 
 	if kind == B.CITY then
-		return `Ville construite : +900 capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
+		local cityPop = Config.CITY_LEVELS[1].popCapBonus
+		return `Ville construite : +{cityPop} capacite · +{Config.GOLD_PER_CITY} or/tick.{suffix}`
 	elseif kind == B.FACTORY then
 		local routes, income = state:logisticsFor(slot)
 		return `Usine raccordee : reseau de {routes} liaison(s) · +{string.format("%.1f", income * Config.TICK_RATE)} or/s.{suffix}`

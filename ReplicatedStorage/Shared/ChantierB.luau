@@ -265,7 +265,9 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
 	ps.border = {}
@@ -371,7 +373,12 @@ function ChantierB.install(GameState, Nukes)
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				self:returnCommittedTroops(atk)
 				table.remove(self.attacks, i)
 				continue
 			end
@@ -380,6 +387,9 @@ function ChantierB.install(GameState, Nukes)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
@@ -469,6 +479,14 @@ function ChantierB.install(GameState, Nukes)
 		end
 		for slot, ps in self.players do
 			if slot == leaderSlot or ps.tiles >= required then
+				self.doomWarnedAt[slot] = nil
+				self.doomUnderSince[slot] = nil
+				continue
+			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une
+			-- armee fantome. On EFFACE les timers : sinon un AFK strip puis
+			-- claimSpawn herite d'un warn deja ecoule et saigne au premier tick.
+			if ps.awaitingSpawn or ps.tiles == 0 then
 				self.doomWarnedAt[slot] = nil
 				self.doomUnderSince[slot] = nil
 				continue
