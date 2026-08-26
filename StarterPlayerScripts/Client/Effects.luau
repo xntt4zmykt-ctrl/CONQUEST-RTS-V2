@@ -59,26 +59,40 @@ end
 --=============================================================================
 
 function Effects.selectTile(self: Effects, index: number, color: Color3)
-	if self.selection then
-		self.selection:Destroy()
-	end
-
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
-	local marker = Instance.new("Part")
-	marker.Name = "SelectedTerritory"
-	marker.Anchored = true
-	marker.CanCollide = false
-	marker.CanTouch = false
-	marker.CanQuery = false
-	marker.CastShadow = false
-	marker.Material = Enum.Material.Neon
+	local marker = self.selection
+	-- N155 : reuse Part si deja creee. previewTile reutilise deja
+	-- (N96 + N154 skip). N168 : reparent si Parent nil apres
+	-- clearSelection (plus de Destroy). Name SelectedTerritory
+	-- inchange. Tween Create conserve (pulse Transparency/Size
+	-- restart). Distinct flame leftover N152 (Size = Vector3.new,
+	-- ≠ visual V74 freeze). Distinct HUD N167 (feedFree deja).
+	-- Distinct previewTile N154 skip. Distinct visual V83
+	-- SelectionRing pulseRot (ne pas merger 0b3d). Recette leftover
+	-- N167, pas merger visual. HUD / UnitModels / Overlay /
+	-- BuildingModels / PlacementPreview inchanges.
+	if not marker then
+		marker = Instance.new("Part")
+		marker.Name = "SelectedTerritory"
+		marker.Anchored = true
+		marker.CanCollide = false
+		marker.CanTouch = false
+		marker.CanQuery = false
+		marker.CastShadow = false
+		marker.Material = Enum.Material.Neon
+		marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
+		marker.Parent = self.root
+		self.selection = marker
+	end
+	if marker.Parent == nil then
+		marker.Parent = self.root
+	end
+
 	marker.Color = color
 	marker.Transparency = 0.38
 	marker.Size = Vector3.new(Config.TILE_SIZE * 1.15, 0.28, Config.TILE_SIZE * 1.15)
 	marker.CFrame = CFrame.new(base.X, height + 0.55, base.Z)
-	marker.Parent = self.root
-	self.selection = marker
 
 	TweenService:Create(marker, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
 		Transparency = 0.68,
@@ -87,9 +101,20 @@ function Effects.selectTile(self: Effects, index: number, color: Color3)
 end
 
 function Effects.clearSelection(self: Effects)
-	if self.selection then
-		self.selection:Destroy()
-		self.selection = nil
+	-- N168 : Parent = nil, garder self.selection. Pas de Destroy,
+	-- pas self.selection = nil. Un second clear ne double-unparent
+	-- pas (garde Parent). selectTile reparent self.root si Parent
+	-- nil. N155 reuse inter-clics inchange (rawequal tant que
+	-- selection vit). Distinct flame leftover N152. Distinct HUD
+	-- N167 feedFree. Distinct previewTile N154. Distinct
+	-- clearActionPreview N169 deja (Parent nil). Distinct
+	-- visual V83 pulseRot (ne pas merger 0b3d). Pas de free-list
+	-- tableau (un seul marqueur). Recette leftover N167, pas
+	-- merger visual. HUD / UnitModels / Overlay / BuildingModels
+	-- inchanges.
+	local marker = self.selection
+	if marker and marker.Parent then
+		marker.Parent = nil
 	end
 end
 
@@ -98,6 +123,29 @@ end
 -- frame, il ne doit donc jamais creer une Part par mouvement de souris.
 function Effects.previewTile(self: Effects, index: number, color: Color3, valid: boolean)
 	local marker = self.actionPreview
+	-- N154 : skip si tuile + valid + color inchanges. actionPreviewIndex
+	-- etait pose et jamais lu. Meme hover 60 Hz (init.client raycast)
+	-- reecrivait Color / Transparency / CFrame.new + indexToWorld.
+	-- Skip les TROIS : attaque vs build peut changer valid/color sur
+	-- la meme tuile. Marker existant requis (premier appel cree).
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual V74
+	-- freeze). Distinct HUD N153 (feed plafond). Distinct visual V77
+	-- PlacementPreview early-out (ne pas merger 185a). Distinct
+	-- selectTile leftover N155 (reuse Part, deja). Distinct
+	-- clearSelection N168 deja. N169 : reparent si Parent nil apres
+	-- clearActionPreview (plus de Destroy). Name ActionPreview
+	-- inchange. Skip index+valid+color inchange (ne doit PAS matcher
+	-- apres clear : les trois champs sont niles). Recette leftover
+	-- N168, pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview inchanges.
+	if
+		marker
+		and self.actionPreviewIndex == index
+		and self.actionPreviewValid == valid
+		and self.actionPreviewColor == color
+	then
+		return
+	end
 	if not marker then
 		marker = Instance.new("Part")
 		marker.Name = "ActionPreview"
@@ -111,6 +159,12 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 		marker.Parent = self.root
 		self.actionPreview = marker
 	end
+	-- N169 : reparent APRES le skip (si skip fire, le marqueur
+	-- resterait unparented). Parent = self.root (pas overlay.root,
+	-- pas hud.feed). Pas de tableau previewFree (un seul marqueur).
+	if marker.Parent == nil then
+		marker.Parent = self.root
+	end
 
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
@@ -118,14 +172,32 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	marker.Transparency = if valid then 0.5 else 0.72
 	marker.CFrame = CFrame.new(base.X, height + 0.42, base.Z)
 	self.actionPreviewIndex = index
+	self.actionPreviewValid = valid
+	self.actionPreviewColor = color
 end
 
 function Effects.clearActionPreview(self: Effects)
-	if self.actionPreview then
-		self.actionPreview:Destroy()
-		self.actionPreview = nil
-		self.actionPreviewIndex = nil
+	-- N169 : Parent = nil, garder self.actionPreview. Pas de
+	-- Destroy, pas self.actionPreview = nil. Un second clear ne
+	-- double-unparent pas (garde Parent). Nil encore
+	-- actionPreviewIndex / Valid / Color : sinon skip N154 return
+	-- sur un Parent nil (marqueur invisible). previewTile reparent
+	-- self.root si Parent nil, APRES le skip. Name ActionPreview
+	-- inchange. N154 skip inter-hovers inchange. N168 selection
+	-- inchange. Distinct flame leftover N152. Distinct HUD leftover
+	-- N167 feedFree. Distinct HUD leftover N170 refreshChatSheet
+	-- (Destroy conserve). Distinct visual V77 (ne pas merger 185a).
+	-- Pas de free-list tableau (un seul marqueur — pas previewFree
+	-- / feedFree / flashFree / selection). Recette leftover N168,
+	-- pas merger visual. HUD / UnitModels / Overlay /
+	-- BuildingModels inchanges.
+	local marker = self.actionPreview
+	if marker and marker.Parent then
+		marker.Parent = nil
 	end
+	self.actionPreviewIndex = nil
+	self.actionPreviewValid = nil
+	self.actionPreviewColor = nil
 end
 
 --=============================================================================
@@ -141,13 +213,36 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
 
-	local plate = Instance.new("Part")
-	plate.Anchored = true
-	plate.CanCollide = false
-	plate.CanTouch = false
-	plate.CanQuery = false
-	plate.CastShadow = false
-	plate.Material = Enum.Material.Neon
+	-- N156 : free-list flashFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 0.7 s : Parent = nil + push. selectTile reutilise
+	-- deja (N155). previewTile reutilise deja (N96 + N154 skip).
+	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual
+	-- V74 freeze). Distinct HUD N153. Distinct previewTile N154.
+	-- Distinct selectTile N155. Distinct conquestPulse leftover
+	-- N157 (euler N134, pas pool). Distinct visual V83 SelectionRing
+	-- pulseRot (ne pas merger 0b3d). Caps 90/28 inchanges. Tween
+	-- Create conserve (pulse CFrame/Transparency/Size restart).
+	-- Recette leftover N155, pas merger visual. HUD / UnitModels /
+	-- Overlay / PlacementPreview / conquestPulse inchanges.
+	local free = self.flashFree
+	if not free then
+		free = {}
+		self.flashFree = free
+	end
+	local n = #free
+	local plate
+	if n > 0 then
+		plate = free[n]
+		free[n] = nil
+	else
+		plate = Instance.new("Part")
+		plate.Anchored = true
+		plate.CanCollide = false
+		plate.CanTouch = false
+		plate.CanQuery = false
+		plate.CastShadow = false
+		plate.Material = Enum.Material.Neon
+	end
 	plate.Color = color
 	plate.Transparency = 0.15
 	plate.Size = Vector3.new(Config.TILE_SIZE, 0.4, Config.TILE_SIZE)
@@ -163,7 +258,9 @@ function Effects.tileFlash(self: Effects, index: number, color: Color3)
 	}):Play()
 
 	task.delay(0.7, function()
-		plate:Destroy()
+		plate.Parent = nil
+		local pool = self.flashFree
+		pool[#pool + 1] = plate
 		self.live -= 1
 	end)
 end
@@ -176,18 +273,51 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	local ground = WorldSpace.tileToWorld(x, y)
 	local worldRadius = math.clamp(radius, 3, 40) * Config.TILE_SIZE
 
-	local ring = Instance.new("Part")
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.CastShadow = false
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Material = Enum.Material.Neon
+	-- N157 : free-list pulseFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1 s : Parent = nil + push. tileFlash reutilise
+	-- deja (N156). selectTile reutilise deja (N155). previewTile
+	-- reutilise deja (N96 + N154 skip). Distinct flame leftover
+	-- N152 (Size = Vector3.new, ≠ visual V74 freeze). Distinct
+	-- HUD N153. Distinct previewTile N154. Distinct selectTile
+	-- N155. Distinct tileFlash N156 (flashFree, ne pas partager).
+	-- Distinct floatingText leftover N158. Distinct visual V82
+	-- ConquestPulse pulseRot (ne pas merger 490f). Euler N134
+	-- inline conserve (Y = 3, pas de Name). Tween Create conserve
+	-- (pulse Size/Transparency restart). Recette leftover N156,
+	-- pas merger visual. HUD / UnitModels / Overlay /
+	-- PlacementPreview / tileFlash inchanges.
+	local free = self.pulseFree
+	if not free then
+		free = {}
+		self.pulseFree = free
+	end
+	local n = #free
+	local ring
+	if n > 0 then
+		ring = free[n]
+		free[n] = nil
+	else
+		ring = Instance.new("Part")
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.CanTouch = false
+		ring.CanQuery = false
+		ring.CastShadow = false
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Material = Enum.Material.Neon
+	end
 	ring.Color = color
 	ring.Transparency = 0.45
 	ring.Size = Vector3.new(0.6, 4, 4)
-	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.Angles(0, 0, math.rad(90))
+	-- N134 : conquestPulse ring. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
+	-- Hauteur Y = 3 inchangee. Caps MAX_FLASHES_PER_WAVE /
+	-- MAX_LIVE_FLASHES inchanges. conquestWave / lossWave
+	-- barycentre inchanges. Flashes tuile sans euler.
+	-- Distinct Overlay Shockwave N133 (PLAINS + 0.5). Distinct
+	-- pulse N132 (Overlay gare). Distinct visual V82 Name
+	-- ConquestPulse / hauteur surface+0.8 (ne pas merger).
+	ring.CFrame = CFrame.new(ground.X, 3, ground.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	ring.Parent = self.root
 
 	TweenService:Create(ring, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
@@ -196,7 +326,9 @@ function Effects.conquestPulse(self: Effects, x: number, y: number, radius: numb
 	}):Play()
 
 	task.delay(1, function()
-		ring:Destroy()
+		ring.Parent = nil
+		local pool = self.pulseFree
+		pool[#pool + 1] = ring
 	end)
 end
 
@@ -207,35 +339,72 @@ end
 function Effects.floatingText(self: Effects, x: number, y: number, text: string, color: Color3)
 	local ground = WorldSpace.tileToWorld(x, y)
 
-	local anchor = Instance.new("Part")
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.CanTouch = false
-	anchor.CanQuery = false
-	anchor.Transparency = 1
-	anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+	-- N158 : free-list textFree, pop O(1) depuis la fin. Pas de
+	-- Destroy a 1.3 s : Parent = nil + push. conquestPulse
+	-- reutilise deja (N157). tileFlash reutilise deja (N156).
+	-- selectTile reutilise deja (N155). previewTile reutilise
+	-- deja (N96 + N154 skip). Distinct flame leftover N152
+	-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+	-- N153. Distinct previewTile N154. Distinct selectTile N155.
+	-- Distinct tileFlash N156 (flashFree, ne pas partager).
+	-- Distinct conquestPulse N157 (pulseFree, ne pas partager).
+	-- Distinct visual V82 ConquestPulse pulseRot (ne pas merger
+	-- 490f — ce n'est pas un Billboard). Arbre Billboard
+	-- conserve au reuse (Part + BillboardGui + TextLabel +
+	-- UIStroke). Reset TextTransparency / outline Transparency
+	-- a 0 (le tween les avait mises a 1). Pas de Name. Tween
+	-- Create conserve (CFrame Y=26 + TextTransparency restart).
+	-- Recette leftover N157, pas merger visual. HUD /
+	-- UnitModels / Overlay / PlacementPreview / conquestPulse /
+	-- tileFlash inchanges.
+	local free = self.textFree
+	if not free then
+		free = {}
+		self.textFree = free
+	end
+	local n = #free
+	local anchor
+	local label
+	local outline
+	if n > 0 then
+		anchor = free[n]
+		free[n] = nil
+		local billboard = anchor:FindFirstChildWhichIsA("BillboardGui") :: BillboardGui
+		label = billboard:FindFirstChildWhichIsA("TextLabel") :: TextLabel
+		outline = label:FindFirstChildWhichIsA("UIStroke") :: UIStroke
+	else
+		anchor = Instance.new("Part")
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanTouch = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.1, 0.1, 0.1)
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Size = UDim2.fromOffset(120, 30)
+		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = 900
+		billboard.Parent = anchor
+
+		label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.FontFace = Theme.font.display
+		label.TextSize = 20
+		label.Parent = billboard
+
+		outline = Instance.new("UIStroke")
+		outline.Color = Color3.fromRGB(6, 8, 14)
+		outline.Thickness = 2.5
+		outline.Parent = label
+	end
 	anchor.CFrame = CFrame.new(ground.X, 12, ground.Z)
-	anchor.Parent = self.root
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(120, 30)
-	billboard.AlwaysOnTop = true
-	billboard.MaxDistance = 900
-	billboard.Parent = anchor
-
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Size = UDim2.fromScale(1, 1)
-	label.FontFace = Theme.font.display
-	label.TextSize = 20
-	label.TextColor3 = color
 	label.Text = text
-	label.Parent = billboard
-
-	local outline = Instance.new("UIStroke")
-	outline.Color = Color3.fromRGB(6, 8, 14)
-	outline.Thickness = 2.5
-	outline.Parent = label
+	label.TextColor3 = color
+	label.TextTransparency = 0
+	outline.Transparency = 0
+	anchor.Parent = self.root
 
 	TweenService:Create(anchor, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		CFrame = CFrame.new(ground.X, 26, ground.Z),
@@ -244,7 +413,9 @@ function Effects.floatingText(self: Effects, x: number, y: number, text: string,
 	TweenService:Create(outline, TweenInfo.new(1.2), { Transparency = 1 }):Play()
 
 	task.delay(1.3, function()
-		anchor:Destroy()
+		anchor.Parent = nil
+		local pool = self.textFree
+		pool[#pool + 1] = anchor
 	end)
 end
 

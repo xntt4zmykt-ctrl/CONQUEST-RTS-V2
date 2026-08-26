@@ -1,8 +1,8 @@
 --!strict
 --[[
-	Menu radial, modele OpenFront.
+	Menu radial, regle CONQUEST.
 
-	C'est la piece qui organise toute l'interface du jeu de reference, et la
+	C'est la piece qui organise toute l'interface CONQUEST, et la
 	raison pour laquelle son ecran reste vide : **aucun bouton d'action n'est
 	affiche en permanence**. On clique droit sur la case qu'on regarde deja, et
 	les actions viennent a l'endroit ou l'oeil se trouve — au lieu d'obliger a
@@ -13,7 +13,7 @@
 	propre territoire, alors qu'une barre permanente doit rester generique et
 	laisse le joueur decouvrir l'erreur apres coup.
 
-	Deux niveaux, comme dans OpenFront : l'anneau racine porte les modes, et
+	Deux niveaux, comme dans CONQUEST : l'anneau racine porte les modes, et
 	"Construire" remplace l'anneau par la liste des batiments sans fermer le
 	menu ni perdre la case visee.
 
@@ -70,6 +70,39 @@ type Petal = {
 -- Construction
 --=============================================================================
 
+-- N188 : parkVeil / takeVeil hoistes pour destroy() + new()
+-- sans Destroy du TextButton RadialMenu rematch. Skip Parent nil
+-- (deja parke par un second destroy()). Push veilFree (TextButton,
+-- pas panelFree Frame / placeRootFree Folder / ghostFree /
+-- worldFree / previewFree MainMenu). take n'importe quel TextButton,
+-- Name RadialMenu, Parent parent. Ring / Hub FindFirstChild reuse,
+-- sinon construction inchangee. Petals leftover = boutons enfants
+-- (pas recréer petal() ni reconnecter Activated). Recette leftover
+-- N187. Pas merger visual. Distinct leftover N152 flame. Overlay
+-- non touche. Minimap non touche. PlacementPreview non touche.
+-- WorldRenderer non touche. init.client radial unique,
+-- radial:destroy() ABSENT — ne pas l'ajouter. Ne pas vider veilFree.
+-- Pas de delay. Distinct leftover N189 VisualDirector effect().
+local veilFree: { TextButton } = {}
+
+local function parkVeil(veil: TextButton)
+	if not veil.Parent then
+		return
+	end
+	veil.Parent = nil
+	veilFree[#veilFree + 1] = veil
+end
+
+local function takeVeil(): TextButton?
+	local n = #veilFree
+	if n == 0 then
+		return nil
+	end
+	local last = veilFree[n]
+	veilFree[n] = nil
+	return last
+end
+
 local function petal(parent: GuiObject): Petal
 	local b = Instance.new("TextButton")
 	b.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -100,6 +133,24 @@ local function petal(parent: GuiObject): Petal
 	return { button = b, label = label, icon = icon }
 end
 
+local function leftoverPetal(button: TextButton): Petal?
+	local icon: TextLabel? = nil
+	local label: TextLabel? = nil
+	for _, inner in button:GetChildren() do
+		if inner:IsA("TextLabel") then
+			if inner.Position.Y.Scale < 0.5 then
+				icon = inner
+			else
+				label = inner
+			end
+		end
+	end
+	if icon and label then
+		return { button = button, label = label, icon = icon }
+	end
+	return nil
+end
+
 function RadialMenu.new(parent: Instance): RadialMenu
 	local self = setmetatable({}, RadialMenu) :: any
 
@@ -116,7 +167,19 @@ function RadialMenu.new(parent: Instance): RadialMenu
 		la carte passerait au travers en declenchant une action non voulue. Il
 		est transparent mais bien present.
 	]]
-	local veil = Instance.new("TextButton")
+	-- N188 : take TextButton leftover avant create. Name RadialMenu /
+	-- Parent parent reposes au reuse. Size / Transparency / Text /
+	-- AutoButtonColor / Visible / ZIndex reecrits. Pas Theme.corner
+	-- au reuse (voile sans Theme.panel). Ring / Hub / petals leftover
+	-- reuse. Activated seulement si pas de leftover (double-fire
+	-- close / page / Batir→premier batiment).
+	local leftover = takeVeil()
+	local veil: TextButton
+	if leftover then
+		veil = leftover
+	else
+		veil = Instance.new("TextButton")
+	end
 	veil.Name = "RadialMenu"
 	veil.Size = UDim2.fromScale(1, 1)
 	veil.BackgroundTransparency = 1
@@ -127,23 +190,37 @@ function RadialMenu.new(parent: Instance): RadialMenu
 	veil.Parent = parent
 	self.veil = veil
 
-	veil.Activated:Connect(function()
-		self:close()
-	end)
+	if not leftover then
+		veil.Activated:Connect(function()
+			self:close()
+		end)
+	end
 
-	local ring = Instance.new("Frame")
-	ring.Name = "Ring"
-	ring.AnchorPoint = Vector2.new(0.5, 0.5)
-	ring.Size = UDim2.fromOffset((RING_RADIUS + PETAL_RADIUS) * 2, (RING_RADIUS + PETAL_RADIUS) * 2)
-	ring.BackgroundTransparency = 1
-	ring.Parent = veil
+	local existingRing = leftover and leftover:FindFirstChild("Ring")
+	local ring: Frame
+	if existingRing and existingRing:IsA("Frame") then
+		ring = existingRing
+	else
+		ring = Instance.new("Frame")
+		ring.Name = "Ring"
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Size = UDim2.fromOffset((RING_RADIUS + PETAL_RADIUS) * 2, (RING_RADIUS + PETAL_RADIUS) * 2)
+		ring.BackgroundTransparency = 1
+		ring.Parent = veil
+	end
 	self.ring = ring
 
 	-- L'echelle sert a l'animation d'ouverture : le menu jaillit du point
 	-- clique, ce qui rattache visuellement les actions a leur cible.
-	local scale = Instance.new("UIScale")
-	scale.Scale = 1
-	scale.Parent = ring
+	local existingScale = ring:FindFirstChildWhichIsA("UIScale")
+	local scale: UIScale
+	if existingScale and existingScale:IsA("UIScale") then
+		scale = existingScale
+	else
+		scale = Instance.new("UIScale")
+		scale.Scale = 1
+		scale.Parent = ring
+	end
 	self.scale = scale
 
 	--[[
@@ -153,40 +230,64 @@ function RadialMenu.new(parent: Instance): RadialMenu
 		l'anneau racine au lieu de tout fermer, pour qu'une erreur de navigation
 		ne coute pas le clic droit.
 	]]
-	local hub = Instance.new("TextButton")
-	hub.Name = "Hub"
-	hub.AnchorPoint = Vector2.new(0.5, 0.5)
-	hub.Position = UDim2.fromScale(0.5, 0.5)
-	hub.Size = UDim2.fromOffset(HUB_RADIUS * 2, HUB_RADIUS * 2)
-	hub.BackgroundColor3 = C.surface
-	hub.BorderSizePixel = 0
-	hub.AutoButtonColor = false
-	hub.Text = ""
-	hub.Parent = ring
-	Theme.corner(hub, HUB_RADIUS)
-	Theme.stroke(hub, C.accent, 1)
+	local existingHub = ring:FindFirstChild("Hub")
+	local hub: TextButton
+	if existingHub and existingHub:IsA("TextButton") then
+		hub = existingHub
+	else
+		hub = Instance.new("TextButton")
+		hub.Name = "Hub"
+		hub.AnchorPoint = Vector2.new(0.5, 0.5)
+		hub.Position = UDim2.fromScale(0.5, 0.5)
+		hub.Size = UDim2.fromOffset(HUB_RADIUS * 2, HUB_RADIUS * 2)
+		hub.BackgroundColor3 = C.surface
+		hub.BorderSizePixel = 0
+		hub.AutoButtonColor = false
+		hub.Text = ""
+		hub.Parent = ring
+		Theme.corner(hub, HUB_RADIUS)
+		Theme.stroke(hub, C.accent, 1)
+	end
 	self.hub = hub
 
-	local hubIcon = Theme.label(hub, "\u{2715}", T.body, C.textMuted)
-	hubIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-	hubIcon.Position = UDim2.fromScale(0.5, 0.5)
-	hubIcon.Size = UDim2.fromScale(1, 1)
-	hubIcon.TextXAlignment = Enum.TextXAlignment.Center
+	local existingHubIcon = hub:FindFirstChildWhichIsA("TextLabel")
+	local hubIcon: TextLabel
+	if existingHubIcon and existingHubIcon:IsA("TextLabel") then
+		hubIcon = existingHubIcon
+	else
+		hubIcon = Theme.label(hub, "\u{2715}", T.body, C.textMuted)
+		hubIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+		hubIcon.Position = UDim2.fromScale(0.5, 0.5)
+		hubIcon.Size = UDim2.fromScale(1, 1)
+		hubIcon.TextXAlignment = Enum.TextXAlignment.Center
+	end
 	self.hubIcon = hubIcon
 
-	hub.Activated:Connect(function()
-		if self.page == "build" then
-			self:showPage("root")
-		else
-			self:close()
-		end
-	end)
+	if not existingHub then
+		hub.Activated:Connect(function()
+			if self.page == "build" then
+				self:showPage("root")
+			else
+				self:close()
+			end
+		end)
+	end
 
 	-- On alloue une reserve de petales une fois pour toutes : les deux pages
 	-- n'en montrent jamais plus, et recreer des boutons a chaque ouverture
 	-- rendrait le menu saccade.
 	local slots = math.max(6, #BuildingDefs.BUILDABLE)
-	for i = 1, slots do
+	if leftover then
+		for _, child in ring:GetChildren() do
+			if child:IsA("TextButton") and child ~= hub then
+				local reused = leftoverPetal(child)
+				if reused then
+					self.petals[#self.petals + 1] = reused
+				end
+			end
+		end
+	end
+	for i = #self.petals + 1, slots do
 		local p = petal(ring)
 		self.petals[i] = p
 
@@ -399,7 +500,14 @@ function RadialMenu.emitBuild(self: RadialMenu, kind: number)
 end
 
 function RadialMenu.destroy(self: RadialMenu)
-	self.veil:Destroy()
+	-- N188 : rematch park TextButton existant. Pas Destroy. Enfants
+	-- laisses (new() Ring/Hub reuse + leftover petals). Skip Parent
+	-- nil (parkVeil). Pas take (new() deja). Pas Overlay. Pas
+	-- Minimap. Pas PlacementPreview. Pas WorldRenderer. Pas
+	-- init.client (radial unique, destroy absent). Recette leftover
+	-- N187. Pas merger visual. Distinct leftover N152 flame.
+	-- Distinct leftover N189 VisualDirector effect().
+	parkVeil(self.veil)
 end
 
 return RadialMenu
