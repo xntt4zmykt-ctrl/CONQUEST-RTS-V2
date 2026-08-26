@@ -19,7 +19,6 @@ local Doctrines = require(ReplicatedStorage.Shared.Doctrines)
 local Nations = require(ReplicatedStorage.Shared.Nations)
 local GameModes = require(ReplicatedStorage.Shared.GameModes)
 local WorldSpace = require(ReplicatedStorage.Shared.WorldSpace)
-local BuildingDefs = require(ReplicatedStorage.Shared.BuildingDefs)
 local QuickChat = require(ReplicatedStorage.Shared.QuickChat)
 
 -- init.server.luau devient le Script "Server" ; les modules voisins en sont
@@ -38,6 +37,7 @@ local Trade = require(script.Trade)
 local SystemsBootstrap = require(script.SystemsBootstrap)
 local IntentValidator = require(script.IntentValidator)
 local TickMetrics = require(script.TickMetrics)
+local MatchLifecycle = require(script.MatchLifecycle)
 local MapGen = require(ReplicatedStorage.Shared.MapGen)
 
 SystemsBootstrap.install()
@@ -98,6 +98,7 @@ local winnerSlot: number? = nil
 local winnerName: string? = nil
 local snapshotCooldown: { [number]: number } = {}
 local snapshotCount: { [number]: number } = {}
+local joinCooldown: { [number]: number } = {}
 local currentMapMeta: any = nil
 
 -- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
@@ -125,20 +126,79 @@ end
 --=============================================================================
 
 local function buildRoster()
-	local roster = {}
-	for slot, ps in state.players do
-		roster[slot] = {
-			name = ps.name,
-			isBot = ps.isBot,
-			doctrine = ps.doctrine,
-			betrayals = ps.betrayals,
-		}
-	end
-	return roster
+	-- N84 : helper bundle (MatchLifecycle). FireAllClients reste ici.
+	return MatchLifecycle.buildRoster(state.players)
 end
 
 local function broadcastRoster()
 	rosterUpdate:FireAllClients(buildRoster())
+end
+
+-- StateDelta / UnitSnapshot / explosions : uniquement les commandants deployes.
+-- FireAllClients facture aussi les joueurs encore au menu (Place MaxPlayers > 8).
+local function fireDeployed(remote, ...)
+	for player in slotByPlayer do
+		if player.Parent then
+			remote:FireClient(player, ...)
+		end
+	end
+end
+
+local function deployedCount(): number
+	local n = 0
+	for _ in slotByPlayer do
+		n += 1
+	end
+	return n
+end
+
+-- N86 : args locaux mutes (pas un {} par appel). Le packet vit dans
+-- MatchLifecycle.matchUpdateBuf. FireAllClients reste ici.
+local matchUpdateArgs = {
+	phase = nil,
+	stage = nil,
+	combatIn = 0,
+	timeLeft = 0,
+	mode = nil,
+	players = 0,
+	maxPlayers = 0,
+	maxHumans = 0,
+	maxBots = 0,
+	maxFactions = 0,
+	renderMode = nil,
+	winner = nil,
+	winnerName = nil,
+	restartIn = 0,
+	summary = nil,
+}
+
+local function broadcastMatchUpdate(stats)
+	matchUpdateArgs.phase = matchPhase
+	matchUpdateArgs.stage = if matchPhase == "waiting"
+		then "waiting"
+		elseif matchPhase == "ended"
+		then "ended"
+		elseif state.combatUnlocked
+		then "combat"
+		else "preparation"
+	matchUpdateArgs.combatIn = if matchPhase == "waiting"
+		then Config.PREPARATION_DURATION
+		else math.max(0, combatStartsAt - os.clock())
+	matchUpdateArgs.timeLeft = if matchPhase == "waiting"
+		then activeMode.duration
+		else math.max(0, matchEndsAt - os.clock())
+	matchUpdateArgs.mode = activeMode.id
+	matchUpdateArgs.players = deployedCount()
+	matchUpdateArgs.maxPlayers = Config.PUBLIC_MATCH_CAPACITY
+	matchUpdateArgs.maxHumans = Config.MAX_HUMAN_PLAYERS
+	matchUpdateArgs.maxBots = Config.MAX_BOTS
+	matchUpdateArgs.maxFactions = Config.MAX_TOTAL_FACTIONS
+	matchUpdateArgs.renderMode = Config.RENDER_MODE
+	matchUpdateArgs.winner = winnerSlot
+	matchUpdateArgs.winnerName = winnerName
+	matchUpdateArgs.restartIn = math.max(0, restartAt - os.clock())
+	matchUpdateArgs.summary = if matchPhase == "ended" then stats else nil
+	matchUpdate:FireAllClients(MatchLifecycle.buildMatchUpdate(matchUpdateArgs))
 end
 
 --[[
@@ -195,7 +255,8 @@ local function flushEvents()
 			notify:FireAllClients(event.text, event.kind)
 		end
 	end
-	table.clear(state.events)
+	-- N83 : truncate sans detruire le pool (pas table.clear).
+	state:drainEvents()
 
 	for _, event in state.sounds do
 		if event.only then
@@ -207,19 +268,20 @@ local function flushEvents()
 			sfx:FireAllClients(event.name)
 		end
 	end
-	table.clear(state.sounds)
+	state:drainSounds()
 
 	--[[
 		Butins de mise a mort.
 
-		Diffuse a tout le monde et pas seulement au vainqueur : voir une faction
-		se faire depouiller sous ses yeux est une information strategique — elle
-		dit qui vient de s'enrichir, et donc qui devient dangereux.
+		Diffuse a tous les commandants deployes (pas le menu) : voir une faction
+		se faire depouiller est une information strategique — qui s'enrichit,
+		donc qui devient dangereux.
 	]]
 	for _, loot in state.plunders do
-		plunderEvent:FireAllClients(loot.tile, loot.slot, loot.gold)
+		fireDeployed(plunderEvent, loot.tile, loot.slot, loot.gold)
 	end
-	table.clear(state.plunders)
+	-- N85 : truncate sans detruire le pool (pas table.clear).
+	state:drainPlunders()
 end
 
 --=============================================================================
@@ -272,6 +334,10 @@ local function startMatch()
 	TickMetrics.reset()
 	table.clear(snapshotCooldown)
 	table.clear(snapshotCount)
+	-- Un JoinRequest en fin de partie precedente ne doit pas throttle le
+	-- deploiement du round suivant (le refus `ended` n'ecrit plus le cooldown,
+	-- mais un spam lobby proche de la relance le ferait encore).
+	table.clear(joinCooldown)
 
 	state = GameState.new(seed)
 	state.mode = activeMode
@@ -321,14 +387,6 @@ local function startMatch()
 	)
 end
 
-local function experienceFor(ps, won: boolean): number
-	return Config.XP_PER_MATCH
-		+ (if won then Config.XP_PER_WIN else 0)
-		+ math.floor(ps.capturedTiles / Config.XP_TILE_DIVISOR)
-		+ ps.capitalsCaptured * Config.XP_PER_CAPITAL
-		+ ps.buildingsBuilt * Config.XP_PER_BUILDING
-end
-
 local function endMatch(slot: number?)
 	winnerSlot = slot
 	matchPhase = "ended"
@@ -345,13 +403,21 @@ local function endMatch(slot: number?)
 	end
 
 	-- On grave la reputation et le resultat de chaque joueur humain.
-	for player, slot in slotByPlayer do
-		local ps = state.players[slot]
-		if ps then
-			local gain = experienceFor(ps, slot == winnerSlot)
-			local profile = Persistence.record(player.UserId, ps.betrayals, slot == winnerSlot, gain)
-			resultRecorded[player] = true
-			profileUpdate:FireClient(player, profilePacket(profile, gain))
+	-- Les elimines n'ont plus state.players[slot] : settledHumans porte
+	-- betrayals / XP (ISSUE-N37). Sans ca, rester jusqu'a l'ecran de victoire
+	-- n'inscrivait ni defaite ni trahison.
+	for _, rec in MatchLifecycle.endMatchRecords(
+		slotByPlayer,
+		state.players,
+		state.settledHumans,
+		resultRecorded
+	) do
+		local ps = rec.stats
+		local gain = MatchLifecycle.experienceFor(ps, rec.slot == winnerSlot)
+		local profile = Persistence.record(rec.player.UserId, ps.betrayals, rec.slot == winnerSlot, gain)
+		resultRecorded[rec.player] = true
+		if rec.player.Parent then
+			profileUpdate:FireClient(rec.player, profilePacket(profile, gain))
 		end
 	end
 end
@@ -402,6 +468,23 @@ local function deployPlayer(player: Player, nationId: number)
 	if slotByPlayer[player] then
 		return -- deja en jeu
 	end
+	if matchPhase == "ended" then
+		notify:FireClient(player, "La partie est terminee — attends la relance.", "info")
+		return
+	end
+
+	local humanCount = 0
+	for _ in slotByPlayer do
+		humanCount += 1
+	end
+	if humanCount >= Config.MAX_HUMAN_PLAYERS then
+		notify:FireClient(
+			player,
+			`Salon plein ({Config.MAX_HUMAN_PLAYERS} commandants max).`,
+			"bad"
+		)
+		return
+	end
 
 	nationByPlayer[player] = nationId
 	local nation = Nations.get(nationId)
@@ -429,16 +512,31 @@ local function deployPlayer(player: Player, nationId: number)
 end
 
 joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
-	if typeof(nationId) ~= "number" then
+	if typeof(nationId) ~= "number"
+		or nationId ~= nationId
+		or nationId ~= math.floor(nationId)
+		or math.abs(nationId) == math.huge
+	then
 		return
 	end
+	-- Avant cooldown / pendingMode : un JoinRequest en phase ended ne doit
+	-- ni bruler le throttle ni voter le mode du round suivant.
+	if matchPhase == "ended" then
+		notify:FireClient(player, "La partie est terminee — attends la relance.", "info")
+		return
+	end
+	local now = os.clock()
+	local lastJoin = joinCooldown[player.UserId]
+	if lastJoin and now - lastJoin < (Config.JOIN_COOLDOWN_SEC or 2) then
+		return
+	end
+	joinCooldown[player.UserId] = now
 	if typeof(modeId) == "string" then
 		local requestedMode = GameModes.get(modeId)
 		pendingMode = requestedMode.id
-		-- Tant que personne n'est deploye, ce n'est pas encore une partie : le
-		-- mode choisi peut donc s'appliquer immediatement au lieu d'attendre le
-		-- match suivant.
-		if matchPhase == "waiting" then
+		-- Premier deploiement seulement : un second JoinRequest en lobby ne
+		-- doit pas changer le mode pour tout le salon.
+		if matchPhase == "waiting" and next(slotByPlayer) == nil then
 			activeMode = requestedMode
 			state.mode = activeMode
 		end
@@ -449,11 +547,22 @@ end)
 local function onPlayerRemoving(player: Player)
 	local slot = slotByPlayer[player]
 	if slot then
-		local ps = state.players[slot]
+		local live = state.players[slot]
+		local ps = MatchLifecycle.lookupStats(state.players, state.settledHumans, slot)
 		if ps and not resultRecorded[player] then
-			Persistence.record(player.UserId, ps.betrayals, false)
+			if live then
+				-- Encore vivant : 0 XP (chemin distinct de N37, P3 note).
+				Persistence.record(player.UserId, ps.betrayals, false)
+			else
+				-- Deja elimine : graver le snapshot avant que slotByPlayer parte.
+				local gain = MatchLifecycle.experienceFor(ps, false)
+				Persistence.record(player.UserId, ps.betrayals, false, gain)
+			end
+			resultRecorded[player] = true
 		end
-		state:removePlayer(slot)
+		if live then
+			state:removePlayer(slot)
+		end
 		slotByPlayer[player] = nil
 		broadcastRoster()
 	end
@@ -462,6 +571,7 @@ local function onPlayerRemoving(player: Player)
 	IntentValidator.clearPlayer(player.UserId)
 	snapshotCooldown[player.UserId] = nil
 	snapshotCount[player.UserId] = nil
+	joinCooldown[player.UserId] = nil
 	Persistence.release(player.UserId)
 end
 
@@ -472,7 +582,10 @@ end
 -- ici : IntentValidator enfile, puis flush en tete de tick.
 
 local function isInteger(value: any): boolean
-	return typeof(value) == "number" and value == value and value == math.floor(value)
+	return typeof(value) == "number"
+		and value == value
+		and value == math.floor(value)
+		and math.abs(value) ~= math.huge
 end
 
 local function slotOf(player: Player): number?
@@ -574,8 +687,13 @@ end)
 local quickChatEvent = Remotes.get("QuickChat")
 
 quickChatEvent.OnServerEvent:Connect(function(player: Player, messageId: any, targetSlot: any, sequence: any)
-	-- Compat : ancien client envoie (id, target) ; nouveau (id, target, seq).
-	-- Si targetSlot est un nombre et sequence nil, c'est l'ancien format.
+	-- Client officiel : (id, target, seq). Ancien fil 2-args : (id, seq) avec
+	-- seq > MAX_TOTAL_FACTIONS ne doit pas viser une faction. Un needsTarget
+	-- 2-args avec petit N reste lu comme cible (compat ancienne UI).
+	if sequence == nil and typeof(targetSlot) == "number" and targetSlot > Config.MAX_TOTAL_FACTIONS then
+		sequence = targetSlot
+		targetSlot = nil
+	end
 	enqueueOrReject(player, "QuickChat", sequence, { messageId = messageId, targetSlot = targetSlot })
 end)
 
@@ -634,83 +752,32 @@ local function replicate()
 	local ownerDelta = state:flushOwnerDelta()
 	local changedTiles = if ownerDelta then buffer.len(ownerDelta) // 5 else 0
 
-	local activeAttacks: { [number]: number } = {}
-	local committedTroops: { [number]: number } = {}
-	local attackTargets: { [number]: { number } } = {}
-	for _, attack in state.attacks do
-		activeAttacks[attack.attacker] = (activeAttacks[attack.attacker] or 0) + 1
-		committedTroops[attack.attacker] = (committedTroops[attack.attacker] or 0) + math.floor(attack.troops)
-		local targets = attackTargets[attack.attacker]
-		if not targets then
-			targets = {}
-			attackTargets[attack.attacker] = targets
-		end
-		table.insert(targets, attack.target)
+	-- N57 : records stats recyclees (helper GameState). N56 : prix via
+	-- Buildings.pricesFor. eraProgress / buildPrices poses ici pour eviter
+	-- un cycle GameState → Research / Buildings. frontHudForReplicate est
+	-- appele une fois a l'interieur du helper (N55).
+	local stats = state:playerStatsForReplicate()
+	for slot, rec in stats do
+		rec.eraProgress = Research.progress(state, slot)
+		rec.buildPrices = Buildings.pricesFor(state, slot)
 	end
-
-	local stats = {}
-	for slot, ps in state.players do
-		local logisticsRoutes, logisticsIncome = state:logisticsFor(slot)
-		local buildPrices = {}
-		for _, def in BuildingDefs.BUILDABLE do
-			buildPrices[def.id] = Buildings.priceFor(state, slot, def.id)
-		end
-		stats[slot] = {
-			troops = math.floor(ps.troops),
-			tiles = ps.tiles,
-			gold = math.floor(ps.gold),
-			maxTroops = math.floor(state:maxTroops(ps)),
-			era = ps.era,
-			eraProgress = Research.progress(state, slot),
-			capturedTiles = ps.capturedTiles,
-			lostTiles = ps.lostTiles,
-			capitalsCaptured = ps.capitalsCaptured,
-			buildingsBuilt = ps.buildingsBuilt,
-			attacksLaunched = ps.attacksLaunched,
-			activeAttacks = activeAttacks[slot] or 0,
-			committedTroops = committedTroops[slot] or 0,
-			attackTargets = attackTargets[slot],
-			buildPrices = buildPrices,
-			logisticsRoutes = logisticsRoutes,
-			logisticsIncome = math.floor(logisticsIncome * 100) / 100,
-		}
-	end
-	stateDelta:FireAllClients(ownerDelta, stats)
+	fireDeployed(stateDelta, ownerDelta, stats)
 
 	local buildings = state:flushBuildingDelta()
 	if buildings then
-		buildingDelta:FireAllClients(buildings)
+		fireDeployed(buildingDelta, buildings)
 	end
 
 	-- Unites : peu nombreuses, donc envoyees en clair. L'instantane vide est
 	-- important lui aussi : c'est lui qui retire le dernier navire du client et
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
-	local boats = {}
-	for _, boat in state.boats do
-		table.insert(boats, {
-			id = boat.id,
-			slot = boat.slot,
-			x = boat.x,
-			y = boat.y,
-			troops = math.floor(boat.troops),
-			kind = boat.kind,
-		})
-	end
+	-- snapshotBoats (N51) recycle boatSnapBuf ; jamais path / homeTile /
+	-- retreating (Overlay de cette ligne ne lit pas retreating).
+	local boats = state:snapshotBoats()
+	-- snapshotMissiles (N52) : Types.MissileSnapshot seulement, pas progress.
+	local missiles = state:snapshotMissiles()
 
-	local missiles = {}
-	for _, missile in state.missiles do
-		table.insert(missiles, {
-			id = missile.id,
-			slot = missile.slot,
-			x = missile.x,
-			y = missile.y,
-			tx = missile.tx,
-			ty = missile.ty,
-			kind = missile.kind,
-		})
-	end
-
-	unitSnapshot:FireAllClients(boats, missiles)
+	fireDeployed(unitSnapshot, boats, missiles)
 
 	-- La vue diplomatique est propre a chaque joueur, donc envoyee une fois par
 	-- seconde seulement — elle change rarement et coute cher a construire.
@@ -721,39 +788,7 @@ local function replicate()
 			diplomacyUpdate:FireClient(player, Diplomacy.viewFor(state, slot))
 		end
 
-		matchUpdate:FireAllClients({
-			phase = matchPhase,
-			stage = if matchPhase == "waiting"
-				then "waiting"
-				elseif matchPhase == "ended"
-				then "ended"
-				elseif state.combatUnlocked
-				then "combat"
-				else "preparation",
-			combatIn = if matchPhase == "waiting"
-				then Config.PREPARATION_DURATION
-				else math.max(0, combatStartsAt - os.clock()),
-			timeLeft = if matchPhase == "waiting"
-				then activeMode.duration
-				else math.max(0, matchEndsAt - os.clock()),
-			mode = activeMode.id,
-			players = (function()
-				local n = 0
-				for _ in slotByPlayer do
-					n += 1
-				end
-				return n
-			end)(),
-			maxPlayers = Config.PUBLIC_MATCH_CAPACITY,
-			maxHumans = Config.MAX_HUMAN_PLAYERS,
-			maxBots = Config.MAX_BOTS,
-			maxFactions = Config.MAX_TOTAL_FACTIONS,
-			renderMode = Config.RENDER_MODE,
-			winner = winnerSlot,
-			winnerName = winnerName,
-			restartIn = math.max(0, restartAt - os.clock()),
-			summary = if matchPhase == "ended" then stats else nil,
-		})
+		broadcastMatchUpdate(stats)
 	end
 
 	flushEvents()
@@ -761,7 +796,7 @@ local function replicate()
 end
 
 local function onExplosion(x: number, y: number, radius: number)
-	explosion:FireAllClients(x, y, radius)
+	fireDeployed(explosion, x, y, radius)
 end
 
 local accumulator = 0
@@ -772,7 +807,15 @@ local function stepOnce()
 	if matchPhase == "waiting" then
 		-- Carte figee : aucun tick economique, aucune expansion et surtout aucun
 		-- bot ne joue derriere le menu de selection.
-		state.tick += 1 -- cadence uniquement la replication du lobby
+		state.tick += 1
+		-- Lobby vide : MatchUpdate 1 Hz pour le menu, pas de StateDelta 10 Hz.
+		if next(slotByPlayer) == nil then
+			if state.tick % Config.TICK_RATE == 0 then
+				broadcastMatchUpdate(nil)
+			end
+			TickMetrics.record(state.tick, 0, nil, (os.clock() - tickStarted) * 1000)
+			return
+		end
 		local changed, delta = replicate()
 		TickMetrics.record(state.tick, changed, delta, (os.clock() - tickStarted) * 1000)
 		return
@@ -789,7 +832,7 @@ local function stepOnce()
 		Navy.step(state, rng)
 		Nukes.step(state, rng, onExplosion)
 		Trade.step(state, rng, function(action, a, b, slot, value)
-			tradeEvent:FireAllClients(action, a, b, slot, value)
+			fireDeployed(tradeEvent, action, a, b, slot, value)
 		end)
 		Diplomacy.step(state)
 		state:step()
@@ -798,6 +841,11 @@ local function stepOnce()
 		state.tick += 1
 		if os.clock() >= restartAt then
 			startMatch()
+			return
+		end
+		-- Ecran victoire : plus de sim, replication 1 Hz (summary HUD).
+		if state.tick % Config.TICK_RATE ~= 0 then
+			TickMetrics.record(state.tick, 0, nil, (os.clock() - tickStarted) * 1000)
 			return
 		end
 	end
