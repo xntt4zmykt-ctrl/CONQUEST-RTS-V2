@@ -740,19 +740,8 @@ local function replicate()
 	local ownerDelta = state:flushOwnerDelta()
 	local changedTiles = if ownerDelta then buffer.len(ownerDelta) // 5 else 0
 
-	local activeAttacks: { [number]: number } = {}
-	local committedTroops: { [number]: number } = {}
-	local attackTargets: { [number]: { number } } = {}
-	for _, attack in state.attacks do
-		activeAttacks[attack.attacker] = (activeAttacks[attack.attacker] or 0) + 1
-		committedTroops[attack.attacker] = (committedTroops[attack.attacker] or 0) + math.floor(attack.troops)
-		local targets = attackTargets[attack.attacker]
-		if not targets then
-			targets = {}
-			attackTargets[attack.attacker] = targets
-		end
-		table.insert(targets, attack.target)
-	end
+	-- N55 : HUD fronts recyclees (helper GameState, init.server hors bundle).
+	local activeAttacks, committedTroops, attackTargets = state:frontHudForReplicate()
 
 	local stats = {}
 	for slot, ps in state.players do
