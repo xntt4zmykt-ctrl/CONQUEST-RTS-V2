@@ -260,6 +260,26 @@ local missileSnapBuf: {
 -- N72 : indices dirty pour flushOwnerDelta. Le buffer outbound reste neuf
 -- (RemoteEvent). Early-out dirty vide sans allouer.
 local dirtyIndexBuf: { number } = table.create(64)
+-- N73 : BuildingDelta recycle (recette missileSnapBuf / N71). Inner records
+-- reecrits, pas recrees. `links` = reference live (pas clone). Non reentrant
+-- — un seul flushBuildingDelta par tick. Early-out dirty vide sans allouer.
+local buildingSnapBuf: {
+	{
+		index: number,
+		kind: number,
+		slot: number,
+		level: number,
+		links: { number }?,
+	}
+} =
+	table.create(16)
+-- N74 : HUD fronts recycle (recette N71, helper GameState car init.server
+-- hors bundle). Slots sans front absents (nil, pas {}). Inner listes via
+-- attackTargetPool. Non reentrant — replicate() unique / tick.
+local activeAttackBuf: { [number]: number } = {}
+local committedTroopBuf: { [number]: number } = {}
+local attackTargetBuf: { [number]: { number } } = {}
+local attackTargetPool: { [number]: { number } } = {}
 
 --=============================================================================
 -- Construction
@@ -2155,20 +2175,80 @@ function GameState.flushOwnerDelta(self: GameState): buffer?
 	return buf
 end
 
+--[[
+	N73 : recycle buildingSnapBuf + inner records. Truncate apres remplissage.
+	Early-out dirty vide sans allouer. Destruction : kind/slot/level = 0,
+	links = nil. `links` reste la table live de l'usine (Overlay lit les
+	champs tout de suite, pas l'identite de `out`).
+]]
 function GameState.flushBuildingDelta(self: GameState): { any }?
-	local out = {}
+	if next(self.buildingDirty) == nil then
+		table.clear(self.buildingDirty)
+		return nil
+	end
+
+	local n = 0
 	for index in self.buildingDirty do
+		n += 1
 		local building = self.buildings[index]
-		table.insert(out, {
-			index = index,
-			kind = if building then building.kind else 0,
-			slot = if building then building.slot else 0,
-			level = if building then building.level else 0,
-			links = if building then building.links else nil,
-		})
+		local rec = buildingSnapBuf[n]
+		if rec == nil then
+			buildingSnapBuf[n] = {
+				index = index,
+				kind = if building then building.kind else 0,
+				slot = if building then building.slot else 0,
+				level = if building then building.level else 0,
+				links = if building then building.links else nil,
+			}
+		else
+			rec.index = index
+			rec.kind = if building then building.kind else 0
+			rec.slot = if building then building.slot else 0
+			rec.level = if building then building.level else 0
+			rec.links = if building then building.links else nil
+		end
+	end
+	for i = #buildingSnapBuf, n + 1, -1 do
+		buildingSnapBuf[i] = nil
 	end
 	table.clear(self.buildingDirty)
-	return if #out > 0 then out else nil
+	return if n > 0 then buildingSnapBuf else nil
+end
+
+--[[
+	N74 : HUD fronts pour StateDelta (activeAttacks / committedTroops /
+	attackTargets). Trois maps recyclees. Pas de stats / buildPrices (N2).
+	Chaque tas compte (terre et isBeachhead separes). Slots sans front :
+	absents des trois maps — replicate() garde `or 0` et attackTargets nil.
+]]
+function GameState.frontHudForReplicate(self: GameState): (
+	{ [number]: number },
+	{ [number]: number },
+	{ [number]: { number } }
+)
+	table.clear(activeAttackBuf)
+	table.clear(committedTroopBuf)
+	table.clear(attackTargetBuf)
+
+	for _, attack in self.attacks do
+		local slot = attack.attacker
+		activeAttackBuf[slot] = (activeAttackBuf[slot] or 0) + 1
+		committedTroopBuf[slot] = (committedTroopBuf[slot] or 0) + math.floor(attack.troops)
+		local targets = attackTargetBuf[slot]
+		if not targets then
+			targets = attackTargetPool[slot]
+			if not targets then
+				targets = {}
+				attackTargetPool[slot] = targets
+			else
+				table.clear(targets)
+			end
+			attackTargetBuf[slot] = targets
+		end
+		table.insert(targets, attack.target)
+	end
+
+	return activeAttackBuf, committedTroopBuf, attackTargetBuf
 end
 
 --[[
