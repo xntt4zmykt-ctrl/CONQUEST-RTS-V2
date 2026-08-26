@@ -724,8 +724,8 @@ check("construction du monde 3D", function()
 	-- fromEulerAnglesYXZ (yaw `phase` variable). Plus de CFrame.Angles
 	-- a buildDecorations pour Rock. ClassName WedgePart. Ne pas cuire un
 	-- rockRot. Distinct de V86 (Z=90° fixe). Distinct de V84 (buildOcean).
-	-- Leftover V88 (cylinder helper BuildingModels).
-	-- Check calques V83, vagues V82 et modeles V85 doivent rester verts.
+	-- V88 cylinder helper (check modeles). Leftover V89 (toits usine Z=-12°).
+	-- Check calques V83, vagues V82 et modeles V85/V88 doivent rester verts.
 	local nRipple = #world.oceanRipples
 	assert(nRipple > 0, "aucun reflet ocean")
 	local first = world.oceanRipples[1]
@@ -794,7 +794,7 @@ check("calques d'entites, effets et apercu", function()
 	-- dans le check vagues. Leftover V81 Shockwave dans le check navires.
 	-- V86 TreeTrunk / V87 Rock (check construction). Leftover V84 OceanGlint
 	-- dans le check construction. Leftover V85 BuildRing dans modeles.
-	-- Leftover V88 (cylinder helper Z=90°).
+	-- Leftover V89 (toits usine Z=-12°).
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	local bakedPulse = effects.pulseRot
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
@@ -986,7 +986,7 @@ check("pose et capture de chaque type de batiment", function()
 	-- + V79 LandingSplash (check navires). V80 DeliveryPulse (ci-dessous).
 	-- V81 Shockwave (check navires explosion). V82 conquestPulse
 	-- (check vagues). V83 SelectionRing (check calques). V84 OceanGlint
-	-- (check construction). Leftover V88 (cylinder helper Z=90°). Voies encore
+	-- (check construction). Leftover V89 (toits usine Z=-12°). Voies encore
 	-- vivantes ici ; la destruction plus bas les vide (le check
 	-- livraison n'en a plus).
 	local _, liveRoute = routesOf(factoryEntry.index)
@@ -1014,7 +1014,7 @@ check("pose et capture de chaque type de batiment", function()
 	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
 	-- V80 : DeliveryPulse reutilise wakeRot. Plus de CFrame.Angles a
 	-- l'arrivee. Recette feel N132. V81 Shockwave (check navires).
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°).
 	local pulseFound = false
 	local aPulse
 	for _, node in overlay.root:GetChildren() do
@@ -1115,9 +1115,20 @@ check("modeles procéduraux : le palier change la silhouette", function()
 
 	-- V11b : cheminee presente. Smoke optionnel (qualité basse) ; headless
 	-- n'a pas UserSettings donc le FX reste (défaut = garder).
+	-- V88 : helper cylinder() pose via fromEulerAnglesYXZ (Z=90° fixe).
+	-- Plus de CFrame.Angles dans le helper. Shape cylindre. Ne pas cuire
+	-- un cylinderRot. Distinct de V87 (Rock yaw phase, WorldRenderer).
+	-- Distinct de V86 (TreeTrunk WorldRenderer). Distinct de V85
+	-- (BuildRing playConstruction). Call sites buildFactory / buildSilo
+	-- non edites. Leftover V89 (toits usine Z=-12°).
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local chimney = factory:FindFirstChild("Chimney", true)
 	assert(chimney, "usine : cheminee absente")
+	assert(chimney.Shape == Enum.PartType.Cylinder, "Chimney pas cylindre")
+	local silo = Building.create(Config.BUILDING.SILO, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local missile = silo:FindFirstChild("StrategicMissile", true)
+	assert(missile, "silo : missile absent")
+	assert(missile.Shape == Enum.PartType.Cylinder, "StrategicMissile pas cylindre")
 
 	-- V60 : câble Y depuis rest, plus de Vector3.new. Leftover V59 (feuillage)
 	-- reste dans construction du monde. V70 : radar / flag / boom rotation
@@ -1128,7 +1139,7 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- V75 rot + V76 Size rayon + V77 early-out hover dans le check
 	-- apercu. V78 wakeRot + V79 LandingSplash (check navires). V80
 	-- DeliveryPulse (check pose/capture). V81 Shockwave (check navires).
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°).
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	local cable = port:FindFirstChild("PortCraneCable")
@@ -1174,7 +1185,8 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- CFrame.Angles a playConstruction. Ne pas cuire un ringRot.
 	-- Distinct de V84 (OceanGlint yaw variable). Distinct de V83
 	-- (SelectionRing pulseRot). V86 TreeTrunk / V87 Rock (check construction).
-	-- Leftover V88 (cylinder helper Z=90°).
+	-- V88 Chimney / StrategicMissile cylindre (ci-dessus). Leftover V89
+	-- (toits usine Z=-12°).
 	local city = Building.create(Config.BUILDING.CITY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.playConstruction(city, Vector3.new(0, 2, 0))
 	local buildRing = city:FindFirstChild("BuildRing")
@@ -1193,7 +1205,7 @@ check("apercu de placement pour chaque batiment", function()
 	-- dans le check navires. V78 wakeRot + V79 LandingSplash
 	-- (check navires). V80 DeliveryPulse (check pose/capture).
 	-- V81 Shockwave (check navires). V82 conquestPulse (check vagues).
-	-- V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°). Hauteurs +0.42 / +0.38.
+	-- V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°). Hauteurs +0.42 / +0.38.
 	assert(preview.footprintRot ~= nil and type(preview.footprintRot.X) == "number", "footprintRot absent")
 	assert(preview.pulseRot ~= nil and type(preview.pulseRot.X) == "number", "pulseRot absent")
 	assert(preview.footprintRot.X == 0 and preview.footprintRot.Y == 0 and preview.footprintRot.Z == 0, "footprintRot n'est pas a l'origine")
@@ -1646,7 +1658,7 @@ check("navires, missiles et interpolation", function()
 	-- reutilise wakeRot a l'arrivee camion (feel N132, check pose/capture).
 	-- V81 : Shockwave reutilise wakeRot a l'explosion (feel N133,
 	-- PLAINS + 0.5). V82 : Effects conquestPulse pulseRot (feel N134,
-	-- check vagues). V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°). Leftover V77
+	-- check vagues). V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°). Leftover V77
 	-- (Preview hover) dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -1773,7 +1785,7 @@ check("navires, missiles et interpolation", function()
 	overlay:explosion(50, 50, 9)
 	-- V81 : Shockwave reutilise wakeRot. Plus de CFrame.Angles explosion.
 	-- Recette feel N133. Y = PLAINS + 0.5. Sphere Blast / fumee inchangees.
-	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°).
+	-- V82 conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°).
 	local shockFound = false
 	local aShock
 	for _, node in overlay.root:GetChildren() do
@@ -1795,7 +1807,7 @@ check("vagues de conquete", function()
 	-- V82 : pulseRot cuit a new (recette V75 footprintRot / V78 wakeRot /
 	-- feel N134). Plus de CFrame.Angles a chaque onde. Height = surface
 	-- + 0.8 (pas Y = 3 feel). Name ConquestPulse. Leftover V81 Shockwave
-	-- dans le check navires. V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°).
+	-- dans le check navires. V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°).
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	assert(effects.pulseRot.X == 0 and effects.pulseRot.Y == 0 and effects.pulseRot.Z == 0, "pulseRot n'est pas a l'origine")
 	local bakedPulse = effects.pulseRot
@@ -1868,7 +1880,7 @@ check("camera strategique", function()
 	-- V75 rot + V76 Size + V77 early-out dans le check apercu.
 	-- V78 wakeRot + V79 LandingSplash (check navires). V80 DeliveryPulse
 	-- (check pose/capture). V81 Shockwave (check navires). V82
-	-- conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V88 (cylinder helper Z=90°).
+	-- conquestPulse (check vagues). V83 SelectionRing (check calques). Leftover V89 (toits usine Z=-12°).
 	assert(type(camera.focusX) == "number", "focusX absent")
 	assert(type(camera.focusY) == "number", "focusY absent")
 	assert(type(camera.focusZ) == "number", "focusZ absent")
