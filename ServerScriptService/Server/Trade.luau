@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Commerce terrestre, modele OpenFront — le pendant routier du commerce
+	Commerce terrestre, regle CONQUEST — le pendant routier du commerce
 	maritime de Navy.
 
 	Trois regles portent tout le systeme :
@@ -18,7 +18,7 @@
 	faction : contrairement aux navires, un colis ne paie qu'un camp. Pas de
 	fil de notifications non plus — une usine livre toutes les sept secondes,
 	le fil serait sature ; le "+X or" flottant au-dessus de la gare est le
-	seul retour, exactement comme dans le jeu de reference.
+	seul retour, selon les regles CONQUEST.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,8 +29,13 @@ local GameState = require(script.Parent.GameState)
 type GameState = GameState.GameState
 
 local Trade = {}
+Trade.lastFactoryVisits = 0
 
 local B = Config.BUILDING
+
+-- N66 : liste usines recyclee (recette portsBuf / N63). Trade.step tourne
+-- a 10 Hz : une table + sort jetes chaque tick saturait le GC pour rien.
+local factoryBuf: { number } = table.create(16)
 
 -- Les gares valides comme destination : tout ce qui appartient au reseau.
 local IS_DESTINATION = {
@@ -105,7 +110,10 @@ local function resolve(state: GameState, index: number, delivery, onEvent: (stri
 		return
 	end
 
-	local gold = deliveryValue(delivery.distance, factory.level, delivery.links)
+	-- Niveau snapshot au depart : upgrader l'usine en transit ne doit pas
+	-- augmenter un colis deja expedie. Fallback si un vieux payload n'a pas le champ.
+	local level = delivery.level or factory.level
+	local gold = deliveryValue(delivery.distance, level, delivery.links)
 	ps.gold += gold
 	onEvent("arrival", delivery.to, 0, delivery.slot, math.floor(gold))
 end
@@ -123,16 +131,44 @@ function Trade.step(state: GameState, rng: Random, onEvent: (string, number, num
 	-- Iteration triee : sans elle, l'ordre des appels au generateur aleatoire
 	-- depend de l'ordre interne de la table, et deux serveurs partis de la
 	-- meme graine divergeraient des le premier colis.
-	local factories: { number } = {}
-	for index, building in state.buildings do
-		if building.kind == B.FACTORY then
-			table.insert(factories, index)
+	-- N61 : index factoriesBySlot, pas le hash buildings (recette samsBySlot).
+	-- N66 : factoryBuf recycle ; early-out 0 usine avant sort ; sort si n>=2.
+	-- Si l'index existe, on n'y touche plus. Fallback hash si nil (tests partiels).
+	local factories = factoryBuf
+	local n = 0
+	if state.factoriesBySlot then
+		for _, set in state.factoriesBySlot do
+			for index in set do
+				n += 1
+				factories[n] = index
+			end
+		end
+	else
+		for index, building in state.buildings do
+			if building.kind == B.FACTORY then
+				n += 1
+				factories[n] = index
+			end
 		end
 	end
-	table.sort(factories)
+	for i = #factories, n + 1, -1 do
+		factories[i] = nil
+	end
+	if n == 0 then
+		Trade.lastFactoryVisits = 0
+		return
+	end
+	if n >= 2 then
+		table.sort(factories)
+	end
+	Trade.lastFactoryVisits = n
 
-	for _, index in factories do
+	for i = 1, n do
+		local index = factories[i]
 		local factory = state.buildings[index]
+		if not factory or factory.kind ~= B.FACTORY then
+			continue
+		end
 		local delivery = state.tradeDeliveries[index]
 		if delivery then
 			if state.tick >= delivery.arrivalTick then
