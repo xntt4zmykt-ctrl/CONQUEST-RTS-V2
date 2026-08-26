@@ -343,8 +343,12 @@ local function endMatch(slot: number?)
 		state:notify("Fin de partie — aucune domination decisive.", "alert")
 	end
 
-	-- On grave la reputation et le resultat de chaque joueur humain.
+	-- On grave la reputation et le resultat de chaque joueur humain encore
+	-- en lice. Les elimines ont deja ete enregistres via settledHumans.
 	for player, slot in slotByPlayer do
+		if resultRecorded[player] then
+			continue
+		end
 		local ps = state.players[slot]
 		if ps then
 			local gain = experienceFor(ps, slot == winnerSlot)
@@ -428,7 +432,13 @@ local function deployPlayer(player: Player, nationId: number)
 end
 
 joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId: any)
+	if matchPhase == "ended" then
+		return
+	end
 	if typeof(nationId) ~= "number" then
+		return
+	end
+	if nationId ~= nationId or nationId == math.huge or nationId == -math.huge or nationId ~= math.floor(nationId) then
 		return
 	end
 	if typeof(modeId) == "string" then
@@ -442,7 +452,7 @@ joinRequest.OnServerEvent:Connect(function(player: Player, nationId: any, modeId
 			state.mode = activeMode
 		end
 	end
-	deployPlayer(player, math.clamp(math.floor(nationId), 1, #Nations.LIST))
+	deployPlayer(player, math.clamp(nationId, 1, #Nations.LIST))
 end)
 
 local function onPlayerRemoving(player: Player)
@@ -790,7 +800,27 @@ local function stepOnce()
 			tradeEvent:FireAllClients(action, a, b, slot, value)
 		end)
 		Diplomacy.step(state)
-		state:step()
+		local eliminated = state:step()
+		for _, slot in eliminated do
+			local settled = state.settledHumans and state.settledHumans[slot]
+			if not settled then
+				continue
+			end
+			for player, mapped in slotByPlayer do
+				if mapped ~= slot then
+					continue
+				end
+				if not resultRecorded[player] then
+					local gain = experienceFor(settled, false)
+					local profile = Persistence.record(player.UserId, settled.betrayals, false, gain)
+					resultRecorded[player] = true
+					profileUpdate:FireClient(player, profilePacket(profile, gain))
+				end
+				slotByPlayer[player] = nil
+				IntentValidator.clearPlayer(player.UserId)
+				break
+			end
+		end
 		checkVictory()
 	else -- ended
 		state.tick += 1

@@ -866,8 +866,10 @@ Config.RENDER_MODE = "Blocks" -- "Blocks" | "CanvasExperimental" | "LowDetail"
 
 -- Intentions reseau
 Config.INTENT_RATE_LIMIT_PER_SEC = 20
+Config.ALLOW_UNSEQUENCED_INTENTS = false
 Config.SNAPSHOT_COOLDOWN_SEC = 5
 Config.MAX_SNAPSHOTS_PER_MATCH = 12
+Config.TRIBE_COUNT = 6
 
 Config.VICTORY_LAND_RATIO = 0.80
 Config.MATCH_DURATION = 25 * 60 -- secondes

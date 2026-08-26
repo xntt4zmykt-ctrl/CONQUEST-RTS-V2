@@ -37,12 +37,12 @@ end
 function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defender: any, tile: number)
 	local terrain = buffer.readu8(state.terrain, tile)
 	local mag, speed = terrainMagSpeed(terrain)
+	local DEF = Config.BUILDING.DEFENSE
 	local posted = false
-	if defender then
+	if defender and (defender.buildingCounts[DEF] or 0) > 0 then
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local DEF = Config.BUILDING.DEFENSE
 		for index, building in state.buildings do
 			if building.kind == DEF and building.slot == defender.slot then
 				local bx, by = MapGen.fromIndex(index)
@@ -103,9 +103,21 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
+	-- Apres setOwner, `seed` appartient deja a l'attaquant. Le BFS part des
+	-- voisins encore detenus par le defenseur (sinon la poche n'est jamais vue).
 	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	local queue: { number } = {}
+	local n0 = MapGen.neighbors(seed, annexScratch)
+	for i = 1, n0 do
+		local nb = annexScratch[i]
+		if buffer.readu8(state.owner, nb) == defenderSlot and not visited[nb] then
+			visited[nb] = true
+			table.insert(queue, nb)
+		end
+	end
+	if #queue == 0 then
+		return
+	end
 	local head = 1
 	local pocket: { number } = {}
 	while head <= #queue do
@@ -432,7 +444,12 @@ function ChantierB.install(GameState, Nukes)
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				attacker.troops += math.max(0, atk.troops)
 				table.remove(self.attacks, i)
 				continue
 			end

@@ -197,7 +197,7 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
+	local troops = math.floor(ps.troops * (Config.BOAT_TROOP_RATIO or 0.2) * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end
@@ -255,7 +255,7 @@ local function resolveLanding(state: GameState, boat)
 	local targetOwner = buffer.readu8(state.owner, tile)
 
 	if targetOwner == boat.slot then
-		applyRetreatMalus(state, boat)
+		ps.troops += boat.troops
 		return
 	end
 
@@ -283,7 +283,7 @@ end
 local function manhattan(a: number, b: number): number
 	local ax, ay = MapGen.fromIndex(a)
 	local bx, by = MapGen.fromIndex(b)
-	return math.abs(ax - bx) + math.abs(by - by)
+	return math.abs(ax - bx) + math.abs(ay - by)
 end
 
 local function canTrade(state: GameState, a: number, b: number): boolean

@@ -120,10 +120,22 @@ local function checkRate(userId: number, now: number): boolean
 	return count <= limit
 end
 
-local function checkSequence(userId: number, sequence: number?): (boolean, RefuseReason?)
+local LOBBY_ACTIONS = {
+	ChooseDoctrine = true,
+	SetAttackRatio = true,
+}
+
+local function checkSequence(userId: number, sequence: number?, matchPhase: string, actionType: string): (boolean, RefuseReason?)
 	if sequence == nil then
-		-- Compat : intention sans numero — acceptee mais non idempotente.
-		return true, nil
+		if Config.ALLOW_UNSEQUENCED_INTENTS then
+			return true, nil
+		end
+		-- Lobby : doctrine / ratio peuvent arriver sans numero. En playing, le
+		-- reste exige sequence >= 1 (anti-exploit, N41).
+		if matchPhase ~= "playing" or LOBBY_ACTIONS[actionType] then
+			return true, nil
+		end
+		return false, "InvalidSchema"
 	end
 	if not isInteger(sequence) or sequence < 1 then
 		return false, "InvalidSchema"
@@ -180,7 +192,7 @@ function IntentValidator.enqueue(
 		return false, "RateLimited"
 	end
 
-	local seqOk, seqReason = checkSequence(userId, sequence)
+	local seqOk, seqReason = checkSequence(userId, sequence, ctx.matchPhase, actionType)
 	if not seqOk then
 		bumpRefuse(seqReason :: string)
 		return false, seqReason
@@ -234,7 +246,7 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
-		if payload.targetSlot < 1 or payload.targetSlot > Config.MAX_TOTAL_FACTIONS then
+		if payload.targetSlot < 1 or payload.targetSlot > Config.MAX_TOTAL_FACTIONS or payload.targetSlot == slot then
 			bumpRefuse("InvalidTarget")
 			return false, "InvalidTarget"
 		end
@@ -243,10 +255,6 @@ function IntentValidator.enqueue(
 			bumpRefuse("InvalidSchema")
 			return false, "InvalidSchema"
 		end
-	end
-
-	if sequence ~= nil then
-		lastSequence[userId] = sequence
 	end
 
 	local intent: Intent = {
@@ -259,7 +267,7 @@ function IntentValidator.enqueue(
 	}
 
 	-- Feel OpenFront : l'intention est resolue tout de suite apres validation.
-	-- La file ne sert que si un appelant demande un flush differe.
+	-- La sequence n'est gravee qu'apres un apply reussi (N29).
 	applyOne(ctx, intent)
 	return true, nil
 end
@@ -384,6 +392,9 @@ local function applyOneImpl(ctx: Context, intent: Intent)
 
 	if message or ok then
 		ctx.reply(player, ok, message)
+	end
+	if ok and intent.sequence >= 1 then
+		lastSequence[intent.userId] = intent.sequence
 	end
 	if not ok and message then
 		-- Refus metier (or, cible) : compteur generique InvalidTarget / InsufficientGold
