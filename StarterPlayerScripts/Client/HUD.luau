@@ -178,7 +178,8 @@ local MODE_COLORS: { [string]: Color3 } = {
 
 export type Mode = "attack" | "build" | "boat" | "nuke"
 
-type Ranking = { { slot: number, tiles: number, troops: number, gold: number } }
+type RankRow = { slot: number, tiles: number, troops: number, gold: number }
+type Ranking = { RankRow }
 
 export type HUD = typeof(setmetatable({} :: any, HUD))
 
@@ -2370,6 +2371,18 @@ function HUD.refreshDiplomacyPanel(self: HUD)
 	self.diploButtons.markTarget.Visible = not allied
 end
 
+-- N100 : HUD.update hoist rankByTiles (recette visual V54).
+-- Distinct de N97 (records ranked) et de N76 (playerStatsForReplicate).
+-- Non reentrant. Meme loi : tuiles desc, tie-break troupes desc.
+-- Ne PAS retoucher self.ranked / inner records (N97 deja).
+-- Pas de RemoteFunction. VictoryScreen / Overlay / init.client non touches.
+local function rankByTiles(a: RankRow, b: RankRow): boolean
+	if a.tiles == b.tiles then
+		return a.troops > b.troops
+	end
+	return a.tiles > b.tiles
+end
+
 --=============================================================================
 -- Rafraichissement par tick
 --=============================================================================
@@ -2521,12 +2534,7 @@ function HUD.update(self: HUD, stats: Types.Stats, roster: Types.Roster)
 	for i = #ranked, n + 1, -1 do
 		ranked[i] = nil
 	end
-	table.sort(ranked, function(a, b)
-		if a.tiles == b.tiles then
-			return a.troops > b.troops
-		end
-		return a.tiles > b.tiles
-	end)
+	table.sort(ranked, rankByTiles)
 
 	--[[
 		Le classement maison a ete retire : la liste native de Roblox le donne

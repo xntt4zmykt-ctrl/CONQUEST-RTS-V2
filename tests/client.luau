@@ -231,6 +231,7 @@ check("identite, ere, diplomatie et classement", function()
 	-- N97 : leftover truncate. Premier update 12 slots, second un seul
 	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
 	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	-- N100 : comparateur module (rankByTiles) — meme loi tiles desc.
 	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
 	assert(#hud.ranked == 1, "leftover ranked non truncate")
 	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")

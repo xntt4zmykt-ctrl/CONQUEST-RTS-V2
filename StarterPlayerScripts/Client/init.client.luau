@@ -978,6 +978,28 @@ end)
 -- Boucle de rendu
 --=============================================================================
 
+-- N99 : hover closures module (recette visual V53 / N85 ownerAt).
+-- Distinct de N92 (record previewCtx) et de N85 (ctxBuf serveur).
+-- Capturent world / overlay upvalues. Overlay nil → buildingAt nil.
+-- World nil → ownerAt 0. Pas de RemoteFunction. Pas de function inline
+-- dans RenderStepped. PlacementPreview / previewCtx (N92) non touches.
+local function previewOwnerAt(index: number): number
+	local w = world
+	if not w then
+		return 0
+	end
+	return w:ownerAt(index)
+end
+
+local function previewBuildingAt(index: number): (number?, number?, number?)
+	local o = overlay
+	if not o then
+		return nil, nil, nil
+	end
+	local kind, slot, level = o:buildingAt(index)
+	return kind, slot, level
+end
+
 RunService.RenderStepped:Connect(function(dt: number)
 	camera:step(dt)
 
@@ -1024,16 +1046,8 @@ RunService.RenderStepped:Connect(function(dt: number)
 				local landing, status = p:resolve(
 					tile,
 					hud.buildKind,
-					function(index)
-						return w:ownerAt(index)
-					end,
-					function(index)
-						if o then
-							local kind, slot, level = o:buildingAt(index)
-							return kind, slot, level
-						end
-						return nil, nil, nil
-					end,
+					previewOwnerAt,
+					previewBuildingAt,
 					mySlot,
 					hud.era,
 					hud.gold,
