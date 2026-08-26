@@ -1,11 +1,11 @@
-# Nightly report — passe 34 (revue PR #94)
+# Nightly report — passe 35 (revue PR #97)
 
-**Branche revue :** `cursor/analyse-nocturne-du-codebase-ab8d` (PR #94, `f04b980`)  
-**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-bee8`  
+**Branche revue :** `cursor/analyse-nocturne-du-codebase-bee8` (PR #97, `c30dc38`)  
+**Branche de correctifs :** `cursor/analyse-nocturne-du-codebase-2932`  
 **Date :** 2026-08-26  
 **Banc :** `./tests/run.sh` — serveur **vert**, client **34/34 vert**. `error()` si un invariant casse (Luau CLI sans `os.exit`).
 
-Revue de PR #94 (`GameState.destroyBuf` / `Placement.validTiles` — HEAD visuel). Correctifs sûrs, sans merger feel `2b37`/`e277`/`1e43` ni hardening `ae35`.
+Revue de PR #97 (`WorldRenderer.gainBuf` / `FactionLabels.countBuf` — HEAD visuel). Correctifs sûrs, sans merger feel `2b37`/`e277`/`1e43` ni hardening `ae35`.
 
 `gh` est en lecture seule : pas d’issues GitHub. Les specs worker sont ci-dessous.
 
@@ -15,14 +15,14 @@ Revue de PR #94 (`GameState.destroyBuf` / `Placement.validTiles` — HEAD visuel
 
 | Sujet | Fichiers | Recette |
 |---|---|---|
-| `WorldRenderer.applyDelta` recycle `gainBuf` / `lossBuf` / `otherBuf` | `WorldRenderer.luau` | V48 |
-| `FactionLabels.surveyTerritories` recycle `sumXBuf` / `sumYBuf` / `countBuf` | `FactionLabels.luau` | V49 |
+| `HUD.update` recycle `self.ranked` + inner records | `HUD.luau` | V50 |
+| `PlacementPreview.resolve` recycle `previewCtxBuf` | `PlacementPreview.luau` | V51 |
 
-`destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `PlacementPreview.luau` **non édité**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research.
+`gainBuf` / `countBuf` / `destroyBuf` / `validTiles` pools / `parkedBuf` / `collapseRemainBuf` / `allyBuf` / `stripBuf` / `ctxBuf` / `doomedBuf` / `collapsingBuf` **conservés**. `seedBeachhead` / inbound recycle / `settledHumans` / `awaitingSpawn` **non touchés**. `CAPTURE_GUARD=80` visuel **inchangé**. Schéma filaire client **inchangé** (V14b reste ouvert). `WorldRenderer.luau` / `FactionLabels.luau` **non édités**. Serveur **inchangé**. GameState ne require toujours pas Buildings / Research.
 
 ---
 
-## Constatations PR #94 (à ne pas casser)
+## Constatations PR #97 (à ne pas casser)
 
 - **Autorité :** le client n’évalue aucune règle de combat/économie. Ordres = remotes + sequence. `Placement` est partagé : Preview et serveur exécutent le même `resolve` ; la vérité reste `Buildings.build` côté serveur.
 - **Vérité runtime :** `SystemsBootstrap.install()` → `ChantierB.apply(Config)`. Ne pas tuner `Config.luau` seul.
@@ -41,6 +41,8 @@ Revue de PR #94 (`GameState.destroyBuf` / `Placement.validTiles` — HEAD visuel
 - **Placement partagé :** `validTiles` recycle `blockBuf` / `candBuf` / `queueBuf` / `visitBuf` / `emptyTileBuf` (V47). Early-out kind/index/owner → `emptyTileBuf` (**jamais** d’insert). Truncate leftover **avant** BFS (queue) et **avant** le sort. Retourne `candBuf` (resolve lit `tiles[1]` tout de suite). `placeScratch` distinct de `GameState.scratch`. **Pas réentrant.** Distinct de V40 (`ctxBuf`). Preview n’appelle pas `validTiles` (seulement `resolve`).
 - **Deltas owner client :** `applyDelta` recycle `gainBuf` / `lossBuf` / `otherBuf` (V48). Truncate leftover **avant** return. Early-out `count == 0` → pools à `# == 0` (jamais `{}`). Loi inchangée (colonisation du neutre sans effet). Effects / init.client lisent tout de suite et n’en conservent pas l’identité. **Pas réentrant.** Distinct de V14b (filaire `buffer.create`).
 - **Étiquettes :** `surveyTerritories` recycle `sumXBuf` / `sumYBuf` / `countBuf` (V49). `table.clear` **avant** le scan (leftover slot A = étiquette fantôme). Hash slot→nombre, pas d’array. **Pas réentrant.** Distinct de V48 (arrays) et de V35 (`contactBuf` serveur).
+- **Classement HUD :** `HUD.update` recycle `self.ranked` + inner records (V50). Truncate leftover **avant** `table.sort`. Pas de `table.insert`, pas de nouvelle table. `VictoryScreen.show` lit tout de suite et copie vers `row.Text` — il ne stocke pas l’identité. Clé de tri inchangée (tuiles desc, tie-break troupes). **Pas réentrant.** Distinct de V49 (hash barycentre) et de V31 (`playerStatsForReplicate` serveur).
+- **Fantôme placement :** `PlacementPreview.resolve` recycle `previewCtxBuf` (V51). Six champs réécrits, pas de nouvelle table. Recette feel N92 **sans** merger feel. `Placement.resolve` lit tout de suite. **Pas réentrant.** Distinct de V40 (`ctxBuf` serveur) et de V47 (`validTiles`). Preview n’appelle pas `validTiles`.
 - **Spawn clic :** terre libre + `isSpawnIsolated`. Snap `r=6` seulement si la tuile cliquée est **occupée**.
 - **Cycles `require` :** aucun au chargement. `Nukes` lazy-require `Diplomacy`. `Tribes` → `Bots` (acyclique). `GameState` ne require pas `Buildings` / `Research` / `Types`.
 - **Produit 20K CCU :** 8 humains / salon, N serveurs. Un salon ≠ 20K joueurs.
@@ -106,45 +108,46 @@ Ne pas merger feel `2b37`/`e277`/`1e43` ni hardening `ae35` sur cette branche sa
 
 **Tester.** Match 6000 ticks, P0 metrics. Client 34/34.
 
-### ISSUE-V50 — `HUD.update` alloue `ranked` + records 10 Hz
+### ISSUE-V52 — `Overlay.applyUnits` closure `track` + extra missile 10 Hz
 
-**Problème.** Chaque `HUD.update` (StateDelta 10 Hz playing) fait `local ranked: Ranking = {}` puis `table.insert(ranked, { slot, tiles, troops, gold })` par faction vivante, puis `self.ranked = ranked`. Nouvelle array + N records par tick. Un leftover non truncaté afficherait une faction éliminée dans la fiche diplomatique / l’écran de victoire (`VictoryScreen.show(hud.ranked)` lit `ranked[i]`). Distinct de V49 (hash barycentre, pas le classement).
+**Problème.** Chaque `UnitSnapshot` (10 Hz playing) fait `local function track(...)` dans `applyUnits` (une closure neuve par lot) puis, pour **chaque** missile, `extra = { tx = missile.tx, ty = missile.ty }`. `stepInterpolation` lit `unit.extra.tx/ty` plus tard. Distinct de `Vector2.new` sur `current`/`target` (hors passe : Vector2 Roblox est immuable ; changer la représentation est un refactor). Distinct de V50 (HUD ranked) et V51 (ctx Preview).
 
-**20K CCU.** Leftover V49. 8 clients × 10 Hz × (1 array + jusqu’à 18 records). Pas d’autorité (le tri est cosmétique ; la victoire se décide serveur). `self.ranked` **est stocké** et lu plus tard (`selectFaction`, `VictoryScreen.show`) : on ne peut pas renvoyer un pool et le muter sous un écran qui le rangerait.
-
-**Faire.**
-
-1. Réutiliser `self.ranked` (déjà `{}` dans `HUD.new`). `n = 0` ; pour chaque `stats[slot]` : `n += 1` ; si `ranked[n]` existe, muter `slot/tiles/troops/gold` ; sinon poser un nouveau record. Truncate leftover **avant** `table.sort` (`for i = #ranked, n+1, -1 do ranked[i] = nil`). Ne **pas** `table.insert`. Ne **pas** remplacer `self.ranked` par une nouvelle table. `VictoryScreen.show` lit tout de suite et copie vers `row.Text` — il ne stocke pas l’identité. Pas de RemoteFunction.
-2. Ne pas modifier la clé de tri (tuiles desc, tie-break troupes). Ne pas recréer le panneau classement maison. Ne pas toucher Overlay / WorldRenderer / FactionLabels (V48–V49 déjà). Après V49. Ne pas porter `PlacementPreview` (V51) en même temps.
-
-**Contraintes.** Client-only. Recette V48 (arrays truncate) **plus** records internes recyclés (comme `boatSnapBuf` inner). **V50 visual ≠ V49 (hash étiquettes) ≠ V31 (`playerStatsForReplicate` serveur).** Les buf ne sont pas réentrants. Un leftover non truncaté ferait une ligne fantôme (`#hud.ranked` trop grand). Client 34/34 (banc « identite, ere, diplomatie et classement » **doit rester vert** : tri décroissant + `# > 0`). **Ne pas** éditer le serveur.
-
-**Tester.** Banc client classement **doit rester vert**. Deux `HUD.update` : premier avec 3 slots, second stats d’un seul slot → `#hud.ranked == 1` et `hud.ranked[1].slot` = le vivant. `./tests/run.sh`. Client 34/34.
-
-**Fichiers.** `HUD.luau` (`HUD.update` classement seulement), `tests/client.luau` **seulement si** un assert truncate est ajouté dans le check « identite, ere, diplomatie et classement » (ne pas ajouter un 35e check). `VictoryScreen.luau` **seulement si** un champ conserve `ranked` (sinon ne pas toucher).
-
-### ISSUE-V51 — `PlacementPreview.resolve` alloue `ctx` à chaque hover
-
-**Problème.** Chaque mouvement de souris (mode construire) fait `local ctx: Placement.Context = { slot, era, gold, terrain, ownerAt, buildingAt }` puis `Placement.resolve`. Une table + 6 champs par hover. Visual V40 a déjà `Buildings.contextFor` / `ctxBuf` **serveur** ; le fantôme client n’en profite pas. Feel N92 / `1e43` a déjà `previewCtx` — porter la recette, **pas** merger. Distinct de V47 (`validTiles` — Preview n’appelle pas `validTiles`) et de V40 (serveur).
-
-**20K CCU.** Leftover V50. 8 clients × hover 60 Hz × 1 table. Pas d’autorité (le serveur re-résout). `resolve` lit `ctx` tout de suite et n’en conserve pas l’identité — on peut renvoyer le pool.
+**20K CCU.** Leftover V51. 8 clients × 10 Hz × (1 closure + 1 table / missile en vol). Pas d’autorité (interpolation cosmétique). Un leftover `extra` d’un navire réutilisé en missile (ids recyclés côté serveur) viserait un `tx/ty` fantôme.
 
 **Faire.**
 
-1. Ajouter `previewCtxBuf` module-level dans `PlacementPreview.luau` (un record, comme V40 `ctxBuf`). `resolve` : poser `slot/era/gold/terrain/ownerAt/buildingAt` sur le buf ; passer le buf à `Placement.resolve`. Slot / closures **sans** allouer. Ne pas muter un ctx que `Placement.resolve` rangerait (il ne le fait pas). Pas de RemoteFunction.
-2. Ne pas changer la loi snap / upgrade / exact / invalid. Ne pas appeler `validTiles` depuis Preview. Ne pas retoucher `Buildings.contextFor` (V40 déjà, serveur). Ne pas porter HUD ranked (V50) en même temps. Recette feel N92 **sans** merger feel. Après V50.
+1. Hoister `track` en fonction module (`trackUnit(self, id, slot, kind, x, y, isMissile, extra)`) — plus de closure par snapshot. `self.seen` / `self.units` inchangés (`table.clear(self.seen)` déjà). Pas de RemoteFunction.
+2. Extra missile : à l’insert, poser `unit.extra = { tx, ty }` **une fois**. Sur un missile déjà suivi : muter `unit.extra.tx` / `unit.extra.ty` (créer extra si nil). Ne **pas** remplacer `unit.extra` par une nouvelle table à chaque lot. Navire : `extra` reste nil.
+3. Ne **pas** changer `current` / `target` Vector2 (hors passe). Ne pas porter HUD ranked (V50) ni Preview ctx (V51). Ne pas retoucher `snapshotBoats` / `snapshotMissiles` serveur (V26 déjà, **sans** `retreating`). Après V51.
 
-**Contraintes.** Client-only. Recette V40 (`ctxBuf` record+closures, slot 99 → champs posés sans nouvelle table). **V51 visual ≠ V40 (serveur `Buildings`) ≠ V47 (`validTiles`).** Non réentrant — un seul fantôme. Client 34/34 (bancs « apercu de placement » et « accrochage du placement » **doivent rester verts**). **Ne pas** éditer le serveur / `tests/client.luau` sauf assert dans un check existant.
+**Contraintes.** Client-only. Recette boatSnapBuf inner (records mutés). **V52 visual ≠ V26 (payload serveur) ≠ Vector2 refactor.** Non réentrant — un seul `applyUnits` / lot. Client 34/34 (banc « navires, missiles et interpolation » **doit rester vert** : pieces, Name, `applyUnits({}, {})` détruit). **Ne pas** éditer le serveur.
 
-**Tester.** Banc client aperçu + accrochage **doivent rester verts**. Deux `preview:resolve` successifs même tuile → même `tile` / même `status`. `./tests/run.sh`. Client 34/34.
+**Tester.** Banc client navires **doit rester vert**. Deux `applyUnits` du même missile (`id=3`, `tx/ty` différents) → `overlay.units[3].extra.tx` = le second, `rawequal` du record extra. `./tests/run.sh`. Client 34/34.
 
-**Fichiers.** `PlacementPreview.luau` (`resolve` seulement), `tests/client.luau` **seulement si** le check existant suffit.
+**Fichiers.** `Overlay.luau` (`applyUnits` / `track` seulement), `tests/client.luau` **seulement si** un assert extra est ajouté dans le check « navires, missiles et interpolation » (ne pas ajouter un 35e check). `UnitModels.luau` **non**.
+
+### ISSUE-V53 — `init.client` closures hover 60 Hz
+
+**Problème.** RenderStepped en mode `build` alloue deux closures par frame : `function(index) return w:ownerAt(index) end` et `function(index) o:buildingAt(...)`. V51 recycle le **record** `previewCtxBuf` ; le caller continue de fabriquer les closures. `buildingCounts` est déjà poolé (`EMPTY_COUNTS`). Distinct de V51 (Preview) et de V40 (`ctxBuf` serveur, closures module).
+
+**20K CCU.** Leftover V52. 8 clients × hover 60 Hz × 2 closures. Pas d’autorité (le serveur re-résout). `Placement.resolve` appelle `ownerAt` / `buildingAt` de façon synchrone — on peut passer des closures stables.
+
+**Faire.**
+
+1. Hoister deux fonctions module dans `init.client.luau` (capturent `world` / `overlay` upvalues, comme V40 `ownerAt`/`buildingAt` capturent `ctxState`). Passer ces fonctions à `preview:resolve` — plus de `function` inline dans RenderStepped. Overlay nil → `ownerAt` 0 / `buildingAt` nil (même loi que le `if o then` actuel). Pas de RemoteFunction.
+2. Ne pas changer la loi snap / upgrade / exact / invalid. Ne pas retoucher `previewCtxBuf` (V51 déjà). Ne pas appeler `validTiles` depuis Preview. Ne pas porter Overlay `track` (V52) en même temps. Après V52.
+
+**Contraintes.** Client-only. Recette V40 (closures module, pas de table). **V53 visual ≠ V51 (record ctx) ≠ V40 (serveur).** `world` / `overlay` sont déjà des locals module — les capturer est licite. Client 34/34 (bancs « apercu de placement » et « accrochage du placement » **doivent rester verts**). **Ne pas** éditer le serveur / `PlacementPreview.luau` / `tests/client.luau` sauf assert dans un check existant.
+
+**Tester.** Banc client aperçu + accrochage **doivent rester verts**. Deux `preview:resolve` successifs même tuile → même `tile` / même `status` (déjà V51). `./tests/run.sh`. Client 34/34.
+
+**Fichiers.** `StarterPlayerScripts/Client/init.client.luau` (RenderStepped aperçu seulement). `PlacementPreview.luau` **non**.
 
 ---
 
 ## Hors scope volontaire
 
-- Merger feel `2b37`/`e277`/`1e43` / hardening `ae35` sur #39/#94.
+- Merger feel `2b37`/`e277`/`1e43` / hardening `ae35` sur #39/#97.
 - Spatial hash warships / `bunkerCells` (hardening N41) — `bunkersBySlot` + `carrierBuf` suffisent.
 - Pairing convois simplifié hardening N40 (poids = level only) — la loi visuelle manhattan/alliance/`longCap` reste.
 - `MODE_KEYS` mort (digits 1–4 = bâtiments). Cosmétique.
@@ -160,9 +163,11 @@ Ne pas merger feel `2b37`/`e277`/`1e43` ni hardening `ae35` sur cette branche sa
 - `buildRoster` (`init.server`, hors bundle) — 10 Hz playing, leftover N2 skip-si-inchangé.
 - Feel `neighborScratch` dans `seedBeachhead` : visuel itère `priorityScratch` que `frontPriority` écrase. Ne pas le porter. Leftover séparé.
 - `Nukes.splitMirv` `targets` — par MIRV, pas le hot path.
-- `HUD.update` ranked + records — 10 Hz client (V50).
-- `PlacementPreview.resolve` ctx hover — 60 Hz client (V51).
-- `Overlay.applyUnits` `Vector2.new` par unité 10 Hz — Vector2 Roblox est immuable ; changer la représentation (nombres) est un refactor, pas un recycle. Hors passe.
+- `Overlay.applyUnits` `Vector2.new` par unité 10 Hz — Vector2 Roblox est immuable ; changer la représentation (nombres) est un refactor, pas un recycle. Hors passe (V52 ne touche que `track` + `extra`).
+- `HUD.update` ranked + records — **fermé** (V50).
+- `PlacementPreview.resolve` ctx hover — **fermé** (V51).
+- `RadialMenu` `entries` à l’ouverture — geste joueur, pas 10 Hz.
+- `HUD.refreshDiplomacyPanel` `markers` — à la sélection, pas 10 Hz.
 
 ---
 
@@ -173,8 +178,10 @@ Ne pas merger feel `2b37`/`e277`/`1e43` ni hardening `ae35` sur cette branche sa
 ```
 
 Client : 34 checks, `error()` si échec (Luau CLI sans `os.exit`).  
-Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–33 inchangées (passe 34 = client-only).  
+Serveur : invariants + P0 + or plat + `removePlayer` refund + embargo auto + cap 3 transports + passe 16–34 inchangées (passe 35 = client-only).  
 Invariants 5b–5f : index `buildingsBySlot` / `coolingBuildings` / `factoriesBySlot` / `portsByTile` / `navalBasesBySlot` vs hash, chaque 500 ticks.  
 Client V48 : check « deltas de terrain et conquetes classees » — prise slot 2→1 classée en gain, delta vide `# == 0` + `rawequal` pools.  
 Client V49 : check « etiquettes de faction : centre, contenu et disparition » — second refresh sans slot 1 détruit l’ancre (leftover `countBuf` interdirait ça).  
+Client V50 : check « identite, ere, diplomatie et classement » — second `HUD.update` d’un seul slot → `#hud.ranked == 1` et `slot == 3`.  
+Client V51 : check « accrochage du placement et bascule en amelioration » — deux `resolve` successifs même tuile / même status.  
 Note banc : Atomique souvent inatteignable en 6000 ticks (or plat + packing) ; Industrielle exigée.
