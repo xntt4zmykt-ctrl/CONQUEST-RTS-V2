@@ -3982,6 +3982,183 @@ do
 end
 
 do
+	-- N34 : syncCarriers evenementiel (dirty flag). Pose → 1 carrier ;
+	-- second tick sans mutation → pas de duplicata ; capture → slot suit ;
+	-- destroy → carrier retire. Recette feel N38, sans AimFront.
+	local carState = GameState.new(4242)
+	local owner = carState:addPlayer(nil, "Amiral", Random.new(1), 0)
+	local rival = carState:addPlayer(nil, "Corsaire", Random.new(2), 0)
+	if not owner or not rival then
+		fail("syncCarriers — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(carState.owner, index) == owner.slot and not carState.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("syncCarriers — tuile libre introuvable")
+		else
+			carState:placeBuilding(site, Config.BUILDING.NAVAL_BASE, owner.slot)
+			if not carState._carriersDirty then
+				fail("syncCarriers — pose NAVAL_BASE n'a pas leve _carriersDirty")
+			end
+			local before = 0
+			for _, boat in carState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					before += 1
+				end
+			end
+			if before ~= 0 then
+				fail("syncCarriers — carrier spawn avant Navy.step")
+			end
+			Navy.step(carState, Random.new(9))
+			local carriers = {}
+			for _, boat in carState.boats do
+				if boat.kind == Navy.KIND_CARRIER then
+					table.insert(carriers, boat)
+				end
+			end
+			if #carriers ~= 1 then
+				fail(`syncCarriers — {#carriers} carrier(s) apres pose, attendu 1`)
+			elseif carriers[1].slot ~= owner.slot or carriers[1].homeTile ~= site then
+				fail("syncCarriers — carrier mal attache")
+			elseif carState._carriersDirty then
+				fail("syncCarriers — dirty encore vrai apres sync")
+			else
+				Navy.step(carState, Random.new(9))
+				local still = 0
+				for _, boat in carState.boats do
+					if boat.kind == Navy.KIND_CARRIER then
+						still += 1
+					end
+				end
+				if still ~= 1 then
+					fail(`syncCarriers — second tick a duplique ({still})`)
+				else
+					carState:setOwner(site, rival.slot)
+					if not carState._carriersDirty then
+						fail("syncCarriers — capture n'a pas leve dirty")
+					end
+					Navy.step(carState, Random.new(9))
+					local captured = nil
+					for _, boat in carState.boats do
+						if boat.kind == Navy.KIND_CARRIER and boat.homeTile == site then
+							captured = boat
+						end
+					end
+					if not captured or captured.slot ~= rival.slot then
+						fail("syncCarriers — slot carrier ne suit pas la capture")
+					else
+						carState:destroyBuilding(site)
+						if not carState._carriersDirty then
+							fail("syncCarriers — destroy n'a pas leve dirty")
+						end
+						Navy.step(carState, Random.new(9))
+						local leftover = 0
+						for _, boat in carState.boats do
+							if boat.kind == Navy.KIND_CARRIER and boat.homeTile == site then
+								leftover += 1
+							end
+						end
+						if leftover ~= 0 then
+							fail("syncCarriers — carrier survivant apres destroy")
+						else
+							print("syncCarriers dirty : pose / capture / destroy OK")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N35 : PORT d'arrivee detruit au combat SANS removePlayer. Contrat B :
+	-- Navy.step coule le kind==2 des que buildings[targetTile] n'est plus
+	-- un PORT. Pas d'or, pas de malus vendeur. N32 recycle reste vert.
+	local state = GameState.new(9902)
+	local seller = state:addPlayer(nil, "Vendeur", Random.new(127), 0)
+	local dest = state:addPlayer(nil, "Quai", Random.new(128), 0)
+	if not seller or not dest then
+		fail("trade port-detruit — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local portA: number? = nil
+		local portB: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					portA, portB = first, second
+					break
+				end
+			end
+			if portA then
+				break
+			end
+		end
+		if not portA or not portB then
+			fail("trade port-detruit — aucune paire cotiere reliee")
+		else
+			state:setOwner(portA, seller.slot)
+			state:setOwner(portB, dest.slot)
+			state:placeBuilding(portA, Config.BUILDING.PORT, seller.slot)
+			state:placeBuilding(portB, Config.BUILDING.PORT, dest.slot)
+			local path = Navy.findSeaPath(state, portA :: number, portB :: number)
+			if not path then
+				fail("trade port-detruit — route maritime introuvable")
+			else
+				local goldSeller, goldDest = seller.gold, dest.gold
+				table.insert(state.boats, {
+					id = state:nextId(),
+					slot = seller.slot,
+					kind = Navy.KIND_TRADE,
+					troops = 0,
+					x = 0,
+					y = 0,
+					path = path,
+					step = 1,
+					targetTile = portB,
+					homeTile = portA,
+				})
+				state:destroyBuilding(portB :: number)
+				if state.players[dest.slot] == nil then
+					fail("trade port-detruit — destroyBuilding a recycle le slot")
+				else
+					state.tick = 1
+					Navy.step(state, Random.new(13))
+					local leftover = 0
+					for _, boat in state.boats do
+						if boat.kind == Navy.KIND_TRADE then
+							leftover += 1
+						end
+					end
+					if leftover ~= 0 then
+						fail(`trade port-detruit — {leftover} convoi(s) encore en mer`)
+					elseif math.abs(seller.gold - goldSeller) > 0.01 then
+						fail(`trade port-detruit — or vendeur {seller.gold} (paiement / malus ?)`)
+					elseif math.abs(dest.gold - goldDest) > 0.01 then
+						fail(`trade port-detruit — or acheteur {dest.gold} (paiement fantome)`)
+					else
+						print("trade port-detruit : convoi coule, pas d'or")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
