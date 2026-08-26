@@ -6183,6 +6183,160 @@ do
 end
 
 do
+	-- N54 : flushBuildingDelta recycle. Flush spawn (capitale) d'abord.
+	-- CITY → length 1, kind/slot/index. Second flush → nil. destroy →
+	-- length 1, kind==0, links==nil. Recette dirtyIndexBuf / N53.
+	local state = GameState.new(1073)
+	local owner = state:addPlayer(nil, "BuildSnap", Random.new(95), 0)
+	if not owner then
+		fail("buildingSnapBuf — spawn impossible")
+	else
+		state:flushBuildingDelta()
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if
+				buffer.readu8(state.owner, index) == owner.slot
+				and not state.buildings[index]
+				and state:isLand(index)
+			then
+				site = index
+				break
+			end
+		end
+		if not site then
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) and buffer.readu8(state.owner, index) == Config.NEUTRAL_SLOT then
+					state:setOwner(index, owner.slot)
+					site = index
+					break
+				end
+			end
+		end
+		if not site then
+			fail("buildingSnapBuf — tuile libre introuvable")
+		else
+			state:placeBuilding(site, Config.BUILDING.CITY, owner.slot)
+			local first = state:flushBuildingDelta()
+			local firstN = if first then #first else 0
+			local firstOk = false
+			if first then
+				for _, rec in first do
+					if rec.index == site and rec.kind == Config.BUILDING.CITY and rec.slot == owner.slot then
+						firstOk = true
+						break
+					end
+				end
+			end
+			if firstN ~= 1 or not firstOk then
+				fail(`buildingSnapBuf — pose CITY length {firstN}, attendu 1`)
+			else
+				local second = state:flushBuildingDelta()
+				if second ~= nil then
+					fail("buildingSnapBuf — second flush non nil")
+				else
+					state:destroyBuilding(site)
+					local gone = state:flushBuildingDelta()
+					local goneN = if gone then #gone else 0
+					local goneOk = false
+					if gone then
+						for _, rec in gone do
+							if rec.index == site and rec.kind == 0 and rec.links == nil then
+								goneOk = true
+								break
+							end
+						end
+					end
+					if goneN ~= 1 or not goneOk then
+						fail(`buildingSnapBuf — destroy length {goneN} kind/links`)
+					else
+						print("buildingSnapBuf : CITY, second nil, destroy kind=0 (N54)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N55 : frontHudForReplicate recycle. 0 front → maps vides. 1 front →
+	-- compteurs + cible. Retraite jusqu'a dissolution → maps vides (pas de
+	-- fuite de slot). Recette missileSnapBuf / N52.
+	local state = GameState.new(1074)
+	local a = state:addPlayer(nil, "HudAtk", Random.new(11), 0)
+	local b = state:addPlayer(nil, "HudDef", Random.new(12), 0)
+	if not a or not b then
+		fail("frontHud — spawn impossible")
+	else
+		local emptyA, emptyC, emptyT = state:frontHudForReplicate()
+		if next(emptyA) ~= nil or next(emptyC) ~= nil or next(emptyT) ~= nil then
+			fail("frontHud — 0 front mais maps non vides")
+		else
+			local contact = nil
+			local scratch = table.create(4, 0)
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+					local n = MapGen.neighbors(index, scratch)
+					for i = 1, n do
+						local nb = scratch[i]
+						if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+							state:setOwner(nb, b.slot)
+							contact = index
+							break
+						end
+					end
+				end
+				if contact then
+					break
+				end
+			end
+			if not contact then
+				fail("frontHud — pas de contact terrestre")
+			else
+				state.combatUnlocked = true
+				a.attackRatio = 0.5
+				a.troops = 20000
+				local launched = state:launchAttack(a.slot, b.slot)
+				local atk = state.attacks[1]
+				if not launched or not atk then
+					fail("frontHud — launchAttack refuse")
+				else
+					local act, comm, targs = state:frontHudForReplicate()
+					local tlist = targs[a.slot]
+					if
+						act[a.slot] ~= 1
+						or comm[a.slot] ~= math.floor(atk.troops)
+						or not tlist
+						or #tlist ~= 1
+						or tlist[1] ~= atk.target
+						or act[b.slot] ~= nil
+						or targs[b.slot] ~= nil
+					then
+						fail("frontHud — 1 front compteurs/cibles incorrects")
+					else
+						print("frontHud : 0 vide, 1 front slot/troupes/cible (N55)")
+						if not state:retreatAttack(a.slot, b.slot) then
+							fail("frontHud — retreatAttack refuse")
+						else
+							local marked = state.attacks[1]
+							if marked and marked.retreatAt then
+								state.tick = marked.retreatAt
+							end
+							state:stepAttacks()
+							local goneA, goneC, goneT = state:frontHudForReplicate()
+							if #state.attacks ~= 0 or next(goneA) ~= nil or next(goneC) ~= nil or next(goneT) ~= nil then
+								fail("frontHud — fuite de slot apres retraite")
+							else
+								print("frontHud : retraite → maps vides (N55)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
