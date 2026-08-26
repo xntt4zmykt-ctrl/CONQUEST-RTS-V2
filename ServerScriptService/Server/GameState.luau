@@ -925,17 +925,17 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
-	-- Transports AVANT setOwner : un bateau n'a pas de targetSlot, on lit
+	-- Bateaux AVANT setOwner : un bateau n'a pas de targetSlot, on lit
 	-- owner[targetTile]. Apres neutralisation, destOwner==NEUTRAL et on ne
-	-- distinguerait plus une invasion du disparu d'un debarquement volontaire
-	-- sur cote vide. Meme contrat que les fronts terre inbound : restitution
-	-- 100 %, pas BOAT_RETREAT_LOSS (ce n'est pas une retraite, le defenseur
-	-- n'existe plus). kind 1 = transport ; GameState ne require pas Navy
-	-- (cycle Navy -> GameState).
+	-- distinguerait plus une invasion / un convoi du disparu d'un trajet
+	-- vers une cote vide. kind 1 = transport (restitution 100 %, pas
+	-- BOAT_RETREAT_LOSS). kind 2 = convoi (ISSUE-N32) : couler, pas d'or
+	-- (le navire n'est pas arrive), pas de malus vendeur. GameState ne
+	-- require pas Navy (cycle Navy -> GameState).
 	for i = #self.boats, 1, -1 do
 		local boat = self.boats[i]
 		if boat.slot == slot then
-			-- L'attaquant qui part : ses troupes embarquees disparaissent.
+			-- L'attaquant / le marchand qui part : ses bateaux disparaissent.
 			table.remove(self.boats, i)
 		elseif boat.kind == 1 and not boat.retreating then
 			local dest = boat.targetTile
@@ -946,6 +946,15 @@ function GameState.removePlayer(self: GameState, slot: number)
 						attacker.troops += math.max(0, boat.troops)
 					end
 					boat.troops = 0
+					table.remove(self.boats, i)
+				end
+			end
+		elseif boat.kind == 2 then
+			-- JoinRequest entre deux ticks recycle le slot, repose un PORT
+			-- sur la meme tuile, et resolveTrade verse l'or a l'heritier.
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
 					table.remove(self.boats, i)
 				end
 			end
