@@ -4940,6 +4940,121 @@ end
 
 print("passe 25 : pricesFor, playerStatsForReplicate OK")
 
+--[[
+	Nightly passe 26 — revue PR #74 : Research.progress min / viewFor recycle (V32–V33).
+]]
+do
+	-- V32 : Research.progress min courant, pas de table ratios.
+	-- era 1 gold=0 → [0, 1) (le critere or bloque). MAX_ID → 1.
+	-- Slot inconnu → 1. Gold enorme : clamp, pas NaN (requiredBuildings
+	-- de l'ere suivante peut rester le goulot). Recette feel N77.
+	local state = GameState.new(2601)
+	local a = state:addPlayer(nil, "EraProg", Random.new(31), 0)
+	if not a then
+		fail("progress — spawn impossible")
+	else
+		a.gold = 0
+		local p0 = Research.progress(state, a.slot)
+		if p0 < 0 or p0 >= 1 then
+			fail(`progress — gold=0 hors [0,1) ({p0})`)
+		elseif Research.progress(state, 99) ~= 1 then
+			fail("progress — slot inconnu n'est pas 1")
+		else
+			local saved = a.era
+			a.era = Eras.MAX_ID
+			local pMax = Research.progress(state, a.slot)
+			a.era = saved
+			if pMax ~= 1 then
+				fail(`progress — MAX_ID n'est pas 1 ({pMax})`)
+			else
+				a.gold = 1e12
+				local pRich = Research.progress(state, a.slot)
+				if pRich < 0 or pRich > 1 or pRich ~= pRich then
+					fail(`progress — NaN ou hors clamp ({pRich})`)
+				else
+					print("progress : gold=0 < 1, MAX_ID=1, clamp (V32)")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V33 : viewFor recycle par slot. 0 pacte → maps vides, second appel
+	-- rawequal du record. request vivant → incoming/outgoing. expiry
+	-- forcee (`= tick`) → absents. Alliance live → allies[other].
+	-- Traître : traitors[slot]==true. Slot disparu → maps vides, pas
+	-- d'erreur. Recette feel N78. Garder requestIsLive visuel.
+	local state = GameState.new(2602)
+	local a = state:addPlayer(nil, "ViewA", Random.new(41), 0)
+	local b = state:addPlayer(nil, "ViewB", Random.new(42), 0)
+	if not a or not b then
+		fail("viewFor recycle — spawn impossible")
+	else
+		local empty = Diplomacy.viewFor(state, a.slot)
+		if next(empty.allies) or next(empty.incoming) or next(empty.outgoing) then
+			fail("viewFor recycle — 0 pacte non vide")
+		else
+			local emptyAgain = Diplomacy.viewFor(state, a.slot)
+			if not rawequal(empty, emptyAgain) then
+				fail("viewFor recycle — rawequal 0 pacte")
+			else
+				Diplomacy.request(state, a.slot, b.slot)
+				local viewB = Diplomacy.viewFor(state, b.slot)
+				local viewA = Diplomacy.viewFor(state, a.slot)
+				if viewB.incoming[a.slot] ~= true then
+					fail("viewFor recycle — incoming absent")
+				elseif viewA.outgoing[b.slot] ~= true then
+					fail("viewFor recycle — outgoing absent")
+				else
+					state.requests[a.slot][b.slot] = state.tick
+					local staleB = Diplomacy.viewFor(state, b.slot)
+					local staleA = Diplomacy.viewFor(state, a.slot)
+					if staleB.incoming[a.slot] or staleA.outgoing[b.slot] then
+						fail("viewFor recycle — expiry encore visible")
+					else
+						local prevAllies = staleA.allies
+						local againA = Diplomacy.viewFor(state, a.slot)
+						if not rawequal(staleA, againA) or not rawequal(againA.allies, prevAllies) then
+							fail("viewFor recycle — rawequal porteuse/allies")
+						else
+							local okReq, _ = Diplomacy.request(state, a.slot, b.slot)
+							local okAcc = okReq and Diplomacy.accept(state, a.slot, b.slot)
+							local allied = Diplomacy.viewFor(state, a.slot)
+							if not okAcc or allied.allies[b.slot] ~= true then
+								fail("viewFor recycle — allies[other] absent")
+							else
+								a.traitorUntil = state.tick + 10
+								local traitorView = Diplomacy.viewFor(state, b.slot)
+								if traitorView.traitors[a.slot] ~= true then
+									fail("viewFor recycle — traitre absent")
+								else
+									local gone = a.slot
+									state:removePlayer(gone)
+									local ghost = Diplomacy.viewFor(state, gone)
+									if
+										next(ghost.allies)
+										or next(ghost.incoming)
+										or next(ghost.outgoing)
+										or next(ghost.traitors)
+										or next(ghost.marks)
+									then
+										fail("viewFor recycle — slot disparu non vide")
+									else
+										print("viewFor recycle : 0 pacte, incoming, expiry, allies, traitre, ghost (V33)")
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 26 : Research.progress, viewFor recycle OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
