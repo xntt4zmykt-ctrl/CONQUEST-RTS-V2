@@ -791,25 +791,64 @@ local function trackUnit(
 		self.units[id] = unit
 		if not isMissile then
 			local origin = WorldSpace.tileToWorld(x, y)
-			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-			wake.Shape = Enum.PartType.Cylinder
+			-- N160 : free-list wakeFree, pop O(1) depuis la fin. Pas de
+			-- Destroy a 0.8 s : Parent = nil + push si encore parenté
+			-- (un delay fantôme ne double-push pas). goldPopup
+			-- réutilise déjà (N159, goldFree — ne pas partager).
+			-- conquestPulse réutilise déjà (N157). floatingText
+			-- réutilise déjà (N158). Distinct flame leftover N152
+			-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+			-- N153. Distinct previewTile N154. Distinct selectTile N155.
+			-- Distinct tileFlash N156. Distinct conquestPulse N157.
+			-- Distinct floatingText N158. Distinct goldPopup N159
+			-- (goldFree, ne pas partager). Distinct N130 (euler
+			-- LaunchWake déjà inline). Distinct visual V78 LaunchWake
+			-- wakeRot (ne pas merger 6183). Distinct LandingSplash
+			-- leftover N161 (Destroy, ne pas fusionner). Name LaunchWake
+			-- conservé. Reset Size (0.16, 2.5, 2.5) + Transparency 0.34
+			-- au reuse (le tween les avait mises à (0.16, 9, 9) / 1).
+			-- Euler N130 inline conservé. Tween Create conservé
+			-- (Size + Transparency restart). routePart non modifié
+			-- (LandingSplash / DeliveryPulse / Shockwave / BlastSmoke).
+			-- Recette leftover N159, pas merger visual. HUD /
+			-- UnitModels / Effects / PlacementPreview / goldPopup /
+			-- applyUnits despawn / stepInterpolation inchangés.
+			local free = self.wakeFree
+			if not free then
+				free = {}
+				self.wakeFree = free
+			end
+			local n = #free
+			local wake
+			if n > 0 then
+				wake = free[n]
+				free[n] = nil
+			else
+				wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
+				wake.Shape = Enum.PartType.Cylinder
+			end
+			wake.Size = Vector3.new(0.16, 2.5, 2.5)
 			wake.Transparency = 0.34
 			-- N130 : insert navire LaunchWake. Plus de CFrame.Angles.
 			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
 			-- Offset Y OCEAN_LEVEL + 0.12 inchange. Garde not isMissile
-			-- inchangee. Tween Size/Transparency + task.delay Destroy
-			-- inchanges. Distinct footprint N129 (60 Hz hover). Distinct
-			-- roulis N125. Distinct splash/pulse/shockwave (leftover).
-			-- Recette visual V75 leftover evenements Overlay. stepInterpolation
-			-- non touche. UnitModels / PlacementPreview inchanges.
+			-- inchangee. Tween Size/Transparency + task.delay
+			-- (Parent = nil, plus Destroy). Distinct footprint N129
+			-- (60 Hz hover). Distinct roulis N125. Distinct
+			-- splash/pulse/shockwave (leftover). Recette visual V75
+			-- leftover evenements Overlay. stepInterpolation non
+			-- touche. UnitModels / PlacementPreview inchanges.
 			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+			wake.Parent = self.root
 			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.16, 9, 9),
 				Transparency = 1,
 			}):Play()
 			task.delay(0.8, function()
 				if wake.Parent then
-					wake:Destroy()
+					wake.Parent = nil
+					local pool = self.wakeFree
+					pool[#pool + 1] = wake
 				end
 			end)
 		end

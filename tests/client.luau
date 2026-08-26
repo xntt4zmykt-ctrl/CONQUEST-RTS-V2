@@ -1766,6 +1766,14 @@ check("navires, missiles et interpolation", function()
 	-- pas merger visual. Flame leftover N152 non touchee (pulse Z
 	-- conserve, ≠ visual V74 freeze). Beacons N150 / fenetres N149
 	-- (check modeles) inchanges. BuildingModels / Overlay inchanges.
+	-- N160 : LaunchWake free-list wakeFree. Pas de testFlushDelays
+	-- ici — les wakes restent parentés (le flush + reuse rawequal
+	-- est dans « vagues de conquete »). Leftover N151 trail
+	-- offset.Z, leftover N152 flame Size, leftover N148 mesh,
+	-- leftover N130 euler inline doivent rester verts. Recette
+	-- leftover N159, pas merger visual V78 wakeRot. goldPopup
+	-- N159 (check livraison / vagues) inchange. LandingSplash
+	-- leftover N161 non touche.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1794,6 +1802,10 @@ check("vagues de conquete", function()
 	-- N159 : goldPopup free-list. Le check livraison n'a pas flushé ;
 	-- ce flush pousse goldFree. goldPopup reparente la meme ancre
 	-- (rawequal Parent root, Name GoldPopup). Distinct textFree.
+	-- N160 : LaunchWake free-list. Le check navires n'a pas flushé ;
+	-- ce flush pousse wakeFree. applyUnits nouvel id reparente la
+	-- meme Part (rawequal Parent root, Name LaunchWake). Distinct
+	-- goldFree. LandingSplash leftover N161 non touche.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1842,6 +1854,20 @@ check("vagues de conquete", function()
 	local reusedLabel = reusedBoard and reusedBoard:FindFirstChildWhichIsA("TextLabel")
 	assert(reusedLabel ~= nil, "arbre Board perdu au reuse")
 	assert(reusedLabel.Text == "+500 or", `reuse affiche "{reusedLabel.Text}"`)
+	-- N160 : flush ci-dessus a poussé les LaunchWake de « navires ».
+	local wakePool = overlay.wakeFree
+	assert(wakePool ~= nil and #wakePool >= 1, "wakes non poolees")
+	local pooledWake = wakePool[#wakePool]
+	assert(pooledWake.Parent == nil, "wake encore parente")
+	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu")
+	assert(pooledWake ~= pooledGold, "wakeFree partage goldFree")
+	local wakeN = #wakePool
+	overlay:applyUnits({
+		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
+	}, {})
+	assert(#wakePool == wakeN - 1, "wake non reutilise")
+	assert(rawequal(pooledWake.Parent, overlay.root), "wake non reparente")
+	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()
