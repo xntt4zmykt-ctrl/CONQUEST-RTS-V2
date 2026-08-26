@@ -267,6 +267,30 @@ local activeAttackBuf: { [number]: number } = {}
 local committedTroopBuf: { [number]: number } = {}
 local attackTargetBuf: { [number]: { number } } = {}
 local attackTargetPool: { [number]: { number } } = {}
+-- V31 : records PlayerStats recyclees (recette feel N76). eraProgress /
+-- buildPrices restent nil ici — init.server les pose (Research /
+-- Buildings require GameState). Slots sans joueur absents. Non reentrant.
+type StatsRec = {
+	troops: number,
+	tiles: number,
+	gold: number,
+	maxTroops: number,
+	era: number,
+	eraProgress: number?,
+	capturedTiles: number,
+	lostTiles: number,
+	capitalsCaptured: number,
+	buildingsBuilt: number,
+	attacksLaunched: number,
+	activeAttacks: number,
+	committedTroops: number,
+	attackTargets: { number }?,
+	buildPrices: { [number]: number }?,
+	logisticsRoutes: number,
+	logisticsIncome: number,
+}
+local statsBuf: { [number]: StatsRec } = {}
+local statsRecPool: { [number]: StatsRec } = {}
 
 --=============================================================================
 -- Construction
@@ -2084,10 +2108,9 @@ end
 
 --[[
 	V29 : HUD fronts pour StateDelta (activeAttacks / committedTroops /
-	attackTargets). Trois maps recyclees. Pas de stats / buildPrices
-	(cycle Buildings — ticket suivant). Chaque tas compte (terre et
-	isBeachhead separes). Slots sans front : absents des trois maps —
-	replicate() garde `or 0` et attackTargets nil.
+	attackTargets). Trois maps recyclees. playerStatsForReplicate (V31)
+	appelle ce helper une fois. Chaque tas compte (terre et isBeachhead
+	separes). Slots sans front : absents des trois maps.
 ]]
 function GameState.frontHudForReplicate(self: GameState): (
 	{ [number]: number },
@@ -2117,6 +2140,64 @@ function GameState.frontHudForReplicate(self: GameState): (
 	end
 
 	return activeAttackBuf, committedTroopBuf, attackTargetBuf
+end
+
+--[[
+	V31 : map stats pour StateDelta. Recycle la porteuse + les records.
+	Appelle frontHudForReplicate une fois (V29). Ne require pas Buildings
+	ni Research. eraProgress / buildPrices = nil — l'orchestrateur les
+	ecrit ensuite. attackTargets = liste V29, pas un clone.
+]]
+function GameState.playerStatsForReplicate(self: GameState): { [number]: StatsRec }
+	table.clear(statsBuf)
+	local activeAttacks, committedTroops, attackTargets = self:frontHudForReplicate()
+
+	for slot, ps in self.players do
+		local rec = statsRecPool[slot]
+		if rec == nil then
+			rec = {
+				troops = 0,
+				tiles = 0,
+				gold = 0,
+				maxTroops = 0,
+				era = 0,
+				eraProgress = nil,
+				capturedTiles = 0,
+				lostTiles = 0,
+				capitalsCaptured = 0,
+				buildingsBuilt = 0,
+				attacksLaunched = 0,
+				activeAttacks = 0,
+				committedTroops = 0,
+				attackTargets = nil,
+				buildPrices = nil,
+				logisticsRoutes = 0,
+				logisticsIncome = 0,
+			}
+			statsRecPool[slot] = rec
+		end
+		local logisticsRoutes, logisticsIncome = self:logisticsFor(slot)
+		rec.troops = math.floor(ps.troops)
+		rec.tiles = ps.tiles
+		rec.gold = math.floor(ps.gold)
+		rec.maxTroops = math.floor(self:maxTroops(ps))
+		rec.era = ps.era
+		rec.eraProgress = nil
+		rec.capturedTiles = ps.capturedTiles
+		rec.lostTiles = ps.lostTiles
+		rec.capitalsCaptured = ps.capitalsCaptured
+		rec.buildingsBuilt = ps.buildingsBuilt
+		rec.attacksLaunched = ps.attacksLaunched
+		rec.activeAttacks = activeAttacks[slot] or 0
+		rec.committedTroops = committedTroops[slot] or 0
+		rec.attackTargets = attackTargets[slot]
+		rec.buildPrices = nil
+		rec.logisticsRoutes = logisticsRoutes
+		rec.logisticsIncome = math.floor(logisticsIncome * 100) / 100
+		statsBuf[slot] = rec
+	end
+
+	return statsBuf
 end
 
 --[[

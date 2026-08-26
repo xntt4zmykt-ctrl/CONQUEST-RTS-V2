@@ -4780,6 +4780,166 @@ end
 
 print("passe 24 : buildingSnapBuf, frontHudForReplicate OK")
 
+--[[
+	Nightly passe 25 — revue PR #72 : pricesFor / playerStatsForReplicate (V30–V31).
+]]
+do
+	-- V30 : pricesFor recycle. Egal priceFor pour chaque BUILDABLE.
+	-- Second appel immediat → rawequal. Slot inconnu → map vide (pas
+	-- math.huge). pose CITY → prix CITY augmente (2^units). Recette feel N75.
+	local state = GameState.new(2501)
+	local owner = state:addPlayer(nil, "PriceBuf", Random.new(21), 0)
+	if not owner then
+		fail("pricesFor — spawn impossible")
+	else
+		local first = Buildings.pricesFor(state, owner.slot)
+		local mismatch = false
+		local n = 0
+		for _, def in BuildingDefs.BUILDABLE do
+			n += 1
+			if first[def.id] ~= Buildings.priceFor(state, owner.slot, def.id) then
+				mismatch = true
+				break
+			end
+		end
+		if mismatch or n ~= #BuildingDefs.BUILDABLE then
+			fail(`pricesFor — mismatch priceFor (n={n})`)
+		else
+			local second = Buildings.pricesFor(state, owner.slot)
+			if not rawequal(first, second) then
+				fail("pricesFor — second appel pas la meme map")
+			else
+				local ghost = Buildings.pricesFor(state, 99)
+				if next(ghost) ~= nil then
+					fail("pricesFor — slot inconnu non vide")
+				else
+					local site: number? = nil
+					for index = 0, Config.TILE_COUNT - 1 do
+						if
+							buffer.readu8(state.owner, index) == owner.slot
+							and not state.buildings[index]
+							and state:isLand(index)
+						then
+							site = index
+							break
+						end
+					end
+					if not site then
+						for index = 0, Config.TILE_COUNT - 1 do
+							if state:isLand(index) and buffer.readu8(state.owner, index) == Config.NEUTRAL_SLOT then
+								state:setOwner(index, owner.slot)
+								site = index
+								break
+							end
+						end
+					end
+					if not site then
+						fail("pricesFor — tuile libre introuvable")
+					else
+						owner.gold = 100000
+						local before = Buildings.pricesFor(state, owner.slot)[Config.BUILDING.CITY]
+						state:placeBuilding(site, Config.BUILDING.CITY, owner.slot)
+						local after = Buildings.pricesFor(state, owner.slot)[Config.BUILDING.CITY]
+						if not state.buildings[site] or after <= before then
+							fail(`pricesFor — CITY n'augmente pas ({before} → {after})`)
+						else
+							print("pricesFor : BUILDABLE, rawequal, CITY double (V30)")
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V31 : playerStatsForReplicate recycle. 1 joueur 0 front → champs
+	-- honores, attackTargets nil, eraProgress/buildPrices nil (poses par
+	-- init.server). launchAttack → activeAttacks==1. removePlayer → slot
+	-- absent. Second appel → rawequal porteuse + record. Recette feel N76.
+	local state = GameState.new(2502)
+	local a = state:addPlayer(nil, "StatAtk", Random.new(11), 0)
+	if not a then
+		fail("playerStats — spawn impossible")
+	else
+		local stats = state:playerStatsForReplicate()
+		local rec = stats[a.slot]
+		local extra = false
+		for slot in stats do
+			if slot ~= a.slot then
+				extra = true
+			end
+		end
+		if
+			extra
+			or not rec
+			or rec.troops ~= math.floor(a.troops)
+			or rec.tiles ~= a.tiles
+			or rec.gold ~= math.floor(a.gold)
+			or rec.activeAttacks ~= 0
+			or rec.attackTargets ~= nil
+			or rec.eraProgress ~= nil
+			or rec.buildPrices ~= nil
+		then
+			fail("playerStats — 0 front champs incorrects")
+		else
+			local again = state:playerStatsForReplicate()
+			if not rawequal(stats, again) or not rawequal(rec, again[a.slot]) then
+				fail("playerStats — rawequal porteuse/record")
+			else
+				print("playerStats : 0 front, rawequal (V31)")
+				local b = state:addPlayer(nil, "StatDef", Random.new(12), 0)
+				if not b then
+					fail("playerStats — defenseur spawn impossible")
+				else
+					local contact = nil
+					local scratch = table.create(4, 0)
+					for index = 0, Config.TILE_COUNT - 1 do
+						if buffer.readu8(state.owner, index) == a.slot and state:isLand(index) then
+							local n = MapGen.neighbors(index, scratch)
+							for i = 1, n do
+								local nb = scratch[i]
+								if state:isLand(nb) and buffer.readu8(state.owner, nb) == 0 then
+									state:setOwner(nb, b.slot)
+									contact = index
+									break
+								end
+							end
+						end
+						if contact then
+							break
+						end
+					end
+					if not contact then
+						fail("playerStats — pas de contact terrestre")
+					else
+						state.combatUnlocked = true
+						a.attackRatio = 0.5
+						a.troops = 20000
+						local launched = state:launchAttack(a.slot, b.slot)
+						local withFront = state:playerStatsForReplicate()
+						if not launched or withFront[a.slot].activeAttacks ~= 1 then
+							fail("playerStats — activeAttacks apres launch")
+						else
+							print("playerStats : 1 front activeAttacks==1 (V31)")
+							local gone = a.slot
+							state:removePlayer(gone)
+							local after = state:playerStatsForReplicate()
+							if after[gone] ~= nil then
+								fail("playerStats — fuite de slot apres removePlayer")
+							else
+								print("playerStats : removePlayer → slot absent (V31)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 25 : pricesFor, playerStatsForReplicate OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
