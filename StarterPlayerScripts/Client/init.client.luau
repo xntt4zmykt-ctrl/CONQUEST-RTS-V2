@@ -719,10 +719,9 @@ Remotes.get("MapInit").OnClientEvent:Connect(function(
 			or mapMeta.generatorVersion ~= Config.GENERATOR_VERSION
 		then
 			warn(
-				`[CONQUEST RTS] desync carte : serveur hash={mapMeta.terrainHash} local={localHash} — demande de snapshot`
+				`[CONQUEST RTS] desync carte : serveur hash={mapMeta.terrainHash} local={localHash} — snapshot owner inutile`
 			)
-			hud:notify("Carte desynchronisee — resynchronisation…", "bad")
-			Remotes.get("RequestSnapshot"):FireServer()
+			hud:notify("Carte desynchronisee — mets a jour le client, puis rejoins.", "bad")
 		end
 	end
 
