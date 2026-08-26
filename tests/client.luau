@@ -1163,6 +1163,12 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- leftover N136 BuildRing (check pose) doivent rester verts.
 	-- Rampes SAM leftover non touchees. Recette leftover N140,
 	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
+	-- N142 : rampes SAM Interceptor fromEulerAnglesYXZ (pas
+	-- CFrame.Angles). Pitch X=-31° fixe. buildSam launchers
+	-- seulement, quatre missiles 2×2. Leftover N141 portes SILO,
+	-- leftover N140 toits FACTORY, leftover N124 radar doivent
+	-- rester verts. Recette leftover N141, pas merger visual.
+	-- WorldRenderer / Overlay / UnitModels inchanges.
 	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	Building.animate(factory, 1, 1 / 60)
 	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)

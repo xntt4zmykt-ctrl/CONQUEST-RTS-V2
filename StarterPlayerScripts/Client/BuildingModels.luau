@@ -345,7 +345,16 @@ local function buildSam(model: Model, color: Color3, _level: number?)
 		for lane = -1, 1, 2 do
 			local launcher = block(model, Vector3.new(0.72, 5.8, 0.72), Vector3.new(side * 1.45, 5.1, lane * 0.72), MISSILE, Enum.Material.Metal)
 			launcher.Name = "Interceptor"
-			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.Angles(math.rad(-31), 0, 0)
+			-- N142 : rampes SAM Interceptor. Plus de CFrame.Angles.
+			-- fromEulerAnglesYXZ(math.rad(-31), 0, 0) ≡ Angles(-31°, 0, 0).
+			-- Pitch X=-31° fixe. Offset side * 1.45, 5.1, lane * 0.72,
+			-- Name = "Interceptor", taille Vector3.new(0.72, 5.8, 0.72),
+			-- MISSILE inchanges. Quatre missiles (2×2) ensemble. Distinct
+			-- portes N141 (Z=±18°). Distinct cylinder() N139 (Z=90).
+			-- Distinct Radar animate N124 (yaw 60 Hz). UnitModels
+			-- leftover apres. buildSilo / playConstruction / animate /
+			-- WorldRenderer / Overlay / Effects inchanges.
+			launcher.CFrame = CFrame.new(side * 1.45, 5.1, lane * 0.72) * CFrame.fromEulerAnglesYXZ(math.rad(-31), 0, 0)
 			local nose = block(model, Vector3.new(0.82, 0.9, 0.82), Vector3.new(side * 1.45, 7.85, lane * 0.72 - 1.65), color)
 			nose.Material = Enum.Material.Neon
 		end
