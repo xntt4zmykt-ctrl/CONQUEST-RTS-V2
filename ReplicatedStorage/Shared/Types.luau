@@ -56,6 +56,8 @@ export type BoatSnapshot = {
 	y: number,
 	troops: number,
 	kind: number, -- 1 = transport de troupes, 2 = navire marchand
+	-- N56 : transport en retraite (Navy.step / retreatBoats). Absent = en route.
+	retreating: boolean?,
 }
 
 export type MissileSnapshot = {

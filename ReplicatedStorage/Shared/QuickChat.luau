@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Messages rapides predefinis, modele OpenFront.
+	Messages rapides predefinis, regle CONQUEST.
 
 	Sur Roblox, les joueurs d'une meme partie ne parlent souvent pas la meme
 	langue : le free-chat est un luxe, la coordination passe par des messages
@@ -9,7 +9,7 @@
 	designee en meme temps pour toute l'alliance (voir Diplomacy.setTargetMark).
 
 	Les textes sont les notres ; seules les categories reprennent l'esprit du
-	jeu de reference.
+	regles CONQUEST.
 ]]
 
 local QuickChat = {}
