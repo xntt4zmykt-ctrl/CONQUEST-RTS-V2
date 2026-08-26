@@ -28,6 +28,10 @@ local scratch = table.create(4, 0)
 local visitBuf = buffer.create(Config.TILE_COUNT)
 local parentScratch: { [number]: number } = {}
 local queueScratch: { number } = table.create(512)
+-- N83 : walk scratch pour reconstruire le trajet. Le tableau rendu au
+-- bateau reste unique (boat.path prend possession). Ne jamais
+-- `return pathWalkBuf` : un second appel aliaserait le trajet du premier.
+local pathWalkBuf: { number } = table.create(256)
 -- syncCarriers : table `seen` recyclee (ISSUE-N38). Pas d'alloc par tick.
 local carrierSeen: { [number]: boolean } = {}
 -- N63 : spawnTradeShips recycle (recette hardening N40). Pas d'alloc par vague.
@@ -71,17 +75,25 @@ function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): {
 		for i = 1, count do
 			local nb = scratch[i]
 			if nb == toTile then
-				local path = { toTile }
+				-- Walk : toTile puis current jusqu'a fromTile exclu.
+				-- Copie inverse dans un tableau neuf — boat.path unique.
+				local walkN = 0
+				walkN += 1
+				pathWalkBuf[walkN] = toTile
 				local node = current
 				while node ~= fromTile do
-					table.insert(path, node)
+					walkN += 1
+					pathWalkBuf[walkN] = node
 					node = parent[node]
 				end
-				local reversed = table.create(#path)
-				for k = #path, 1, -1 do
-					table.insert(reversed, path[k])
+				for i = #pathWalkBuf, walkN + 1, -1 do
+					pathWalkBuf[i] = nil
 				end
-				return reversed
+				local out = table.create(walkN)
+				for i = 1, walkN do
+					out[i] = pathWalkBuf[walkN - i + 1]
+				end
+				return out
 			end
 			if buffer.readu8(terrain, nb) == OCEAN and buffer.readu8(visited, nb) == 0 then
 				buffer.writeu8(visited, nb, 1)
