@@ -251,7 +251,16 @@ function UnitModels.createMissile(parent: Instance, slot: number, kind: number):
 	visual.model.Parent = parent
 	local faction = Theme.factionColor(slot)
 
-	local body = addPart(visual, "Part", "MissileBody", Vector3.new(6.2, 1.05, 1.05), WHITE, CFrame.new(0, 0, 0) * CFrame.Angles(0, math.rad(90), 0), Enum.Material.Metal)
+	-- N146 : corps MissileBody. Plus de CFrame.Angles.
+	-- fromEulerAnglesYXZ(0, math.rad(90), 0) ≡ Angles(0, 90°, 0).
+	-- Yaw Y=90° fixe. Offset (0, 0, 0), taille Vector3.new(6.2, 1.05, 1.05),
+	-- WHITE, Metal, Name = "MissileBody", Shape = Cylinder inchanges.
+	-- Un site. Distinct rampe N145 (pitch -8°). Distinct Bow N144
+	-- (Y=π). Distinct cylinder() N139 (Z=90 bâtiments). Distinct
+	-- ailettes leftover (Z = axis * π/2). Nez / bandes / flamme
+	-- sans euler. LandingRamp N145 / Bow N144 / addWake N143 /
+	-- Overlay / BuildingModels / place inchanges.
+	local body = addPart(visual, "Part", "MissileBody", Vector3.new(6.2, 1.05, 1.05), WHITE, CFrame.new(0, 0, 0) * CFrame.fromEulerAnglesYXZ(0, math.rad(90), 0), Enum.Material.Metal)
 	body.Shape = Enum.PartType.Cylinder
 	local nose = addPart(visual, "Part", "Warhead", Vector3.new(1.35, 1.35, 1.65), faction, CFrame.new(0, 0, -3.45), Enum.Material.Metal)
 	nose.Shape = Enum.PartType.Ball
