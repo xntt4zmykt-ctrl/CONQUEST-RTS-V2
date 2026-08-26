@@ -312,7 +312,7 @@ Config.TILE_BASE_COST = 1.4
 Config.NEUTRAL_COST_MULT = 0.75
 Config.DEFENSE_DENSITY_K = 0.9 -- poids de la densite de troupes adverse
 Config.DEFENDER_LOSS_RATIO = 0.55
-Config.MAX_TILES_PER_TICK = 400 -- mort apres install : combat vivant = guard < 80
+Config.MAX_TILES_PER_TICK = 400 -- MORT apres install. Debit vivant = ChantierB.CAPTURE_GUARD (80).
 
 -- Ouverture lisible : on peut coloniser et construire immediatement, mais les
 -- guerres entre nations attendent quelques secondes. Deux fronts simultanes

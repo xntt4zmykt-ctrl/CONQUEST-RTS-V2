@@ -176,6 +176,8 @@ export type GameState = typeof(setmetatable(
 		buildingDirty: { [number]: true },
 		-- Index posted DEFENSE par camp (combat installé, O(bunkers) pas O(hash)).
 		bunkersBySlot: { [number]: { [number]: true } },
+		-- Index SAM par camp (tryIntercept / samsOf, O(SAM) pas O(hash)).
+		samsBySlot: { [number]: { [number]: true } },
 		freeSlots: { number },
 		nextEntityId: number,
 		capitalEvents: number,
@@ -238,6 +240,7 @@ function GameState.new(seed: number): GameState
 	self.dirty = {}
 	self.buildingDirty = {}
 	self.bunkersBySlot = {}
+	self.samsBySlot = {}
 	self.nextEntityId = 1
 	self.capitalEvents = 0
 	self.sounds = {}
@@ -417,7 +420,9 @@ end
 -- Batiments
 --=============================================================================
 
--- Applique (ou retire) l'aura defensive d'un bunker autour de sa tuile.
+-- Corps historique. Apres SystemsBootstrap.install(), le combat lit
+-- `bunkersBySlot` (posted booléen) et ignore ce buffer. Conservé pour
+-- `tileCost` hors install. Ne plus appeler depuis place/destroy.
 function GameState.applyDefenseAura(self: GameState, index: number, sign: number)
 	local cx, cy = MapGen.fromIndex(index)
 	local radius = Config.DEFENSE_RADIUS
@@ -700,6 +705,22 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
+local function setSlotIndex(map: { [number]: { [number]: true } }, slot: number, index: number, on: boolean)
+	if on then
+		local set = map[slot]
+		if not set then
+			set = {}
+			map[slot] = set
+		end
+		set[index] = true
+	else
+		local set = map[slot]
+		if set then
+			set[index] = nil
+		end
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -709,13 +730,10 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	self:countBuilding(slot, kind, 1, 1)
 
 	if kind == B.DEFENSE then
-		self:applyDefenseAura(index, 1)
-		local set = self.bunkersBySlot[slot]
-		if not set then
-			set = {}
-			self.bunkersBySlot[slot] = set
-		end
-		set[index] = true
+		setSlotIndex(self.bunkersBySlot, slot, index, true)
+	end
+	if kind == B.SAM then
+		setSlotIndex(self.samsBySlot, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -771,16 +789,12 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		self._carriersDirty = true
 	end
 	if building.kind == B.DEFENSE then
-		local fromSet = self.bunkersBySlot[previousSlot]
-		if fromSet then
-			fromSet[index] = nil
-		end
-		local toSet = self.bunkersBySlot[newSlot]
-		if not toSet then
-			toSet = {}
-			self.bunkersBySlot[newSlot] = toSet
-		end
-		toSet[index] = true
+		setSlotIndex(self.bunkersBySlot, previousSlot, index, false)
+		setSlotIndex(self.bunkersBySlot, newSlot, index, true)
+	end
+	if building.kind == B.SAM then
+		setSlotIndex(self.samsBySlot, previousSlot, index, false)
+		setSlotIndex(self.samsBySlot, newSlot, index, true)
 	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
@@ -796,11 +810,10 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousSlot = building.slot
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
-		self:applyDefenseAura(index, -1)
-		local set = self.bunkersBySlot[previousSlot]
-		if set then
-			set[index] = nil
-		end
+		setSlotIndex(self.bunkersBySlot, previousSlot, index, false)
+	end
+	if building.kind == B.SAM then
+		setSlotIndex(self.samsBySlot, previousSlot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1096,6 +1109,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.quickChatLast[slot] = nil
 	if self.bunkersBySlot then
 		self.bunkersBySlot[slot] = nil
+	end
+	if self.samsBySlot then
+		self.samsBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil
@@ -1568,7 +1584,7 @@ end
 
 -- Corps historique. Apres SystemsBootstrap.install(), ChantierB remplace
 -- cette fonction ; ATTACK_SPEND_RATE / MAX_TILES_PER_TICK / defense buffer
--- n'agissent plus sur le combat vivant.
+-- n'agissent plus sur le combat vivant. Debit = ChantierB.CAPTURE_GUARD.
 function GameState.stepAttacks(self: GameState)
 	local collapsing: { { victim: number, captor: number } } = {}
 

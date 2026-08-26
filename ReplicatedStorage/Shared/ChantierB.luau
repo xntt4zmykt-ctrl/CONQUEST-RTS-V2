@@ -14,6 +14,10 @@ local Doomsday = require(ReplicatedStorage.Shared.Doomsday)
 
 local ChantierB = {}
 
+-- Debit vivant de captures par front par tick. Config.MAX_TILES_PER_TICK
+-- (400 brut / 56 apres apply) est mort : ne pas le lire pour limiter le combat.
+ChantierB.CAPTURE_GUARD = 80
+
 local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
@@ -186,7 +190,7 @@ function ChantierB.apply(cfg)
 	cfg.TILE_BASE_COST = 18
 	cfg.NEUTRAL_COST_MULT = 0.88
 	cfg.DEFENSE_DENSITY_K = 1.15
-	cfg.MAX_TILES_PER_TICK = 56 -- mort apres install : debit = guard < 80
+	cfg.MAX_TILES_PER_TICK = 56 -- MORT : debit vivant = ChantierB.CAPTURE_GUARD (80)
 	cfg.FRONT_TILES_PER_CONTACT = 2.4 -- mort apres install
 	cfg.DEFENSE_RADIUS = 30
 	cfg.DEFENSE_STRENGTH = 200
@@ -473,7 +477,7 @@ function ChantierB.install(GameState, Nukes)
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
 			local guard = 0
-			while numTiles > 0 and guard < 80 do
+			while numTiles > 0 and guard < ChantierB.CAPTURE_GUARD do
 				guard += 1
 				local index = Heap.pop(atk.frontier)
 				if not index then
