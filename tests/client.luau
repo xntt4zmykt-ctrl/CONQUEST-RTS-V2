@@ -1861,6 +1861,11 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 
 	-- Une faction effacee de la carte perd son etiquette au lieu de la laisser
 	-- flotter sur un territoire qui ne lui appartient plus.
+	-- N182 : snapshot ancre slot 1 (first déjà) avant emptied.
+	-- Parent nil + labelFree. Skip Overlay. Skip surveyTerritories N96.
+	-- Recette leftover N181, pas merger visual 3437. Distinct leftover
+	-- N152 flame. Pas overlay:clear() ici. Check vagues leftover N181
+	-- doit rester vert.
 	local emptied = buffer.create(Config.TILE_COUNT)
     for y = 40, 70 do
         for x = 180, 200 do
@@ -1870,6 +1875,35 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	labels:refresh(emptied, stats, roster)
 	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
 	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
+	assert(first.anchor.Parent == nil, "ancre N182 encore parentee")
+	local labelPool = labels.labelFree
+	assert(labelPool ~= nil and #labelPool >= 1, "etiquettes non poolees")
+	local parkedLabel = false
+	for _, rec in labelPool do
+		if rawequal(rec, first) then
+			parkedLabel = true
+			break
+		end
+	end
+	assert(parkedLabel, "ancre N182 absente de labelFree")
+
+	-- Restore territoire slot 1 : reuse. Parent labels.root **ou** free-list.
+	-- Arbre Billboard conservé. Pas Destroy. Recette leftover N181.
+	labels:refresh(owner, stats, roster)
+	if first.anchor.Parent == nil then
+		local inFree = false
+		for _, rec in labelPool do
+			if rawequal(rec, first) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ancre N182 ni reparentee ni dans labelFree")
+	else
+		assert(rawequal(first.anchor.Parent, labels.root), "ancre N182 recree")
+		assert(rawequal(labels.labels[1], first), "ancre N182 pas au slot 1")
+		assert(first.name.Text == "Valoria", "texte perdu au reuse N182")
+	end
 
 	-- N96 : owner tout NEUTRAL → plus d'ancres (leftover hash interdit).
 	local barren = buffer.create(Config.TILE_COUNT)
@@ -1878,6 +1912,7 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 
 	labels:clear()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
+	assert(labels.labelFree ~= nil and #labels.labelFree >= 1, "labelFree videe au clear")
 end)
 
 --[[
