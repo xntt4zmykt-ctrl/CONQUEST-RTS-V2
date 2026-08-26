@@ -682,6 +682,33 @@ check("construction du monde 3D", function()
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 
+	-- N114 : compact du prefixe consomme (seuil 32). 40 chunks sales,
+	-- 11 frames × budget 3 = tete 34 → compact des 7 restants a l'index 1.
+	-- Leftover N112 (drain → head 1, file vide) reste au-dessus.
+	-- Pas de table.remove. Recycle Parts N106 inchange.
+	local compactChunks = {}
+	for chunk in world.chunkFolders do
+		table.insert(compactChunks, chunk)
+		if #compactChunks >= 40 then
+			break
+		end
+	end
+	assert(#compactChunks >= 40, "pas assez de chunks pour tester le compact")
+	for _, chunk in compactChunks do
+		world:markChunkDirty(chunk)
+	end
+	assert(#world.dirtyQueue == 40, "file non remplie pour compact")
+	for _ = 1, 11 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1, "dirtyHead non reset apres compact")
+	assert(#world.dirtyQueue == 7, "reste non compacte vers l'index 1")
+	assert(world.dirtyQueue[8] == nil, "surplus non nile")
+	for _ = 1, 4 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1 and #world.dirtyQueue == 0, "file non drainee apres compact")
+
 	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
 	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
 	-- (partCount) reste au-dessus. Recette visual V58/V59, pas merger.
@@ -933,6 +960,15 @@ check("pose et capture de chaque type de batiment", function()
 	assert(type(firstSeg.layers[1].ox) == "number" and type(firstSeg.layers[1].oy) == "number", "ox/oy shoulder absents")
 	assert(firstSeg.layers[2].oy ~= firstSeg.layers[1].oy, "oy asphalt = shoulder")
 	assert(firstSeg.layers[3].oy ~= firstSeg.layers[2].oy, "oy bande = asphalt")
+	-- N113 : rot cuit a l'origine. Plus de lookAt 60 Hz. Leftover N111
+	-- (nombres) reste au-dessus. Recette visual V63, portee pas mergee.
+	assert(firstSeg.rot ~= nil and type(firstSeg.rot.X) == "number", "rot absent")
+	assert(firstSeg.rot.X == 0 and firstSeg.rot.Y == 0 and firstSeg.rot.Z == 0, "rot n'est pas a l'origine")
+	local bakedRot = firstSeg.rot
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(firstSeg.rot, bakedRot), "rot recree pendant le chantier")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres rot")
 
 	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
 	-- libere — sinon il resterait a tourner pour rien a chaque image.
@@ -1552,6 +1588,9 @@ check("deltas de terrain et conquetes classees", function()
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead >= 1, "dirtyHead absent apres deltas")
 	if world.dirtyHead > #world.dirtyQueue then
 		assert(#world.dirtyQueue == 0 and world.dirtyHead == 1, "file non truncatee une fois consommee")
+	else
+		-- N114 : tant que la file vit, le prefixe consomme ne depasse pas 32.
+		assert(world.dirtyHead <= 32, "prefixe consomme non compacte")
 	end
 
 	-- N106 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
