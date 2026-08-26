@@ -579,7 +579,16 @@ function WorldRenderer.step(self: WorldRenderer, dt: number)
 		)
 	end
 	for _, leaf in self.animatedFoliage do
-		leaf.part.CFrame = leaf.base * CFrame.Angles(math.sin(time * 1.2 + leaf.phase) * 0.018, 0, math.cos(time + leaf.phase) * 0.014)
+		-- V59 : Y en nombres depuis base. Plus de CFrame.Angles 60 Hz
+		-- (tilt ~1° invisible sur Ball). Amplitude 0.018 conservee en
+		-- translation Y. Houle / camion / unites inchanges (V58/V57/V56).
+		-- 0 couronne = zéro alloc.
+		local base = leaf.base
+		leaf.part.CFrame = CFrame.new(
+			base.X,
+			base.Y + math.sin(time * 1.2 + leaf.phase) * 0.018,
+			base.Z
+		)
 	end
 end
 
