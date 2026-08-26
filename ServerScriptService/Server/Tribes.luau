@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Tribus PvE — port OF TribeExecution / TribeSpawner.
+	Tribus PvE — port tribus PvE / TribeSpawner.
 
 	IA allégée vs bots :
 	  - colonise d'abord le neutre (terra nullius)
