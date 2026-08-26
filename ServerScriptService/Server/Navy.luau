@@ -29,6 +29,8 @@ local scratch = table.create(4, 0)
 local visitBuf = buffer.create(Config.TILE_COUNT)
 local parentScratch: { [number]: number } = {}
 local queueScratch: { number } = table.create(512)
+-- syncCarriers : table `seen` recyclee (ISSUE-N34). Pas d'alloc par tick.
+local carrierSeen: { [number]: boolean } = {}
 
 function Navy.findSeaPath(state: GameState, fromTile: number, toTile: number): { number }?
 	local terrain = state.terrain
@@ -400,8 +402,18 @@ local function resolveTrade(state: GameState, boat)
 end
 
 local function syncCarriers(state: GameState)
+	-- Dirty flag : pose / destruction / capture de NAVAL_BASE seulement.
+	-- Sans ca, 10 scans O(buildings) par seconde pour une table hash jetable
+	-- (ISSUE-N34). Recette feel N38, sans AimFront. Le spawn/despawn
+	-- reste identique ; nested loop warships (N20) inchange.
+	if not state._carriersDirty then
+		return
+	end
+	state._carriersDirty = false
+
 	local maxHp = Config.WARSHIP_MAX_HEALTH or 100
-	local seen: { [number]: boolean } = {}
+	table.clear(carrierSeen)
+	local seen = carrierSeen
 	for i = #state.boats, 1, -1 do
 		local boat = state.boats[i]
 		if boat.kind ~= KIND_CARRIER then
@@ -619,6 +631,20 @@ function Navy.step(state: GameState, rng: Random)
 		local boat = state.boats[i]
 		if boat.kind == KIND_CARRIER then
 			continue
+		end
+
+		-- N35 : PORT d'arrivee detruit au combat (pas recycle — c'est N32).
+		-- Sans ca le kind==2 reste en mer jusqu'a step > #path, occupe
+		-- MAX_TRADE_SHIPS, puis resolveTrade no-op. Contrat B : couler
+		-- des que buildings[targetTile] n'est plus un PORT. Pas d'or,
+		-- pas de malus vendeur. Capture (transfer) : le PORT existe
+		-- encore, le convoi continue. destSlot = N28 transports, pas ici.
+		if boat.kind == KIND_TRADE then
+			local dest = state.buildings[boat.targetTile]
+			if not dest or dest.kind ~= Config.BUILDING.PORT then
+				table.remove(state.boats, i)
+				continue
+			end
 		end
 
 		if boat.kind == KIND_TRANSPORT and not boat.retreating then

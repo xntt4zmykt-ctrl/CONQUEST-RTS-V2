@@ -180,6 +180,9 @@ export type GameState = typeof(setmetatable(
 		mode: any,
 		events: { { text: string, kind: string, only: number? } },
 		combatUnlocked: boolean,
+		-- Navy.syncCarriers : leve par place/destroy/transfer NAVAL_BASE
+		-- seulement (ISSUE-N34). Pas de scan O(buildings) a 10 Hz a vide.
+		_carriersDirty: boolean,
 	},
 	GameState
 ))
@@ -243,6 +246,9 @@ function GameState.new(seed: number): GameState
 	-- tests. Le serveur de match le passe explicitement a false pendant son
 	-- compte a rebours de preparation.
 	self.combatUnlocked = true
+	-- Ceinture : premier Navy.step synchronise (buildings encore vide).
+	-- Ensuite le flag ne se leve que sur une mutation NAVAL_BASE.
+	self._carriersDirty = true
 
 	self.freeSlots = {}
 	for slot = Config.MAX_PLAYERS, 1, -1 do
@@ -696,6 +702,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 	if kind == B.DEFENSE then
 		self:applyDefenseAura(index, 1)
 	end
+	if kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[kind] then
 		self:refreshRailNetwork(slot)
 	end
@@ -743,6 +752,9 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 	building.slot = newSlot
 	self:countBuilding(newSlot, building.kind, 1, building.level)
 	self.buildingDirty[index] = true
+	if building.kind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -762,6 +774,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
 	self.buildingDirty[index] = true
+	if previousKind == B.NAVAL_BASE then
+		self._carriersDirty = true
+	end
 	if IS_STATION[previousKind] then
 		self:refreshRailNetwork(previousSlot)
 	end
