@@ -5741,6 +5741,145 @@ end
 
 print("passe 30 : contextFor ctxBuf, doomedBuf/collapsingBuf OK")
 
+--[[
+	Nightly passe 31 — revue PR #87 : Bots.decideDiplomacy allyBuf / ChantierB.stepDoomsday stripBuf (V42–V43).
+]]
+do
+	-- V42 : decideDiplomacy recycle allyBuf. 2 humains allies + 1 bot,
+	-- deux appels → pas d'erreur, rawequal. Apres breakAlliance le
+	-- leftover d'un clear oublie ferait une coalition fantome.
+	-- Recette V35 (table.clear hash). Pas de stripBuf.
+	local state = GameState.new(3101)
+	local bot = state:addPlayer(nil, "AllyBot", Random.new(101), 0)
+	local h1 = state:addPlayer(nil, "AllyH1", Random.new(102), 0)
+	local h2 = state:addPlayer(nil, "AllyH2", Random.new(103), 0)
+	if not bot or not h1 or not h2 then
+		fail("allyBuf — spawn impossible")
+	else
+		h1.isBot = false
+		h2.isBot = false
+		Diplomacy.request(state, h1.slot, h2.slot)
+		if not Diplomacy.accept(state, h1.slot, h2.slot) then
+			fail("allyBuf — pacte humains")
+		else
+			Diplomacy.request(state, bot.slot, h1.slot)
+			if not Diplomacy.accept(state, bot.slot, h1.slot) then
+				fail("allyBuf — pacte bot")
+			else
+				-- NextNumber toujours > seuils accept/coalition/trahison/offre
+				-- pour ne pas rompre le pacte avant le leftover.
+				local rng = { NextNumber = function() return 0.99 end }
+				Bots.decideDiplomacy(state, bot, rng)
+				local first = Bots.allyBuf
+				if first[h1.slot] ~= true then
+					fail("allyBuf — allie absent")
+				elseif first[h2.slot] ~= nil then
+					fail("allyBuf — humain non allie du bot present")
+				else
+					Bots.decideDiplomacy(state, bot, rng)
+					if not rawequal(first, Bots.allyBuf) then
+						fail("allyBuf — rawequal")
+					else
+						print("allyBuf : deux appels, rawequal, allie present (V42)")
+						Diplomacy.breakAlliance(state, bot.slot, h1.slot)
+						if state:areAllied(bot.slot, h1.slot) then
+							fail("allyBuf — breakAlliance n'a pas rompu")
+						else
+							Bots.decideDiplomacy(state, bot, rng)
+							if Bots.allyBuf[h1.slot] ~= nil then
+								fail("allyBuf — leftover apres breakAlliance")
+							else
+								print("allyBuf : breakAlliance → ex-allie absent (V42)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V43 : stepDoomsday recycle stripBuf. 1 humain sous quota →
+	-- tuiles diminuent, tiles vs buffer. Deux slots marques le meme
+	-- tick → chacun perd le sien (un leftover sans truncate
+	-- arracherait les tuiles du premier pendant le second).
+	-- Recette V37 (truncate avant traitement). Pas d'index tuiles-par-slot.
+	local state = GameState.new(3102)
+	local leader = state:addPlayer(nil, "StripLead", Random.new(104), 0)
+	local a = state:addPlayer(nil, "StripA", Random.new(105), 0)
+	local b = state:addPlayer(nil, "StripB", Random.new(106), 0)
+	if not leader or not a or not b then
+		fail("stripBuf — spawn impossible")
+	else
+		a.isBot = false
+		b.isBot = false
+		local function shrinkTo(ps, keep)
+			local seen = 0
+			local drop: { number } = {}
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(state.owner, index) == ps.slot then
+					seen += 1
+					if seen > keep then
+						table.insert(drop, index)
+					end
+				end
+			end
+			for _, index in drop do
+				state:setOwner(index, Config.NEUTRAL_SLOT)
+			end
+		end
+		if leader.tiles <= 40 then
+			fail(`stripBuf — leader trop petit ({leader.tiles})`)
+		else
+			shrinkTo(a, 40)
+			shrinkTo(b, 40)
+			if a.tiles ~= 40 or b.tiles ~= 40 then
+				fail(`stripBuf — shrink A={a.tiles} B={b.tiles}`)
+			elseif a.tiles >= leader.tiles or b.tiles >= leader.tiles then
+				fail("stripBuf — leader pas unique")
+			else
+				state.tick = 12000
+				local elapsed = state.tick * Config.TICK_DT
+				state.doomWarnedAt = {
+					[a.slot] = elapsed - 70,
+					[b.slot] = elapsed - 70,
+				}
+				state.doomUnderSince = {
+					[a.slot] = 40,
+					[b.slot] = 40,
+				}
+				local beforeA, beforeB, beforeL = a.tiles, b.tiles, leader.tiles
+				state:stepDoomsday()
+				local realA, realB, realL = 0, 0, 0
+				for index = 0, Config.TILE_COUNT - 1 do
+					local slot = buffer.readu8(state.owner, index)
+					if slot == a.slot then
+						realA += 1
+					elseif slot == b.slot then
+						realB += 1
+					elseif slot == leader.slot then
+						realL += 1
+					end
+				end
+				if a.tiles >= beforeA then
+					fail(`stripBuf — A n'a pas perdu ({a.tiles} / {beforeA})`)
+				elseif b.tiles >= beforeB then
+					fail(`stripBuf — B n'a pas perdu ({b.tiles} / {beforeB})`)
+				elseif leader.tiles ~= beforeL then
+					fail(`stripBuf — leader touche ({leader.tiles} / {beforeL})`)
+				elseif a.tiles ~= realA or b.tiles ~= realB or leader.tiles ~= realL then
+					fail(`stripBuf — tiles vs buffer A={a.tiles}/{realA} B={b.tiles}/{realB}`)
+				else
+					print("stripBuf : rot sous quota, deux camps, tiles vs buffer (V43)")
+				end
+			end
+		end
+	end
+end
+
+print("passe 31 : allyBuf, stripBuf recycle OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
