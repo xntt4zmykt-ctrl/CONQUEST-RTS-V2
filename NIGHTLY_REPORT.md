@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 43)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 44)
 
-Déclencheur : ouverture de la **PR #131** (`cursor/analyse-nocturne-du-codebase-846c`) — `applyRouteProgress` rot, compact `dirtyQueue`, specs N115–N116.
+Déclencheur : ouverture de la **PR #133** (`cursor/analyse-nocturne-du-codebase-ab04`) — Overlay `segRot` camion, unités immobile, specs N117–N118.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-ab04`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#131.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-bec6`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#135.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `buildFactoryRoute` cuit `route.segRot` par segment HV ; `stepInterpolation` compose `CFrame.new(px, py, pz) * route.segRot[segmentIndex]` (N115). Unités immobiles (`mag <= 0.01`) : `CFrame.new(worldX, py, worldZ)` (N116). LookAt chantier (N113), compact dirty (N114), nombres (N111), `dirtyHead` (N112), câble (N109), lift (N110), houle (N107), feuillage (N108), camion lerp (N105) et recycle Ground/Border (N106) restent.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. Unités en mouvement : `CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)` (N117). Camera overview : `CFrame.new(ex, ey, ez) * rotation` (N118) ; le biais `lookAt(..., focus + shake * 0.18)` est abandonné (shake sur l’œil seulement). `segRot` camion (N115), immobile `CFrame.new` (N116), rot chantier (N113) et compact dirty (N114) restent.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #131 (passe 42) : claims vérifiés.** `segment.rot` cuit, `CFrame.new * rot` (N113) ; compact `dirtyQueue` seuil 32 (N114). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #133 (passe 43) : claims vérifiés.** `route.segRot` cuit, `CFrame.new * segRot` (N115) ; unités `mag <= 0.01` : `CFrame.new` (N116). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #131 a documenté (N115, N116)**.
+Cette passe a **livré ce que #133 a documenté (N117, N118)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #131
+## 2. Revue PR #133
 
-| Claim #131 | Réalité à l’ouverture |
+| Claim #133 | Réalité à l’ouverture |
 |---|---|
-| `applyRouteProgress` rot (N113) | Oui. `segment.rot = CFrame.lookAt(Vector3.zero, direction)` à la pose. Hot path : `CFrame.new(cx, cy, cz) * segment.rot`. Plus de lookAt 60 Hz chantier. Recette visual V63, pas merger `f5e9`. |
-| `stepRebuilds` compact (N114) | Oui. Après budget, si `dirtyHead > 32` et file non vide : copie in-place, nil du surplus, `dirtyHead = 1`. Drain N112 inchangé. Pas de `table.remove`. |
-| Specs N115–N116 | **Corrigés ici.** N115 = `route.segRot` cuit, `CFrame.new * segRot` (recette visual V64 déjà fermée sur `3062` — **porté, pas mergé**). N116 = immobile `CFrame.new` ; mouvement lookAt conservé (leftover visual V65). |
+| Overlay camion `segRot` (N115) | Oui. `buildFactoryRoute` cuit `route.segRot[i]`. Hot path : `CFrame.new(px, py, pz) * route.segRot[segmentIndex]`. Plus de lookAt 60 Hz camion. Recette visual V64, pas merger `3062`. |
+| Overlay unités immobile (N116) | Oui. `mag <= 0.01` : `CFrame.new(worldX, py, worldZ)`. Mouvement : lookAt conservé (leftover N117). |
+| Specs N117–N118 | **Corrigés ici.** N117 = `CFrame.new * fromEulerAnglesYXZ` (recette visual V65 déjà fermée sur `dc65` / PR #132 — **porté, pas mergé**). N118 = `CFrame.new(ex,ey,ez) * rotation` (recette visual V66 déjà fermée sur `926d` / PR #134 — **porté, pas mergé** ; shake Vector3 **conservé** cette passe, leftover N119). |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #130 (`e488`), feel jusqu’à #131, visuelles #39/…/#129 (`3062` V64 camion `segRot` **fermé** + leftover V65 unités lookAt). **#131 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#130) reste distincte. Ne pas merger visual `3062` / `f5e9` ni hardening `e488` / `46a1` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #135 (`e9e5` N93–N94), feel jusqu’à #133, visuelles #39/…/#134 (`926d` V66 camera lookAt **fermé** + leftover V67 offset). **#133 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#135) reste distincte. Ne pas merger visual `926d` / `dc65` ni hardening `e9e5` / `e488` sans rebase.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N115–N116 du rapport #131.
+Feel #19 inchangé. Pas de réinvention : N117–N118 du rapport #133.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| Overlay camion lookAt deux Vector3 60 Hz (N115) | `Overlay.luau` (`buildFactoryRoute` path + boucle `route.delivery` de `stepInterpolation`), `tests/client.luau` (asserts dans le check pose/capture existant) | Leftover N113. Cuire `route.segRot[i] = CFrame.lookAt(Vector3.zero, path[i+1]-path[i])` (Magnitude `< 0.01` → rot précédente / identité). Hot path : `CFrame.new(px, py, pz) * route.segRot[segmentIndex]`. Plus de `CFrame.lookAt` 60 Hz camion. `CFrame.Angles` roues **inchangé**. Construction initiale `truckPart` lookAt `from→to` **conservée** (une fois). Chantier `segment.rot` **inchangé** (N113). Recette visual V64 déjà sur `3062`, **pas** merger. Cosmétique (pose). 0 livraison → zéro alloc (déjà `continue`). |
-| Overlay unités lookAt deux Vector3 60 Hz hors déplacement (N116) | `Overlay.luau` (boucle `self.units` de `stepInterpolation`), `tests/client.luau` (asserts dans le check navires existant) | Leftover N103. Immobile (`mag <= 0.01`) : `CFrame.new(worldX, py, worldZ)` (regard −Z). Mouvement : lookAt **conservé** (look change chaque frame, pas cuisable). Roulis `CFrame.Angles` **inchangé**. `UnitModels.place` **inchangé**. Extra missile **inchangé** (N98). Cosmétique. 0 unité → zéro alloc. |
+| Overlay unités lookAt deux Vector3 60 Hz en mouvement (N117) | `Overlay.luau` (branche `mag > 0.01` de la boucle `self.units` de `stepInterpolation`), `tests/client.luau` (asserts dans le check navires existant) | Leftover N116. `CFrame.new * fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)`. Plus de lookAt deux Vector3. Immobile `CFrame.new` **inchangé** (N116). Roulis `CFrame.Angles` **après** la compose yaw, **inchangé**. Recette visual V65 déjà sur `dc65`, **pas** merger. Cosmétique. 0 unité en mouvement → zéro alloc (déjà `CFrame.new` N116). |
+| WorldCamera.step lookAt deux Vector3 60 Hz (N118) | `WorldCamera.luau` (`step` overview), `tests/client.luau` (asserts dans le check camera existant) | Leftover Overlay. Œil en nombres `ex, ey, ez` ; pose `CFrame.new(ex, ey, ez) * rotation`. Biais `shake * 0.18` abandonné (documenté). `Vector3.new` offset/shake **restent** (leftover N119 / N120). Recette visual V66 déjà sur `926d` (visual a aussi fermé shake — **ne pas** porter shake ici). Cosmétique. Hors overview → early-out déjà. |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), lookAt unités **en mouvement** (**N117**), lookAt camera 60 Hz (**N118**). `PlacementPreview.resolve` ctx déjà **N92**. `self.ranked` inner déjà **N97**. Overlay `trackUnit` extra déjà **N98**. Hover déjà **N99**. `rankByTiles` déjà **N100**. `targetX` déjà **N101**. `BORDER_PASSES` déjà **N102**. lookAt unités unique déjà **N103**. `meshKeyAt` déjà **N104**. Camion lerp déjà **N105**. Parts Ground déjà **N106**. Houle déjà **N107**. Feuillage déjà **N108**. Câble déjà **N109**. Lift déjà **N110**. Nombres déjà **N111**. `dirtyHead` déjà **N112**. Rot chantier déjà **N113**. Compact déjà **N114**. `else {}` overlay-nil hors passe.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), offset camera Vector3 (**N120**), shake camera Vector3 (**N119**). `PlacementPreview.resolve` ctx déjà **N92**. `self.ranked` inner déjà **N97**. Overlay `trackUnit` extra déjà **N98**. Hover déjà **N99**. `rankByTiles` déjà **N100**. `targetX` déjà **N101**. `BORDER_PASSES` déjà **N102**. lookAt unités unique déjà **N103**. `meshKeyAt` déjà **N104**. Camion lerp déjà **N105**. Parts Ground déjà **N106**. Houle déjà **N107**. Feuillage déjà **N108**. Câble déjà **N109**. Lift déjà **N110**. Nombres déjà **N111**. `dirtyHead` déjà **N112**. Rot chantier déjà **N113**. Compact déjà **N114**. Camion `segRot` déjà **N115**. Unités immobile déjà **N116**. `else {}` overlay-nil hors passe.
 
 ---
 
@@ -80,53 +80,61 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Carriers** = spawn/despawn/slot sur dirty NAVAL_BASE, spawn via `navalBasesBySlot` (N65). Ciblage obus = `carrierBuf`/`targetBuf` recyclés **(N67)**. Pas de spatial hash.
 - **Posted bunker** = index `bunkersBySlot`. **Posted SAM** = `samsBySlot`. **Posted SILO** = `silosBySlot`. **Posted FACTORY** = `factoriesBySlot`. **Tous** = `buildingsBySlot`. **PORT** = `portsByTile`. **Posted NAVAL_BASE** = `navalBasesBySlot`.
 - **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). Playing 10 Hz ; lobby vide et ended → 1 Hz.
-- Overlay `stepInterpolation` X/Z monde + un `lookAt` unités en mouvement (**N103**, leftover **N117**) **et** camion lerp (**N105**) + `segRot` (**N115**). `rebuildChunk` hisse `meshKeyAt` (**N104**) et recycle Ground/Border par chunk (**N106**). Houle océan (**N107**) et feuillage (**N108**) = nombres + un `CFrame.new`. Câble PORT (**N109**) = nombres + un `CFrame.new`. Lift voie (**N110**) cuit dans `layer.origin`. Arithmétique `origin + direction * t` **fermée** (**N111**). `table.remove(dirtyQueue, 1)` **fermé** (**N112**). LookAt chantier **fermé** (**N113**). Compact préfixe `dirtyQueue` **fermé** (**N114**). LookAt camion **fermé** (**N115**). LookAt unités immobile **fermé** (**N116**). LookAt unités en mouvement encore 60 Hz (**N117**). LookAt camera encore 60 Hz (**N118**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- Overlay `stepInterpolation` X/Z monde + yaw euler unités en mouvement (**N117**) **et** camion lerp (**N105**) + `segRot` (**N115**). Immobile `CFrame.new` (**N116**). `rebuildChunk` hisse `meshKeyAt` (**N104**) et recycle Ground/Border par chunk (**N106**). Houle océan (**N107**) et feuillage (**N108**) = nombres + un `CFrame.new`. Câble PORT (**N109**) = nombres + un `CFrame.new`. Lift voie (**N110**) cuit dans `layer.origin`. Arithmétique `origin + direction * t` **fermée** (**N111**). `table.remove(dirtyQueue, 1)` **fermé** (**N112**). LookAt chantier **fermé** (**N113**). Compact préfixe `dirtyQueue` **fermé** (**N114**). LookAt camion **fermé** (**N115**). LookAt unités immobile **fermé** (**N116**). LookAt unités en mouvement **fermé** (**N117**). LookAt camera **fermé** (**N118**). Shake camera Vector3 encore 60 Hz (**N119**). Offset camera `Vector3.new(0,0,distance)` encore 60 Hz (**N120**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N117–N118)
+## 5. Issues worker-ready (nouveaux, N119–N120)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N116 = faits. N22 = **N67 fait**. N27 = doc only. **V64 / N115** fermés ici (portés, pas mergés ; V64 déjà livré visuel `3062`). **N116** fermé ici (immobile seulement). **V65** fermé visuel `dc65` — leftover feel = **N117** (porter euler mouvement, ne pas merger). **V66** ouvert visuel — leftover feel = **N118**.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N118 = faits. N22 = **N67 fait**. N27 = doc only. **V65 / N117** fermés ici (portés, pas mergés ; V65 déjà livré visuel `dc65`). **V66 / N118** fermés ici (portés, pas mergés ; V66 déjà livré visuel `926d` **avec** shake nombres — feel garde Vector3 shake, leftover **N119**). **V67** ouvert visuel — leftover feel = **N120**.
 
 ---
 
-### ISSUE-N117 — Overlay unités lookAt en mouvement deux Vector3 60 Hz (feel)
+### ISSUE-N119 — WorldCamera.step shake `Vector3.new` 60 Hz (feel)
 
-**Priorité :** P3 alloc client unités. Leftover explicite de N116 (immobile `CFrame.new` déjà). Distinct de N116 (cas `mag <= 0.01` déjà), de N115 (camion **HV cuisable** via `segRot`) et de N113 (chantier). Recette visual V65 **fermée** sur `dc65` (passe 48 visual, après V64 camion) — `CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)` (yaw monde, regard −Z). **Porter la recette, ne pas merger.** Ne pas toucher WorldRenderer ni BuildingModels ni WorldCamera.
+**Priorité :** P3 alloc client camera. Leftover explicite de N118 (pose `CFrame.new * rotation` déjà). Distinct de N118 (lookAt déjà), de N120 (offset `(0,0,distance)`), de N117 (unités Overlay). Recette visual V66 **fermée** sur `926d` (passe 49 visual) a **déjà** posé `sx/sy/sz` en nombres — **porter les trois lignes shake, ne pas merger** `926d`. Ne pas toucher Overlay ni WorldRenderer.
 
-**Problème :** N116 coupe le lookAt **immobile**. Reste, **par unité interpolée en mouvement, à chaque frame** : `CFrame.lookAt(Vector3.new(worldX, py, worldZ), Vector3.new(worldX+dx, py, worldZ+dy))`. Deux allocs Vector3 **en plus** du `CFrame.Angles` roulis navire (rotation réelle, inévitable). Le look suit `targetX - currentX` **chaque frame**, donc **pas** cuisable à la pose (contrairement au camion N115). `fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)` produit la même assiette look −Z **sans** deux Vector3. Distinct de N116 (immobile déjà), de N115 (HV constant), de N105 (camion lerp), de N113 (chantier).
+**Problème :** N118 coupe le lookAt. Reste, **chaque frame overview** : `Vector3.new(sin(clock*31)*shake*0.65, cos(clock*37)*shake*0.42, sin(clock*23)*shake*0.5)` puis `.X/.Y/.Z` pour l’œil. Un Vector3 par frame **en plus** de l’offset leftover N120. Les coeffs 0.65 / 0.42 / 0.5 et les fréquences 31 / 37 / 23 sont la signature du tremblement. Distinct de N118 (compose déjà), de N120 (offset local).
 
-**Pourquoi 20K CCU :** leftover N116. 8 clients × 60 Hz × (navires + missiles en déplacement, quelques dizaines en pic) × 2 Vector3 lookAt. Pas d’autorité (pose cosmétique). Forcer une rot cuite à la pose casserait le suivi de cible. 0 unité en mouvement → zéro alloc (déjà `CFrame.new` N116).
+**Pourquoi 20K CCU :** leftover N118. 8 clients × 60 Hz × 1 Vector3 shake. Pas d’autorité (cosmétique). Changer un coeff ferait dériver le kick visuel vs Studio. `shake == 0` → zéros, alloc quand même tant que `Vector3.new` reste.
 
 **Worker :**
 
-1. Dans `Overlay.stepInterpolation` boucle `self.units` seulement, branche `mag > 0.01` : garder lerp `currentX/Y` (N101) et X/Z monde (N103). Remplacer `CFrame.lookAt(deux Vector3)` par `frame = CFrame.new(worldX, py, worldZ) * CFrame.fromEulerAnglesYXZ(0, math.atan2(dx, -dy), 0)`. Immobile (`mag <= 0.01`) **inchangé** (`CFrame.new`, N116). `CFrame.Angles` roulis navire **inchangé** (`mag > 0.01 and not unit.isMissile`, **après** la compose yaw). `UnitModels.place` **inchangé**. Extra missile **inchangé** (N98). `targetX` **inchangé** (N101). Camion / chantier / câble / houle / feuillage **inchangés** (N115 / N113 / N109 / N107 / N108). File dirty **inchangée** (N114). Camera **inchangée** (N118 leftover).
-2. Ne **pas** éditer `UnitModels.luau` / `BuildingModels.luau` / `WorldRenderer.luau` / `HUD.luau` / `WorldSpace.luau` / `WorldCamera.luau`. Ne pas porter N118 (camera lookAt) dans ce worker. Après N116. Recette visual V65 **fermée** sur `dc65` — porter `fromEulerAnglesYXZ`, pas merger visual `dc65` / `3062`.
-3. Ne pas « fermer » `Size` flamme missile (API, `UnitModels`). Ne pas toucher explosion / wake / splash (événement). Ne pas merger visual `1dbb` / `3062`. Ne pas cuire une rot à l’insert (look change). `atan2(dx, -dy)` : `dx` = delta tuile X, `dy` = delta tuile Y = monde Z. Vérifier l’assiette vs lookAt (regard −Z vers la cible). Missile **sans** roulis : yaw seulement.
-4. Test : banc client « navires, missiles et interpolation » **doit rester vert** : leftover N116 (navire immobile `currentX == targetX`) **et** leftover N103 (lerp `currentX`/`currentY` sous yaw, navire `extra == nil`, `retreatTinted` conservé) **et** leftover N101 (`targetX`) **et** leftover N98 (extra `rawequal`) **doivent rester verts**. Mouvement : pas d’erreur `fromEulerAnglesYXZ`. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
-5. Fichiers : `Overlay.luau` (branche `mag > 0.01` de la boucle `self.units` de `stepInterpolation` seulement). `tests/client.luau` **seulement si** un assert dans le check navires existant (ne **pas** ajouter un 36e). `UnitModels.luau` **non**. `WorldCamera.luau` **non**. **Ne pas** éditer le serveur.
+1. Dans `WorldCamera.step` seulement, après `rotation` / `offset` : remplacer le `Vector3.new` shake par `sx = math.sin(self.clock * 31) * self.shake * 0.65`, `sy = math.cos(self.clock * 37) * self.shake * 0.42`, `sz = math.sin(self.clock * 23) * self.shake * 0.5`. Œil : `ex = self.focus.X + offset.X + sx` (idem Y/Z). Pose **inchangée** : `CFrame.new(ex, ey, ez) * rotation` (N118). Offset `VectorToWorldSpace(Vector3.new(0, 0, distance))` **inchangé** (leftover N120). FOV / lissage / `stepInput` **inchangés**. Overlay unités / camion / chantier **inchangés** (N117 / N116 / N115 / N113).
+2. Ne **pas** éditer `Overlay.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `BuildingModels.luau`. Ne pas porter N120 (offset trig) dans ce worker. Après N118. Recette visual V66 déjà sur `926d` (shake nombres **dans** V66) — porter `sx/sy/sz`, pas merger visual `926d` / `dc65`.
+3. Ne pas convertir Radar / Flag / Boom. Ne pas toucher `Camera.ViewportPointToRay`. Ne pas changer MIN/MAX_DISTANCE. Ne pas « fermer » offset `(0,0,d)` (N120). Tests « camera strategique » et « camera tactile » **doivent rester verts**.
+4. Test : banc client « camera strategique » **et** « camera tactile : panoramique, pincement et torsion » **doivent rester verts**. Leftover N118 (`CFrame.X` nombre) **et** leftover N117 (lerp missile sous yaw, navire immobile) **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+5. Fichiers : `WorldCamera.luau` (`step` overview seulement, bloc shake). `tests/client.luau` **seulement si** un assert dans le check camera existant (ne **pas** ajouter un 36e). `Overlay.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. Immobile = `CFrame.new` (N116) ; mouvement = `CFrame.new * fromEulerAnglesYXZ`. **N117 feel ≠ N116 (immobile déjà) ≠ N115 (camion HV) ≠ N113 (chantier) ≠ N103 (lookAt unique déjà) ≠ visual V65 (déjà livré visuel `dc65`, ne pas merger).** Non réentrant. Ne pas fusionner avec N118 dans le même worker.
+**Contraintes :** pas de RemoteFunction. Coeffs 0.65 / 0.42 / 0.5 et fréquences 31 / 37 / 23 **identiques**. **N119 feel ≠ N118 (lookAt déjà) ≠ N120 (offset) ≠ visual V66 (déjà livré visuel `926d` avec shake, ne pas merger).** Non réentrant. Ne pas fusionner avec N120 dans le même worker.
 
 ---
 
-### ISSUE-N118 — WorldCamera.step lookAt deux Vector3 60 Hz (feel)
+### ISSUE-N120 — WorldCamera.step offset `Vector3.new(0, 0, distance)` 60 Hz (feel)
 
-**Priorité :** P3 alloc client camera. Leftover explicite après N116/N117 (Overlay unités). Distinct de N117 (unités monde) et de N103 (Overlay). Recette visual V66 **ouverte** (leftover après V65 unités). `WorldCamera.step` overview seulement. Ne pas toucher Overlay ni WorldRenderer.
+**Priorité :** P3 alloc client camera. Leftover explicite après N118/N119. Distinct de N119 (shake nombres) et de N118 (pose lookAt). Recette visual V67 **ouverte** (leftover après V66). `WorldCamera.step` overview seulement. Ne pas toucher Overlay ni WorldRenderer.
 
-**Problème :** N115/N116 ferment Overlay camion / unités immobile. Reste, **chaque frame overview** : `CFrame.lookAt(self.focus + offset + shake, self.focus + shake * 0.18)`. Deux Vector3 lookAt **en plus** de `Vector3.new` shake et de `VectorToWorldSpace(Vector3.new(0, 0, distance))`. `rotation = CFrame.fromEulerAnglesYXZ(-pitch, yaw, 0)` est **déjà** l’orientation camera. Si `shake == 0`, lookAt(eye, focus) ≡ `CFrame.new(ex, ey, ez) * rotation` (offset = rotation · (0,0,distance) = recul camera). Le biais `shake * 0.18` sur la cible est cosmétique (tremblement de visée). Distinct de N117 (unités), de N115 (camion).
+**Problème :** N118/N119 ferment lookAt + shake. Reste, **chaque frame overview** : `rotation:VectorToWorldSpace(Vector3.new(0, 0, self.distance))`. Un Vector3 d’entrée + un Vector3 de sortie (API). `rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)` **existe déjà** et doit rester (compose N118). `fromEulerAnglesYXZ(-pitch, yaw, 0):VectorToWorldSpace((0,0,d))` ≡
 
-**Pourquoi 20K CCU :** leftover Overlay. 8 clients × 60 Hz × 1 camera × 2 Vector3 lookAt (+ shake/offset Vector3). Pas d’autorité (pose camera). Changer le look target `shake * 0.18` sans documenter ferait dériver le shake visuel. Hors overview (`mode ~= "overview"`) → early-out déjà, zéro alloc pose.
+```
+ox = d * math.cos(pitch) * math.sin(yaw)
+oy = d * math.sin(pitch)
+oz = d * math.cos(pitch) * math.cos(yaw)
+```
+
+(YXZ, `rz=0`. Vérifier : pitch=0 yaw=0 → `(0,0,d)` ; pitch=`π/2` yaw=0 → `(0,d,0)` ; pitch=0 yaw=`π/2` → `(d,0,0)`.) Distinct de N119 (shake), de N118 (pose).
+
+**Pourquoi 20K CCU :** leftover N118. 8 clients × 60 Hz × 2 Vector3. Pas d’autorité (offset cosmétique). Un yaw/pitch faux casserait le cap stratégique et le pincement tactile. Hors overview → early-out déjà.
 
 **Worker :**
 
-1. Dans `WorldCamera.step` seulement, après le calcul `rotation` / `offset` / `shake` : poser l’œil en nombres `ex, ey, ez` (`focus.X + offset.X + shake.X`, idem Y/Z). Remplacer `CFrame.lookAt(deux Vector3)` par `self.camera.CFrame = CFrame.new(ex, ey, ez) * rotation`. Documenter : le biais `lookAt(..., focus + shake * 0.18)` est abandonné (shake sur l’œil seulement ; `rotation` porte déjà yaw/pitch). `Vector3.new` shake **peut rester** cette passe (leftover, ne pas « fermer » offset/shake dans N118). Overlay unités / camion / chantier **inchangés** (N117 leftover / N116 / N115 / N113). Houle / feuillage / câble **inchangés**. `stepInput` **inchangé**. FOV **inchangé**.
-2. Ne **pas** éditer `Overlay.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `BuildingModels.luau`. Ne pas porter N117 (unités euler) dans ce worker. Après N116. Recette visual V66 ouverte — porter compose `CFrame.new * rotation`, pas merger visual.
-3. Ne pas convertir Radar / Flag / Boom. Ne pas toucher `Camera.ViewportPointToRay` (sélection). Ne pas changer MIN/MAX_DISTANCE. Ne pas « fermer » `Vector3.new` shake (passe suivante si besoin). Tests « camera strategique » et « camera tactile » **doivent rester verts**.
-4. Test : banc client « camera strategique » **et** « camera tactile : panoramique, pincement et torsion » **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé. Overview : `CFrame.new * rotation` doit garder yaw/pitch identiques à lookAt hors shake. Shake non-zéro : l’œil tremble encore ; la visée ne bascule plus de `0.18 * shake` (choix documenté, cosmétique).
+1. Dans `WorldCamera.step` seulement (branche `mode == "overview"`) : garder `rotation = CFrame.fromEulerAnglesYXZ(-self.pitch, self.yaw, 0)`. Calculer `ox/oy/oz` en nombres (formule ci-dessus, `d = self.distance`). `ex = self.focus.X + ox + sx` (idem Y/Z) — si N119 n’est pas encore passé, `sx = shake.X` (Vector3 leftover). Pose **inchangée** : `CFrame.new(ex, ey, ez) * rotation` (N118). Plus de `Vector3.new(0, 0, self.distance)` ni `VectorToWorldSpace` 60 Hz. Shake **inchangé** (N119 leftover ou déjà nombres). FOV / lissage **inchangés**. Overlay unités / camion **inchangés** (N117 / N115).
+2. Ne **pas** éditer `Overlay.luau` / `WorldRenderer.luau` / `UnitModels.luau` / `HUD.luau` / `BuildingModels.luau`. Ne pas porter N119 (shake nombres) dans ce worker si N119 est un autre agent. Après N118. Recette visual V67 ouverte — porter trig, pas merger visual `926d`.
+3. Ne pas « fermer » `self.focus += (target - focus) * alpha` (lerp Vector3 — leftover, événement de lissage natif). Ne pas « fermer » pan/clamp Vector3 (gestes, pas 60 Hz idle). Ne pas changer MIN/MAX_DISTANCE. Vérifier les trois identités trig ci-dessus.
+4. Test : banc client « camera strategique » **et** « camera tactile » **doivent rester verts**. Overview stub : VectorToWorldSpace identité dans `guistubs` renvoyait `(0,0,d)` — après trig, yaw=0 pitch=58° **n’est plus** `(0,0,d)` en Studio, mais le stub `fromEulerAnglesYXZ` ignore les angles : `ox/oy/oz` nombres ne cassent pas `CFrame.X` (compose `__mul` = translation). Ne **pas** assert `Z == focus.Z + distance` (ce serait un assert visual 34/34, pas feel 35/35). Leftover N118 / N117 / N116 **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 5. Fichiers : `WorldCamera.luau` (`step` overview seulement). `tests/client.luau` **seulement si** un assert dans le check camera existant (ne **pas** ajouter un 36e). `Overlay.luau` **non**. **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. Compose `CFrame.new(ex,ey,ez) * rotation` déjà calculée. **N118 feel ≠ N117 (unités euler) ≠ N116 (Overlay immobile) ≠ visual V66 (si livré visuel, ne pas merger).** Non réentrant. Ne pas fusionner avec N117 dans le même worker.
+**Contraintes :** pas de RemoteFunction. Formule YXZ `rz=0` ci-dessus. **N120 feel ≠ N119 (shake) ≠ N118 (lookAt déjà) ≠ visual V67 (si livré visuel, ne pas merger).** Non réentrant. Ne pas fusionner avec N119 dans le même worker.
 
 ---
 
@@ -135,7 +143,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; lookAt camion → **N115 fait** ; unités immobile → **N116 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; lookAt unités mouvement → **N117 fait** ; camera lookAt → **N118 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -143,7 +151,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; lookAt camion → **N115 fait** ; unités immobile → **N116 fait**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; … ; lookAt unités mouvement → **N117 fait** ; camera lookAt → **N118 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -159,13 +167,13 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert (serveur rate-limite ; client n’envoie jamais) |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34–N114 | (voir rapport #131) | — | **faits** |
-| N115 | Overlay camion lookAt deux Vector3 60 Hz | P3 | **fait** cette passe (`route.segRot`, recette visual V64) |
-| N116 | Overlay unités lookAt immobile | P3 | **fait** cette passe (`CFrame.new` si `mag <= 0.01`) |
-| N117 | Overlay unités lookAt en mouvement | P3 | **nouveau** (`CFrame.new * fromEulerAnglesYXZ`, recette visual V65 fermée sur `dc65`) |
-| N118 | WorldCamera.step lookAt deux Vector3 60 Hz | P3 | **nouveau** (`CFrame.new * rotation`, leftover visual V66) |
+| N34–N116 | (voir rapport #133) | — | **faits** |
+| N117 | Overlay unités lookAt en mouvement | P3 | **fait** cette passe (`fromEulerAnglesYXZ`, recette visual V65) |
+| N118 | WorldCamera.step lookAt deux Vector3 60 Hz | P3 | **fait** cette passe (`CFrame.new * rotation`, recette visual V66 pose ; shake Vector3 **conservé**) |
+| N119 | WorldCamera.step shake `Vector3.new` 60 Hz | P3 | **nouveau** (`sx/sy/sz` nombres, recette visual V66 leftover shake, ne pas merger `926d`) |
+| N120 | WorldCamera.step offset `Vector3.new(0,0,distance)` 60 Hz | P3 | **nouveau** (trig YXZ, recette visual V67 ouverte) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 / #108 / #111 / #114 / #118 / #121 / #125 / #128 / #131 / #133 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -197,8 +205,7 @@ Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / 
 | `COLLAPSE_MIN_TILES` | 100 | 100 | oui (N86 wrap, N88 scan) |
 | `SPAWN_RADIUS` | 3 | n/a | oui (N93 banc `keep=8`, N94 strip, N55 isolation) |
 | `CHUNK_REBUILDS_PER_FRAME` | 3 | n/a | oui (N102/N104/N106/N112/N114 compact seuil 32) |
-| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde, N103 X/Z, N105 TRUCK_LIFT monde, N115 segRot HV) |
-| `ROUTE_BUILD_SPEED` | — | n/a | oui (N110 lift, N111 nombres, N113 rot, N115 segRot) |
+| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde, N103 X/Z, N105 TRUCK_LIFT monde, N115 segRot HV, N117 yaw tuile) |
 
 ---
 
@@ -223,31 +230,27 @@ MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N115 `segRot` à l’origine, `#segRot == #path-1`, `rawequal` après deux frames de livraison ; leftover N113 `rot` chantier ; leftover N111 `ox`/`dx` ; leftover N110 Parts `rawequal` ; leftover N105 dispatch → camion parenté, arrivée `Parent = nil` + pulse) ; `modeles procéduraux` (N109 câble) ; `deltas de terrain et conquetes classees` (N114 `dirtyHead <= 32`) ; `navires, missiles et interpolation` (N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` inchangé. `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `init.client.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `WorldCamera.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
+Client : **35/35 OK** — dont `construction du monde 3D` (N114 compact leftover, N112 `dirtyHead`, N106/N107/N108) ; `pose et capture de chaque type de batiment` (N115 `segRot` leftover, N113 `rot` chantier) ; `navires, missiles et interpolation` (N117 second frame lerp sous yaw euler ; leftover N116 navire immobile `currentX == targetX` ; leftover N103 lerp missile, N98 extra `rawequal`, N101 `targetX`, navire `extra == nil`, `retreatTinted` conservé) ; `camera strategique` (N118 `CFrame.X` nombre, leftover tactile pincement/torsion). `livraison : le gain s'affiche sur la gare` inchangé. Serveur **non** touché cette passe. `HUD.luau` **non** touché. `init.client.luau` **non** touché. `BuildingModels.luau` **non** touché. `PlacementPreview.luau` **non** touché. `UnitModels.luau` **non** touché. `WorldRenderer.luau` **non** touché. `WorldSpace.luau` **non** touché. `GreedyMesh.luau` **non** touché.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass43.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass44.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N115/N116 sont un hoist d’orientation / `CFrame.new` immobile vérifiés par le banc headless.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N117/N118 sont un hoist d’orientation / compose camera vérifiés par le banc headless.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N115 n’ajoute **pas** de require (`route.segRot` local dans Overlay). N116 n’ajoute **pas** de require (`CFrame.new` immobile). N117 restera dans `Overlay.stepInterpolation` unités. N118 restera dans `WorldCamera.step`.
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N117 n’ajoute **pas** de require (`fromEulerAnglesYXZ` local Overlay). N118 n’ajoute **pas** de require (`CFrame.new * rotation` local WorldCamera). N119 restera dans `WorldCamera.step` shake. N120 restera dans `WorldCamera.step` offset.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
 
 Piège N64 (toujours vrai) : ne **pas** référencer `IS_STATION` depuis `refreshRailNetwork` — le `local` est déclaré plus bas, la closure verrait `nil` au runtime.
 
-Piège N113 : cuire `segment.rot` une fois. `CFrame.new(cx, cy, cz) * rot` doit garder l’assiette look −Z. Recette visual V63 déjà sur `f5e9` — porter, ne pas merger. `part.Size = Vector3.new` reste (API). Ne pas changer `ROUTE_BUILD_SPEED`.
+Piège N117 : `fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)` — `dy` tuile = monde Z. Compose **après** `CFrame.new`, **avant** le roulis navire. Recette visual V65 déjà sur `dc65` — porter, ne pas merger. Immobile reste `CFrame.new` (N116), pas `atan2(0, 1)`. Ne pas merger visual.
 
-Piège N114 : compact seuil 32, pas à chaque frame. Ne pas `table.remove(1)`. Ne pas compact sous `dirtyHead == 1`. Drain complet N112 **inchangé**. Copie avant nil du surplus (pas de trou). Recycle Parts N106 **inchangé**. Stale (`dirty` déjà nil) saute sans compter le budget, comme avant.
+Piège N118 : `CFrame.new(ex,ey,ez) * rotation` déjà calculée. Abandonner le biais `lookAt(..., focus + shake * 0.18)` (cosmétique, documenté). Ne pas « fermer » `Vector3.new` shake ni offset dans la même passe. Recette visual V66 déjà sur `926d` **inclut** shake nombres — feel N118 **ne porte pas** shake (leftover N119). Ne pas merger visual.
 
-Piège N115 : cuire `route.segRot` par segment de `path`, pas une rot unique. Magnitude `< 0.01` → rot précédente / identité (jamais lookAt dégénéré). Virage = changement d’index, pas slerp. Recette visual V64 déjà sur `3062` — porter, ne pas merger. Roues `CFrame.Angles` **conservées**. Construction initiale `truckPart` lookAt **conservée** (une fois).
+Piège N119 (à venir) : coeffs 0.65 / 0.42 / 0.5 et fréquences 31 / 37 / 23 **identiques**. Porter `sx/sy/sz` de visual V66, pas merger `926d`. Ne pas fermer offset.
 
-Piège N116 : immobile = `CFrame.new` (regard −Z). Mouvement = lookAt conservé (look change). Ne pas cuire une rot unité. Roulis `CFrame.Angles` **conservé**. `UnitModels.place` **non** édité.
-
-Piège N117 (à venir) : `fromEulerAnglesYXZ(0, atan2(dx, -dy), 0)` — `dy` tuile = monde Z. Compose **après** `CFrame.new`, **avant** le roulis navire. Recette visual V65 déjà sur `dc65` — porter, ne pas merger. Ne pas merger visual.
-
-Piège N118 (à venir) : `CFrame.new(ex,ey,ez) * rotation` déjà calculée. Abandonner le biais `lookAt(..., focus + shake * 0.18)` (cosmétique, documenter). Ne pas « fermer » `Vector3.new` shake dans la même passe. Recette visual V66 ouverte.
+Piège N120 (à venir) : trig YXZ `ox = d*cos(pitch)*sin(yaw)` etc. Pitch feel défaut `math.rad(58)` ≠ 0 : l’œil n’est plus à `focus.Z + distance`. Ne pas assert `Z == focus.Z + distance` (assert visual stub). Ne pas merger visual V67.
