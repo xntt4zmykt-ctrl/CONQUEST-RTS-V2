@@ -1460,7 +1460,10 @@ check("navires, missiles et interpolation", function()
 	assert(rawequal(overlay.units[3], missileUnit), "missile unit non recycle")
 	local beforeX = overlay.units[3].currentX
 	local beforeY = overlay.units[3].currentY
-	-- V56 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover V55.
+	-- V56 : lerp X et Y (mag > 0.01). Leftover V55.
+	-- V65 : yaw fromEulerAnglesYXZ, plus de lookAt deux Vector3. Immobile
+	-- (premier stepInterpolation plus haut) ne casse pas. Leftover V64
+	-- (segRot camion) reste dans le check pose/capture.
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
