@@ -910,10 +910,12 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		-- N105 : lerp X/Y/Z en nombres. Plus de Vector3.new(0, 0.8, 0) × 2,
 		-- ni (b - a), ni (a + dir * t), ni CFrame.new() identite par piece.
 		-- N115 : pose = translation * rot cuit. Plus de lookAt(deux Vector3)
-		-- 60 Hz. Roues : Angles conserve. Unites inchangees (N117 / N116).
-		-- Chantier segment.rot inchange (N113). Recette visual V64, portee pas
-		-- mergee. Extra missile inchange (N98). targetX inchange (N101).
-		-- Une voie sans delivery ne rentre pas ici.
+		-- 60 Hz. N126 : roues fromEulerAnglesYXZ(spin, 0, 0). Plus de
+		-- CFrame.Angles 60 Hz. Facteur π * 20 inchange. Pieces non-Wheel
+		-- inchangees (frame * offset). Unites inchangees (N117 / N116 /
+		-- N125). Chantier segment.rot inchange (N113). Recette visual V72
+		-- leftover, portee pas mergee. Extra missile inchange (N98).
+		-- targetX inchange (N101). Une voie sans delivery ne rentre pas ici.
 		local path = route.path
 		local nSeg = #path - 1
 		local scaled = delivery.progress * nSeg
@@ -931,7 +933,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		local frame = CFrame.new(px, py, pz) * route.segRot[segmentIndex]
 		for _, piece in route.truck do
 			if piece.part.Name == "Wheel" then
-				piece.part.CFrame = frame * piece.offset * CFrame.Angles(delivery.progress * math.pi * 20, 0, 0)
+				local spin = delivery.progress * math.pi * 20
+				piece.part.CFrame = frame * piece.offset * CFrame.fromEulerAnglesYXZ(spin, 0, 0)
 			else
 				piece.part.CFrame = frame * piece.offset
 			end
