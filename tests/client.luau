@@ -990,16 +990,26 @@ check("pose et capture de chaque type de batiment", function()
 	overlay:stepInterpolation(1 / 60)
 
 	-- N105 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
-	-- Leftover N103 (unités) reste dans le check navires. Voies encore vivantes
-	-- ici ; la destruction plus bas les vide (le check livraison n'en a plus).
-	-- Recette visual V57, portee pas mergee.
+	-- N115 : segRot cuit (meme index que segmentIndex). rawequal d'un frame a
+	-- l'autre. Leftover N113 (rot chantier) plus haut. Leftover N103/N116
+	-- (unités) reste dans le check navires. Voies encore vivantes ici ; la
+	-- destruction plus bas les vide (le check livraison n'en a plus).
+	-- Recette visual V64, portee pas mergee. Recette visual V57 leftover N105.
 	local _, liveRoute = routesOf(factoryEntry.index)
 	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
+	local firstSegRot = liveRoute.segRot[1]
+	assert(firstSegRot ~= nil and type(firstSegRot.X) == "number", "segRot[1] absent")
+	assert(firstSegRot.X == 0 and firstSegRot.Y == 0 and firstSegRot.Z == 0, "segRot n'est pas a l'origine")
 	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
 	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
 	overlay:stepInterpolation(1 / 60)
 	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
 	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree pendant la livraison")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue au second frame")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree au second frame")
 	for _ = 1, 12 do
 		overlay:stepInterpolation(0.02)
 	end
@@ -1534,7 +1544,11 @@ check("navires, missiles et interpolation", function()
 	local beforeX = overlay.units[3].currentX
 	local beforeY = overlay.units[3].currentY
 	-- N103 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover N101.
+	-- N116 : immobile = CFrame.new. Navire 1 (x=y=10) n'avance pas ; missile
+	-- continue de lerper. Leftover N103 (lookAt en mouvement) reste.
 	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
+	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
 	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
 	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
 	overlay:applyUnits({}, {})
