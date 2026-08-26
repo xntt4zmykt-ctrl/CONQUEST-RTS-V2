@@ -1,12 +1,12 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 15)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 16)
 
-Déclencheur : ouverture de la **PR #46** (`cursor/analyse-nocturne-du-codebase-f8c8`) — index PORT, grille bunkers, specs N42–N43.
+Déclencheur : ouverture de la **PR #49** (`cursor/analyse-nocturne-du-codebase-e91b`) — index SAM, set cooldown, specs N44–N45.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-e91b`.
-Base : PR #16 (`cursor/p0-framework-hardening-5b2e`). Cette passe est un **sur-ensemble de #46**.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#46. Pas d’outil Slack.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-a320`.
+Base : PR #16 (`cursor/p0-framework-hardening-5b2e`). Cette passe est un **sur-ensemble de #49**.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#49. Pas d’outil Slack.
 
-Ligne parallèle **feel** (#19/#21/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42 + d425 + df65 + 2157 passe 15) : ne pas merger sur cette branche sans rebase. Les numéros N40+ feel (settledHumans, seq, N52–N60…) ne sont **pas** les N40–N45 de ce rapport. Cette passe **ferme** hardening N42 (`tryIntercept` / `samsBySlot`) et N43 (`stepCooldowns` / `coolingBuildings`). Seq obligatoire (feel N41) et `targetSlot` (feel N49/N53) ne sont pas portés.
+Ligne parallèle **feel** (#19/#21/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48 + d425 + df65 + 2157 + 5c74 + e735 passe 17) : ne pas merger sur cette branche sans rebase. Les numéros N40+ feel (settledHumans, seq, N52–N66…) ne sont **pas** les N40–N46 de ce rapport. Cette passe **ferme** hardening N44 (`Nukes.launch` / `silosBySlot`) et N45 (`Trade.step` / `factoriesByTile`). Seq obligatoire (feel N41) et `targetSlot` (feel N49/N53) ne sont pas portés. Feel 5c74/e735 a déjà `silosBySlot` (N60) : N44 est redondant là-bas. Feel e735 N61 (`factoriesBySlot`) est l’équivalent de N45 (recette `BySlot` vs `ByTile`). Feel e735 N62 (`buildingsBySlot`) = N46 ici.
 
 ---
 
@@ -14,40 +14,39 @@ Ligne parallèle **feel** (#19/#21/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42 +
 
 Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que des intentions + `JoinRequest`. `RequestSnapshot` n’est toujours jamais `FireServer` côté client (N4).
 
-La PR #46 a bien fermé le spawn commercial (index PORT) et le lookup bunker par capture. Cette passe a **corrigé ce que #46 a spécifié** — intercept SAM et tick de recharge :
+La PR #49 a bien fermé l’intercept SAM et le tick de recharge. Cette passe a **corrigé ce que #49 a spécifié** — choix du silo au launch, flatten usines à 10 Hz :
 
 | Bug | Gravité | Statut |
 |---|---|---|
-| SAM `tryIntercept` O(buildings) par missile (N42) | **P2 nucléaire / perf** | **corrigé** (contrat A : `samsBySlot`, recette feel N57) |
-| `Buildings.stepCooldowns` O(buildings) à 10 Hz (N43) | **P3 tick / perf** | **corrigé** (contrat A : `coolingBuildings`, SAM **et** silos) |
+| `Nukes.launch` scan silos O(buildings) (N44) | **P3 nucléaire / perf** | **corrigé** (contrat A : `silosBySlot`, recette feel N60) |
+| `Trade.step` flatten FACTORY O(buildings) à 10 Hz (N45) | **P2 tick / perf** | **corrigé** (contrat A : `factoriesByTile`, recette `portsByTile`) |
 | `retreatBoats` filtre `owner[targetTile]` courant | **P2 marine** | **ouvert** (reste de N28 ; feel d425/df65 a la recette) |
 | `seedBeachhead` insert toujours un nouvel `Attack` | **P2 cap** | **ouvert** (N29) |
 | `findSpawn` ignore splash / fallout (N33) | **P3 nucléaire** | **ouvert** (feel d425/df65 a C1+C2 + `isSpawnSafe`) |
-| `Nukes.launch` scan silos O(buildings) (N44) | **P3 nucléaire / perf** | **ouvert** |
-| `Trade.step` flatten usines O(buildings) à 10 Hz (N45) | **P2 tick / perf** | **ouvert** |
+| Bots upgrade + score nuke O(B) / O(90×B) (N46) | **P2 tick / perf** | **ouvert** (feel N62) |
 
 **20K CCU** = ~1 700 shards × 12 factions publiques / 8 humains, pas un monde unique.
 
 Banc headless (`./tests/run.sh`) : voir section 7.
 
-- Serveur : 5 seeds + invariants + P0 + gardes #17–#46 + samsBySlot + intercept 0/portée/hors-portée/allié/même slot + stepCooldowns.
+- Serveur : 5 seeds + invariants + P0 + gardes #17–#49 + silosBySlot + tryLaunch + factoriesByTile.
 - Client : **34/34 OK** (inchangé).
 - **Factions observées : 18** (toujours 12 + 6 tribus). ISSUE-N12 ouvert.
 
 ---
 
-## 2. Revue PR #46
+## 2. Revue PR #49
 
-**À merger** (index PORT + grille bunkers + specs N42–N43), sous réserve que cette passe 15 parte avec : **chaque missile non `engaged` relisait tout `buildings`**, et **chaque tick décrétait le cooldown de tous les bâtiments**.
+**À merger** (index SAM + set cooldown + specs N44–N45), sous réserve que cette passe 16 parte avec : **chaque clic nuke relisait tout `buildings`**, et **chaque tick reconstruisait la liste des usines**.
 
-Points encore vrais après #46 :
+Points encore vrais après #49 :
 
-| Claim #46 | Réalité après passe 15 |
+| Claim #49 | Réalité après passe 16 |
 |---|---|
-| `portsByTile` + early-out `MAX_TRADE_SHIPS` avant flatten | confirmé |
-| `bunkerCells` grille 3×3, posted booléen | confirmé |
-| N42 `tryIntercept` O(buildings) | **fermé ici** (`samsBySlot`) |
-| N43 `stepCooldowns` O(buildings) | **fermé ici** (`coolingBuildings`) |
+| `samsBySlot` + `samsOf` via l’index | confirmé |
+| `coolingBuildings` + `armCooldown` SAM **et** silos | confirmé (`launch` appelle toujours `armCooldown`) |
+| N44 `Nukes.launch` scan silos | **fermé ici** (`silosBySlot`) |
+| N45 `Trade.step` flatten FACTORY | **fermé ici** (`factoriesByTile`) |
 | N33 `findSpawn` splash / fallout | **ouvert** |
 | N28 retraite après flip / `targetSlot` | **ouvert** |
 | N29 `seedBeachhead` no-merge | specs only, inchangé |
@@ -57,9 +56,9 @@ Points encore vrais après #46 :
 
 `init.server.luau` et `Persistence` restent **exclus du bundle**. Le helper `MatchLifecycle` est **dans** le bundle (37 modules serveur). Le fix `joinCooldown` n’a toujours pas de test headless.
 
-PR #45 (feel passe 15, `2157`) ne doit pas être mergée par-dessus #16/#46 sans rebase. `samsBySlot` (feel N57) est **porté** ici. `isSpawnIsolated` / `snapshotBoats.retreating` restent feel-only. Feel N59 (`samsOf`) est fermé ici en même temps que N42. Feel N60 (`stepCooldowns`) est fermé ici, mais avec le contrat A (set `cooling`, pas seulement les SAM) : un silo a aussi un cooldown.
+PR #48 (feel passe 16, `5c74`) et la suite e735 (passe 17) ne doivent pas être mergées par-dessus #16/#49 sans rebase. `silosBySlot` (feel N60) est **porté** ici. `isSpawnIsolated` / `snapshotBoats.retreating` / hover `SpawnHint` restent feel-only. Feel N61 (`factoriesBySlot` sur e735) est **couvert ici** par `factoriesByTile` (N45) : recette PORT, pas BySlot. Feel N62 (`buildingsBySlot`) n’est **pas** porté (N46).
 
-On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43 et #46 au profit de celle-ci (sur-ensemble hardening).
+On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43, #46 et #49 au profit de celle-ci (sur-ensemble hardening).
 
 ---
 
@@ -67,10 +66,11 @@ On peut fermer #17, #18, #20, #23, #25, #27, #30, #31, #33, #35, #37, #40, #43 e
 
 | Bug | Fichiers | Pourquoi |
 |---|---|---|
-| Index SAM par camp | `GameState.samsBySlot`, `Nukes.tryIntercept`, `Buildings.samsOf` | `tryIntercept` parcourait tout `buildings` **par missile** (MIRV → 8 ogives). Désormais : `samsBySlot[slot][tile]=true` incrémental (`place` / `destroy` / `transfer` / `removePlayer` SAM seulement) ; `areAllied` une fois par camp ; early-out table vide. `samsOf` (bots, couverture avant tir) lit le même index. Fallback linéaire si `samsBySlot` absent. `SAM_RANGE` / chance / cooldown / exclusivité `engaged` : **inchangés**. |
-| Tick de recharge O(actifs) | `GameState.coolingBuildings`, `Buildings.armCooldown` / `stepCooldowns`, `Nukes.launch` | `stepCooldowns` itérait tout `buildings` à 10 Hz. Seuls SAM **et silos** portent un cooldown : le contrat B (n’itérer que `samsBySlot`) aurait **cassé** la recharge des silos. Contrat A : set `coolingBuildings[index]=true` levé par `armCooldown` (intercept + tir silo), parcouru par `stepCooldowns`, retiré à 0 / `destroyBuilding`. Fallback linéaire si le set est absent. Durées inchangées. |
+| Index SILO par camp | `GameState.silosBySlot`, `Nukes.launch` | `launch` parcourait tout `buildings` **par tir** (humain + bots think). Désormais : `silosBySlot[slot][tile]=true` incrémental (`place` / `destroy` / `transfer` / `removePlayer` SILO seulement) ; un slot sans silo ne rescane **pas** le hash. `armCooldown` (N43) reste **la** voie d’écriture du cooldown. Fallback linéaire si `silosBySlot` absent. Coût / ère / un silo = un missile : **inchangés**. |
+| Flatten usines O(usines) | `GameState.factoriesByTile`, `Trade.step` | `Trade.step` allouait `factories={}` et scannait `buildings` **à 10 Hz**. Désormais : `factoriesByTile[index]={slot,level}` incrémental PORT-style (`place` / `destroy` / `transfer` / `upgrade` FACTORY seulement) ; flatten depuis l’index, `table.sort` par index **inchangé** (RNG), buffer `factoriesBuf` recyclé. Un FACTORY injecté hors index n’expédie pas. `delivery.level` snapshot (N14) inchangé. `refreshRailNetwork` reste événementiel. |
+| Test MIRV hors index | `tests/simulate.luau` | Le silo était écrit dans `buildings` sans `placeBuilding` → `silosBySlot` vide → « Il te faut un silo. » Recette feel 5c74. |
 
-**Non modifié (volontaire) :** N1–N41 restant, reste de N28 (`targetSlot`). N10.8. Cap beachheads (N5 / N29). `tryAnnex` océan. `SAM_INTERCEPT_CHANCE=1` après apply. Pas de `require(Navy)` / `require(Nukes)` depuis GameState. Pas de contrat C spawn (N33). Pas de seq obligatoire (feel N41). Pas d’index silo (N44) ni d’index usine (N45). Pas de spatial hash warships. Buffer `defense` **alloué** mais plus écrit.
+**Non modifié (volontaire) :** N1–N43 restant, reste de N28 (`targetSlot`). N10.8. Cap beachheads (N5 / N29). `tryAnnex` océan. `SAM_INTERCEPT_CHANCE=1` après apply. Pas de `require(Navy)` / `require(Nukes)` / `require(Trade)` depuis GameState. Pas de contrat C spawn (N33). Pas de seq obligatoire (feel N41). Pas d’index `buildingsBySlot` bots (N46). Pas de spatial hash warships. Buffer `defense` **alloué** mais plus écrit.
 
 ---
 
@@ -84,7 +84,9 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead), A
 - **Combat vivant** = `ChantierB.stepAttacks` (`attackLogic` + `attackTilesPerTick` + **captures < 80 et pops < 160**).
 - **Posted bunker** = `bunkersBySlot[slot][tile]` + grille `bunkerCells[slot][cellKey]` (cell = `DEFENSE_RADIUS`). Capture → `transferBuilding` change de panier **et** de cellule. Lookup 3×3 par capture (N41).
 - **Posted SAM** = `samsBySlot[slot][tile]` (N42). `tryIntercept` / `samsOf` ne scannent plus `buildings`.
-- **Cooldown bâtiments** = `coolingBuildings[index]` (N43). Unique écriture : `Buildings.armCooldown`. SAM **et** silos.
+- **Posted SILO** = `silosBySlot[slot][tile]` (N44). `Nukes.launch` n’itère que ce set.
+- **Posted FACTORY** = `factoriesByTile[index]={slot,level}` (N45). `Trade.step` flatten depuis l’index, pas `buildings`.
+- **Cooldown bâtiments** = `coolingBuildings[index]` (N43). Unique écriture : `Buildings.armCooldown`. SAM **et** silos. `launch` continue d’appeler `armCooldown`.
 - **Têtes de pont** = `BoatFront.seedBeachhead` : frontier = **voisins encore à la cible**, flag `isBeachhead`. `launchAttack` gare les beachheads avant fusion.
 - **Retraite** = couple `(attacker, target)` : tous les fronts + `Navy.retreatBoats`.
 - **Pacte vivant** = `areAllied` : deux sens **et** `tick < expiry` (ou `true` legacy tests). Bots et tribus doivent passer par là, pas `alliances[]`.
@@ -95,7 +97,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead), A
 - **Commerce maritime** = `portsByTile` incrémental (PORT seulement, N40). Vague plafonnée **avant** flatten. `canTrade` = embargo-only.
 - **Réplication** : hot path → `fireDeployed`. `MatchUpdate` / `RosterUpdate` / Notify-Sfx globaux → `FireAllClients` (N26).
 - **DataStore** : `settledHumans` avant destruction du PlayerState. `endMatch` grave via `MatchLifecycle.endMatchRecords`. `Persistence.record` max-merge inchangé (N6).
-- **Require** : DAG. Pas de cycle. `MatchLifecycle` → Config seulement. `Tribes` → `Bots` (export `humanTargetProtected` seulement). `Navy` → `GameState` (unidirectionnel). `Nukes` → `GameState` + `Buildings`. `ChantierB`/`BoatFront`/`AimFront` dans ReplicatedStorage (formules visibles client, `install()` serveur seulement).
+- **Require** : DAG. Pas de cycle. `MatchLifecycle` → Config seulement. `Tribes` → `Bots` (export `humanTargetProtected` seulement). `Navy` → `GameState` (unidirectionnel). `Nukes` → `GameState` + `Buildings`. `Trade` → `GameState`. `ChantierB`/`BoatFront`/`AimFront` dans ReplicatedStorage (formules visibles client, `install()` serveur seulement).
 - **BFS mer** : `visitBuf` + `parentScratch` + `queueScratch` module-level. Un seul chemin en vol à la fois (Navy n’est pas réentrant).
 - **BFS annex** : `annexVisitBuf` + `annexQueue` + `annexPocket` module-level. Un seul `tryAnnex` en vol à la fois (combat n’est pas réentrant).
 
@@ -103,7 +105,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead), A
 
 ## 5. Issues worker-ready (à créer dans GitHub)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N45 restent ouverts** sauf N19 partiel, N21 **fermé**, N24 remplacé par N31 (**fermé**), N30–N32 **fermés**, N34–N43 **fermés**. N28 est **partiel** (inbound fermé). Ci-dessous les **nouveaux** tickets + le reste de N28 / N29 / N33.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N46 restent ouverts** sauf N19 partiel, N21 **fermé**, N24 remplacé par N31 (**fermé**), N30–N32 **fermés**, N34–N45 **fermés**. N28 est **partiel** (inbound fermé). Ci-dessous les **nouveaux** tickets + le reste de N28 / N29 / N33.
 
 ---
 
@@ -116,7 +118,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB, BoatFront (isBeachhead), A
 1. `retreatAttack(A, B)` ne rappelle **pas** une invasion si la côte a déjà changé de main (neutre, tiers).
 2. Le wrapper `SystemsBootstrap.retreatAttack` appelle `retreatBoats` même si `origRetreat` a dit « déjà ordonnée » : un 2e geste peut encore rappeler des bateaux tardifs (parfois voulu) avec le message « front terrestre et N transport(s) ».
 
-Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats` filtre l’intention (fallback `owner[targetTile]`), wrap 2e geste rappelle les tardifs, `Navy.step` auto-retraite si `owner[targetTile] ~= targetSlot`. **Porter, ne pas réinventer.** Distinct de N10.8 et du fix inbound. Distinct de N35 (`destSlot` convoi ≠ `targetSlot` invasion). Distinct de N40 (index PORT, **fermé**) et N42 (SAM, **fermé**).
+Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats` filtre l’intention (fallback `owner[targetTile]`), wrap 2e geste rappelle les tardifs, `Navy.step` auto-retraite si `owner[targetTile] ~= targetSlot`. **Porter, ne pas réinventer.** Distinct de N10.8 et du fix inbound. Distinct de N35 (`destSlot` convoi ≠ `targetSlot` invasion). Distinct de N40 (index PORT, **fermé**) et N44 (silos, **fermé**).
 
 **Pourquoi 20K CCU :** late-game invasions + flip de côte le même tick que la retraite.
 
@@ -127,7 +129,7 @@ Feel d425 (N49) + df65 (N53) : `launchInvasion` pose `targetSlot`, `retreatBoats
 3. Test : invasion en mer vs B → flip de la côte à un tiers → `retreatAttack(A, B)` rappelle le transport. Second test : wrapper 2e geste, trancher si les bateaux tardifs doivent partir.
 4. Fichiers : `Navy.luau` (`launchInvasion`, `retreatBoats`), éventuellement `SystemsBootstrap.retreatAttack`, `tests/simulate.luau`. Recette feel : branche `d425` / `df65`.
 
-**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N22). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % déjà livré). Ne pas recâbler N35 (convois, `kind==2`). Pas d’équilibrage. **N28 hardening ≠ N28 feel (RequestSnapshot mort).** Ne pas porter AimFront ni seq. Ne pas recâbler N40 (`portsByTile`) ni N42 (`samsBySlot`).
+**Contraintes :** pas de RemoteFunction. Ne pas toucher N10.8. Ne pas câbler `BOAT_LANDING_BONUS` (N22). Ne pas réintroduire un malus sur inbound `removePlayer` (100 % déjà livré). Ne pas recâbler N35 (convois, `kind==2`). Pas d’équilibrage. **N28 hardening ≠ N28 feel (RequestSnapshot mort).** Ne pas porter AimFront ni seq. Ne pas recâbler N40 (`portsByTile`) ni N44 (`silosBySlot`) ni N45 (`factoriesByTile`).
 
 ---
 
@@ -166,53 +168,32 @@ Feel d425 (N50) + df65 (N52) + 2157 (N55 isolation, ticket suivant) : `isSpawnSa
 2. Test : A tire sur C (capitale), `removePlayer(B)`, forcer le spawn de l’héritier dans le rayon (tuiles libres), `Nukes.step`. Assert selon C1/C2/C3.
 3. Fichiers : `GameState.findSpawn` / `addPlayer`, éventuellement `Nukes`, `tests/simulate.luau`. Recette feel : branche `d425` / `df65`.
 
-**Contraintes :** ne pas annuler une frappe tiers (régression `nuke third-party`). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Ne pas porter isolation clic (feel N55) dans le même PR. Ne pas recâbler N42 (`samsBySlot`).
+**Contraintes :** ne pas annuler une frappe tiers (régression `nuke third-party`). Ne pas rembourser l’or. Pas de RemoteFunction. Rayon lu depuis `NUKE_STATS` / `missile.radius`, pas une constante magique. Ne pas porter isolation clic (feel N55) dans le même PR. Ne pas recâbler N42 (`samsBySlot`) ni N44 (`silosBySlot`).
 
 ---
 
-### ISSUE-N44 — `Nukes.launch` scanne tous les bâtiments pour trouver un silo
+### ISSUE-N46 — Bots : upgrade + score nuke encore O(B) / O(90×B)
 
-**Priorité :** P3 nucléaire / perf. Suite de N42 (SAM indexés). **N44 hardening ≠ N44 feel (inbound missiles — déjà sur hardening via N30).**
+**Priorité :** P2 tick / perf. Suite de N42 (`samsOf` indexé) et N44 (`launch` indexé). **N46 hardening ≠ N46 feel (request croisée — déjà sur hardening via 915c / fd0b).** Feel N62 décrit le même trou.
 
-**Problème :** `Nukes.launch` parcourt **tout** `state.buildings` pour chaque tir, à la recherche du silo prêt le plus proche (`kind == SILO`, `slot` du tireur, `cooldown <= 0`). Late-game : des dizaines de villes/ports/bunkers/SAM paient un hash walk à chaque clic nuke (et chaque décision bot). N42 a retiré le scan SAM du hot path intercept ; le scan **silo au launch** reste linéaire. Distinct de N43 (tick de recharge, **fermé**) : ici c’est le **choix du lanceur**, pas le decrement.
+**Problème :** `Bots.tryUpgradeBuilding` itère tout `buildings` pour le moins développé du slot (`DECISION_INTERVAL` × 11 bots). `decideNuke` : pour jusqu’à **90** tuiles de frontière, rescane tout `buildings` du camp visé pour scorer l’emprise (`value += level` dans `blast2`). Après N42, `samsOf` / `coveredBy` sont O(SAM) ; après N44, `launch` est O(silos). Le **choix de cible** et l’**upgrade** restent O(B) / O(90×B). Distinct de N45 (usines, **fermé**) : ici c’est l’IA, pas le tick éco.
 
-Ce n’est **pas** N30 (inbound annulé) ni N33 (spawn splash) ni N42 (intercept).
+**Pourquoi 20K CCU :** 11 bots + 6 tribus, ère 5 (le banc 6000 ticks en produit). Un spike nuke n’est plus `tryIntercept` (N42) ni `launch` (N44) : c’est 90 × ~90 bâtiments pour choisir une tuile, **en plus** du flatten usines (N45, fermé) et du combat `captures<80`. Budget tick, pas autorité.
 
-**Pourquoi 20K CCU :** moins chaud qu’une salve MIRV (N42, **fermée**) — un launch n’arrive pas 10 fois par seconde — mais les bots évaluent un tir à chaque think, et 18 factions × scan buildings × think 10 Hz revient au même profil que l’ancien `samsOf`.
+**Worker — choisir UNE option :**
 
-**Worker :**
+1. **(A)** Index `buildingsBySlot[slot][tile]` (tous kinds) : upgrade itère le set du bot ; score nuke itère le set de la **cible** (plus le hash global). **(B)** Seulement `upgradablesBySlot` + un set plat des bâtiments de la cible. Ne **pas** spatial-hasher le blast (N39 contrat A non retenu). Ne pas changer `SAM_RANGE` / chance. Feel e735 N62 a **déjà** `buildingsBySlot` + `lowestUpgradable` / `blastValue` + snapshot des clés au `removePlayer` : **porter, ne pas réinventer.**
+2. Ne pas faire viser les SAM alliés. Ne pas relire `samsOf` via le hash (N42). Ne pas recâbler `Nukes.launch` (N44, `silosBySlot`). Ne pas recâbler `factoriesByTile` (N45) — feel N61 est `factoriesBySlot`, recette différente, déjà couvert ici par tuile.
+3. Test : 3 bâtiments upgradables + 1 bunker maxé ; `tryUpgradeBuilding` choisit le plus bas. Score nuke : 2 villes dans le rayon battent une frontière vide. `samsOf` / intercept / `tryLaunch` restent verts.
+4. Fichiers : `GameState.luau` (si nouvel index, pas de `require(Bots)`), `Bots.luau` (`tryUpgradeBuilding`, boucle `value` ~L741), `tests/simulate.luau`. Recette feel : branche `e735`.
 
-1. Trancher **un** contrat : (A) `silosBySlot[slot][tile]=true` incrémental comme `samsBySlot` (pose/destroy/transfer/removePlayer SILO seulement) + `Nukes.launch` n’itère que ce set ; (B) réutiliser `coolingBuildings` pour sauter les silos en recharge, plus un index des silos prêts — trop de mouvement pour un P3 ; (C) documenter le linéaire comme OK sous un cap `MAX_SILO_PER_PLAYER`. Pas A et un changement `SILO_COOLDOWN` à la fois. Feel 5c74 N60 a déjà `silosBySlot` + launch via l’index : **porter, ne pas réinventer.** `armCooldown` (N43) reste la voie d’écriture du cooldown.
-2. Si A : test — 0 silo → refus « Il te faut un silo » ; 1 silo en cooldown → refus recharge ; 1 silo prêt → tir + `armCooldown` ; un SAM / PORT n’est jamais choisi comme lanceur. Réutiliser `nuke third-party` (N30) : une frappe tiers n’est pas annulée au recycle.
-3. Fichiers : `Nukes.luau` (`launch`), `GameState.luau` (index, pas de `require(Nukes)`), `tests/simulate.luau`. Recette feel : branche `5c74`.
-
-**Contraintes :** ne pas changer `SILO_COOLDOWN` / coût / ère. Un silo = un missile inchangé. Pas de RemoteFunction. Ne pas `require(Nukes)` depuis GameState (cycle). Ne pas mixer avec N33 spawn. Ne pas recâbler N42 (`samsBySlot`) ni N43 (`coolingBuildings` — `launch` doit continuer d’appeler `armCooldown`). **N44 hardening ≠ N44 feel.**
-
----
-
-### ISSUE-N45 — `Trade.step` flatten toutes les usines à 10 Hz
-
-**Priorité :** P2 tick / perf. Reste après N40 (plus de scan buildings à la vague PORT) et N43 (plus de scan buildings au cooldown). **N45 hardening ≠ N45 feel (aura defense — déjà sur hardening via N36).**
-
-**Problème :** `Trade.step` alloue `factories = {}`, parcourt **tout** `state.buildings` pour `kind == FACTORY`, puis `table.sort`. Ça tourne **chaque tick**, missiles ou non, vagues commerciales ou non. Late-game : 45 villes + ports + bunkers + SAM + silos paient un hash walk 10 fois par seconde pour 18 usines. Distinct de N40 (PORT, vague `tick % 45`) et de `refreshRailNetwork` (événementiel, O(gares²) au pose/destroy — volontaire). Distinct du ciblage nuke bot (`Bots` nested buildings × 90 tuiles de frontière — P3 noté, pas ce ticket).
-
-`tradeDeliveries` est déjà indexé par tuile d’usine, mais le flatten reconstruit la liste à chaque tick pour un ordre de RNG stable.
-
-**Pourquoi 20K CCU :** 18 factions, tick 10 Hz, buildings >> usines. Moins spectaculaire qu’une salve MIRV, mais c’est du coût **chaque tick**, comme l’était N43.
-
-**Worker :**
-
-1. Trancher **un** contrat : (A) `factoriesByTile[index]={slot,level}` incrémental PORT-style (`place` / `destroy` / `transfer` / `upgrade` FACTORY seulement) + flatten depuis l’index, sort par index **inchangé** (RNG) ; (B) set `factoriesBySlot` + buffers recyclés comme `portsBuf` ; (C) documenter O(buildings) comme OK sous un cap usines. Pas A+changement `TRUCK_COOLDOWN` / `deliveryValue` à la fois. Recette N40 `portsByTile`, pas `_carriersDirty`. Feel N61 (5c74) spécifie le même trou : **porter si déjà implémenté, sinon contrat A ici**.
-2. Si A ou B : test — 0 usine → pas de colis ; pose usine+ville à portée → dispatch honoré ; destroy usine en transit → colis tombé (déjà le ménage `tradeDeliveries`) ; upgrade en transit ne change pas `delivery.level` (régression snapshot N14). Réutiliser `colis snapshot`.
-3. Fichiers : `GameState.luau` (index, pas de `require(Trade)`), `Trade.luau` (`step`), `tests/simulate.luau`.
-
-**Contraintes :** ne pas changer l’or, le snapshot de niveau, ni `table.sort` (divergence de graine). Pas de RemoteFunction. Ne pas recâbler N40 (`portsByTile`) ni N42/N43. `refreshRailNetwork` reste événementiel — ne pas le fusionner avec cet index. **N45 hardening ≠ N45 feel.**
+**Contraintes :** pas de RemoteFunction. Recette index posted, pas un rewrite de l’IA. Ne pas recâbler N44 / N45. **N46 hardening ≠ N46 feel historique.**
 
 ---
 
-## 5b. N1–N45 encore ouverts ou fermés (passes 2–15)
+## 5b. N1–N46 encore ouverts ou fermés (passes 2–16)
 
-| ID | Titre | Prio | Note passe 15 |
+| ID | Titre | Prio | Note passe 16 |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | + `SAM_INTERCEPT_CHANCE` 0.55→1 ; clés mortes `FRONT_TILES_PER_CONTACT`, `CITY_TROOP_INCREASE` |
 | N2 | Delta `stats` + UnitSnapshot dirty | P1 | `replicate()` envoie stats+unités complets à 10 Hz |
@@ -257,12 +238,13 @@ Ce n’est **pas** N30 (inbound annulé) ni N33 (spawn splash) ni N42 (intercept
 | N41 | `attackLogic` bunkers par capture | P2 | **fermé** (grille 3×3). **≠ N41 feel (seq obligatoire).** |
 | N42 | SAM `tryIntercept` O(buildings) | P2 | **fermé** (`samsBySlot` + `samsOf`). Recette feel N57. **≠ N42 feel (bunkersBySlot).** |
 | N43 | `stepCooldowns` O(buildings) | P3 | **fermé** (`coolingBuildings`, contrat A : SAM+silo). **≠ N43 feel (inbound transports).** |
-| N44 | `Nukes.launch` scan silos | P3 | specs only. Recette feel 5c74 `silosBySlot`. **≠ N44 feel (inbound missiles).** |
-| N45 | `Trade.step` flatten usines | P2 | specs only. Recette `portsByTile` + feel N61. **≠ N45 feel (aura defense).** |
+| N44 | `Nukes.launch` scan silos | P3 | **fermé** (`silosBySlot`). Recette feel 5c74 N60. **≠ N44 feel (inbound missiles).** |
+| N45 | `Trade.step` flatten usines | P2 | **fermé** (`factoriesByTile`). Recette `portsByTile` + feel N61. **≠ N45 feel (aura defense).** |
+| N46 | Bots upgrade + score nuke O(B) | P2 | specs only. Recette feel N62. **≠ N46 feel historique.** |
 
 N10.8 (refund allié bateau 100 % vs `BOAT_RETREAT_LOSS`) : **inchangé**. `Navy.step` convertit encore un transport allié en retraite (25 %). `Diplomacy.accept` ne rappelle pas les bateaux ; le tick Navy suivant taxe 25 %. `resolveLanding` allié = 100 % si le check mid-transit est contourné.
 
-P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `startMatch` suffit) ; disconnect mid-match **vivant** = `Persistence.record(..., false)` 0 XP (chemin distinct de N37 ; éliminé puis leave **grave** le snapshot) ; wrap `launchAttack` n’applique `AimFront.focus` que si le couple n’existait pas (renfort = pas de re-visée — feel N36). Spatial hash warships (contrat A de N39) volontairement non fait. Ciblage nuke bot : nested `buildings` × 90 tuiles de frontière (moins chaud que N45, think sporadique). `syncCarriers` dirty rebuild encore O(buildings) quand une base change — événementiel, pas 10 Hz.
+P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `startMatch` suffit) ; disconnect mid-match **vivant** = `Persistence.record(..., false)` 0 XP (chemin distinct de N37 ; éliminé puis leave **grave** le snapshot) ; wrap `launchAttack` n’applique `AimFront.focus` que si le couple n’existait pas (renfort = pas de re-visée — feel N36). Spatial hash warships (contrat A de N39) volontairement non fait. `syncCarriers` dirty rebuild encore O(buildings) quand une base change — événementiel, pas 10 Hz. `structureHash` O(B log B) seulement sur `RequestSnapshot` rate-limité (N4, client jamais `FireServer`).
 
 ---
 
@@ -287,6 +269,8 @@ P3 notés, pas tickets : `IntentValidator.Context.matchId` jamais lu (reset à `
 | `MAX_TRADE_SHIPS` | 24 | 24 | oui (early-out **avant** flatten) |
 | `SAM_RANGE` | 34 | **70** | oui (`tryIntercept` via `samsBySlot` — N42) |
 | `SAM_COOLDOWN` | 90 | **75** | oui (`armCooldown` / `coolingBuildings` — N43) |
+| `SILO_COOLDOWN` | (Config) | (apply) | oui (`Nukes.launch` via `silosBySlot` — N44, écriture `armCooldown`) |
+| `TRUCK_COOLDOWN` | (Config) | (apply) | oui (`Trade.step` via `factoriesByTile` — N45, sort inchangé) |
 
 ---
 
@@ -351,13 +335,20 @@ Serveur : Tous les invariants tiennent.
   tryIntercept : SAM hors portee skip
   tryIntercept : SAM allie skip
   tryIntercept : SAM meme slot skip
+  silosBySlot : pose / transfer / destroy OK
+  tryLaunch : silo pret → tir + armCooldown
+  tryLaunch : silo recharge refuse, SAM/PORT ignores
+  factoriesByTile : pose / upgrade / transfer OK
+  trade factory empty : 0 usine, pas de colis
+  trade factory index : flatten ignore le hash buildings
+  factoriesByTile : destroy OK
   combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 captures=80 pops=160
   factions : 18
-  metrics : ticks=6000 avgChanged=11.1 p95Changed=27 maxChanged=479 avgTickMs=0.29 p95TickMs=0.71
+  metrics : ticks=6000 avgChanged=11.1 p95Changed=27 maxChanged=479 avgTickMs=0.30 p95TickMs=0.73
 Client  : 34 OK — Tous les ecrans se construisent et s'executent sans erreur.
 ```
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe15.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe16.log`
 
 ---
 
@@ -371,17 +362,19 @@ Artefact : `/opt/cursor/artifacts/headless-tests-nightly-passe15.log`
 - `retreatAttack` = **tous** les fronts du couple. Ne pas revenir à un `return` au premier match.
 - Cote déjà nôtre ≠ retraite. Allié en mer = toujours retraite 25 % (N10.8). Inbound disparu = 100 % (comme front terre).
 - Purge inbound d’un slot = **dans `removePlayer`**, pas seulement dans `Diplomacy.step` (ordre : Diplomacy puis `state:step`). Inclut cadran + colis + **transports** + **missiles** + **convois kind==2** (avant `setOwner`).
-- Transports : `kind == 1`. Convois : `kind == 2`. Missiles : `toIndex(floor(tx), floor(ty))` vs `owner` **avant** `setOwner`. Ne pas `require(Navy)` / `require(Nukes)` depuis GameState (cycle).
+- Transports : `kind == 1`. Convois : `kind == 2`. Missiles : `toIndex(floor(tx), floor(ty))` vs `owner` **avant** `setOwner`. Ne pas `require(Navy)` / `require(Nukes)` / `require(Trade)` depuis GameState (cycle).
 - Missile inbound = **annulé**, pas remboursé. Convoi inbound = **coulé**, pas d’or. Convoi vs PORT **détruit** (combat, pas recycle) = **coulé** dans `Navy.step` (contrat B). Capture de PORT = convoi continue. Frappe / convoi déjà visé sur un tiers = conservé. Splash tiers / fallout au spawn = N33.
 - `findSeaPath` : pools module-level, `buffer.fill(buf, 0, 0)`, `table.clear` parent/queue. Navy n’est pas réentrant. Ne pas porter AimFront avec.
 - `tryAnnex` : appelé **après** `setOwner` ; BFS depuis les voisins défenseur du seed. Océan = abort (enclave terrestre), pas un bug. Pools `annexVisitBuf` / queue / pocket, `buffer.fill(buf, 0, 0)`.
 - `syncCarriers` : `_carriersDirty` NAVAL_BASE seulement (`placeBuilding` / `destroyBuilding` / `transferBuilding`). `carrierSeen` recyclé. Pas de scan 10 Hz. Pas de dirty CITY/PORT.
 - Ciblage warships : `carrierBuf` / `targetBuf` module-level, `table.clear`. Early-out si 0 carrier ou 0 autre slot. Priorité et `areAllied` inchangés. Pas de spatial hash (N39 contrat A non retenu).
 - Commerce maritime : `portsByTile[index]={slot,level}` (PORT seulement). Early-out `countTradeShips >= MAX_TRADE_SHIPS` **avant** flatten. `portsBuf` / `candidateBuf` recyclés. Sort par index, poids = niveau, `canTrade` embargo-only. Ne pas recâbler `_carriersDirty`. `TRADE_SHIP_CHANCE` / gold inchangés.
+- Commerce terrestre : `factoriesByTile[index]={slot,level}` (FACTORY seulement, N45). Flatten + `table.sort` par index (RNG). Buffer `factoriesBuf` recyclé. `delivery.level` snapshot au départ. `refreshRailNetwork` reste événementiel — ne pas le fusionner avec cet index. Ne pas recâbler N40 (`portsByTile`).
 - Posted bunker : `bunkersBySlot[slot][tile]` + `bunkerCells[slot][cellKey]` (cell = `DEFENSE_RADIUS`, clé `floor(y/r)*1024+floor(x/r)`). Lookup 3×3 + dist², cassure au premier hit. Posted = **booléen**, pas un stack. Plus d’appels `applyDefenseAura`. Buffer `defense` alloué, plus écrit. Ne pas changer `DEFENSE_POST_BONUS` / `DEFENSE_RADIUS`.
 - Posted SAM : `samsBySlot[slot][tile]` (N42). `tryIntercept` itère les SAM ennemis non alliés, pas `buildings`. `samsOf` lit le même index (feel N59 fermé ici). Un SAM = une cible (`engaged`). Ne pas changer `SAM_RANGE` / chance / cooldown.
+- Posted SILO : `silosBySlot[slot][tile]` (N44). `Nukes.launch` n’itère que ce set. Un slot sans silo ne rescane **pas** le hash. Un SAM / PORT n’est jamais un lanceur. `armCooldown` reste la voie d’écriture (N43). Ne pas poser `silo.cooldown =` à la main (feel 5c74 le faisait — **ne pas porter ça** : ça gèlerait `coolingBuildings`). Ne pas changer `SILO_COOLDOWN` / coût / ère. Un silo = un missile. Ne pas `require(Nukes)` depuis GameState.
 - Cooldown bâtiments : `Buildings.armCooldown` est **la** voie d’écriture (intercept + tir silo). `stepCooldowns` parcourt `coolingBuildings`, pas `buildings`. Ne **pas** n’itérer que les SAM : un silo a aussi un cooldown (contrat B de N43 rejeté). `destroyBuilding` retire du set.
 - Humain éliminé : `settledHumans[slot]` **avant** destruction du PlayerState. Bots ignorés. `endMatch` / disconnect après élimination passent par `MatchLifecycle` (init.server hors bundle). Disconnect **vivant** = 0 XP. `Persistence` reste hors du tick. Ne pas recâbler N6.
 - Grâce humaine = `Bots.humanTargetProtected` (bots **et** tribus). Ne pas dupliquer une 2e courbe.
 - Ne pas casser le client 34/34. `init.server` / `Persistence` exclus du bundle : extraire un helper testable (`MatchLifecycle` déjà là) ou documenter un test Studio.
-- Ligne feel (#19/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45) : rebase sur cette passe avant cherry-pick, sinon perte `samsBySlot` / `coolingBuildings`. Cherry-pick seq obligatoire (N41 feel) et `targetSlot` (N49 feel) seulement — N40/N42/N45/N57/N59/N60 feel sont déjà redondants avec N36 / N37 / N42 / N43 hardening. N50/N52 feel (`findSpawn` / `isSpawnSafe`) porte N33. N44 hardening (`silosBySlot`) n’a pas d’équivalent feel numéroté.
+- Ligne feel (#19/#22/#24/#26/#28/#29/#32/#34/#36/#38/#41/#42/#45/#48) : rebase sur cette passe avant cherry-pick, sinon perte `silosBySlot` / `factoriesByTile`. Cherry-pick seq obligatoire (N41 feel) et `targetSlot` (N49 feel) seulement — N40/N42/N45/N57/N59/N60/N61 feel sont déjà redondants avec N36 / N37 / N42 / N43 / N44 / N45 hardening. N50/N52 feel (`findSpawn` / `isSpawnSafe`) porte N33. N62 feel (`Bots` hash) = N46 ici.
