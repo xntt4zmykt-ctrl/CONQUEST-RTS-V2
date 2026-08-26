@@ -617,11 +617,14 @@ function ChantierB.installSpawn(GameState)
 		if not self:isLand(index) then
 			return false, "Choisis une terre."
 		end
-		-- N52 : meme C1+C2 (+ N54 bus) que findSpawn. Une terre neutre dans
-		-- un crater n'est pas un spawn. Chercher plus loin dans r=6, ne jamais
-		-- poser quand meme. Isolation voisinage (disque entierement neutre) = N55.
+		-- N52 splash/fallout + N54 bus + N55 isolation (carre SPAWN_RADIUS+3
+		-- tout NEUTRAL, meme recette que findSpawn). Chercher plus loin dans
+		-- r=6, ne jamais poser un disque partiel colle a un empire.
 		local function isClaimable(i: number): boolean
-			return self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL and self:isSpawnSafe(i)
+			return self:isLand(i)
+				and buffer.readu8(self.owner, i) == NEUTRAL
+				and self:isSpawnSafe(i)
+				and self:isSpawnIsolated(i)
 		end
 		local best: number? = if isClaimable(index) then index else nil
 		if not best then

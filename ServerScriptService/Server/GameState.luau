@@ -161,6 +161,9 @@ export type GameState = typeof(setmetatable(
 		-- plus le hash buildings entier (ISSUE-N42). Le buffer `defense` reste
 		-- la source du cout de tuile (falloff), pas du flag posted.
 		bunkersBySlot: { [number]: { [number]: true } },
+		-- Index O(1) des batteries SAM par camp. tryIntercept (N57) n'itere
+		-- plus le hash buildings entier ; recette bunkersBySlot.
+		samsBySlot: { [number]: { [number]: true } },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -233,6 +236,7 @@ function GameState.new(seed: number): GameState
 	self.missiles = {}
 	self.buildings = {}
 	self.bunkersBySlot = {}
+	self.samsBySlot = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -711,18 +715,32 @@ local IS_STATION = {
 	[B.FACTORY] = true,
 }
 
--- Index bunker : pose / capture / destroy seulement, jamais dans le tick.
-local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
-	local set = self.bunkersBySlot[slot]
+-- Index bunker / SAM : pose / capture / destroy seulement, jamais dans le tick.
+local function indexPosted(
+	_self: GameState,
+	bySlot: { [number]: { [number]: true } },
+	slot: number,
+	index: number,
+	present: boolean
+)
+	local set = bySlot[slot]
 	if present then
 		if not set then
 			set = {}
-			self.bunkersBySlot[slot] = set
+			bySlot[slot] = set
 		end
 		set[index] = true
 	elseif set then
 		set[index] = nil
 	end
+end
+
+local function indexBunker(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.bunkersBySlot, slot, index, present)
+end
+
+local function indexSam(self: GameState, slot: number, index: number, present: boolean)
+	indexPosted(self, self.samsBySlot, slot, index, present)
 end
 
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
@@ -735,6 +753,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 
 	if kind == B.DEFENSE then
 		indexBunker(self, slot, index, true)
+	end
+	if kind == B.SAM then
+		indexSam(self, slot, index, true)
 	end
 	if kind == B.NAVAL_BASE then
 		self._carriersDirty = true
@@ -793,6 +814,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexBunker(self, previousSlot, index, false)
 		indexBunker(self, newSlot, index, true)
 	end
+	if building.kind == B.SAM then
+		indexSam(self, previousSlot, index, false)
+		indexSam(self, newSlot, index, true)
+	end
 	if IS_STATION[building.kind] then
 		self:refreshRailNetwork(previousSlot)
 		self:refreshRailNetwork(newSlot)
@@ -808,6 +833,9 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	local previousKind = building.kind
 	if building.kind == B.DEFENSE then
 		indexBunker(self, building.slot, index, false)
+	end
+	if building.kind == B.SAM then
+		indexSam(self, building.slot, index, false)
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -825,8 +853,9 @@ end
 --=============================================================================
 
 --[[
-	C1 ogive + C2 fallout + N54 MIRV bus. Pas d'isolation voisinage (ca reste
-	findSpawn) et pas d'annulation de frappe (contrat B / N44).
+	C1 ogive + C2 fallout + N54 MIRV bus. Isolation voisinage = isSpawnIsolated
+	(N55, partagee findSpawn / claimSpawn). Pas d'annulation de frappe
+	(contrat B / N44).
 
 	Rayon d'exclusion :
 	- ogive / ATOM / H : missile.radius ou NUKE_STATS[kind].radius
@@ -893,12 +922,36 @@ function GameState.isSpawnSafe(self: GameState, center: number): boolean
 end
 
 --[[
+	Carre SPAWN_RADIUS+3 entierement NEUTRAL (meme recette que findSpawn).
+	claimSpawn (N55) refuse un disque colle a un empire ; placeDisk ne peint
+	que du NEUTRAL et ne doit pas etre relache.
+]]
+function GameState.isSpawnIsolated(self: GameState, center: number): boolean
+	if center < 0 or center >= Config.TILE_COUNT then
+		return false
+	end
+	local check = Config.SPAWN_RADIUS + 3
+	local x, y = MapGen.fromIndex(center)
+	for dy = -check, check do
+		for dx = -check, check do
+			local nx, ny = x + dx, y + dy
+			if MapGen.inBounds(nx, ny) then
+				local idx = MapGen.toIndex(nx, ny)
+				if buffer.readu8(self.owner, idx) ~= NEUTRAL then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+--[[
 	Cherche une zone de spawn : une tuile de terre dont le disque alentour est
 	entierement libre, pour ne jamais coller deux joueurs au demarrage.
 ]]
 function GameState.findSpawn(self: GameState, rng: Random): number?
-	local radius = Config.SPAWN_RADIUS
-	local check = radius + 3
+	local check = Config.SPAWN_RADIUS + 3
 
 	for _ = 1, 6000 do
 		local x = rng:NextInteger(check, Config.MAP_WIDTH - check - 1)
@@ -906,32 +959,44 @@ function GameState.findSpawn(self: GameState, rng: Random): number?
 		local center = MapGen.toIndex(x, y)
 
 		if self:isLand(center) and buffer.readu8(self.owner, center) == NEUTRAL then
-			-- N50 C1+C2 + N54 MIRV bus. Isolation voisinage reste ici.
-			if not self:isSpawnSafe(center) then
-				continue
-			end
-			local ok = true
-			for dy = -check, check do
-				for dx = -check, check do
-					local nx, ny = x + dx, y + dy
-					if MapGen.inBounds(nx, ny) then
-						local idx = MapGen.toIndex(nx, ny)
-						if buffer.readu8(self.owner, idx) ~= NEUTRAL then
-							ok = false
-							break
-						end
-					end
-				end
-				if not ok then
-					break
-				end
-			end
-			if ok then
+			-- N50 C1+C2 + N54 MIRV bus + N55 isolation.
+			if self:isSpawnSafe(center) and self:isSpawnIsolated(center) then
 				return center
 			end
 		end
 	end
 	return nil
+end
+
+--[[
+	Payload UnitSnapshot bateaux (10 Hz). Pas de path / homeTile (intention +
+	bandwidth). retreating = N56 : le HUD distingue retraite vs invasion.
+	init.server est hors bundle : ce helper est le contrat testable.
+]]
+function GameState.snapshotBoats(self: GameState): {
+	{
+		id: number,
+		slot: number,
+		x: number,
+		y: number,
+		troops: number,
+		kind: number,
+		retreating: boolean,
+	}
+}
+	local boats = {}
+	for _, boat in self.boats do
+		table.insert(boats, {
+			id = boat.id,
+			slot = boat.slot,
+			x = boat.x,
+			y = boat.y,
+			troops = math.floor(boat.troops),
+			kind = boat.kind,
+			retreating = boat.retreating == true,
+		})
+	end
+	return boats
 end
 
 function GameState.addPlayer(
@@ -1181,6 +1246,7 @@ function GameState.removePlayer(self: GameState, slot: number)
 		self.quickChatLast[slot] = nil
 	end
 	self.bunkersBySlot[slot] = nil
+	self.samsBySlot[slot] = nil
 
 	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
 	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.

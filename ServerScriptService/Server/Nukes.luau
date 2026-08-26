@@ -159,30 +159,37 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 	local range2 = range * range
 	local best = nil
 	local bestDist = math.huge
+	local samsBySlot = state.samsBySlot
 
-	for index, building in state.buildings do
-		if building.kind ~= Config.BUILDING.SAM then
-			continue
-		end
-		if building.slot == missile.slot then
-			continue
-		end
-		if state:areAllied(building.slot, missile.slot) then
-			continue
-		end
-		if building.cooldown > 0 then
-			continue
-		end
+	-- N57 : index samsBySlot, pas le hash buildings (recette bunkersBySlot).
+	if samsBySlot then
+		for slot, set in samsBySlot do
+			if slot == missile.slot then
+				continue
+			end
+			if state:areAllied(slot, missile.slot) then
+				continue
+			end
+			for tile in set do
+				local building = state.buildings[tile]
+				if not building or building.kind ~= Config.BUILDING.SAM then
+					continue
+				end
+				if building.cooldown > 0 then
+					continue
+				end
 
-		local x, y = MapGen.fromIndex(index)
-		local dx, dy = x - missile.x, y - missile.y
-		local d2 = dx * dx + dy * dy
-		if d2 > range2 then
-			continue
-		end
-		if d2 < bestDist then
-			best = building
-			bestDist = d2
+				local x, y = MapGen.fromIndex(tile)
+				local dx, dy = x - missile.x, y - missile.y
+				local d2 = dx * dx + dy * dy
+				if d2 > range2 then
+					continue
+				end
+				if d2 < bestDist then
+					best = building
+					bestDist = d2
+				end
+			end
 		end
 	end
 

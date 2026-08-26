@@ -234,6 +234,35 @@ local function checkInvariants(state, tick)
 		end
 	end
 
+	-- 5c. Index samsBySlot = batiments SAM (ISSUE-N57).
+	do
+		local SAM = Config.BUILDING.SAM
+		local indexed = 0
+		local samsBySlot = state.samsBySlot or {}
+		for slot, set in samsBySlot do
+			for index in set do
+				indexed += 1
+				local building = state.buildings[index]
+				if not building or building.kind ~= SAM or building.slot ~= slot then
+					fail(`tick {tick} — samsBySlot[{slot}][{index}] orphelin`)
+				end
+			end
+		end
+		local realSam = 0
+		for index, building in state.buildings do
+			if building.kind == SAM then
+				realSam += 1
+				local set = samsBySlot[building.slot]
+				if not (set and set[index]) then
+					fail(`tick {tick} — SAM {index} absent de samsBySlot[{building.slot}]`)
+				end
+			end
+		end
+		if indexed ~= realSam then
+			fail(`tick {tick} — samsBySlot count {indexed} != SAM {realSam}`)
+		end
+	end
+
 	-- 6. Espacement minimal, tous types confondus. C'est la regle qui empeche un
 	-- empire de concentrer tout son developpement sur un mouchoir de poche, et
 	-- elle passe par le resolveur de placement : si elle casse, c'est que le
@@ -5070,6 +5099,203 @@ do
 	end
 end
 
+do
+	-- N55 : claimSpawn refuse un disque colle a un empire (isolation findSpawn).
+	-- Occupant peint tout sauf une tuile terre adjacente : sans N55, placeDisk
+	-- poserait une capitale 1 tuile contre le blob. N52 splash reste distinct.
+	local state = GameState.new(1056)
+	local occupier = state:addPlayer(nil, "Occupe", Random.new(210), 0)
+	local claimant = state:addPlayer(nil, "Colons", Random.new(211), 0)
+	if not occupier or not claimant or not occupier.capitalTile then
+		fail("claimSpawn isolation — spawn impossible")
+	else
+		local pocket: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and buffer.readu8(state.owner, index) ~= occupier.slot then
+				local x, y = MapGen.fromIndex(index)
+				local adj = false
+				for _, d in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } } do
+					local nx, ny = x + d[1], y + d[2]
+					if MapGen.inBounds(nx, ny) then
+						local ni = MapGen.toIndex(nx, ny)
+						if state:isLand(ni) and buffer.readu8(state.owner, ni) == occupier.slot then
+							adj = true
+							break
+						end
+					end
+				end
+				if adj then
+					pocket = index
+					break
+				end
+			end
+		end
+		if not pocket then
+			fail("claimSpawn isolation — lisiere introuvable")
+		else
+			for index = 0, Config.TILE_COUNT - 1 do
+				if state:isLand(index) then
+					if index == pocket then
+						buffer.writeu8(state.owner, index, 0)
+					else
+						buffer.writeu8(state.owner, index, occupier.slot)
+					end
+				end
+			end
+			claimant.awaitingSpawn = true
+			local okClaim = state:claimSpawn(claimant.slot, pocket)
+			if okClaim then
+				local cap = claimant.capitalTile
+				if cap == pocket then
+					fail("claimSpawn isolation — capitale collee a l'empire")
+				elseif not cap or not state:isSpawnIsolated(cap) then
+					fail("claimSpawn isolation — disque encore en contact")
+				else
+					print("claimSpawn isolation : decale hors contact")
+				end
+			else
+				print("claimSpawn isolation : lisiere refusee")
+			end
+		end
+	end
+end
+
+do
+	-- N56 option A : snapshotBoats porte retreating apres flip (Navy.step).
+	-- Pas de path / homeTile dans le payload. init.server hors bundle.
+	local state = GameState.new(1057)
+	state.combatUnlocked = true
+	local invader = state:addPlayer(nil, "Flotte", Random.new(58), 0)
+	local defender = state:addPlayer(nil, "Cote", Random.new(59), 0)
+	local third = state:addPlayer(nil, "Tiers", Random.new(60), 0)
+	if not invader or not defender or not third then
+		fail("boat snapshot retreat — spawn impossible")
+	else
+		local coastal: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if state:isLand(index) and MapGen.isCoastal(state.terrain, index) then
+				table.insert(coastal, index)
+				if #coastal >= 400 then
+					break
+				end
+			end
+		end
+		local fromTile: number? = nil
+		local toTile: number? = nil
+		for _, first in coastal do
+			for _, second in coastal do
+				if first ~= second and Navy.findSeaPath(state, first, second) then
+					fromTile, toTile = first, second
+					break
+				end
+			end
+			if fromTile then
+				break
+			end
+		end
+		if not fromTile or not toTile then
+			fail("boat snapshot retreat — aucune paire cotiere reliee")
+		else
+			state:setOwner(fromTile, invader.slot)
+			state:setOwner(toTile, defender.slot)
+			invader.troops = 8000
+			local okLaunch, launchMsg = Navy.launchInvasion(state, invader.slot, toTile :: number)
+			if not okLaunch then
+				fail(`boat snapshot retreat — launchInvasion refuse ({launchMsg})`)
+			else
+				state:setOwner(toTile :: number, third.slot)
+				Navy.step(state, Random.new(61))
+				local snaps = state:snapshotBoats()
+				local marked = false
+				local leaked = false
+				for _, snap in snaps do
+					if snap.kind == Navy.KIND_TRANSPORT and snap.slot == invader.slot then
+						if snap.retreating == true then
+							marked = true
+						end
+						if (snap :: any).path ~= nil or (snap :: any).homeTile ~= nil then
+							leaked = true
+						end
+					end
+				end
+				if leaked then
+					fail("boat snapshot retreat — path/homeTile fuite dans le payload")
+				elseif not marked then
+					local leftover = 0
+					for _, b in state.boats do
+						if b.kind == Navy.KIND_TRANSPORT and b.slot == invader.slot then
+							leftover += 1
+						end
+					end
+					if leftover ~= 0 then
+						fail("boat snapshot retreat — transport en mer sans retreating")
+					else
+						print("boat snapshot retreat : transport coule, payload sans fuite")
+					end
+				else
+					print("boat snapshot retreat : retreating=true, pas de path")
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N57 : samsBySlot indexe les SAM, pas les silos. transferBuilding change
+	-- de camp. tryIntercept n'a plus besoin du hash buildings.
+	local state = GameState.new(1058)
+	local owner = state:addPlayer(nil, "Defense", Random.new(62), 0)
+	local heir = state:addPlayer(nil, "Heritier", Random.new(63), 0)
+	if not owner or not heir then
+		fail("samsBySlot — spawn impossible")
+	else
+		local sites: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				table.insert(sites, index)
+				if #sites >= 4 then
+					break
+				end
+			end
+		end
+		if #sites < 4 then
+			fail("samsBySlot — tuiles libres insuffisantes")
+		else
+			state:placeBuilding(sites[1], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[2], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[3], Config.BUILDING.SAM, owner.slot)
+			state:placeBuilding(sites[4], Config.BUILDING.SILO, owner.slot)
+			local set = state.samsBySlot[owner.slot]
+			local count = 0
+			if set then
+				for _ in set do
+					count += 1
+				end
+			end
+			if count ~= 3 then
+				fail(`samsBySlot — {count} SAM indexes, attendu 3`)
+			elseif set and set[sites[4]] then
+				fail("samsBySlot — silo indexe comme SAM")
+			else
+				state:transferBuilding(sites[1], heir.slot)
+				local oldSet = state.samsBySlot[owner.slot]
+				local newSet = state.samsBySlot[heir.slot]
+				if oldSet and oldSet[sites[1]] then
+					fail("samsBySlot — transfer laisse l'ancien camp")
+				elseif not (newSet and newSet[sites[1]]) then
+					fail("samsBySlot — transfer n'indexe pas le nouvel camp")
+				else
+					state:destroyBuilding(sites[2])
+					if oldSet and oldSet[sites[2]] then
+						fail("samsBySlot — destroy laisse un orphelin")
+					else
+						print("samsBySlot : pose / transfer / destroy OK")
+					end
+				end
+			end
+		end
+	end
+end
 
 do
 	local ChantierB = __require("ChantierB")

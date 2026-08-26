@@ -693,7 +693,19 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 	end
 
 	for _, boat in boats do
-		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false)
+		track(boat.id, boat.slot, boat.kind, boat.x, boat.y, false, {
+			retreating = boat.retreating == true,
+		})
+		-- N56 option A : teinte froide des que le serveur marque la retraite.
+		if boat.retreating then
+			local unit = self.units[boat.id]
+			if unit and not unit.retreatTinted then
+				unit.retreatTinted = true
+				for _, piece in unit.visual.pieces do
+					piece.part.Color = piece.part.Color:Lerp(Color3.fromRGB(168, 206, 222), 0.42)
+				end
+			end
+		end
 	end
 
 	for _, missile in missiles do
@@ -707,22 +719,30 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 	for id, unit in self.units do
 		if not self.seen[id] then
 			if not unit.isMissile then
-				local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
-				local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
-				splash.Shape = Enum.PartType.Cylinder
-				splash.Transparency = 0.18
-				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
-				TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-					Size = Vector3.new(0.18, 15, 15),
-					Transparency = 1,
-				}):Play()
+				-- N56 : une retraite auto ne doit pas jouer le splash d'arrivee
+				-- (le client interpolait vers l'ancienne cible et confondait
+				-- avec un debarquement).
+				local retreating = (unit.extra and unit.extra.retreating) or unit.retreatTinted
+				if not retreating then
+					local last = WorldSpace.tileToWorld(unit.current.X, unit.current.Y)
+					local splash = routePart(self.root, "LandingSplash", Vector3.new(0.18, 3, 3), Color3.fromRGB(202, 239, 247), Enum.Material.Neon)
+					splash.Shape = Enum.PartType.Cylinder
+					splash.Transparency = 0.18
+					splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * CFrame.Angles(0, 0, math.rad(90))
+					TweenService:Create(splash, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+						Size = Vector3.new(0.18, 15, 15),
+						Transparency = 1,
+					}):Play()
+					task.delay(0.95, function()
+						if splash.Parent then
+							splash:Destroy()
+						end
+					end)
+				end
 				for _, piece in unit.visual.pieces do
 					TweenService:Create(piece.part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
 				end
 				task.delay(0.95, function()
-					if splash.Parent then
-						splash:Destroy()
-					end
 					if unit.visual.model.Parent then
 						unit.visual.model:Destroy()
 					end
