@@ -1492,6 +1492,12 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- sheds Z=-12° (ci-dessus). V90 portes silo Z=±18° (ci-dessus).
 	-- V91 rampes SAM pitch X=-31° (ci-dessus). V92 addWake
 	-- (check navires). V93 Bow (check navires). V94 LandingRamp (check navires). V95 MissileBody (check navires). V96 Fin (check navires). V97 mesh carrier (check navires). V98 CityWindows rest.X (ci-dessous). V99 beacons rest.Z (ci-dessous). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil).
+	-- V123 recycle BuildRing (ci-dessous). Pre-flush : Overlay
+	-- applyBuildingDelta (check pose) a pu laisser un delay BuildRing
+	-- (city palier 3) — on parque avant d'allouer, pour que #ringFree
+	-- suive la spec (1 puis 0) et que le 2e playConstruction rawequal.
+	testFlushDelays()
+	assert(type(Building.ringFree) == "table", "ringFree absent")
 	local city = Building.create(Config.BUILDING.CITY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
 	-- V98 : Transparency depuis rest.X. Plus de child.Position.X
 	-- 60 Hz. Recette feel N149 — ne PAS merger c450. Distinct de
@@ -1577,6 +1583,35 @@ check("modeles procéduraux : le palier change la silhouette", function()
 		math.abs(buildRing.CFrame.Y - 2) < 1e-6,
 		"BuildRing Y"
 	)
+	-- V123 : BuildRing free-list ringFree. Recette feel N166 inline —
+	-- ne PAS merger 6cec / 595e / 6512. Name BuildRing. Size visuel
+	-- (0.5, 4, 4) pas feel (0.4, 3, 3). Transparency 0.25 pas feel 0.4.
+	-- Euler N136 inline (pas ringRot, pas Effects.pulseRot). Parent =
+	-- model. PointLight enfant FindFirstChildWhichIsA. Leftover
+	-- Parent = nil, pas Destroy. Dust / scaffold Destroy conserves.
+	-- Distinct de V122 (pulseFree, Effects). Distinct de V121
+	-- (flashFree). Distinct de V113 (blastFree, Overlay). Leftover
+	-- V85 Y == 2 doit rester vert. Leftover V122 pulseFree (check
+	-- vagues) doit rester vert. Leftover V121 flashFree (check vagues)
+	-- doit rester vert.
+	local ringLight = buildRing:FindFirstChildWhichIsA("PointLight")
+	assert(ringLight, "BuildRing sans PointLight")
+	assert(#Building.ringFree == 0, "ringFree pre-park non vide")
+	assert(Building.ringFree[1] == nil, "ringFree leftover slot pre-park")
+	testFlushDelays()
+	assert(buildRing.Parent == nil, "BuildRing encore parent apres delay")
+	assert(#Building.ringFree == 1, "ringFree non parque")
+	assert(Building.ringFree[2] == nil, "ringFree leftover slot")
+	assert(rawequal(Building.ringFree[1], buildRing), "ringFree autre Part")
+	assert(rawequal(buildRing:FindFirstChildWhichIsA("PointLight"), ringLight), "PointLight recree au park")
+	Building.playConstruction(city, Vector3.new(0, 2, 0))
+	local reusedRing = city:FindFirstChild("BuildRing")
+	assert(reusedRing, "BuildRing absent 2e chantier")
+	assert(rawequal(reusedRing, buildRing), "BuildRing non recycle")
+	assert(rawequal(reusedRing:FindFirstChildWhichIsA("PointLight"), ringLight), "PointLight recree au reuse")
+	assert(#Building.ringFree == 0, "ringFree non pop")
+	assert(Building.ringFree[1] == nil, "ringFree leftover slot pop")
+	assert(math.abs(reusedRing.CFrame.Y - 2) < 1e-6, "BuildRing Y recycle")
 end)
 
 check("apercu de placement pour chaque batiment", function()
