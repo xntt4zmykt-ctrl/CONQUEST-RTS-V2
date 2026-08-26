@@ -1,50 +1,50 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 34)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 35)
 
-Déclencheur : ouverture de la **PR #101** (`cursor/analyse-nocturne-du-codebase-d74d`) — gainBuf, surveyTerritories, specs N97–N98.
+Déclencheur : ouverture de la **PR #106** (`cursor/analyse-nocturne-du-codebase-c786`) — HUD.ranked, Overlay.trackUnit, specs N99–N100.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-c786`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#102.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-4a67`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#106.
 
 ---
 
 ## 1. Verdict
 
-Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `self.ranked` est un array d’instance HUD (records internes mutés, pas de l’état répliqué). `trackUnit` est une fonction module Overlay ; `unit.extra` missile est un record posé une fois.
+Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués. `previewOwnerAt` / `previewBuildingAt` sont des fonctions module `init.client` (capturent `world` / `overlay`). `rankByTiles` est une fonction module HUD ; `self.ranked` reste un array d’instance.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #101 (passe 33) : claims vérifiés.** `WorldRenderer.applyDelta` recycle `gainBuf`/`lossBuf`/`otherBuf` (N95) ; `FactionLabels.surveyTerritories` recycle `sumXBuf`/`countBuf` (N96). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
+**PR #106 (passe 34) : claims vérifiés.** `HUD.update` recycle `self.ranked` + inner records (N97) ; `Overlay.applyUnits` hisse `trackUnit`, extra missile muté (N98). Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé.
 
-Cette passe a **livré ce que #101 a documenté (N97, N98)**.
+Cette passe a **livré ce que #106 a documenté (N99, N100)**.
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #101
+## 2. Revue PR #106
 
-| Claim #101 | Réalité à l’ouverture |
+| Claim #106 | Réalité à l’ouverture |
 |---|---|
-| `gainBuf` (N95) | Oui. Trois arrays module, truncate leftover **avant** return, early-out `count == 0` → pools vides. Prise locale → `gainBuf`. Recette visual V48, pas merger `bee8`. |
-| `surveyTerritories` (N96) | Oui. Trois hash module, `table.clear` **avant** le scan. Owner tout NEUTRAL → plus d’ancres. Recette visual V49, pas merger `bee8`. |
-| Specs N97–N98 | **Corrigés ici.** |
+| `self.ranked` (N97) | Oui. Inner records mutés, truncate leftover **avant** `table.sort`, pas de `table.insert`. Recette visual V50, pas merger `2932`. |
+| `trackUnit` (N98) | Oui. Hoist module. Extra missile posé une fois, `tx/ty` mutés (`rawequal`). Navire `extra` nil. Recette visual V52, pas merger `36bc`. |
+| Specs N99–N100 | **Corrigés ici.** N100 = comparateur `rankByTiles` (recette visual V54), pas `buildChunkBorders` — ce leftover est **N102**. |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #102 (71d9), feel jusqu’à #101, visuelles #39/…/#100 (ranked/previewCtxBuf). **#101 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#102) reste distincte. Ne pas merger visual `bee8` / `2932` ni hardening `71d9` / `b4c1` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #104 (5f6c), feel jusqu’à #106, visuelles #39/…/#105 (`rankByTiles` V54). **#106 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel (#16←…←#104) reste distincte. Ne pas merger visual `36bc` / `e3ed` ni hardening `5f6c` / `71d9` sans rebase.
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N97–N98 du rapport #101.
+Feel #19 inchangé. Pas de réinvention : N99–N100 du rapport #106.
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| `HUD.update` alloue `ranked` + records (N97) | `HUD.luau` (`HUD.update` classement seulement), `tests/client.luau` (check existant) | Leftover N96. Recycle `self.ranked` + inner records, truncate leftover **avant** `table.sort`. Pas de `table.insert`, pas de nouvelle table. 12 slots puis 1 vivant → `#ranked == 1`. Recette visual V50, **pas** merger `2932`. Cosmétique (victoire serveur). |
-| `Overlay.applyUnits` closure `track` + extra (N98) | `Overlay.luau` (`applyUnits` / `trackUnit` seulement), `tests/client.luau` (check existant) | Leftover N97. Hoist `trackUnit`. Extra missile posé une fois, puis `tx/ty` mutés (`rawequal`). Navire : `extra` nil — retraite N56 via `retreatTinted`, pas une table 10 Hz. Recette visual V52, **pas** merger `2932`. Serveur `retreating` **inchangé**. |
+| `init.client` closures hover 60 Hz (N99) | `init.client.luau` (RenderStepped aperçu seulement) | Leftover N98. Hoist `previewOwnerAt` / `previewBuildingAt` module, capturent `world` / `overlay`. Overlay nil → `buildingAt` nil ; world nil → `ownerAt` 0. Recette visual V53, **pas** merger `36bc`. Cosmétique (le serveur re-résout). |
+| `HUD.update` comparateur `table.sort` 10 Hz (N100) | `HUD.luau` (`HUD.update` sort seulement), `tests/client.luau` (commentaire check existant) | Leftover N97/N99. Hoist `rankByTiles` — même loi tuiles desc / troupes tie-break. Plus de `function` inline. Recette visual V54, **pas** merger `e3ed`. Cosmétique (victoire serveur). |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), `init.client` hover closures (**N99**), comparateur `table.sort` ranked (**N100**). `PlacementPreview.resolve` ctx déjà **N92**. Vector2 `current`/`target` hors passe (visual V55). `buildChunkBorders` ownerOf/emit hors passe.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), Overlay `Vector2.new` cible (**N101**), `buildChunkBorders` ownerOf/emit/`BORDER_PASSES` (**N102**). `PlacementPreview.resolve` ctx déjà **N92**. `self.ranked` inner déjà **N97**. Overlay `trackUnit` déjà **N98**. `else {}` overlay-nil hors passe.
 
 ---
 
@@ -83,53 +83,53 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Score nuke bots** = flatten `buildingsBySlot` une fois (N69), puis 90 `scoreBlast`.
 - **Inbound `removePlayer`** = snapshot `destroyBuf` (**N89**) → destroy → diplo + transports `kind==1` (100 %, lit **`owner[targetTile]`**) + missiles contrat B + cadran/colis + convois `kind==2` (coulés), **avant** `setOwner`.
 - **Hover spawn** = `SpawnHint` (Shared) si `tiles==0`. Serveur = `claimSpawn` (N52+N55).
-- **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `Diplomacy.step` recycle `expiredBuf` (**N79**). `Bots.neighborFactions` recycle `contactBuf` (**N80**). `gatherSites` recycle `siteBuf` (**N81**). `stepElimination` recycle `elimBuf` (**N82**). `findSeaPath` walk scratch, retour unique (**N83**). `refreshRailNetwork` porteuses recyclées (**N84**). `Buildings.contextFor` recycle `ctxBuf` (**N85**). `ChantierB.cancelOpposingFronts` / wrap `stepAttacks` recyclent `doomedBuf` / `collapsingBuf` (**N86**). `BoatFront.launchAttack` recycle `parkedBuf` (**N87**). `collapseFaction` recycle `collapseRemainBuf` / `collapseLeftBuf` (**N88**). `removePlayer` recycle `destroyBuf` (**N89**). `Placement.validTiles` recycle blockers/candidates/queue (**N90**). `Bots.decideDiplomacy` recycle `allyBuf` (**N91**). `PlacementPreview.resolve` recycle `previewCtx` (**N92**). `stepDoomsday` recycle `stripBuf` (**N93**). `stripTerritory` `table.clear` in-place (**N94**). `WorldRenderer.applyDelta` recycle `gainBuf`/`lossBuf`/`otherBuf` (**N95**). `FactionLabels.surveyTerritories` recycle `sumXBuf`/`countBuf` (**N96**). `HUD.update` recycle `self.ranked` (**N97**). `Overlay.applyUnits` hisse `trackUnit`, extra missile muté (**N98**). `init.client` RenderStepped alloue encore 2 closures hover 60 Hz (**N99**). `HUD.update` alloue encore le comparateur `table.sort` 10 Hz (**N100**). Vector2 `target` 10 Hz hors passe (visual V55). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- **Réplication :** StateDelta (`dirtyIndexBuf` N72, HUD fronts N74 via N76, `buildPrices` N75, records stats N76, `eraProgress` N77) / UnitSnapshot (`retreating`, `boatSnapBuf` N70, `missileSnapBuf` N71) / BuildingDelta (`buildingSnapBuf` N73) / plunder / trade / explosions / notify&sfx déployés / Diplomacy.viewFor 1 Hz (N78). `path` / `homeTile` / `progress` **non** répliqués. Playing 10 Hz ; lobby vide et ended → 1 Hz. `Diplomacy.step` recycle `expiredBuf` (**N79**). `Bots.neighborFactions` recycle `contactBuf` (**N80**). `gatherSites` recycle `siteBuf` (**N81**). `stepElimination` recycle `elimBuf` (**N82**). `findSeaPath` walk scratch, retour unique (**N83**). `refreshRailNetwork` porteuses recyclées (**N84**). `Buildings.contextFor` recycle `ctxBuf` (**N85**). `ChantierB.cancelOpposingFronts` / wrap `stepAttacks` recyclent `doomedBuf` / `collapsingBuf` (**N86**). `BoatFront.launchAttack` recycle `parkedBuf` (**N87**). `collapseFaction` recycle `collapseRemainBuf` / `collapseLeftBuf` (**N88**). `removePlayer` recycle `destroyBuf` (**N89**). `Placement.validTiles` recycle blockers/candidates/queue (**N90**). `Bots.decideDiplomacy` recycle `allyBuf` (**N91**). `PlacementPreview.resolve` recycle `previewCtx` (**N92**). `stepDoomsday` recycle `stripBuf` (**N93**). `stripTerritory` `table.clear` in-place (**N94**). `WorldRenderer.applyDelta` recycle `gainBuf`/`lossBuf`/`otherBuf` (**N95**). `FactionLabels.surveyTerritories` recycle `sumXBuf`/`countBuf` (**N96**). `HUD.update` recycle `self.ranked` (**N97**). `Overlay.applyUnits` hisse `trackUnit`, extra missile muté (**N98**). `init.client` hisse `previewOwnerAt`/`previewBuildingAt` (**N99**). `HUD.update` hisse `rankByTiles` (**N100**). Overlay `unit.target = Vector2.new` encore 10 Hz (**N101**). `buildChunkBorders` alloue encore `ownerOf`/`emit`/`passes` par chunk sale (**N102**). `else {}` overlay-nil hors passe. N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (nouveaux, N99–N100)
+## 5. Issues worker-ready (nouveaux, N101–N102)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N98 = faits. N22 = **N67 fait**. N27 = doc only. **V51 / N92** (Preview ctx) déjà fermé sur feel — ne pas re-spécifier. **V50 / N97** et **V52 / N98** fermés ici.
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26/N29–N100 = faits. N22 = **N67 fait**. N27 = doc only. **V51 / N92** (Preview ctx) déjà fermé. **V50 / N97**, **V52 / N98**, **V53 / N99**, **V54 / N100** fermés ici (portés, pas mergés).
 
 ---
 
-### ISSUE-N99 — `init.client` closures hover 60 Hz (feel)
+### ISSUE-N101 — `Overlay.applyUnits` `Vector2.new` cible 10 Hz (feel)
 
-**Priorité :** P3 alloc client 60 Hz. Leftover explicite de N98 (`trackUnit`). Distinct de N92 (`previewCtx` record déjà recyclé) et de visual V53 (déjà **fermé** sur `36bc` — **porter, ne pas merger**). Ne pas toucher Overlay `track` (N98). Ne pas retoucher `PlacementPreview.luau`.
+**Priorité :** P3 alloc client 10 Hz. Leftover explicite de N98 (`trackUnit`) et de N100 (`rankByTiles`). Distinct de N98 (extra muté déjà) et de visual V55 (spec ouverte sur `e3ed` — **porter, ne pas merger**). Ne pas toucher HUD sort (N100) ni `init.client` (N99). `CFrame` / `Vector3` 60 Hz = hors cette passe.
 
-**Problème :** RenderStepped en mode `build` alloue deux closures par frame : `function(index) return w:ownerAt(index) end` et `function(index) o:buildingAt(...)`. N92 recycle le **record** `previewCtx` ; le caller continue de fabriquer les closures. `buildingCounts` est déjà poolé (`EMPTY_COUNTS`). Distinct de N92 (Preview) et de N85 (`ctxBuf` serveur, closures module).
+**Problème :** N98 hisse `trackUnit` et mute `extra`, mais `unit.target = Vector2.new(x, y)` alloue **un Vector2 par unité, à chaque lot** (insert **et** update, 10 Hz). Vector2 Roblox est immuable : on ne peut pas muter `target.X`. `stepInterpolation` fait `unit.current += (unit.target - unit.current) * alpha` puis lit `.X` / `.Y`. Distinct de N98 (`track` / extra), de N70/N71 (payload serveur) et du 60 Hz `CFrame.lookAt`.
 
-**Pourquoi 20K CCU :** leftover N98. 8 clients × hover 60 Hz × 2 closures. Pas d’autorité (le serveur re-résout). `Placement.resolve` appelle `ownerAt` / `buildingAt` de façon synchrone — on peut passer des closures stables.
+**Pourquoi 20K CCU :** leftover N100. 8 clients × 10 Hz × (navires + missiles en vol) × 1 Vector2. Pas d’autorité (interpolation cosmétique). Changer la représentation sans adapter `stepInterpolation` casserait la cloche missile.
 
 **Worker :**
 
-1. Hoister deux fonctions module dans `init.client.luau` (capturent `world` / `overlay` upvalues, comme N85 `ownerAt`/`buildingAt` capturent `ctxState`). Passer ces fonctions à `preview:resolve` — plus de `function` inline dans RenderStepped. Overlay nil → `ownerAt` 0 / `buildingAt` nil (même loi que le `if o then` actuel). Pas de RemoteFunction.
-2. Ne pas changer la loi snap / upgrade / exact / invalid. Ne pas retoucher `previewCtx` (N92 déjà). Ne pas appeler `validTiles` depuis Preview. Ne pas porter Overlay `track` (N98) ni le comparateur sort (N100) en même temps. Après N98. Recette visual V53 (déjà sur `36bc`).
-3. Ne **pas** toucher le hover attaque/bateau/nuke (`SpawnHint` N58, `effects:previewTile`) — seulement les deux closures passées à `preview:resolve` en mode `build`.
-4. Test : bancs client « apercu de placement » et « accrochage du placement et bascule en amelioration » **doivent rester verts**. Deux `preview:resolve` successifs même tuile → même `tile` / même `status` (déjà N92). Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
-5. Fichiers : `StarterPlayerScripts/Client/init.client.luau` (RenderStepped aperçu seulement). `PlacementPreview.luau` **non**. `tests/client.luau` **seulement si** un assert est ajouté dans un check existant (ne **pas** ajouter un 36e). **Ne pas** éditer le serveur ni visual `36bc`.
+1. Sur le record unité : `targetX` / `targetY` nombres. Insert : poser une fois. Update : muter les nombres, **plus** de `Vector2.new` sur le chemin update. `current` peut rester Vector2 **ou** passer en `currentX`/`currentY` dans le **même** commit que `stepInterpolation` (sinon lerp cassé). Pas de RemoteFunction.
+2. `stepInterpolation` : lerp numérique, puis `WorldSpace.tileToWorld` comme aujourd’hui. Extra missile **inchangé** (N98). Ne pas porter HUD `rankByTiles` (N100 déjà) ni hover (N99 déjà) ni `buildChunkBorders` (N102). Après N100. Recette visual V55.
+3. Ne **pas** recycler `CFrame.lookAt` / `Vector3.new` au 60 Hz (hors passe). Ne pas retoucher `snapshotBoats` / `snapshotMissiles` serveur. Ne pas éditer `HUD.luau` ni `init.client.luau`.
+4. Test : banc client « navires, missiles et interpolation » **doit rester vert** (pieces, Name, extra `rawequal`, navire `extra == nil`, `applyUnits({}, {})` détruit). Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+5. Fichiers : `Overlay.luau` (`trackUnit` / `stepInterpolation` seulement). `tests/client.luau` **seulement si** un assert dans le check existant (ne **pas** ajouter un 36e). `UnitModels.luau` **non**. `HUD.luau` **non**. **Ne pas** éditer le serveur ni visual `e3ed`.
 
-**Contraintes :** pas de RemoteFunction. Recette visual V53 (closures module, pas de table, déjà fermée sur `36bc`). **N99 feel ≠ N92 (`previewCtx` record) ≠ N85 (`ctxBuf` serveur) ≠ N98 (`trackUnit`) ≠ visual V53 (déjà fermé sur `36bc`).** `world` / `overlay` sont déjà des locals module — les capturer est licite. `init.client` n’est pas un module `require` du banc : les checks Preview restent la preuve. Un `ownerAt` inline recréé chaque frame est du gaspillage, pas un leak d’autorité.
+**Contraintes :** pas de RemoteFunction. Recette visual V55 (nombres mutés, pas de table). **N101 feel ≠ N98 (`trackUnit` / extra) ≠ N100 (`rankByTiles`) ≠ N70/N71 (payload) ≠ visual V55 (spec ouverte sur `e3ed`) ≠ CFrame 60 Hz.** Non réentrant. Un leftover `current` Vector2 + `target` nombres sans adapter le lerp casserait l’interpolation. Ne pas fusionner avec N98 (extra) dans le même worker si N98 est déjà mergé ici.
 
 ---
 
-### ISSUE-N100 — `HUD.update` comparateur `table.sort` 10 Hz (feel)
+### ISSUE-N102 — `WorldRenderer.buildChunkBorders` ownerOf/emit/`BORDER_PASSES` (feel)
 
-**Priorité :** P3 alloc client 10 Hz. Leftover explicite de N97 (records ranked) et de N99 (hover). Distinct de N97 (inner records déjà mutés) et de visual V54 (spec déjà sur `36bc` — **porter, ne pas merger**). Ne pas toucher Overlay `trackUnit` (N98) ni `init.client` (N99). Vector2 Overlay = visual V55, **hors cette passe**.
+**Priorité :** P3 alloc client par chunk sale. Leftover explicite de N95 (`gainBuf`) et de N101 (Vector2). Distinct de N95 (listes applyDelta) et de N100 (`rankByTiles`). Ne pas toucher Overlay Vector2 (N101) ni HUD (N100). Visual n’a **pas** encore ce hoist — recette N85 (`ctxState` + closures module).
 
-**Problème :** N97 recycle `self.ranked` + inner records, mais `table.sort(ranked, function(a, b) … end)` alloue **une closure neuve** à chaque `HUD.update` (10 Hz playing, `StateDelta`). Clé de tri inchangée (tuiles desc, tie-break troupes). Distinct de N97 (records) et de N76 (`playerStatsForReplicate` serveur). Distinct de N98 (Overlay track).
+**Problème :** chaque `buildChunkBorders` alloue deux closures (`ownerOf`, `emit`) et une table `passes` de 4 records. Un tick d’offensive salit des dizaines de chunks (budget 3 rebuilds / frame, file plus longue). `ownerOf` relit `self.terrain` / `self.owner` ; `emit` capture `folder` / `surface`. Distinct de N95 (gains/losses arrays) et du greedy mesh sol.
 
-**Pourquoi 20K CCU :** leftover N99. 8 clients × 10 Hz × 1 closure. Pas d’autorité (`VictoryScreen.show` lit tout de suite). Un comparateur instable changerait l’ordre à tiles+troupes égaux et casserait `selectFaction`.
+**Pourquoi 20K CCU :** leftover N101. 8 clients × chunks sales × 2 closures + 1 table. Pas d’autorité (voile politique cosmétique). Un `ownerOf` qui lirait le `self` d’un rebuild précédent colorerait la frontière du voisin.
 
 **Worker :**
 
-1. Hoister le comparateur en fonction module (`rankByTiles(a, b)`) — même loi : `a.tiles == b.tiles` → `a.troops > b.troops`, sinon `a.tiles > b.tiles`. `table.sort(ranked, rankByTiles)`. Plus de `function` inline dans `update`. Pas de RemoteFunction.
-2. Ne **pas** retoucher le recycle `self.ranked` / inner records (N97 déjà). Ne pas `table.insert`. Truncate leftover **avant** le sort (déjà). Ne pas porter Overlay `trackUnit` (N98) ni hover (N99) ni Vector2 (visual V55). Après N99. Recette visual V54.
-3. Ne pas changer `VictoryScreen.show` (il copie `row.Text` tout de suite).
-4. Test : banc client « identite, ere, diplomatie et classement » **doit rester vert** (leftover `#ranked == 1` / `slot == 3`, déjà N97). Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
-5. Fichiers : `HUD.luau` (`HUD.update` sort seulement). `tests/client.luau` **seulement si** un assert dans le check existant (ne **pas** ajouter un 36e). `VictoryScreen.luau` **non**. **Ne pas** éditer le serveur ni visual `36bc`.
+1. Hoister `ownerOf` / `emit` en fonctions module. Poser `borderTerrain` / `borderOwner` / `borderFolder` / `borderSurface` (upvalues module, recette N85 `ctxState`) **au début** de `buildChunkBorders`, les lire dans les closures. Constante module `BORDER_PASSES` = les quatre `{ dx, dy }` — plus de `local passes = { … }` par appel. Pas de RemoteFunction.
+2. Ne **pas** changer la loi greedy (deux balayages, tour `innerTo+1`, `nil` mer/neutre, deux nations = deux lignes). Ne pas porter Overlay Vector2 (N101) ni HUD sort (N100). Après N101. Recette N85 (closures + state module), pas un hash de Parts.
+3. Ne pas recycler les Parts frontière (hors passe). Ne pas toucher `applyDelta` / `gainBuf` (N95 déjà). Ne pas éditer `Overlay.luau` / `HUD.luau` / `init.client.luau`.
+4. Test : bancs client « construction du monde 3D » et « deltas de terrain et conquetes classees » **doivent rester verts**. Client **35/35**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+5. Fichiers : `WorldRenderer.luau` (`buildChunkBorders` seulement). `tests/client.luau` **seulement si** un assert dans un check existant (ne **pas** ajouter un 36e). **Ne pas** éditer le serveur.
 
-**Contraintes :** pas de RemoteFunction. Recette visual V54 (closure module, pas de table, spec sur `36bc`). **N100 feel ≠ N97 (records ranked) ≠ N76 (serveur) ≠ N99 (hover) ≠ visual V54 (spec ouverte sur `36bc`) ≠ Vector2 Overlay (V55).** Non réentrant. Un leftover non truncaté ferait toujours une ligne fantôme — N97 déjà. Ne pas fusionner avec N97 (records) dans le même worker si N97 est déjà mergé ici.
+**Contraintes :** pas de RemoteFunction. Recette N85 (state + closures module). **N102 feel ≠ N95 (`gainBuf`) ≠ N101 (Vector2 Overlay) ≠ N100 (HUD sort) ≠ greedy mesh sol.** Non réentrant : un second `buildChunkBorders` **avant** la fin du premier (il n’y en a pas — synchrone) casserait `borderFolder`. Un leftover `self` d’un chunk précédent colorerait mal. Ne pas `table.clone` de `BORDER_PASSES`.
 
 ---
 
@@ -138,7 +138,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; records stats → **N76 fait** ; `eraProgress` → **N77 fait** ; bateaux → **N70 fait** ; missiles → **N71 fait** ; owner indices → **N72 fait** ; bâtiments → **N73 fait** ; HUD fronts → **N74 fait** ; viewFor → **N78 fait** ; listes effets client → **N95 fait** ; ranked → **N97 fait** ; units extra → **N98 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; records stats → **N76 fait** ; `eraProgress` → **N77 fait** ; bateaux → **N70 fait** ; missiles → **N71 fait** ; owner indices → **N72 fait** ; bâtiments → **N73 fait** ; HUD fronts → **N74 fait** ; viewFor → **N78 fait** ; listes effets client → **N95 fait** ; ranked → **N97 fait** ; units extra → **N98 fait** ; hover → **N99 fait** ; sort → **N100 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -146,7 +146,7 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; `ChantierB` doomed/collapsing → **N86 fait** ; parked → **N87 fait** ; collapse remain → **N88 fait** ; destroyBuf → **N89 fait** ; validTiles → **N90 fait** ; allyBuf → **N91 fait** ; previewCtx → **N92 fait** ; stripBuf → **N93 fait** ; stripTerritory → **N94 fait** ; gainBuf → **N95 fait** ; surveyTerritories → **N96 fait** ; ranked → **N97 fait** ; trackUnit → **N98 fait**) |
+| N10 | Divers P3 | P3 | ouvert (`Buildings.contextFor` → **N85 fait** ; `ChantierB` doomed/collapsing → **N86 fait** ; parked → **N87 fait** ; collapse remain → **N88 fait** ; destroyBuf → **N89 fait** ; validTiles → **N90 fait** ; allyBuf → **N91 fait** ; previewCtx → **N92 fait** ; stripBuf → **N93 fait** ; stripTerritory → **N94 fait** ; gainBuf → **N95 fait** ; surveyTerritories → **N96 fait** ; ranked → **N97 fait** ; trackUnit → **N98 fait** ; hover → **N99 fait** ; rankByTiles → **N100 fait**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -170,75 +170,13 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 | N31 | Scan bunkers O(B) | P1 | **fait** passe 10 (N42) |
 | N32 | `viewFor` requests expirées | P3 | **fait** |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34 | `areAllied` ignore expiry pacte | P2 | **fait** passe 7 |
-| N35 | `applyDefenseAura` buffer mort (posted) | P2 | **fait** posted=index ; écritures → **N45 fait** |
-| N36 | AimFront figé après premier lancer | P2 | **fait** passe 8 |
-| N37 | `findSeaPath` alloc 40k / appel | P2 | **fait** passe 8 (BFS) ; résultat → **N83 fait** |
-| N38 | `syncCarriers` O(B) / tick | P2 | **fait** passe 9 (dirty ; spawn → **N65 fait**) |
-| N39 | `tryAnnex` alloc + BFS mort | P2 | **fait** passe 9 |
-| N40 | Éliminés skip `Persistence.record` | P1 | **fait** passe 9 |
-| N41 | Sequence `nil` bypass idempotence | P2 | **fait** passe 10 |
-| N42 | `attackLogic` index bunkers | P1 | **fait** passe 10 |
-| N43 | Transports inbound `removePlayer` (feel) | P2 | **fait** passe 11 |
-| N44 | Missiles inbound vs slot recyclé | P2 | **fait** passe 11 |
-| N45 | `applyDefenseAura` writes mortes | P3 | **fait** passe 11 |
-| N46 | `Diplomacy.request` inverse périmée | P2 | **fait** passe 12 |
-| N47 | Cadran / colis recycle feel | P2 | **fait** passe 12 |
-| N48 | Convoi marchand inbound | P2 | **fait** passe 12 |
-| N49 | `retreatBoats` / `targetSlot` après flip | P2 | **fait** passe 13 |
-| N50 | `findSpawn` splash / fallout | P3 | **fait** passe 13 (C1+C2) |
-| N51 | Convoi vs PORT détruit au combat | P3 | **fait** passe 13 |
-| N52 | `claimSpawn` splash / fallout | P3 | **fait** passe 14 |
-| N53 | Débarquement auto vs côte flippée | P3 | **fait** passe 14 (option A) |
-| N54 | MIRV bus vs `findSpawn` | P3 | **fait** passe 14 (`spread + warheadRadius`) |
-| N55 | `claimSpawn` isolation disque | P3 | **fait** passe 15 |
-| N56 | Snapshot bateau `retreating` | P3 | **fait** passe 15 (option A) ; alloc → **N70 fait** |
-| N57 | SAM scan O(B) / missile | P2 | **fait** passe 15 (`samsBySlot`) |
-| N58 | Hover client spawn isolation | P3 | **fait** passe 16 (`SpawnHint`) |
-| N59 | `samsOf` / bots scan O(B) | P2 | **fait** passe 16 (alloc → **N68 fait**) |
-| N60 | `stepCooldowns` O(B) / tick nuke | P2 | **fait** passe 16 (`samsBySlot` + `silosBySlot`) |
-| N61 | `Trade.step` scan FACTORY O(B) | P2 | **fait** passe 17 (`factoriesBySlot`) |
-| N62 | Bots upgrade + score nuke O(B) | P2 | **fait** passe 17 (`buildingsBySlot`) ; nested 90 → **N69 fait** |
-| N63 | `spawnTradeShips` O(ports²) feel | P2 | **fait** passe 17 (`portsByTile`) |
-| N64 | `refreshRailNetwork` scan gares O(B) | P3 | **fait** passe 17 (`buildingsBySlot[slot]`) ; alloc → **N84 fait** |
-| N65 | `syncCarriers` spawn NAVAL_BASE O(B) dirty | P3 | **fait** passe 18 (`navalBasesBySlot`) |
-| N66 | `Trade.step` alloc+sort liste usines 10 Hz | P3 | **fait** passe 18 (`factoryBuf`) |
-| N67 | `stepCarriers` nested O(C × B) 10 Hz | P2 | **fait** passe 19 (`carrierBuf`/`targetBuf`) |
-| N68 | `samsOf` alloc table 10 Hz bots | P3 | **fait** passe 19 (`samBuf`) |
-| N69 | `blastValue` × 90 tuiles frontière | P3 | **fait** passe 20 (`fillBlastBuf`) |
-| N70 | `snapshotBoats` alloc 10 Hz | P2 | **fait** passe 20 (`boatSnapBuf`) |
-| N71 | `snapshotMissiles` alloc 10 Hz | P3 | **fait** passe 21 (`missileSnapBuf`) |
-| N72 | `flushOwnerDelta` indices alloc | P3 | **fait** passe 21 (`dirtyIndexBuf`) |
-| N73 | `flushBuildingDelta` alloc 10 Hz | P3 | **fait** passe 22 (`buildingSnapBuf`) |
-| N74 | HUD fronts `replicate()` alloc 10 Hz | P3 | **fait** passe 22 (`frontHudForReplicate`) |
-| N75 | `buildPrices` alloc 10 Hz × slots | P3 | **fait** passe 23 (`pricesFor`) |
-| N76 | `stats[slot]` alloc 10 Hz × slots | P3 | **fait** passe 23 (`playerStatsForReplicate`) |
-| N77 | `Research.progress` alloc `ratios` | P3 | **fait** passe 24 (min courant) |
-| N78 | `Diplomacy.viewFor` alloc 7 tables 1 Hz | P3 | **fait** passe 24 (`viewBuf` par slot) |
-| N79 | `Diplomacy.step` alloc `expired` 10 Hz | P3 | **fait** passe 25 (`expiredBuf` + pool records) |
-| N80 | `Bots.neighborFactions` alloc hash contacts | P3 | **fait** passe 25 (`contactBuf`) |
-| N81 | `Bots.gatherSites` alloc array / décision | P3 | **fait** passe 26 (`siteBuf`, caps 40/60/45 inchangés) |
-| N82 | `stepElimination` alloc `doomed` 10 Hz | P3 | **fait** passe 26 (`elimBuf`, pas le doomed bâtiments de `removePlayer` → **N89 fait**) |
-| N83 | `findSeaPath` path + reversed | P3 | **fait** passe 27 (`pathWalkBuf`, retour **unique** pour `boat.path`) |
-| N84 | `refreshRailNetwork` stations / parent | P3 | **fait** passe 27 (`stationBuf`, pas de pool `building.links`) |
-| N85 | `Buildings.contextFor` table + closures | P3 | **fait** passe 28 (`ctxBuf` + closures module, pas le ctx client → **N92 fait**) |
-| N86 | `ChantierB` doomed / collapsing 10 Hz | P3 | **fait** passe 28 (`doomedBuf` hash + `collapsingBuf` pool records) |
-| N87 | `BoatFront.parked` par lancer | P3 | **fait** passe 29 (`parkedBuf`, truncate avant origLaunch) |
-| N88 | `collapseFaction` remaining / leftovers | P3 | **fait** passe 29 (`collapseRemainBuf` / `collapseLeftBuf`) |
-| N89 | `removePlayer` snapshot `doomed` bâtiments | P3 | **fait** passe 30 (`destroyBuf`, pas elimBuf / doomedBuf Attack) |
-| N90 | `Placement.validTiles` blockers / candidates | P3 | **fait** passe 30 (`blockBuf`/`candBuf`/`queueBuf`/`visitBuf`/`emptyTileBuf`) |
-| N91 | `Bots.decideDiplomacy` `or {}` | P3 | **fait** passe 31 (`allyBuf`, recette visual V42, pas contactBuf) |
-| N92 | `PlacementPreview.resolve` ctx hover | P3 | **fait** passe 31 (client, pas `ctxBuf` Buildings / pas `candBuf`) |
-| N93 | `stepDoomsday` `toStrip` | P3 | **fait** passe 32 (`stripBuf`, recette visual V43, scan O(carte) reste N9) |
-| N94 | `stripTerritory` `border`/`coast` | P3 | **fait** passe 32 (`table.clear` in-place, pas de hash partagé) |
-| N95 | `WorldRenderer.applyDelta` gains/losses/others | P3 | **fait** passe 33 (`gainBuf`/`lossBuf`/`otherBuf`, recette visual V48) |
-| N96 | `FactionLabels.surveyTerritories` sumX/sumY/counts | P3 | **fait** passe 33 (`sumXBuf` hash `table.clear`, recette visual V49) |
-| N97 | `HUD.update` ranked + records | P3 | **fait** cette passe (`self.ranked` inner, recette visual V50) |
-| N98 | `Overlay.applyUnits` track + extra | P3 | **fait** cette passe (hoist `trackUnit`, extra muté, recette visual V52) |
-| N99 | `init.client` closures hover 60 Hz | P3 | **nouveau** (hoist `hoverOwnerAt`/`hoverBuildingAt`, recette visual V53 déjà sur `36bc`) |
-| N100 | `HUD.update` comparateur `table.sort` | P3 | **nouveau** (`rankByTiles` module, recette visual V54) |
+| N34–N98 | (voir rapport #106) | — | **faits** |
+| N99 | `init.client` closures hover 60 Hz | P3 | **fait** cette passe (`previewOwnerAt`/`previewBuildingAt`, recette visual V53) |
+| N100 | `HUD.update` comparateur `table.sort` | P3 | **fait** cette passe (`rankByTiles` module, recette visual V54) |
+| N101 | Overlay `Vector2.new` cible 10 Hz | P3 | **nouveau** (`targetX`/`targetY` mutés, recette visual V55) |
+| N102 | `buildChunkBorders` ownerOf/emit/`BORDER_PASSES` | P3 | **nouveau** (closures module + constante, recette N85) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 / #22 / #24 / #26 / #29 / #32 / #34 / #36 / #38 / #41 / #42 / #45 / #48 / #51 / #53 / #56 / #59 / #62 / #65 / #68 / #71 / #75 / #78 / #82 / #86 / #89 / #93 / #96 / #99 / #101 / #106 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -293,22 +231,22 @@ allyBuf : bot sans pacte, next nil (N91)
 validTiles : deux resolve CITY, tile identique (N90)
 destroyBuf : leftover A→B, CITY B survit (N89)
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.72
+metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.33 p95TickMs=0.73
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **35/35 OK** — dont `identite, ere, diplomatie et classement` (N97 leftover 12→1 slot, `#ranked == 1`) et `navires, missiles et interpolation` (N98 extra `tx` muté, `rawequal` du record, navire `extra == nil`). `hover spawn isolation` (N58), `accrochage du placement` (N90+N92), `deltas de terrain` (N95) et `etiquettes de faction` (N96) restent verts. Overlay `previewTile(valid=false)` ne lève pas. Serveur **non** touché cette passe. `Placement.luau` **non** touché. `VictoryScreen.luau` **non** touché (copie `row.Text` tout de suite).
+Client : **35/35 OK** — dont `identite, ere, diplomatie et classement` (N97 leftover 12→1 slot, `#ranked == 1`, N100 même loi tiles desc) et `accrochage du placement` / `apercu de placement` (N92+N99 resolve inchangé). `navires, missiles et interpolation` (N98 extra `tx` muté) reste vert. Overlay `previewTile(valid=false)` ne lève pas. Serveur **non** touché cette passe. `PlacementPreview.luau` **non** touché. `VictoryScreen.luau` **non** touché (copie `row.Text` tout de suite). `Overlay.luau` **non** touché (Vector2 = N101).
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass34.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass35.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N97/N98 sont des pools client vérifiés par le banc headless.
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N99/N100 sont des hoists client vérifiés par le banc headless.
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N97 n’ajoute **pas** de require (`self.ranked` vit dans HUD). N98 n’ajoute **pas** de require (`trackUnit` vit dans Overlay). N99 restera dans `init.client`. N100 restera dans HUD (`rankByTiles`).
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N99 n’ajoute **pas** de require (`previewOwnerAt` vit dans `init.client`). N100 n’ajoute **pas** de require (`rankByTiles` vit dans HUD). N101 restera dans Overlay. N102 restera dans WorldRenderer.
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -339,8 +277,12 @@ Piège N96 : `sumXBuf` / `sumYBuf` / `countBuf` sont des **hash** (`table.clear`
 
 Piège N97 : `self.ranked` **est stocké**. Muter les records in-place, truncate **avant** sort. Ne pas `table.insert`. Ne pas remplacer `self.ranked` par une nouvelle table. Un leftover non truncaté ferait une ligne fantôme dans `VictoryScreen.show`. Distinct de N76 (records stats serveur). `VictoryScreen.show` copie `row.Text` tout de suite — il ne stocke pas l’identité du record.
 
-Piège N98 : `trackUnit` n’est pas réentrant. Extra missile : allouer `{tx,ty}` **seulement** à l’insert (ou si `unit.extra` nil) ; ensuite muter les champs. Navire : `extra` **nil** — ne pas recréer `{ retreating = … }` 10 Hz (`retreatTinted` suffit, N56). Ne pas changer `Vector2` current/target. Un leftover extra d’un id recyclé viserait un `tx/ty` fantôme. Distinct de N70/N71 (payload serveur, feel **avec** `retreating`).
+Piège N98 : `trackUnit` n’est pas réentrant. Extra missile : allouer `{tx,ty}` **seulement** à l’insert (ou si `unit.extra` nil) ; ensuite muter les champs. Navire : `extra` **nil** — ne pas recréer `{ retreating = … }` 10 Hz (`retreatTinted` suffit, N56). Ne pas changer `Vector2` current/target (**N101**). Un leftover extra d’un id recyclé viserait un `tx/ty` fantôme. Distinct de N70/N71 (payload serveur, feel **avec** `retreating`).
 
-Piège N99 (à venir) : hoister les deux closures dans `init.client`, capturer `world`/`overlay` module (pas les locals `w`/`o` de la frame). Overlay nil → owner 0 / building nil. Ne pas toucher `previewCtx` (N92). Ne pas toucher SpawnHint hover attaque. Recette visual V53 déjà sur `36bc` — porter, ne pas merger.
+Piège N99 : hoister les deux closures dans `init.client`, capturer `world`/`overlay` module (pas les locals `w`/`o` de la frame). Overlay nil → owner 0 / building nil. Ne pas toucher `previewCtx` (N92). Ne pas toucher SpawnHint hover attaque. Recette visual V53 déjà sur `36bc` — porter, ne pas merger. `init.client` n’est pas un `require` du banc : les checks Preview restent la preuve.
 
-Piège N100 (à venir) : hoister `rankByTiles` au module HUD. Même loi tiles desc / troupes tie-break. Ne pas retoucher les records N97. Ne pas porter Vector2 Overlay (visual V55). Recette visual V54 (spec sur `36bc`).
+Piège N100 : hoister `rankByTiles` au module HUD. Même loi tiles desc / troupes tie-break. Ne pas retoucher les records N97. Ne pas porter Vector2 Overlay (N101). Recette visual V54 déjà sur `e3ed` — porter, ne pas merger. Un leftover non truncaté ferait toujours une ligne fantôme — N97 déjà.
+
+Piège N101 (à venir) : muter `targetX`/`targetY` nombres. Adapter `stepInterpolation` dans le **même** commit. Extra missile inchangé (N98). Recette visual V55 (spec sur `e3ed`).
+
+Piège N102 (à venir) : poser `borderTerrain` / `borderOwner` / `borderFolder` / `borderSurface` au début de `buildChunkBorders`. `BORDER_PASSES` constante module. Ne pas changer la loi greedy. Recette N85.
