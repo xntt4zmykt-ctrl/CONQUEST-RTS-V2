@@ -106,8 +106,8 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- merger 076b. Leftover Parent = nil, pas Destroy. Name
 	-- DeliveryPulse. Euler N132 deja (wakeRot V80). Distinct de
 	-- V113 (Blast). Distinct de V114 (BlastSmoke). Distinct de
-	-- V115 (Shockwave). Distinct de V117 (LandingSplash). Pas
-	-- reentrant.
+	-- V115 (Shockwave). Distinct de V117 (LandingSplash). Distinct
+	-- de V118 (LaunchWake). Pas reentrant.
 	self.deliveryFree = {} :: { Part }
 
 	-- V117 : free-list LandingSplash PAR overlay (pas blastFree /
@@ -116,8 +116,19 @@ function Overlay.new(parent: Instance, terrain: buffer): Overlay
 	-- Destroy. Name LandingSplash. Euler N131 deja (wakeRot V79).
 	-- Distinct de V113 (Blast). Distinct de V114 (BlastSmoke).
 	-- Distinct de V115 (Shockwave). Distinct de V116
-	-- (DeliveryPulse). Pas reentrant.
+	-- (DeliveryPulse). Distinct de V118 (LaunchWake). Pas
+	-- reentrant.
 	self.splashFree = {} :: { Part }
+
+	-- V118 : free-list LaunchWake PAR overlay (pas blastFree /
+	-- smokeFree / shockFree / deliveryFree / splashFree). Recette
+	-- feel N160 inline — ne PAS merger d29b. Leftover Parent =
+	-- nil, pas Destroy. Name LaunchWake. Euler N130 deja (wakeRot
+	-- V78). Distinct de V113 (Blast). Distinct de V114
+	-- (BlastSmoke). Distinct de V115 (Shockwave). Distinct de
+	-- V116 (DeliveryPulse). Distinct de V117 (LandingSplash). Pas
+	-- reentrant.
+	self.wakeFree = {} :: { Part }
 
 	return self
 end
@@ -613,6 +624,7 @@ function Overlay.goldPopup(self: Overlay, tileIndex: number, gold: number, mine:
 		TextStrokeTransparency = 1,
 	}):Play()
 	task.delay(1.5, function()
+		-- Recycle goldPopup leftover V119 (feel N159).
 		if anchor.Parent then
 			anchor:Destroy()
 		end
@@ -788,20 +800,57 @@ local function trackUnit(
 		self.units[id] = unit
 		if not isMissile then
 			local origin = WorldSpace.tileToWorld(x, y)
-			local wake = routePart(self.root, "LaunchWake", Vector3.new(0.16, 2.5, 2.5), Color3.fromRGB(174, 231, 244), Enum.Material.Neon)
-			wake.Shape = Enum.PartType.Cylinder
+			-- V118 : recycler LaunchWake. Size (0.16, 2.5, 2.5) +
+			-- Transparency 0.34 + Color 174,231,244 + CFrame AVANT
+			-- Tween (un leftover Size = tween 9×9 / Transparency 1
+			-- du spawn precedent). Recette feel N160 inline —
+			-- ne PAS merger d29b. Name LaunchWake conserve. Euler
+			-- N130 deja (wakeRot V78). Pas de pool partage avec
+			-- Blast / BlastSmoke / Shockwave / DeliveryPulse /
+			-- LandingSplash. Ne pas nil les slots du pool (pop
+			-- O(1) : [n] = nil). Skip missiles conserve. Distinct
+			-- de V117 (splashFree). Distinct de V116 (deliveryFree).
+			-- Distinct de V115 (shockFree). Distinct de V113
+			-- (blastFree). Distinct de V114 (smokeFree). Distinct
+			-- de V81 (Shockwave wakeRot). Flame Size (V111)
+			-- inchangee. Ne pas modifier routePart.
+			local wakeFree = self.wakeFree
+			local pn = #wakeFree
+			local wake = if pn > 0 then wakeFree[pn] else nil
+			if wake then
+				wakeFree[pn] = nil
+			else
+				wake = Instance.new("Part")
+				wake.Name = "LaunchWake"
+				wake.Shape = Enum.PartType.Cylinder
+				wake.Anchored = true
+				wake.CanCollide = false
+				wake.CanTouch = false
+				wake.CanQuery = false
+				wake.CastShadow = false
+				wake.Material = Enum.Material.Neon
+				wake.TopSurface = Enum.SurfaceType.Smooth
+				wake.BottomSurface = Enum.SurfaceType.Smooth
+			end
+			wake.Name = "LaunchWake"
+			wake.Color = Color3.fromRGB(174, 231, 244)
 			wake.Transparency = 0.34
+			wake.Size = Vector3.new(0.16, 2.5, 2.5)
 			-- V78 : translation * rot cuit. Plus de CFrame.Angles spawn.
+			-- Recette feel N130. Y + 0.12 inchange. Distinct de V79
+			-- (despawn, Y + 0.14). Distinct de DeliveryPulse (V80 +
+			-- V116 recycle). Distinct de Shockwave (V81). Distinct
+			-- de LandingSplash (V79 + V117 recycle). Wake recycle
+			-- (V118).
 			wake.CFrame = CFrame.new(origin.X, Config.OCEAN_LEVEL + 0.12, origin.Z) * self.wakeRot
+			wake.Parent = self.root
 			TweenService:Create(wake, TweenInfo.new(0.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.16, 9, 9),
 				Transparency = 1,
 			}):Play()
-			-- Recycle LaunchWake leftover V118 (feel N160).
 			task.delay(0.8, function()
-				if wake.Parent then
-					wake:Destroy()
-				end
+				wake.Parent = nil
+				wakeFree[#wakeFree + 1] = wake
 			end)
 		end
 	elseif isMissile then
@@ -855,8 +904,9 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				-- Destroy modele navire conserve. Skip missiles
 				-- conserve. Distinct de V116 (deliveryFree). Distinct
 				-- de V115 (shockFree). Distinct de V113 (blastFree).
-				-- Distinct de V114 (smokeFree). Distinct de V81
-				-- (Shockwave wakeRot). Flame Size (V111) inchangee.
+				-- Distinct de V114 (smokeFree). Distinct de V118
+				-- (wakeFree). Distinct de V81 (Shockwave wakeRot).
+				-- Flame Size (V111) inchangee.
 				local splashFree = self.splashFree
 				local pn = #splashFree
 				local splash = if pn > 0 then splashFree[pn] else nil
@@ -881,7 +931,7 @@ function Overlay.applyUnits(self: Overlay, boats: { Types.BoatSnapshot }, missil
 				splash.Size = Vector3.new(0.18, 3, 3)
 				-- V79 : translation * rot cuit. Plus de CFrame.Angles despawn.
 				-- Recette feel N131. Y + 0.14 inchange. Distinct de V78 (spawn,
-				-- Y + 0.12). Distinct de DeliveryPulse (V80 + V116
+				-- Y + 0.12, recycle V118). Distinct de DeliveryPulse (V80 + V116
 				-- recycle). Distinct de Shockwave (V81). Splash recycle
 				-- (V117).
 				splash.CFrame = CFrame.new(last.X, Config.OCEAN_LEVEL + 0.14, last.Z) * self.wakeRot
@@ -958,7 +1008,8 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 			-- conserve. Distinct de V115 (shockFree). Distinct de
 			-- V113 (blastFree). Distinct de V114 (smokeFree). Distinct
 			-- de V81 (Shockwave wakeRot). Distinct de V117
-			-- (splashFree). Flame Size (V111) inchangee.
+			-- (splashFree). Distinct de V118 (wakeFree). Flame Size
+			-- (V111) inchangee.
 			local deliveryFree = self.deliveryFree
 			local pn = #deliveryFree
 			local pulse = if pn > 0 then deliveryFree[pn] else nil
@@ -1113,7 +1164,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- V112 (Ground/Border, WorldRenderer). Distinct de V81 (Shockwave
 	-- wakeRot). Distinct de V115 (shockFree). Distinct de V116
 	-- (DeliveryPulse deliveryFree). Distinct de V117
-	-- (LandingSplash splashFree). Flame Size (V111) inchangee.
+	-- (LandingSplash splashFree). Distinct de V118 (LaunchWake
+	-- wakeFree). Flame Size (V111) inchangee.
 	local free = self.blastFree
 	local n = #free
 	local sphere = if n > 0 then free[n] else nil
@@ -1148,7 +1200,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- (Blast blastFree). Distinct de V114 (BlastSmoke smokeFree).
 	-- Distinct de V81 (wakeRot). Distinct de V116 (DeliveryPulse
 	-- deliveryFree). Distinct de V117 (LandingSplash splashFree).
-	-- Flame Size (V111) inchangee.
+	-- Distinct de V118 (LaunchWake wakeFree). Flame Size (V111)
+	-- inchangee.
 	local shockFree = self.shockFree
 	local kn = #shockFree
 	local shockwave = if kn > 0 then shockFree[kn] else nil
@@ -1194,7 +1247,8 @@ function Overlay.explosion(self: Overlay, x: number, y: number, radius: number)
 	-- Distinct de V113 (Blast blastFree). Distinct de V115 (Shockwave
 	-- shockFree). Distinct de V116 (DeliveryPulse deliveryFree).
 	-- Distinct de V117 (LandingSplash splashFree). Distinct de
-	-- V81 (Shockwave wakeRot). Flame Size (V111) inchangee.
+	-- V118 (LaunchWake wakeFree). Distinct de V81 (Shockwave
+	-- wakeRot). Flame Size (V111) inchangee.
 	local smokeFree = self.smokeFree
 	for i = 1, 5 do
 		local sn = #smokeFree
