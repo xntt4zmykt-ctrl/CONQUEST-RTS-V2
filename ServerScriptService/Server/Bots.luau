@@ -135,6 +135,8 @@ local function humanTargetProtected(
 	-- joueur controle un territoire suffisant ou prend lui-meme de l'avance.
 	return target.tiles < Config.BOT_HUMAN_PROTECTION_TILES and attacker.tiles > target.tiles
 end
+-- Exporte pour les tribus (meme grace / meme protection tuiles).
+Bots.humanTargetProtected = humanTargetProtected
 
 -- Le leader ne doit pas seulement etre "la meilleure cible" : quand il a
 -- deja pris une avance nette, les factions secondaires doivent comprendre
@@ -438,7 +440,7 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 
 		if rng:NextNumber() < Config.COALITION_ALLY_CHANCE then
 			for other, ps2 in state.players do
-				if other ~= slot and other ~= leader and not allies[other] then
+				if other ~= slot and other ~= leader and not state:areAllied(slot, other) then
 					Diplomacy.request(state, slot, other)
 					return
 				end
@@ -453,6 +455,9 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	-- Sauf pendant une coalition : trahir un compagnon d'infortune pendant qu'un
 	-- geant occupe la moitie de la carte n'est pas un calcul, c'est un suicide.
 	for ally in allies do
+		if not state:areAllied(slot, ally) then
+			continue
+		end
 		local mine = strengthOf(state, slot)
 		local theirs = strengthOf(state, ally)
 		local protectedByCoalition = threatened and ally ~= leader
@@ -476,7 +481,9 @@ local function decideDiplomacy(state: GameState, ps: GameState.PlayerState, rng:
 	if rng:NextNumber() < 0.3 then
 		local contacts = neighborFactions(state, slot)
 		for other in contacts do
-			if other ~= NEUTRAL and not allies[other] and not (threatened and other == leader) then
+			-- areAllied, pas la table brute : un pacte perime reste dans
+			-- alliances[] jusqu'a Diplomacy.step, qui tourne APRES Bots.step.
+			if other ~= NEUTRAL and not state:areAllied(slot, other) and not (threatened and other == leader) then
 				if strengthOf(state, other) > strengthOf(state, slot) * 1.3 then
 					Diplomacy.request(state, slot, other)
 					return
@@ -517,10 +524,19 @@ local function decideChat(state: GameState, ps: GameState.PlayerState, rng: Rand
 		end
 	end
 	if worst then
+		local hasAlly = false
 		local allies = state.alliances[slot]
-		local hasAlly = allies ~= nil and next(allies) ~= nil
+		if allies then
+			for other in allies do
+				if state:areAllied(slot, other) then
+					hasAlly = true
+					break
+				end
+			end
+		end
 		-- Avec des allies on demande du renfort, seul on designe la menace a
 		-- toute la carte : dans les deux cas on cherche a ne pas mourir seul.
+		-- Un pacte perime encore present dans la table ne compte pas.
 		if hasAlly then
 			if Diplomacy.sendQuickChat(state, slot, "help_defend", worst) then
 				return
