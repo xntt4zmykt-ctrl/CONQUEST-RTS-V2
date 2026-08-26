@@ -960,8 +960,31 @@ function GameState.removePlayer(self: GameState, slot: number)
 		set[slot] = nil
 	end
 	self.allianceCooldowns[slot] = nil
+	-- Inbound : sinon un embargo / une proposition / une intention de
+	-- prolongation vise encore un slot recycle par le prochain addPlayer.
+	for _, set in self.requests do
+		set[slot] = nil
+	end
 	self.requests[slot] = nil
+	for _, set in self.embargoes do
+		set[slot] = nil
+	end
 	self.embargoes[slot] = nil
+	if self.allianceExtensions then
+		for _, set in self.allianceExtensions do
+			set[slot] = nil
+		end
+		self.allianceExtensions[slot] = nil
+	end
+	if self.quickChatSent then
+		self.quickChatSent[slot] = nil
+	end
+	if self.quickChatLast then
+		self.quickChatLast[slot] = nil
+	end
+	if self.targetMarks then
+		self.targetMarks[slot] = nil
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
@@ -994,10 +1017,31 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 	return true
 end
 
+--[[
+	Un pacte n'est honorable que s'il est symetrique ET encore dans son delai.
+
+	flush() tourne avant Diplomacy.step : sans le garde d'expiry, Attack / Boat /
+	Nuke / dons voient encore 1 tick de paix fantome (le meme bug que viewFor
+	sur les propositions). Une valeur non numerique (`true` dans les tests)
+	reste un pacte vivant — la production n'ecrit que des ticks d'echeance.
+]]
+local function pactStillLive(self: GameState, expiry: any): boolean
+	if expiry == nil then
+		return false
+	end
+	if typeof(expiry) == "number" then
+		return self.tick < expiry
+	end
+	return expiry == true
+end
+
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
 	local ab = self.alliances[a]
 	local ba = self.alliances[b]
-	return ab ~= nil and ab[b] ~= nil and ba ~= nil and ba[a] ~= nil
+	if not ab or not ba then
+		return false
+	end
+	return pactStillLive(self, ab[b]) and pactStillLive(self, ba[a])
 end
 
 --=============================================================================
@@ -1421,7 +1465,7 @@ function GameState.stepAttacks(self: GameState)
 		-- Le delai de retraite est ecoule : les survivants rentrent au pays,
 		-- comme lorsqu'un front s'epuise naturellement.
 		if atk.retreatAt and self.tick >= atk.retreatAt then
-			attacker.troops += math.max(0, atk.troops)
+			attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
 			table.remove(self.attacks, i)
 			continue
 		end
