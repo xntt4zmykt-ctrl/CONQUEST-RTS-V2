@@ -6626,6 +6626,8 @@ do
 	-- N70 : snapshotBoats recycle. 1 carrier + 1 transport retreating,
 	-- pas de path/homeTile. Retirer le transport → length 1. Destroy base
 	-- → length 0 (pas de fuite du premier remplissage).
+	-- N2 : `#snaps == 0` apres truncate est le predicat lastUnitEmpty
+	-- (init.server hors bundle). Premier vide fire ; second skip.
 	local state = GameState.new(1070)
 	local owner = state:addPlayer(nil, "FlotteSnap", Random.new(90), 0)
 	if not owner then
@@ -6724,6 +6726,7 @@ end
 do
 	-- N71 : snapshotMissiles recycle. 1 ogive, tx/ty honores, pas de
 	-- progress/speed/sx/sy. Vider missiles → length 0. Relancer → length 1.
+	-- N2 : `#snaps == 0` conjointement avec N70 alimente lastUnitEmpty.
 	local state = GameState.new(1071)
 	local bomber = state:addPlayer(nil, "OgiveSnap", Random.new(93), 0)
 	if not bomber then

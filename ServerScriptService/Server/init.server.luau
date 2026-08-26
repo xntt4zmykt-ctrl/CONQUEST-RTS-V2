@@ -99,6 +99,11 @@ local snapshotCooldown: { [number]: number } = {}
 local snapshotCount: { [number]: number } = {}
 local joinCooldown: { [number]: number } = {}
 local currentMapMeta: any = nil
+-- N2 : dernier UnitSnapshot envoye etait vide-vide. Reset a startMatch
+-- (premier vide du match DOIT fire). Ne pas comparer l'identite de
+-- boatSnapBuf / missileSnapBuf (buffers mutes). StateDelta toujours
+-- fire ici — empreinte stats = leftover.
+local lastUnitEmpty = false
 
 -- Nation choisie au menu, par joueur. Elle sert de nom de faction : un joueur
 -- se reconnait a son pays, pas a son pseudo Roblox.
@@ -321,6 +326,7 @@ local function startMatch()
 	TickMetrics.reset()
 	table.clear(snapshotCooldown)
 	table.clear(snapshotCount)
+	lastUnitEmpty = false
 
 	state = GameState.new(seed)
 	state.mode = activeMode
@@ -746,12 +752,17 @@ local function replicate()
 	-- Unites : peu nombreuses, donc envoyees en clair. L'instantane vide est
 	-- important lui aussi : c'est lui qui retire le dernier navire du client et
 	-- declenche son animation d'arrivee au lieu de laisser un fantome en mer.
+	-- N2 : skip vide-vide seulement si le dernier envoi etait deja vide.
+	-- Premier vide -> fire. StateDelta toujours (empreinte leftover).
 	-- snapshotBoats (N56) porte `retreating`, jamais path / homeTile.
 	local boats = state:snapshotBoats()
 	-- snapshotMissiles (N71) : Types.MissileSnapshot seulement, pas progress.
 	local missiles = state:snapshotMissiles()
-
-	fireDeployed(unitSnapshot, boats, missiles)
+	local unitEmpty = #boats == 0 and #missiles == 0
+	if not (unitEmpty and lastUnitEmpty) then
+		fireDeployed(unitSnapshot, boats, missiles)
+		lastUnitEmpty = unitEmpty
+	end
 
 	-- La vue diplomatique est propre a chaque joueur, donc envoyee une fois par
 	-- seconde seulement — elle change rarement et coute cher a construire.
