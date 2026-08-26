@@ -86,9 +86,10 @@ local function addWake(visual: Visual)
 	-- kind==1 — ne PAS retoucher la rampe). Distinct de V95
 	-- (MissileBody yaw Y=90°, cylindre — ne PAS retoucher le
 	-- corps). Distinct de V100 (trail offset.Z,
-	-- UnitModels.place). Distinct de V78 (LaunchWake Overlay, wakeRot
-	-- cuit, Y = OCEAN+0.12 — autre objet). Construction de
-	-- modele, pas 60 Hz.
+	-- UnitModels.place). Distinct de V106 (wake Transparency
+	-- offset.X, UnitModels.place — 60 Hz, pas ce helper). Distinct
+	-- de V78 (LaunchWake Overlay, wakeRot cuit, Y = OCEAN+0.12 —
+	-- autre objet). Construction de modele, pas 60 Hz.
 	-- addPart pose part.CFrame = offset ; Overlay place compose
 	-- frame * offset ensuite. Size 1.15, 0.08, 6.5 / FOAM / Neon /
 	-- Transparency 0.62 / role wake / Name Wake inchanges. Call sites
@@ -373,18 +374,31 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- (V71). Roues camion inchangees (V72). BuildingModels
 			-- Radar/Flag/Boom inchanges (V70). Flame Size inchange
 			-- (V74). Trail offset.Z inchange (V100). Feux offset.X
-			-- (V105, elseif plus bas). Wake leftover V106.
+			-- (V105). Wake offset.X (V106, elseif plus bas). Flag
+			-- leftover V107.
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(0, time * 2.2, 0)
 		elseif piece.role == "flag" then
+			-- Leftover V107 : pitch synchrone sin(time * 5), sans
+			-- offset.X. Amplitude 0.06 / frequence 5 inchangees.
+			-- Distinct de V106 (wake Transparency, elseif suivant).
+			-- Distinct de V73 (fromEulerAnglesYXZ deja). Un flag par
+			-- navire. Carrier X=3.05 / transport X=0.
 			localFrame = localFrame * CFrame.fromEulerAnglesYXZ(math.sin(time * 5) * 0.06, 0, 0)
 		elseif piece.role == "wake" then
-			-- Leftover V106 : phase synchrone sin(time * 5), sans
-			-- offset.X. Wake X=±2.15 (side ∈ {-1,1}), meme Z 5.5 —
-			-- ne PAS user offset.Z. Distinct de V105 (feux
-			-- offset.X). Distinct de V100 (trail offset.Z). Amplitude
-			-- 0.06 / frequence 5 / clamp [0.48, 0.82] / base 0.76 /
-			-- speed * 0.08 inchanges.
-			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5) * 0.06, 0.48, 0.82)
+			-- V106 : phase depuis offset.X. Plus de lockstep
+			-- sin(time * 5) sans phase. offset est deja un CFrame
+			-- pose a addWake. Wake X=±2.15 (side ∈ {-1,1}), meme Z
+			-- 5.5 — ne PAS user offset.Z (resterait lockstep).
+			-- Amplitude 0.06, frequence 5, clamp [0.48, 0.82],
+			-- base 0.76, speed * 0.08, * 0.1 inchanges (famille
+			-- V98/V104/V105). Pas de Position. Recette analogique
+			-- V105 — ne PAS merger c450 / ee71. Distinct de V105
+			-- (feux offset.X, elseif plus bas). Distinct de V100
+			-- (trail offset.Z). Distinct de leftover V107 (flag
+			-- pitch, pas Transparency). Un elseif, role == "wake"
+			-- inchange. Name Wake inchange. Construction addWake
+			-- inchangee (V92).
+			piece.part.Transparency = math.clamp(0.76 - speed * 0.08 + math.sin(time * 5 + piece.offset.X * 0.1) * 0.06, 0.48, 0.82)
 		elseif piece.role == "flame" then
 			piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
 		elseif piece.role == "trail" then
@@ -399,9 +413,9 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- Distinct de V98 (CityWindows rest.X). Distinct de V104
 			-- (FactoryOutput rest.X / SiloWarning rest.Z,
 			-- BuildingModels.animate — autre fichier). Distinct de
-			-- V105 (feux navire offset.X, elseif suivant). Trois
-			-- Parts Exhaust par missile. Construction createMissile
-			-- inchangee.
+			-- V105 (feux navire offset.X, elseif suivant). Distinct de
+			-- V106 (wake Transparency, elseif wake). Trois Parts Exhaust
+			-- par missile. Construction createMissile inchangee.
 			piece.part.Transparency = math.clamp(piece.part.Transparency + math.sin(time * 9 + piece.offset.Z) * 0.035, 0.25, 0.9)
 		elseif piece.role == "light" then
 			-- V105 : phase depuis offset.X. Plus de lockstep
@@ -414,8 +428,8 @@ function UnitModels.place(visual: Visual, frame: CFrame, time: number, speed: nu
 			-- ee71. Distinct de V100 (trail offset.Z, elseif
 			-- precedent). Distinct de V104 (FactoryOutput /
 			-- SiloWarning, BuildingModels.animate — autre fichier).
-			-- Distinct de leftover V106 (wake Transparency, pas de
-			-- phase spatiale). Un elseif, role == "light" inchange.
+			-- Distinct de V106 (wake Transparency). Distinct de leftover
+			-- V107 (flag pitch). Un elseif, role == "light" inchange.
 			-- Names PortLight / StarboardLight inchanges.
 			piece.part.Transparency = if math.sin(time * 3 + piece.offset.X * 0.1) > -0.2 then 0 else 0.45
 		end

@@ -333,7 +333,7 @@ check("fil de notifications sature", function()
 	-- les 3 plus recents restent, rawequal des restants apres overflow.
 	-- MAX_FEED_ENTRIES=3. Leftover V102 (40 chunks, compact seuil 32)
 	-- dans le check construction — doit rester vert. Feux navire fermes
-	-- (V105). Wake leftover V106.
+	-- (V105). Wake Transparency fermee (V106). Flag leftover V107.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -736,7 +736,8 @@ check("construction du monde 3D", function()
 	-- Recycle Ground/Border (feel N106) non porte. Distinct de V100
 	-- (trail offset.Z). Distinct de V48 (applyDelta). FactoryOutput /
 	-- SiloWarning fermees (V104, check modeles). Feux navire fermes
-	-- (V105, check navires). HUD feed leftover V103. Wake leftover V106.
+	-- (V105, check navires). HUD feed leftover V103. Wake Transparency
+	-- fermee (V106). Flag leftover V107.
 	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
 	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
 	world:markChunkDirty(0)
@@ -761,7 +762,8 @@ check("construction du monde 3D", function()
 	-- Recette feel N114 inline — ne PAS merger 846c. Recycle Parts
 	-- N106 non porte. Distinct de V48 (applyDelta). HUD feed leftover
 	-- V103. FactoryOutput / SiloWarning fermees (V104). Feux navire
-	-- fermes (V105). Wake leftover V106.
+	-- fermes (V105). Wake Transparency fermee (V106). Flag leftover
+	-- V107.
 	local compactChunks = {}
 	for chunk in world.chunkFolders do
 		table.insert(compactChunks, chunk)
@@ -1391,7 +1393,9 @@ check("modeles procéduraux : le palier change la silhouette", function()
 	-- (warning). Distinct de V98 (CityWindows rest.X). Distinct de
 	-- V99 (beacons rest.Z, leftover ci-dessus — doit rester vert).
 	-- Distinct de V103 (feedEntries, HUD). Distinct de V105
-	-- (feux navire offset.X, check navires — fermee ici). Animate AVANT
+	-- (feux navire offset.X, check navires — fermee ici). Distinct
+	-- de V106 (wake Transparency, check navires — fermee ici).
+	-- Animate AVANT
 	-- playConstruction (usine / silo n'ont pas ConstructionUntil).
 	local output = factory:FindFirstChild("FactoryOutput")
 	assert(output, "usine sans FactoryOutput")
@@ -1900,8 +1904,8 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). Leftover V77 (Preview hover)
-	-- dans le check apercu. Leftover V106 wake Transparency.
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). Leftover V77 (Preview hover)
+	-- dans le check apercu. Leftover V107 flag pitch.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
 	local bakedWake = overlay.wakeRot
@@ -2108,7 +2112,8 @@ check("navires, missiles et interpolation", function()
 	-- Deux stepInterpolation ci-dessous → Part rawequal, Transparency
 	-- ∈ [0.25, 0.9]. Ne pas merger feel. FactoryOutput / SiloWarning
 	-- fermees (V104, check modeles). Feux navire fermes (V105,
-	-- ci-dessous). Leftover V106 wake Transparency.
+	-- ci-dessous). Wake Transparency fermee (V106, ci-dessous). Leftover
+	-- V107 flag pitch.
 	local exhaustN = 0
 	local aTrail
 	for _, piece in overlay.units[3].visual.pieces do
@@ -2136,9 +2141,9 @@ check("navires, missiles et interpolation", function()
 	-- bloc commun Mast/Radar/Flag/feux. Missile id 3 : 0. Recette
 	-- analogique V104 SiloWarning — ne PAS merger c450 / ee71.
 	-- Distinct de V100 (trail offset.Z). Distinct de V104
-	-- (FactoryOutput / SiloWarning, check modeles). Distinct de leftover
-	-- V106 (wake Transparency). Deux stepInterpolation → Part rawequal,
-	-- Transparency ∈ {0, 0.45}. Ne PAS ajouter de feux au carrier.
+	-- (FactoryOutput / SiloWarning, check modeles). Distinct de V106
+	-- (wake Transparency, ci-dessous). Deux stepInterpolation → Part
+	-- rawequal, Transparency ∈ {0, 0.45}. Ne PAS ajouter de feux au carrier.
 	local aLight
 	for _, id in { 1, 2 } do
 		local shipLightN = 0
@@ -2179,6 +2184,37 @@ check("navires, missiles et interpolation", function()
 		end
 	end
 	assert(missileLightN == 0, "missile avec feu navire")
+	-- V106 : ids 1/2/4 ont 2 Parts Name == Wake (role == "wake").
+	-- Offset local X == ±2.15 (side ∈ {-1,1}), Y == -0.68 (V92).
+	-- Missile id 3 : 0. Recette analogique V105 — ne PAS merger
+	-- c450 / ee71. Distinct de V105 (feux offset.X). Distinct de
+	-- V100 (trail offset.Z). Distinct de leftover V107 (flag pitch).
+	-- Distinct de V78 (LaunchWake Overlay, Y = OCEAN+0.12). Deux
+	-- stepInterpolation → Part rawequal, Transparency ∈ [0.48, 0.82].
+	local aWakePiece
+	for _, id in { 1, 2, 4 } do
+		local shipWakeN = 0
+		for _, piece in overlay.units[id].visual.pieces do
+			if piece.role == "wake" and piece.part.Name == "Wake" then
+				shipWakeN += 1
+				if aWakePiece == nil then
+					aWakePiece = piece
+				end
+			end
+		end
+		assert(shipWakeN == 2, "navire sans 2 Wake role")
+	end
+	assert(aWakePiece ~= nil and aWakePiece.offset, "Wake sans offset")
+	assert(math.abs(math.abs(aWakePiece.offset.X) - 2.15) < 1e-6, "Wake offset X")
+	assert(math.abs(aWakePiece.offset.Y + 0.68) < 1e-6, "Wake offset Y V106")
+	local wakePart = aWakePiece.part
+	local missileWakeRoleN = 0
+	for _, piece in overlay.units[3].visual.pieces do
+		if piece.role == "wake" or piece.part.Name == "Wake" then
+			missileWakeRoleN += 1
+		end
+	end
+	assert(missileWakeRoleN == 0, "missile avec Wake role")
 	overlay:stepInterpolation(1 / 60)
 	-- V73 : radar/flag fromEulerAnglesYXZ. Premier stepInterpolation
 	-- immobile compose UnitModels.place (distinct V71 : zero roulis).
@@ -2261,6 +2297,12 @@ check("navires, missiles et interpolation", function()
 	assert(
 		aLight.part.Transparency == 0 or aLight.part.Transparency == 0.45,
 		"feu Transparency hors {0, 0.45}"
+	)
+	assert(rawequal(aWakePiece.part, wakePart), "Part wake recreee")
+	assert(type(aWakePiece.part.Transparency) == "number", "Wake Transparency absente")
+	assert(
+		aWakePiece.part.Transparency >= 0.48 and aWakePiece.part.Transparency <= 0.82,
+		"Wake Transparency hors bande"
 	)
 	overlay:applyUnits({}, {})
 	-- V79 : 3 navires → 3 LandingSplash. Missile skip. Y = OCEAN + 0.14.
