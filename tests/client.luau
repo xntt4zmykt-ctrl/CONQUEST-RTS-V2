@@ -775,15 +775,17 @@ check("calques d'entites, effets et apercu", function()
 	-- Tween Create conserve. Leftover N154 previewTile skip (2001
 	-- puis 2002 deux indices, Part reutilisee) doit rester vert.
 	-- N168 : clearSelection Parent = nil, garder self.selection.
-	-- Reselect 2000 reparente (rawequal Parent root). Pas de
-	-- testFlushDelays ici. Leftover N167 fil (check notifications
-	-- sans flush + vagues reuse) et leftover N152 flame (check
-	-- navires) doivent rester verts. Recette leftover N167, pas
-	-- merger visual V83 SelectionRing pulseRot. HUD / UnitModels /
-	-- Overlay / PlacementPreview / BuildingModels non touches.
-	-- tileFlash leftover N156 (check vagues, free-list) doit
-	-- rester vert. clearActionPreview Destroy conserve (leftover
-	-- N169).
+	-- Reselect 2000 reparente (rawequal Parent root). N169 :
+	-- clearActionPreview Parent = nil, garder self.actionPreview.
+	-- Re-preview 2001 reparente (rawequal Parent root). Nil skip
+	-- N154 obligatoire. Pas de testFlushDelays ici. Leftover N167
+	-- fil (check notifications sans flush + vagues reuse) et
+	-- leftover N152 flame (check navires) doivent rester verts.
+	-- Recette leftover N168, pas merger visual V77 PlacementPreview.
+	-- HUD / UnitModels / Overlay / PlacementPreview / BuildingModels
+	-- non touches. tileFlash leftover N156 (check vagues, free-list)
+	-- doit rester vert. HUD refreshChatSheet Destroy conserve
+	-- (leftover N170).
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
@@ -796,7 +798,17 @@ check("calques d'entites, effets et apercu", function()
 	assert(selection.Name == "SelectedTerritory", "Name selection mute")
 	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
+	local previewMarker = effects.actionPreview
+	assert(previewMarker ~= nil, "preview manquante")
+	assert(previewMarker.Name == "ActionPreview", "Name preview")
 	effects:clearActionPreview()
+	assert(rawequal(effects.actionPreview, previewMarker), "clearActionPreview a nile")
+	assert(previewMarker.Parent == nil, "clearActionPreview n'a pas unparente")
+	assert(previewMarker.Name == "ActionPreview", "Name preview perdu au clear")
+	assert(effects.actionPreviewIndex == nil, "skip N154 encore pose apres clear")
+	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
+	assert(rawequal(effects.actionPreview, previewMarker), "Part preview recree apres clear")
+	assert(rawequal(previewMarker.Parent, effects.root), "preview non reparentee")
 	effects:clearSelection()
 	assert(rawequal(effects.selection, selection), "clearSelection a nile")
 	assert(selection.Parent == nil, "clearSelection n'a pas unparente")

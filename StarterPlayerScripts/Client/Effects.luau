@@ -107,7 +107,7 @@ function Effects.clearSelection(self: Effects)
 	-- nil. N155 reuse inter-clics inchange (rawequal tant que
 	-- selection vit). Distinct flame leftover N152. Distinct HUD
 	-- N167 feedFree. Distinct previewTile N154. Distinct
-	-- clearActionPreview leftover N169 (Destroy conserve). Distinct
+	-- clearActionPreview N169 deja (Parent nil). Distinct
 	-- visual V83 pulseRot (ne pas merger 0b3d). Pas de free-list
 	-- tableau (un seul marqueur). Recette leftover N167, pas
 	-- merger visual. HUD / UnitModels / Overlay / BuildingModels
@@ -131,8 +131,12 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 	-- Distinct flame leftover N152 (Size = Vector3.new, ≠ visual V74
 	-- freeze). Distinct HUD N153 (feed plafond). Distinct visual V77
 	-- PlacementPreview early-out (ne pas merger 185a). Distinct
-	-- selectTile leftover N155 (reuse Part, deja). Recette leftover
-	-- N153, pas merger visual. HUD / UnitModels / Overlay /
+	-- selectTile leftover N155 (reuse Part, deja). Distinct
+	-- clearSelection N168 deja. N169 : reparent si Parent nil apres
+	-- clearActionPreview (plus de Destroy). Name ActionPreview
+	-- inchange. Skip index+valid+color inchange (ne doit PAS matcher
+	-- apres clear : les trois champs sont niles). Recette leftover
+	-- N168, pas merger visual. HUD / UnitModels / Overlay /
 	-- PlacementPreview inchanges.
 	if
 		marker
@@ -155,6 +159,12 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 		marker.Parent = self.root
 		self.actionPreview = marker
 	end
+	-- N169 : reparent APRES le skip (si skip fire, le marqueur
+	-- resterait unparented). Parent = self.root (pas overlay.root,
+	-- pas hud.feed). Pas de tableau previewFree (un seul marqueur).
+	if marker.Parent == nil then
+		marker.Parent = self.root
+	end
 
 	local base = WorldSpace.indexToWorld(index)
 	local height = WorldSpace.surfaceHeight(self.terrain, index)
@@ -167,13 +177,27 @@ function Effects.previewTile(self: Effects, index: number, color: Color3, valid:
 end
 
 function Effects.clearActionPreview(self: Effects)
-	if self.actionPreview then
-		self.actionPreview:Destroy()
-		self.actionPreview = nil
-		self.actionPreviewIndex = nil
-		self.actionPreviewValid = nil
-		self.actionPreviewColor = nil
+	-- N169 : Parent = nil, garder self.actionPreview. Pas de
+	-- Destroy, pas self.actionPreview = nil. Un second clear ne
+	-- double-unparent pas (garde Parent). Nil encore
+	-- actionPreviewIndex / Valid / Color : sinon skip N154 return
+	-- sur un Parent nil (marqueur invisible). previewTile reparent
+	-- self.root si Parent nil, APRES le skip. Name ActionPreview
+	-- inchange. N154 skip inter-hovers inchange. N168 selection
+	-- inchange. Distinct flame leftover N152. Distinct HUD leftover
+	-- N167 feedFree. Distinct HUD leftover N170 refreshChatSheet
+	-- (Destroy conserve). Distinct visual V77 (ne pas merger 185a).
+	-- Pas de free-list tableau (un seul marqueur — pas previewFree
+	-- / feedFree / flashFree / selection). Recette leftover N168,
+	-- pas merger visual. HUD / UnitModels / Overlay /
+	-- BuildingModels inchanges.
+	local marker = self.actionPreview
+	if marker and marker.Parent then
+		marker.Parent = nil
 	end
+	self.actionPreviewIndex = nil
+	self.actionPreviewValid = nil
+	self.actionPreviewColor = nil
 end
 
 --=============================================================================
