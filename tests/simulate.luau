@@ -4375,6 +4375,216 @@ end
 
 print("passe 22 : carrierBuf/targetBuf, fillBlastBuf OK")
 
+--[[
+	Nightly passe 23 — revue PR #67 : snapshotBoats/snapshotMissiles (V26).
+]]
+do
+	-- V26 : snapshotBoats recycle. 1 carrier + 1 transport, pas de path /
+	-- homeTile / retreating. Retirer le transport → length 1. Destroy base
+	-- → length 0 (pas de fuite du premier remplissage). Recette hardening
+	-- N51 / feel N70 sans le champ retreating (Overlay 34/34 ne le lit pas).
+	local empty = GameState.new(2301)
+	local emptyBoats = empty:snapshotBoats()
+	local emptyMissiles = empty:snapshotMissiles()
+	if emptyBoats == nil or emptyMissiles == nil then
+		fail("unitSnap — 0 unite a renvoye nil (attendu table vide recyclee)")
+	elseif #emptyBoats ~= 0 or #emptyMissiles ~= 0 then
+		fail(`unitSnap — 0 unite length boats={#emptyBoats} missiles={#emptyMissiles}`)
+	end
+
+	local state = GameState.new(2302)
+	local owner = state:addPlayer(nil, "FlotteSnap", Random.new(90), 0)
+	if not owner then
+		fail("boatSnapBuf — spawn impossible")
+	else
+		local site: number? = nil
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(state.owner, index) == owner.slot and not state.buildings[index] then
+				site = index
+				break
+			end
+		end
+		if not site then
+			fail("boatSnapBuf — tuile libre introuvable")
+		else
+			state:placeBuilding(site, Config.BUILDING.NAVAL_BASE, owner.slot)
+			Navy.step(state, Random.new(91))
+			table.insert(state.boats, {
+				id = state:nextId(),
+				slot = owner.slot,
+				kind = Navy.KIND_TRANSPORT,
+				troops = 400,
+				x = 3,
+				y = 4,
+				path = { site },
+				step = 1,
+				targetTile = site,
+				homeTile = site,
+			})
+			local snaps = state:snapshotBoats()
+			local n = 0
+			local sawCarrier = false
+			local sawTransport = false
+			local leaked = false
+			local transportOk = false
+			for _, snap in snaps do
+				n += 1
+				if (snap :: any).path ~= nil or (snap :: any).homeTile ~= nil then
+					leaked = true
+				end
+				if (snap :: any).retreating ~= nil then
+					leaked = true
+				end
+				if snap.kind == Navy.KIND_CARRIER then
+					sawCarrier = true
+				elseif snap.kind == Navy.KIND_TRANSPORT then
+					sawTransport = true
+					if snap.troops == 400 then
+						transportOk = true
+					end
+				end
+			end
+			if leaked then
+				fail("boatSnapBuf — path/homeTile/retreating fuite")
+			elseif n ~= 2 or #snaps ~= 2 then
+				fail(`boatSnapBuf — length {n}/#{#snaps}, attendu 2`)
+			elseif not sawCarrier or not sawTransport then
+				fail("boatSnapBuf — carrier ou transport manquant")
+			elseif not transportOk then
+				fail("boatSnapBuf — troops transport incorrect")
+			else
+				print("boatSnapBuf : 1 carrier + 1 transport, pas de path (V26)")
+				for i = #state.boats, 1, -1 do
+					if state.boats[i].kind == Navy.KIND_TRANSPORT then
+						table.remove(state.boats, i)
+					end
+				end
+				local after = state:snapshotBoats()
+				local afterN = 0
+				local leftoverTransport = false
+				for _, snap in after do
+					afterN += 1
+					if snap.kind == Navy.KIND_TRANSPORT then
+						leftoverTransport = true
+					end
+				end
+				if leftoverTransport or afterN ~= 1 or #after ~= 1 then
+					fail(`boatSnapBuf — truncate transport fuite (n={afterN} #{#after})`)
+				else
+					state:destroyBuilding(site)
+					Navy.step(state, Random.new(92))
+					local gone = state:snapshotBoats()
+					local goneN = 0
+					for _ in gone do
+						goneN += 1
+					end
+					if goneN ~= 0 or #gone ~= 0 then
+						fail(`boatSnapBuf — destroy base fuite (n={goneN} #{#gone})`)
+					else
+						print("boatSnapBuf : truncate 2→1→0 (V26)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V26 : snapshotMissiles recycle. 1 ogive, tx/ty honores, pas de
+	-- progress/speed/sx/sy. Vider missiles → length 0. Relancer → length 1.
+	local state = GameState.new(2303)
+	local bomber = state:addPlayer(nil, "OgiveSnap", Random.new(93), 0)
+	if not bomber then
+		fail("missileSnapBuf — spawn impossible")
+	else
+		local target = bomber.capitalTile
+		if not target then
+			fail("missileSnapBuf — capitale introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			table.insert(state.missiles, {
+				id = 1,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx + 3,
+				ty = ty + 4,
+				progress = 0.5,
+				speed = Config.MISSILE_SPEED,
+			})
+			local snaps = state:snapshotMissiles()
+			local n = 0
+			local leaked = false
+			local fieldsOk = false
+			for _, snap in snaps do
+				n += 1
+				if
+					(snap :: any).progress ~= nil
+					or (snap :: any).speed ~= nil
+					or (snap :: any).sx ~= nil
+					or (snap :: any).sy ~= nil
+				then
+					leaked = true
+				end
+				if snap.id == 1 and snap.tx == tx + 3 and snap.ty == ty + 4 and snap.kind == Config.NUKE.ATOM then
+					fieldsOk = true
+				end
+			end
+			if leaked then
+				fail("missileSnapBuf — progress/speed/sx/sy fuite")
+			elseif n ~= 1 or #snaps ~= 1 then
+				fail(`missileSnapBuf — length {n}/#{#snaps}, attendu 1`)
+			elseif not fieldsOk then
+				fail("missileSnapBuf — tx/ty/kind incorrects")
+			else
+				print("missileSnapBuf : 1 ogive, tx/ty, pas de progress (V26)")
+				table.clear(state.missiles)
+				local gone = state:snapshotMissiles()
+				local goneN = 0
+				for _ in gone do
+					goneN += 1
+				end
+				if goneN ~= 0 or #gone ~= 0 then
+					fail(`missileSnapBuf — truncate fuite (n={goneN} #{#gone})`)
+				else
+					table.insert(state.missiles, {
+						id = 2,
+						slot = bomber.slot,
+						kind = Config.NUKE.ATOM,
+						x = tx,
+						y = ty,
+						sx = tx,
+						sy = ty,
+						tx = tx + 1,
+						ty = ty + 1,
+						progress = 0.1,
+						speed = Config.MISSILE_SPEED,
+					})
+					local again = state:snapshotMissiles()
+					local againN = 0
+					local againOk = false
+					for _, snap in again do
+						againN += 1
+						if snap.id == 2 and snap.tx == tx + 1 and snap.ty == ty + 1 then
+							againOk = true
+						end
+					end
+					if againN ~= 1 or #again ~= 1 or not againOk then
+						fail(`missileSnapBuf — relance length {againN}/#{#again}`)
+					else
+						print("missileSnapBuf : truncate 1→0→1 (V26)")
+					end
+				end
+			end
+		end
+	end
+end
+
+print("passe 23 : snapshotBoats, snapshotMissiles OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
