@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Chantier B-E : combat OpenFront, fallout, spawn, warships, SAM, tribus config.
+	Chantier B-E : combat CONQUEST, fallout, spawn, warships, SAM, tribus config.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -18,6 +18,29 @@ local NEUTRAL = Config.NEUTRAL_SLOT
 local OCEAN = Config.TERRAIN.OCEAN
 local scratch = table.create(4, 0)
 local annexScratch = table.create(4, 0)
+-- tryAnnex : pools module-level (ISSUE-N39). Meme pattern que findSeaPath N37.
+-- Cap poche 280 inchange ; oceán = abort (enclave terrestre only).
+local annexVisitBuf = buffer.create(Config.TILE_COUNT)
+local annexQueue: { number } = table.create(280)
+local annexPocket: { number } = table.create(280)
+
+-- N86 : cancelOpposingFronts / collapsing recycle (recette N79 + table.clear
+-- hash N80). Hash sparse — ne pas iterer #doomedBuf. Truncate collapsing
+-- leftover AVANT traitement (recette N82). Non reentrant — stepAttacks
+-- unique par tick. Distinct de elimBuf (slots) et de retreatAttack (couple).
+type CollapseRec = { victim: number, captor: number }
+local doomedBuf: { [number]: boolean } = {}
+local collapsingBuf: { CollapseRec } = table.create(8)
+local collapseRecPool: { CollapseRec } = table.create(8)
+ChantierB.doomedBuf = doomedBuf
+-- N93 : liste temporaire du rot cadran. Array + truncate (recette
+-- visual V43 / N82 elimBuf). Distinct de N9 (scan O(carte) encore)
+-- et de N86 (collapsingBuf combat). Truncate leftover AVANT
+-- l'arrachage ; reset n=0 / truncate a 0 APRES pour qu'un second
+-- slot du meme tick n'arrache pas les tuiles du premier. Pas reentrant.
+-- stepDoomsday unique par tick, mais boucle les slots.
+local stripBuf: { number } = table.create(64)
+ChantierB.stripBuf = stripBuf
 
 local function within(x: number, lo: number, hi: number): number
 	return math.clamp(x, lo, hi)
@@ -39,12 +62,14 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 	local mag, speed = terrainMagSpeed(terrain)
 	local posted = false
 	if defender then
+		-- Index par camp (ISSUE-N42) : O(bunkers_défenseur), pas O(buildings).
+		-- Le buffer `defense` n'est plus ecrit (N45 Option A) ni lu ici.
 		local cx, cy = MapGen.fromIndex(tile)
 		local r = Config.DEFENSE_RADIUS or 30
 		local r2 = r * r
-		local DEF = Config.BUILDING.DEFENSE
-		for index, building in state.buildings do
-			if building.kind == DEF and building.slot == defender.slot then
+		local bunkers = state.bunkersBySlot and state.bunkersBySlot[defender.slot]
+		if bunkers then
+			for index in bunkers do
 				local bx, by = MapGen.fromIndex(index)
 				local dx, dy = bx - cx, by - cy
 				if dx * dx + dy * dy <= r2 then
@@ -73,8 +98,7 @@ function ChantierB.attackLogic(state, attackTroops: number, attacker: any, defen
 		if fallout then
 			attackerTroopLoss *= Config.FALLOUT_DEFENSE_MULT
 		end
-		attackerTroopLoss /= state:doctrineOf(attacker.slot).attack
-		attackerTroopLoss *= Doctrines.get(defender.doctrine).defense
+		-- Tables OF brutes : pas de multiplicateur de doctrine sur la perte.
 		return attackerTroopLoss, defenderTroopLoss, tilesPerTickUsed
 	else
 		local attackerTroopLoss = if attacker.isBot then mag / 10 else mag / 5
@@ -98,11 +122,34 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 	if defenderSlot == NEUTRAL then
 		return
 	end
-	local visited: { [number]: boolean } = {}
-	local queue = { seed }
-	visited[seed] = true
+	buffer.fill(annexVisitBuf, 0, 0)
+	table.clear(annexQueue)
+	table.clear(annexPocket)
+	local visited = annexVisitBuf
+	local queue = annexQueue
+	local pocket = annexPocket
+
+	-- Le combat vivant appelle tryAnnex APRES setOwner : `seed` appartient
+	-- deja a l'attaquant. L'ancienne file `{ seed }` marquait visited puis
+	-- `continue` (owner ~= defender) sans jamais etendre les voisins — BFS
+	-- mort, aucune enclave annexee. On part des voisins defenseur du seed
+	-- (seed = coupe). Si seed est encore defenseur (appel avant setOwner),
+	-- on l'enfile comme avant.
+	buffer.writeu8(visited, seed, 1)
+	if buffer.readu8(state.owner, seed) == defenderSlot then
+		table.insert(queue, seed)
+	else
+		local n0 = MapGen.neighbors(seed, annexScratch)
+		for i = 1, n0 do
+			local nb = annexScratch[i]
+			if buffer.readu8(state.owner, nb) == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
+				table.insert(queue, nb)
+			end
+		end
+	end
+
 	local head = 1
-	local pocket: { number } = {}
 	while head <= #queue do
 		local cur = queue[head]
 		head += 1
@@ -123,8 +170,8 @@ function ChantierB.tryAnnex(state, attackerSlot: number, defenderSlot: number, s
 			if owner ~= attackerSlot and owner ~= defenderSlot then
 				return
 			end
-			if owner == defenderSlot and not visited[nb] then
-				visited[nb] = true
+			if owner == defenderSlot and buffer.readu8(visited, nb) == 0 then
+				buffer.writeu8(visited, nb, 1)
 				table.insert(queue, nb)
 			end
 		end
@@ -167,7 +214,21 @@ function ChantierB.apply(cfg)
 	cfg.WARSHIP_RESPAWN_TICKS = 300
 	cfg.CARRIER_PATROL_RADIUS = 40
 	cfg.CARRIER_INTERCEPT_RANGE = 65
-	cfg.RETREAT_LOSS = 0.25
+	cfg.RETREAT_LOSS = 0.25 -- malusForRetreat contre joueur ; neutre = 0 (voir stepAttacks)
+	cfg.RETREAT_LOSS_NEUTRAL = 0
+	cfg.COLLAPSE_MIN_TILES = 100
+	cfg.COLLAPSE_TILE_RATIO = 0
+	-- Anti-blob OF : MIDPOINT 150k / DECAY ln2/50k sur carte pleine ; ici on
+	-- scale au landCount pour garder le meme profil relatif.
+	cfg.LARGE_EMPIRE_MIDPOINT_RATIO = 0.55 -- ~ OF 150k / ~270k terres typiques
+	cfg.LARGE_EMPIRE_SPREAD = 1 / 3
+	cfg.LARGE_DEFENDER_FLOOR = 0.70
+	cfg.LARGE_ATTACKER_THRESHOLD_RATIO = 100000 / 150000 -- OF : bonus au-dela de 100k vs midpoint 150k
+	cfg.LARGE_ATTACKER_SPEED_EXPONENT = 0.6
+	cfg.LARGE_ATTACKER_COST_EXPONENT = 0.35
+	cfg.LARGE_ATTACKER_SPEED_FLOOR = 0.35
+	cfg.SPAWN_NUKE_IMMUNITY = 5
+	cfg.PREPARATION_DURATION = 0
 	cfg.MISSILE_SPEED = 14
 	cfg.SAM_RANGE = 70
 	cfg.SAM_INTERCEPT_CHANCE = 1
@@ -182,7 +243,7 @@ function ChantierB.apply(cfg)
 	cfg.FALLOUT_TICKS = 800
 	cfg.FALLOUT_DEFENSE_MULT = 3.2
 	cfg.DEPLOY_DURATION = 15
-	-- Tribus OF (TribeSpawner)
+	-- Tribus PvE (TribeSpawner)
 	cfg.TRIBE_COUNT = 6
 	cfg.TRIBE_START_TROOPS = 4000
 	-- Trains / commerce (TrainExecution feel)
@@ -219,14 +280,14 @@ local function enqueueFront(state, atk, index)
 end
 
 function ChantierB.cancelOpposingFronts(state)
-	local doomed: { boolean } = {}
+	table.clear(doomedBuf)
 	for i = 1, #state.attacks do
-		if doomed[i] then
+		if doomedBuf[i] then
 			continue
 		end
 		local a = state.attacks[i]
 		for j = i + 1, #state.attacks do
-			if doomed[j] then
+			if doomedBuf[j] then
 				continue
 			end
 			local b = state.attacks[j]
@@ -235,16 +296,16 @@ function ChantierB.cancelOpposingFronts(state)
 				a.troops -= clash
 				b.troops -= clash
 				if a.troops <= 0 then
-					doomed[i] = true
+					doomedBuf[i] = true
 				end
 				if b.troops <= 0 then
-					doomed[j] = true
+					doomedBuf[j] = true
 				end
 			end
 		end
 	end
 	for i = #state.attacks, 1, -1 do
-		if doomed[i] or state.attacks[i].troops <= 0 then
+		if doomedBuf[i] or state.attacks[i].troops <= 0 then
 			local atk = state.attacks[i]
 			local owner = state.players[atk.attacker]
 			if owner and atk.troops > 0 then
@@ -265,11 +326,16 @@ function ChantierB.stripTerritory(state, ps)
 			state:setOwner(index, NEUTRAL)
 		end
 	end
-	ps.tiles = 1
+	-- setOwner a deja ramene tiles a 0 ; un 1 fictif faussait colonisedRatio
+	-- et les invariants pendant la fenetre de spawn au clic.
+	ps.tiles = 0
 	ps.capitalTile = nil
 	ps.awaitingSpawn = true
-	ps.border = {}
-	ps.coast = {}
+	-- N94 : table.clear in-place. Un `= {}` neuf abandonnait les hashes
+	-- deja vides par setOwner. Un buf module partage serait mute par
+	-- setOwner du premier claimSpawn voisin.
+	table.clear(ps.border)
+	table.clear(ps.coast)
 end
 
 function ChantierB.placeDisk(state, slot, center)
@@ -293,6 +359,7 @@ function ChantierB.placeDisk(state, slot, center)
 	if ps then
 		ps.capitalTile = center
 		ps.awaitingSpawn = false
+		ps.spawnTick = state.tick
 	end
 end
 
@@ -366,20 +433,32 @@ function ChantierB.install(GameState, Nukes)
 	local origStepAttacks = GameState.stepAttacks
 	function GameState.stepAttacks(self)
 		ChantierB.cancelOpposingFronts(self)
-		local collapsing = {}
+		local collapseN = 0
 		for i = #self.attacks, 1, -1 do
 			local atk = self.attacks[i]
 			local attacker = self.players[atk.attacker]
 			local defender = if atk.target ~= NEUTRAL then self.players[atk.target] else nil
-			if not attacker or (atk.target ~= NEUTRAL and not defender) then
+			if not attacker then
+				table.remove(self.attacks, i)
+				continue
+			end
+			if atk.target ~= NEUTRAL and not defender then
+				attacker.troops += math.max(0, atk.troops)
 				table.remove(self.attacks, i)
 				continue
 			end
 			if atk.retreatAt and self.tick >= atk.retreatAt then
-				attacker.troops += math.max(0, atk.troops) * (1 - (Config.RETREAT_LOSS or 0))
+				-- OF malusForRetreat : 25 % contre joueur, 0 % contre neutre.
+				local loss = if atk.target == NEUTRAL
+					then (Config.RETREAT_LOSS_NEUTRAL or 0)
+					else (Config.RETREAT_LOSS or 0.25)
+				attacker.troops += math.max(0, atk.troops) * (1 - loss)
 				table.remove(self.attacks, i)
 				continue
 			end
+			-- NOTE: Config.MAX_TILES_PER_TICK n'est PAS lu ici (valeur apply=56
+			-- inutilisee). Debit vivant = attackTilesPerTick * speedFactor, borne
+			-- par guard < 80. Voir ISSUE-N1 / ISSUE-N11.
 			local speedFactor = select(1, self:sizeAttackFactors(attacker))
 			local contact = math.max(1, atk.frontier.size)
 			local numTiles = ChantierB.attackTilesPerTick(atk.troops, defender, contact) * speedFactor
@@ -416,14 +495,26 @@ function ChantierB.install(GameState, Nukes)
 				end
 			end
 			if defender and defender.tiles > 0 and defender.tiles < self:collapseThreshold() then
-				table.insert(collapsing, { victim = atk.target, captor = atk.attacker })
+				collapseN += 1
+				local rec = collapseRecPool[collapseN]
+				if rec == nil then
+					rec = { victim = 0, captor = 0 }
+					collapseRecPool[collapseN] = rec
+				end
+				rec.victim = atk.target
+				rec.captor = atk.attacker
+				collapsingBuf[collapseN] = rec
 			end
 			if atk.troops <= 0 or Heap.isEmpty(atk.frontier) then
 				attacker.troops += math.max(0, atk.troops)
 				table.remove(self.attacks, i)
 			end
 		end
-		for _, entry in collapsing do
+		for i = #collapsingBuf, collapseN + 1, -1 do
+			collapsingBuf[i] = nil
+		end
+		for i = 1, collapseN do
+			local entry = collapsingBuf[i]
 			local victim = self.players[entry.victim]
 			if victim and victim.tiles > 0 and victim.tiles < self:collapseThreshold() then
 				if not victim.isBot then
@@ -473,6 +564,10 @@ function ChantierB.install(GameState, Nukes)
 				self.doomUnderSince[slot] = nil
 				continue
 			end
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une armee fantome.
+			if ps.awaitingSpawn or ps.tiles == 0 then
+				continue
+			end
 			if not self.doomWarnedAt[slot] then
 				self.doomWarnedAt[slot] = elapsed
 				if not ps.isBot then
@@ -498,16 +593,21 @@ function ChantierB.install(GameState, Nukes)
 			if quota <= 0 or ps.tiles <= 0 then
 				continue
 			end
-			local ripped, toStrip = 0, {}
+			local ripped, n = 0, 0
 			for index = 0, Config.TILE_COUNT - 1 do
 				if buffer.readu8(self.owner, index) == slot then
-					table.insert(toStrip, index)
-					if #toStrip >= quota * 4 then
+					n += 1
+					stripBuf[n] = index
+					if n >= quota * 4 then
 						break
 					end
 				end
 			end
-			for _, index in toStrip do
+			for i = #stripBuf, n + 1, -1 do
+				stripBuf[i] = nil
+			end
+			for i = 1, n do
+				local index = stripBuf[i]
 				if ripped >= quota then
 					break
 				end
@@ -518,6 +618,9 @@ function ChantierB.install(GameState, Nukes)
 					self:setOwner(index, NEUTRAL)
 					ripped += 1
 				end
+			end
+			for i = n, 1, -1 do
+				stripBuf[i] = nil
 			end
 		end
 	end
@@ -555,9 +658,17 @@ function ChantierB.installSpawn(GameState)
 		if not self:isLand(index) then
 			return false, "Choisis une terre."
 		end
-		local best = index
-		if buffer.readu8(self.owner, index) ~= NEUTRAL then
-			best = nil
+		-- N52 splash/fallout + N54 bus + N55 isolation (carre SPAWN_RADIUS+3
+		-- tout NEUTRAL, meme recette que findSpawn). Chercher plus loin dans
+		-- r=6, ne jamais poser un disque partiel colle a un empire.
+		local function isClaimable(i: number): boolean
+			return self:isLand(i)
+				and buffer.readu8(self.owner, i) == NEUTRAL
+				and self:isSpawnSafe(i)
+				and self:isSpawnIsolated(i)
+		end
+		local best: number? = if isClaimable(index) then index else nil
+		if not best then
 			local ox, oy = MapGen.fromIndex(index)
 			for r = 1, 6 do
 				for dy = -r, r do
@@ -565,7 +676,7 @@ function ChantierB.installSpawn(GameState)
 						local nx, ny = ox + dx, oy + dy
 						if MapGen.inBounds(nx, ny) then
 							local i = MapGen.toIndex(nx, ny)
-							if self:isLand(i) and buffer.readu8(self.owner, i) == NEUTRAL then
+							if isClaimable(i) then
 								best = i
 								break
 							end
