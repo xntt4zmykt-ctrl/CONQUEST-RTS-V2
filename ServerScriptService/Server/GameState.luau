@@ -128,6 +128,8 @@ export type Missile = {
 	warhead: boolean?,
 	radius: number?,
 	troopKill: number?,
+	-- True une fois qu'un SAM a choisi ce missile (exclusivite de cible).
+	engaged: boolean?,
 }
 
 export type Building = {
@@ -169,6 +171,12 @@ export type GameState = typeof(setmetatable(
 		-- Index PORT (ISSUE-N40) : spawnTradeShips n'a plus a parcourir
 		-- buildings. Distinct de `_carriersDirty` (NAVAL_BASE seulement).
 		portsByTile: { [number]: { slot: number, level: number } },
+		-- Index SAM par camp (ISSUE-N42 / feel N57). tryIntercept et samsOf
+		-- n'iterent plus le hash buildings. Pose/destroy/transfer seulement.
+		samsBySlot: { [number]: { [number]: true } },
+		-- Batiments dont cooldown > 0 (ISSUE-N43). stepCooldowns n'itere plus
+		-- tout buildings a 10 Hz. SAM et silos seulement en pratique.
+		coolingBuildings: { [number]: true },
 		-- Valeur = tick d'expiration du pacte. Les alliances ne sont pas
 		-- permanentes : voir Config.ALLIANCE_DURATION.
 		alliances: { [number]: { [number]: number } },
@@ -245,6 +253,8 @@ function GameState.new(seed: number): GameState
 	self.bunkersBySlot = {}
 	self.bunkerCells = {}
 	self.portsByTile = {}
+	self.samsBySlot = {}
+	self.coolingBuildings = {}
 	self.alliances = {}
 	self.allianceCooldowns = {}
 	-- Intentions de prolongation, marquees par chaque camp : le pacte n'est
@@ -774,6 +784,20 @@ local function indexPort(self: GameState, index: number, slot: number, level: nu
 	end
 end
 
+-- Index SAM : tryIntercept / samsOf (ISSUE-N42). Recette bunkersBySlot, sans grille.
+local function indexSam(self: GameState, slot: number, index: number, present: boolean)
+	local set = self.samsBySlot[slot]
+	if present then
+		if not set then
+			set = {}
+			self.samsBySlot[slot] = set
+		end
+		set[index] = true
+	elseif set then
+		set[index] = nil
+	end
+end
+
 function GameState.placeBuilding(self: GameState, index: number, kind: number, slot: number)
 	if self.buildings[index] then
 		return
@@ -784,6 +808,9 @@ function GameState.placeBuilding(self: GameState, index: number, kind: number, s
 
 	if kind == B.DEFENSE then
 		indexBunker(self, slot, index, true)
+	end
+	if kind == B.SAM then
+		indexSam(self, slot, index, true)
 	end
 	if kind == B.PORT then
 		indexPort(self, index, slot, 1, true)
@@ -848,6 +875,10 @@ function GameState.transferBuilding(self: GameState, index: number, newSlot: num
 		indexBunker(self, previousSlot, index, false)
 		indexBunker(self, newSlot, index, true)
 	end
+	if building.kind == B.SAM then
+		indexSam(self, previousSlot, index, false)
+		indexSam(self, newSlot, index, true)
+	end
 	if building.kind == B.PORT then
 		indexPort(self, index, newSlot, building.level, true)
 	end
@@ -867,8 +898,14 @@ function GameState.destroyBuilding(self: GameState, index: number)
 	if building.kind == B.DEFENSE then
 		indexBunker(self, building.slot, index, false)
 	end
+	if building.kind == B.SAM then
+		indexSam(self, building.slot, index, false)
+	end
 	if building.kind == B.PORT then
 		indexPort(self, index, building.slot, building.level, false)
+	end
+	if self.coolingBuildings then
+		self.coolingBuildings[index] = nil
 	end
 	self:countBuilding(building.slot, building.kind, -1, building.level)
 	self.buildings[index] = nil
@@ -1206,6 +1243,9 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.bunkersBySlot[slot] = nil
 	if self.bunkerCells then
 		self.bunkerCells[slot] = nil
+	end
+	if self.samsBySlot then
+		self.samsBySlot[slot] = nil
 	end
 
 	self.players[slot] = nil

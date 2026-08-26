@@ -102,7 +102,7 @@ function Nukes.launch(state: GameState, slot: number, targetTile: number, kind: 
 
 	local silo = state.buildings[bestSilo]
 	if silo then
-		silo.cooldown = Config.SILO_COOLDOWN
+		Buildings.armCooldown(state, bestSilo, Config.SILO_COOLDOWN)
 	end
 
 	ps.gold -= stats.cost
@@ -149,40 +149,76 @@ local function tryIntercept(state: GameState, missile: GameState.Missile, rng: R
 	local range = Config.SAM_RANGE or 70
 	local range2 = range * range
 	local best = nil
+	local bestIndex: number? = nil
 	local bestDist = math.huge
+	local samsBySlot = state.samsBySlot
 
-	for index, building in state.buildings do
-		if building.kind ~= Config.BUILDING.SAM then
-			continue
-		end
-		if building.slot == missile.slot then
-			continue
-		end
-		if state:areAllied(building.slot, missile.slot) then
-			continue
-		end
-		if building.cooldown > 0 then
-			continue
-		end
+	-- N42 : index samsBySlot, pas le hash buildings (recette feel N57).
+	if samsBySlot then
+		for slot, set in samsBySlot do
+			if slot == missile.slot then
+				continue
+			end
+			if state:areAllied(slot, missile.slot) then
+				continue
+			end
+			for tile in set do
+				local building = state.buildings[tile]
+				if not building or building.kind ~= Config.BUILDING.SAM then
+					continue
+				end
+				if building.cooldown > 0 then
+					continue
+				end
 
-		local x, y = MapGen.fromIndex(index)
-		local dx, dy = x - missile.x, y - missile.y
-		local d2 = dx * dx + dy * dy
-		if d2 > range2 then
-			continue
+				local x, y = MapGen.fromIndex(tile)
+				local dx, dy = x - missile.x, y - missile.y
+				local d2 = dx * dx + dy * dy
+				if d2 > range2 then
+					continue
+				end
+				if d2 < bestDist then
+					best = building
+					bestIndex = tile
+					bestDist = d2
+				end
+			end
 		end
-		if d2 < bestDist then
-			best = building
-			bestDist = d2
+	else
+		for index, building in state.buildings do
+			if building.kind ~= Config.BUILDING.SAM then
+				continue
+			end
+			if building.slot == missile.slot then
+				continue
+			end
+			if state:areAllied(building.slot, missile.slot) then
+				continue
+			end
+			if building.cooldown > 0 then
+				continue
+			end
+
+			local x, y = MapGen.fromIndex(index)
+			local dx, dy = x - missile.x, y - missile.y
+			local d2 = dx * dx + dy * dy
+			if d2 > range2 then
+				continue
+			end
+			if d2 < bestDist then
+				best = building
+				bestIndex = index
+				bestDist = d2
+			end
 		end
 	end
 
-	if not best then
+	if not best or not bestIndex then
 		return false
 	end
 
 	missile.engaged = true
-	best.cooldown = Config.SAM_COOLDOWN or 90
+	Buildings.armCooldown(state, bestIndex, Config.SAM_COOLDOWN or 90)
 
 	local chance = if Config.SAM_INTERCEPT_CHANCE ~= nil then Config.SAM_INTERCEPT_CHANCE else 1
 	if rng:NextNumber() < chance then
