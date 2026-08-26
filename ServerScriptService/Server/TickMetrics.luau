@@ -26,6 +26,12 @@ local history: { Sample } = table.create(HISTORY_CAP)
 local historyCount = 0
 local historyWrite = 0
 local seenBuf: { [number]: boolean } = {}
+-- N79 : copies numeriques pour percentile. table.sort mute — le prochain
+-- snapshot reecrit 1..historyCount (pas d'early-out « deja plein »).
+local changedBuf: { number } = table.create(HISTORY_CAP, 0)
+local bytesBuf: { number } = table.create(HISTORY_CAP, 0)
+local msBuf: { number } = table.create(HISTORY_CAP, 0)
+local chunksBuf: { number } = table.create(HISTORY_CAP, 0)
 local totals = {
 	ticks = 0,
 	changedTiles = 0,
@@ -89,6 +95,7 @@ local function acquireSample(): Sample
 		}
 		history[historyWrite] = sample
 	end
+	TickMetrics.historyCount = historyCount
 	return sample
 end
 
@@ -123,42 +130,55 @@ local function percentile(values: { number }, p: number): number
 	return values[rank]
 end
 
-function TickMetrics.snapshot()
-	-- Leftover N79 : 4 arrays + table de retour. Ne pas mixer (lifetime
-	-- different, table.sort dans percentile mute).
-	local changed = table.create(#history, 0)
-	local bytes = table.create(#history, 0)
-	local ms = table.create(#history, 0)
-	local chunks = table.create(#history, 0)
-	for i, sample in history do
-		changed[i] = sample.changedTiles
-		bytes[i] = sample.deltaBytes
-		ms[i] = sample.tickMs
-		chunks[i] = sample.dirtyChunks
+local function truncateMetric(buf: { number }, n: number)
+	for i = n + 1, #buf do
+		buf[i] = nil
 	end
+end
+
+function TickMetrics.snapshot()
+	-- N79 : 4 arrays module. N80 contrat B : iterer 1..historyCount, pas
+	-- #history (les Sample restent apres reset). Truncate leftover avant
+	-- percentile — un [601] fantome fausserait p95. Leftover table de
+	-- retour / p95 / p99 → N81.
+	local n = historyCount
+	for i = 1, n do
+		local sample = history[i]
+		changedBuf[i] = sample.changedTiles
+		bytesBuf[i] = sample.deltaBytes
+		msBuf[i] = sample.tickMs
+		chunksBuf[i] = sample.dirtyChunks
+	end
+	truncateMetric(changedBuf, n)
+	truncateMetric(bytesBuf, n)
+	truncateMetric(msBuf, n)
+	truncateMetric(chunksBuf, n)
 
 	return {
-		samples = #history,
+		samples = n,
 		totals = totals,
 		p95 = {
-			changedTiles = percentile(changed, 0.95),
-			deltaBytes = percentile(bytes, 0.95),
-			tickMs = percentile(ms, 0.95),
-			dirtyChunks = percentile(chunks, 0.95),
+			changedTiles = percentile(changedBuf, 0.95),
+			deltaBytes = percentile(bytesBuf, 0.95),
+			tickMs = percentile(msBuf, 0.95),
+			dirtyChunks = percentile(chunksBuf, 0.95),
 		},
 		p99 = {
-			changedTiles = percentile(changed, 0.99),
-			deltaBytes = percentile(bytes, 0.99),
-			tickMs = percentile(ms, 0.99),
-			dirtyChunks = percentile(chunks, 0.99),
+			changedTiles = percentile(changedBuf, 0.99),
+			deltaBytes = percentile(bytesBuf, 0.99),
+			tickMs = percentile(msBuf, 0.99),
+			dirtyChunks = percentile(chunksBuf, 0.99),
 		},
 	}
 end
 
 function TickMetrics.reset()
-	table.clear(history)
+	-- N80 contrat B : ne pas table.clear(history) — le pool Sample reste.
+	-- historyCount = 0 pour que snapshot / formatReport ignorent les
+	-- leftovers d'un match mort (sinon p95 du match precedent).
 	historyCount = 0
 	historyWrite = 0
+	TickMetrics.historyCount = 0
 	totals.ticks = 0
 	totals.changedTiles = 0
 	totals.dirtyChunks = 0
@@ -190,8 +210,14 @@ function TickMetrics.formatReport(): string
 end
 
 -- Banc N78 : rawequal seenBuf / Sample recycle. Pas replique.
+-- Banc N79 : rawequal des 4 arrays. Banc N80 : historyCount / Sample pool.
 TickMetrics.HISTORY_CAP = HISTORY_CAP
 TickMetrics.history = history
+TickMetrics.historyCount = historyCount
 TickMetrics.seenBuf = seenBuf
+TickMetrics.changedBuf = changedBuf
+TickMetrics.bytesBuf = bytesBuf
+TickMetrics.msBuf = msBuf
+TickMetrics.chunksBuf = chunksBuf
 
 return TickMetrics
