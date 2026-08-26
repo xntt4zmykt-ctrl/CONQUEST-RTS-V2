@@ -2010,8 +2010,8 @@ check("navires, missiles et interpolation", function()
 	-- Skip retraite splash id=1 N56. Leftover N161 splash,
 	-- leftover N160 wake, leftover N152 flame Size doivent rester
 	-- verts. Recette leftover N174, pas merger visual V112.
-	-- Overlay.clear Destroy conservé (leftover N177). HUD
-	-- dismissFree N174 (check vagues) inchange.
+	-- Overlay.clear parque live (N177, shipFree/ogiveFree existants).
+	-- HUD dismissFree N174 (check vagues) inchange.
 	-- N176 : Overlay applyUnits missile Parent=nil + ogiveFree.
 	-- Park **immédiat** (pas de delay, pas de testFlushDelays).
 	-- Snapshot après applyUnits({}, {}) plus bas ; reuse rawequal
@@ -2460,6 +2460,72 @@ check("vagues de conquete", function()
 	assert(rawequal(pooledBlast.Parent, overlay.root), "sphere Blast non reparentee")
 	assert(pooledBlast.Name == "Blast", "Name Blast perdu au reuse")
 	assert(pooledBlast:FindFirstChildWhichIsA("PointLight") ~= nil, "PointLight enfant perdu au reuse")
+	-- N177 : Overlay.clear Parent=nil + shipFree / ogiveFree existants.
+	-- Spawn ids neufs (≠ 88, ≠ 99, ≠ 3) **après** les reuse N176/N175
+	-- / N161 / N162 / N166 / N163–N165 — clear trop tôt casserait
+	-- splash/wake encore parentés et Destroy les bâtiments N162.
+	-- Skip retraite splash N56. Distinct applyUnits despawn N176.
+	-- Pas #ogiveFree == 1. Pas d'assert autre Name. Recette leftover
+	-- N176. Pas merger visual V114. Bâtiments / routes Destroy
+	-- conservés (leftover N178).
+	overlay:applyUnits({
+		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
+	}, {
+		{ id = 66, slot = 1, x = 48, y = 48, tx = 68, ty = 68, kind = 1 },
+	})
+	local liveShip = overlay.units[77]
+	local liveOgive = overlay.units[66]
+	assert(liveShip ~= nil and liveOgive ~= nil, "spawn N177 absent")
+	local clearShip = liveShip.visual
+	local clearOgive = liveOgive.visual
+	assert(clearShip.isMissile ~= true, "ogive spawn N177 dans navire")
+	assert(clearOgive.isMissile == true, "navire spawn N177 dans ogive")
+	overlay:clear()
+	assert(overlay.units[77] == nil and overlay.units[66] == nil, "units live apres clear")
+	assert(clearShip.model.Parent == nil, "navire clear encore parent")
+	assert(clearOgive.model.Parent == nil, "ogive clear encore parentee")
+	local shipPoolClear = overlay.shipFree
+	local ogivePoolClear = overlay.ogiveFree
+	assert(shipPoolClear ~= nil, "shipFree absent apres clear")
+	assert(ogivePoolClear ~= nil, "ogiveFree absent apres clear")
+	assert(next(overlay.buildings) == nil, "batiments survivant clear")
+	assert(next(overlay.routes) == nil, "routes survivant clear")
+	overlay:applyUnits({
+		{ id = 55, slot = 1, x = 20, y = 18, troops = 40, kind = 1 },
+	}, {
+		{ id = 44, slot = 1, x = 50, y = 50, tx = 70, ty = 70, kind = 1 },
+	})
+	if clearShip.model.Parent == nil then
+		local inFree = false
+		for _, vis in shipPoolClear do
+			if rawequal(vis, clearShip) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "navire clear ni reparente ni dans shipFree")
+	else
+		assert(rawequal(clearShip.model.Parent, overlay.root), "navire clear recree")
+		assert(not clearShip.isMissile, "reuse ogive au clear")
+	end
+	if clearOgive.model.Parent == nil then
+		local inFree = false
+		for _, vis in ogivePoolClear do
+			if rawequal(vis, clearOgive) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ogive clear ni reparentee ni dans ogiveFree")
+	else
+		assert(rawequal(clearOgive.model.Parent, overlay.root), "ogive clear recree")
+		assert(clearOgive.isMissile == true, "reuse navire au clear")
+		local flameClear = clearOgive.model:FindFirstChild("EngineFlame")
+		assert(
+			flameClear ~= nil and flameClear:FindFirstChildWhichIsA("PointLight") ~= nil,
+			"PointLight enfant perdu au clear reuse"
+		)
+	end
 end)
 
 check("deltas de terrain et conquetes classees", function()
