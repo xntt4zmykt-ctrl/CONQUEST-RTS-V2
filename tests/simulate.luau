@@ -6048,6 +6048,141 @@ do
 end
 
 do
+	-- N52 : snapshotMissiles recycle. 1 ogive, tx/ty honores, pas de
+	-- progress/speed/sx/sy. Vider missiles → length 0. Relancer → length 1.
+	local state = GameState.new(1071)
+	local bomber = state:addPlayer(nil, "OgiveSnap", Random.new(93), 0)
+	if not bomber then
+		fail("missileSnapBuf — spawn impossible")
+	else
+		local target = bomber.capitalTile
+		if not target then
+			fail("missileSnapBuf — capitale introuvable")
+		else
+			local tx, ty = MapGen.fromIndex(target)
+			table.insert(state.missiles, {
+				id = 1,
+				slot = bomber.slot,
+				kind = Config.NUKE.ATOM,
+				x = tx,
+				y = ty,
+				sx = tx,
+				sy = ty,
+				tx = tx + 3,
+				ty = ty + 4,
+				progress = 0.5,
+				speed = Config.MISSILE_SPEED,
+			})
+			local snaps = state:snapshotMissiles()
+			local n = 0
+			local leaked = false
+			local fieldsOk = false
+			for _, snap in snaps do
+				n += 1
+				if
+					(snap :: any).progress ~= nil
+					or (snap :: any).speed ~= nil
+					or (snap :: any).sx ~= nil
+					or (snap :: any).sy ~= nil
+				then
+					leaked = true
+				end
+				if snap.id == 1 and snap.tx == tx + 3 and snap.ty == ty + 4 and snap.kind == Config.NUKE.ATOM then
+					fieldsOk = true
+				end
+			end
+			if leaked then
+				fail("missileSnapBuf — progress/speed/sx/sy fuite")
+			elseif n ~= 1 or #snaps ~= 1 then
+				fail(`missileSnapBuf — length {n}/#{#snaps}, attendu 1`)
+			elseif not fieldsOk then
+				fail("missileSnapBuf — tx/ty/kind incorrects")
+			else
+				print("missileSnapBuf : 1 ogive, tx/ty, pas de progress (N52)")
+				table.clear(state.missiles)
+				local gone = state:snapshotMissiles()
+				local goneN = 0
+				for _ in gone do
+					goneN += 1
+				end
+				if goneN ~= 0 or #gone ~= 0 then
+					fail(`missileSnapBuf — truncate fuite (n={goneN} #{#gone})`)
+				else
+					table.insert(state.missiles, {
+						id = 2,
+						slot = bomber.slot,
+						kind = Config.NUKE.ATOM,
+						x = tx,
+						y = ty,
+						sx = tx,
+						sy = ty,
+						tx = tx + 1,
+						ty = ty + 1,
+						progress = 0.1,
+						speed = Config.MISSILE_SPEED,
+					})
+					local again = state:snapshotMissiles()
+					local againN = 0
+					local againOk = false
+					for _, snap in again do
+						againN += 1
+						if snap.id == 2 and snap.tx == tx + 1 and snap.ty == ty + 1 then
+							againOk = true
+						end
+					end
+					if againN ~= 1 or #again ~= 1 or not againOk then
+						fail(`missileSnapBuf — relance length {againN}/#{#again}`)
+					else
+						print("missileSnapBuf : truncate 1→0→1 (N52)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- N53 : flushOwnerDelta recycle dirtyIndexBuf. addPlayer (capitale dirty)
+	-- → length > 0. Second flush → nil. setOwner 1 tuile neutre → length 1.
+	local state = GameState.new(1072)
+	local owner = state:addPlayer(nil, "DeltaSnap", Random.new(94), 0)
+	if not owner then
+		fail("dirtyIndexBuf — spawn impossible")
+	else
+		local first = state:flushOwnerDelta()
+		local firstN = if first then buffer.len(first) // 5 else 0
+		if firstN == 0 then
+			fail("dirtyIndexBuf — capitale pas dirty apres addPlayer")
+		else
+			local second = state:flushOwnerDelta()
+			if second ~= nil then
+				fail("dirtyIndexBuf — second flush non nil")
+			else
+				local site: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if state:isLand(index) and buffer.readu8(state.owner, index) == Config.NEUTRAL_SLOT then
+						site = index
+						break
+					end
+				end
+				if not site then
+					fail("dirtyIndexBuf — tuile neutre introuvable")
+				else
+					state:setOwner(site, owner.slot)
+					local third = state:flushOwnerDelta()
+					local thirdN = if third then buffer.len(third) // 5 else 0
+					if thirdN ~= 1 then
+						fail(`dirtyIndexBuf — setOwner 1 tuile length {thirdN}, attendu 1`)
+					else
+						print("dirtyIndexBuf : spawn>0, second nil, 1 tuile (N53)")
+					end
+				end
+			end
+		end
+	end
+end
+
+do
 	local ChantierB = __require("ChantierB")
 	local perTick = ChantierB.attackTilesPerTick(10000, nil, 1)
 	print(
