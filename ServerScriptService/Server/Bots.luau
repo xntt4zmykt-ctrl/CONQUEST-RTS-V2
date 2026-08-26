@@ -957,15 +957,24 @@ end
 --=============================================================================
 
 function Bots.step(state: GameState, rng: Random)
-	for i = #botSlots, 1, -1 do
+	-- N108 : swap-pop (recette N105). Decrement toujours, y compris
+	-- apres continue si ps nil : l'item swappe venait d'un indice
+	-- plus haut. Array de nombres — pas de free-list. Un slot saute
+	-- = bot vivant ignore 1 tick ou slot recycle (banc grace / N12).
+	local i = #botSlots
+	while i >= 1 do
 		local slot = botSlots[i]
 		local ps = state.players[slot]
 		if not ps then
-			table.remove(botSlots, i)
+			local last = #botSlots
+			botSlots[i] = botSlots[last]
+			botSlots[last] = nil
+			i -= 1
 			continue
 		end
 
 		if (state.tick + slot * 3) % DECISION_INTERVAL ~= 0 then
+			i -= 1
 			continue
 		end
 
@@ -979,6 +988,7 @@ function Bots.step(state: GameState, rng: Random)
 		decideChat(state, ps, rng)
 		decideNavy(state, ps, rng)
 		decideNuke(state, ps, rng)
+		i -= 1
 	end
 end
 
@@ -988,5 +998,7 @@ Bots.blastValue = blastValue
 Bots.decideDiplomacy = decideDiplomacy
 -- Banc N72 : leftover apres breakAlliance. Pas replique.
 Bots.allyBuf = allyBuf
+-- Banc N108 : swap-pop milieu {2,5,8} → {2,8}. Pas replique.
+Bots.botSlots = botSlots
 
 return Bots

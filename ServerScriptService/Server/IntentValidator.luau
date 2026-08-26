@@ -172,10 +172,18 @@ function IntentValidator.clearPlayer(userId: number)
 	lastSequence[userId] = nil
 	windowStart[userId] = nil
 	windowCount[userId] = nil
-	for i = #queue, 1, -1 do
+	-- N107 : swap-pop (recette N106). Decrement toujours : l'item
+	-- swappe venait d'un indice plus haut (deja visite). Payload
+	-- live — ne pas table.clear le record Intent (N82). Distinct
+	-- de flush (truncate-nil N82). Un intent B saute = ordre fantome.
+	local i = #queue
+	while i >= 1 do
 		if queue[i].userId == userId then
-			table.remove(queue, i)
+			local last = #queue
+			queue[i] = queue[last]
+			queue[last] = nil
 		end
+		i -= 1
 	end
 end
 

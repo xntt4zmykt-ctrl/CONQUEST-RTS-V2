@@ -147,19 +147,30 @@ local function decideAttack(state: GameState, ps, rng: Random)
 end
 
 function Tribes.step(state: GameState, rng: Random)
-	for i = #tribeSlots, 1, -1 do
+	-- N108 : swap-pop (recette N105 / Bots.step). Decrement toujours.
+	-- Array de nombres — pas de free-list. Ne pas corriger N12 ici.
+	local i = #tribeSlots
+	while i >= 1 do
 		local slot = tribeSlots[i]
 		local ps = state.players[slot]
 		if not ps or not ps.isTribe then
-			table.remove(tribeSlots, i)
+			local last = #tribeSlots
+			tribeSlots[i] = tribeSlots[last]
+			tribeSlots[last] = nil
+			i -= 1
 			continue
 		end
 		if (state.tick + slot * 5) % DECISION_INTERVAL ~= 0 then
+			i -= 1
 			continue
 		end
 		acceptAlliances(state, slot)
 		decideAttack(state, ps, rng)
+		i -= 1
 	end
 end
+
+-- Banc N108 : swap-pop milieu {2,5,8} → {2,8}. Pas replique.
+Tribes.tribeSlots = tribeSlots
 
 return Tribes
