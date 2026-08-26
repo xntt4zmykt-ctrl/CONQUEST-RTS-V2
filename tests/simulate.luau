@@ -5535,6 +5535,212 @@ end
 
 print("passe 29 : pathWalkBuf, stationBuf recycle OK")
 
+--[[
+	Nightly passe 30 — revue PR #84 : Buildings.contextFor ctxBuf / ChantierB doomedBuf+collapsingBuf (V40–V41).
+]]
+do
+	-- V40 : contextFor recycle. Deux appels → rawequal. Slot 99 → nil
+	-- SANS muter ctxBuf. pose CITY encore. ownerAt conserve lit le
+	-- second etat (non reentrant — documente, pas clone). Recette feel N85.
+	local state = GameState.new(3001)
+	local owner = state:addPlayer(nil, "CtxA", Random.new(91), 0)
+	if not owner then
+		fail("contextFor — spawn impossible")
+	else
+		local first = Buildings.contextFor(state, owner.slot)
+		local second = Buildings.contextFor(state, owner.slot)
+		if not first or not rawequal(first, second) then
+			fail("contextFor — rawequal")
+		else
+			local ghost = Buildings.contextFor(state, 99)
+			if ghost ~= nil then
+				fail("contextFor — slot 99 non nil")
+			elseif first.slot ~= owner.slot then
+				fail("contextFor — slot 99 a mute ctxBuf")
+			else
+				owner.gold = 100000
+				local site: number? = nil
+				for index = 0, Config.TILE_COUNT - 1 do
+					if
+						buffer.readu8(state.owner, index) == owner.slot
+						and not state.buildings[index]
+						and state:isLand(index)
+					then
+						site = index
+						break
+					end
+				end
+				if not site then
+					fail("contextFor — tuile libre introuvable")
+				else
+					local ok = Buildings.build(state, owner.slot, site, Config.BUILDING.CITY)
+					local city = state.buildings[site]
+					if not ok or not city or city.kind ~= Config.BUILDING.CITY then
+						fail("contextFor — resolve/build CITY casse")
+					else
+						print("contextFor : rawequal, slot 99, CITY (V40)")
+						local other = GameState.new(3002)
+						local otherPs = other:addPlayer(nil, "CtxB", Random.new(92), 0)
+						if not otherPs then
+							fail("contextFor — second spawn impossible")
+						else
+							local savedOwnerAt = first.ownerAt
+							local ctxB = Buildings.contextFor(other, otherPs.slot)
+							local capB = otherPs.capitalTile :: number
+							if not ctxB or savedOwnerAt(capB) ~= otherPs.slot then
+								fail("contextFor — ownerAt conserve ne lit pas B (devrait, non reentrant)")
+							else
+								print("contextFor : ownerAt conserve lit B (V40, non reentrant)")
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+do
+	-- V41 : doomedBuf hash. Deux appels vides → pas d'erreur, next nil.
+	-- Fronts opposes troupes egales → les deux disparaissent.
+	-- Defenseur sous le seuil → collapse (territoire du captor augmente).
+	local empty = GameState.new(3003)
+	local alive = empty:addPlayer(nil, "ClashEmpty", Random.new(93), 0)
+	if not alive then
+		fail("doomedBuf — spawn vide impossible")
+	else
+		ChantierB.cancelOpposingFronts(empty)
+		ChantierB.cancelOpposingFronts(empty)
+		if next(ChantierB.doomedBuf) ~= nil then
+			fail("doomedBuf — leftover apres clear")
+		else
+			print("doomedBuf : deux appels vides, next nil (V41)")
+		end
+	end
+end
+
+do
+	local clash = GameState.new(3004)
+	clash.combatUnlocked = true
+	local a = clash:addPlayer(nil, "ClashA", Random.new(94), 0)
+	local b = clash:addPlayer(nil, "ClashB", Random.new(95), 0)
+	if not a or not b or not a.capitalTile then
+		fail("cancelOpposing — factions impossibles")
+	else
+		local cx, cy = MapGen.fromIndex(a.capitalTile)
+		for dy = -6, 6 do
+			for dx = 4, 12 do
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local index = MapGen.toIndex(nx, ny)
+					if clash:isLand(index) then
+						clash:setOwner(index, b.slot)
+					end
+				end
+			end
+		end
+		a.troops = 8000
+		b.troops = 8000
+		a.attackRatio = 0.5
+		b.attackRatio = 0.5
+		local okA = clash:launchAttack(a.slot, b.slot)
+		local okB = clash:launchAttack(b.slot, a.slot)
+		if not okA or not okB then
+			fail(`cancelOpposing — launch {tostring(okA)}/{tostring(okB)}`)
+		else
+			ChantierB.cancelOpposingFronts(clash)
+			if #clash.attacks ~= 0 then
+				fail(`cancelOpposing — {#clash.attacks} front(s) restant(s)`)
+			else
+				print("cancelOpposing : clash egal, fronts vides (V41)")
+			end
+		end
+	end
+end
+
+do
+	local col = GameState.new(3005)
+	col.combatUnlocked = true
+	local captor = col:addPlayer(nil, "Captor", Random.new(96), 0)
+	local victim = col:addPlayer(nil, "Victim", Random.new(97), 0)
+	if not captor or not victim or not captor.capitalTile then
+		fail("collapsingBuf — factions impossibles")
+	else
+		local cx, cy = MapGen.fromIndex(captor.capitalTile)
+		for dy = -4, 4 do
+			for dx = 3, 8 do
+				local nx, ny = cx + dx, cy + dy
+				if MapGen.inBounds(nx, ny) then
+					local index = MapGen.toIndex(nx, ny)
+					if col:isLand(index) then
+						col:setOwner(index, victim.slot)
+					end
+				end
+			end
+		end
+		local keep: { [number]: boolean } = {}
+		local kept = 0
+		local probe = table.create(4, 0)
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(col.owner, index) == victim.slot then
+				local n = MapGen.neighbors(index, probe)
+				local touches = false
+				for k = 1, n do
+					if buffer.readu8(col.owner, probe[k]) == captor.slot then
+						touches = true
+						break
+					end
+				end
+				if touches then
+					keep[index] = true
+					kept += 1
+					if kept >= 40 then
+						break
+					end
+				end
+			end
+		end
+		if kept < 40 then
+			for index = 0, Config.TILE_COUNT - 1 do
+				if buffer.readu8(col.owner, index) == victim.slot and not keep[index] then
+					keep[index] = true
+					kept += 1
+					if kept >= 40 then
+						break
+					end
+				end
+			end
+		end
+		local toDrop: { number } = {}
+		for index = 0, Config.TILE_COUNT - 1 do
+			if buffer.readu8(col.owner, index) == victim.slot and not keep[index] then
+				table.insert(toDrop, index)
+			end
+		end
+		for _, index in toDrop do
+			col:setOwner(index, Config.NEUTRAL_SLOT)
+		end
+		if victim.tiles <= 0 or victim.tiles >= col:collapseThreshold() then
+			fail(`collapsingBuf — victim.tiles={victim.tiles} (seuil {col:collapseThreshold()})`)
+		else
+			captor.troops = 20000
+			captor.attackRatio = 0.5
+			local launched = col:launchAttack(captor.slot, victim.slot)
+			local before = captor.tiles
+			col:stepAttacks()
+			if not launched then
+				fail("collapsingBuf — launchAttack sans contact")
+			elseif captor.tiles <= before then
+				fail(`collapsingBuf — captor.tiles {captor.tiles} (avant {before})`)
+			else
+				print("collapsingBuf : defenseur sous seuil, captor grandit (V41)")
+			end
+		end
+	end
+end
+
+print("passe 30 : contextFor ctxBuf, doomedBuf/collapsingBuf OK")
+
 do
 	local report = TickMetrics.formatReport()
 	print(`metrics run principal : {report}`)
