@@ -67,6 +67,8 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	self.terrain = terrain
 	self.kind = nil
 	self.tile = nil
+	self.status = nil
+	self.shown = false
 	self.model = nil
 
 	local root = Instance.new("Folder")
@@ -107,8 +109,9 @@ function PlacementPreview.new(parent: Instance, terrain: buffer): PlacementPrevi
 	-- V75 : rotation cylindre plat cuite une fois (recette V63 segment.rot).
 	-- Plus de CFrame.Angles 60 Hz hover. fromEulerAnglesYXZ(0, 0, rad(90))
 	-- ≡ Angles(0, 0, 90°) (rx=0, ry=0 → Z seul). Hauteurs +0.42 / +0.38
-	-- inchangees. V76 : Size pose dans setKind (rayon = kind). Radar/flag
-	-- unites inchanges (V73). Flame Size inchange (V74 API). Overlay /
+	-- inchangees. V76 : Size pose dans setKind (rayon = kind). V77 :
+	-- early-out update si tuile+statut inchanges. Radar/flag unites
+	-- inchanges (V73). Flame Size inchange (V74 API). Overlay /
 	-- BuildingModels / WorldCamera non edites.
 	self.footprintRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
 	self.pulseRot = CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
@@ -166,6 +169,8 @@ function PlacementPreview.setKind(self: PlacementPreview, kind: number?)
 	end
 	self.kind = kind
 	self.tile = nil
+	self.status = nil
+	self.shown = false
 
 	if self.model then
 		self.model:Destroy()
@@ -219,19 +224,32 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 				end
 			end
 		end
+		-- V77 : update(nil) nil le tile. Sans ca, un early-out
+		-- self.tile == tile bloquerait le restore au retour souris
+		-- (setKind(nil) nil deja, pas le chemin update(nil) sans hide).
+		self.tile = nil
+		self.status = nil
+		self.shown = false
 		return
 	end
 
-	local color = if status == "exact"
-		then VALID
-		elseif status == "upgrade" then UPGRADE
-		elseif status == "snap" then SNAPPED
-		else INVALID
-	local base = WorldSpace.indexToWorld(tile)
-	local ground = WorldSpace.surfaceHeight(self.terrain, tile)
+	-- V77 : early-out si tuile + statut inchanges et deja visible.
+	-- Color ne depend que de status. CFrame ne depend que de tile
+	-- (rot deja cuit V75). Size deja pose dans setKind (V76).
+	-- Distinct de V74 (flame Z DOIT changer). Distinct de
+	-- CityWindows / beacons Transparency sin(time) (ne pas geler).
+	if self.shown and self.tile == tile and self.status == status then
+		return
+	end
 
-	if self.tile ~= tile then
+	local wasHidden = not self.shown
+	local tileChanged = self.tile ~= tile
+	local statusChanged = self.status ~= status
+
+	if tileChanged then
 		self.tile = tile
+		local base = WorldSpace.indexToWorld(tile)
+		local ground = WorldSpace.surfaceHeight(self.terrain, tile)
 		-- Les modeles sont construits autour de l'origine : on repositionne en
 		-- recreant les decalages locaux memorises a la construction.
 		local target = Vector3.new(base.X, ground, base.Z)
@@ -245,24 +263,37 @@ function PlacementPreview.update(self: PlacementPreview, tile: number?, status: 
 				part.Position = (local_ :: Vector3) + target
 			end
 		end
+		-- V75 : CFrame seulement si la tuile bouge. Ne pas cuire la
+		-- translation a new (le curseur bouge).
+		self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * self.footprintRot
+		self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * self.pulseRot
 	end
 
-	for _, part in model:GetChildren() do
-		if part:IsA("BasePart") then
-			part.Transparency = 0.55
-			part.Color = color
+	if statusChanged or wasHidden then
+		local color = if status == "exact"
+			then VALID
+			elseif status == "upgrade" then UPGRADE
+			elseif status == "snap" then SNAPPED
+			else INVALID
+		for _, part in model:GetChildren() do
+			if part:IsA("BasePart") then
+				if wasHidden then
+					part.Transparency = 0.55
+				end
+				part.Color = color
+			end
 		end
+		self.footprint.Color = color
+		self.pulse.Color = color
 	end
 
-	-- V76 : Size deja pose dans setKind. Hover ne reecrit que CFrame
-	-- (V75, le curseur bouge) + couleur / transparence (leftover V77).
-	self.footprint.Transparency = 0.52
-	self.footprint.Color = color
-	self.footprint.CFrame = CFrame.new(base.X, ground + 0.42, base.Z) * self.footprintRot
+	if wasHidden then
+		self.footprint.Transparency = 0.52
+		self.pulse.Transparency = 0.72
+	end
 
-	self.pulse.Transparency = 0.72
-	self.pulse.Color = color
-	self.pulse.CFrame = CFrame.new(base.X, ground + 0.38, base.Z) * self.pulseRot
+	self.status = status
+	self.shown = true
 end
 
 function PlacementPreview.hide(self: PlacementPreview)
