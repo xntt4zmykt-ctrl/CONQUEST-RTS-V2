@@ -1208,7 +1208,8 @@ check("pose et capture de chaque type de batiment", function()
 	-- LandingSplash (check navires) doit rester vert. Leftover V118
 	-- LaunchWake (check navires) doit rester vert. Leftover V119
 	-- goldPopup (check livraison) doit rester vert. Leftover V120
-	-- floatingText (check vagues) doit rester vert.
+	-- floatingText (check vagues) doit rester vert. Leftover V121
+	-- tileFlash (check vagues) doit rester vert.
 	assert(type(overlay.deliveryFree) == "table", "deliveryFree absent")
 	assert(#overlay.deliveryFree == 0, "deliveryFree pre-park non vide")
 	testFlushDelays()
@@ -2038,7 +2039,8 @@ check("livraison : le gain s'affiche sur la gare", function()
 	-- 3e arrival recycle. Distinct de V118 (wakeFree, check navires).
 	-- Distinct de V117 (splashFree, check navires). Distinct de V116
 	-- (deliveryFree, check pose/capture). Distinct de Effects
-	-- floatingText (feel N158, fermee V120). Leftover V118 LaunchWake
+	-- floatingText (feel N158, fermee V120). Distinct de V121
+	-- (tileFlash flashFree, check vagues). Leftover V118 LaunchWake
 	-- (check navires) doit rester vert. Leftover V117 LandingSplash
 	-- (check navires) doit rester vert. Leftover V116 DeliveryPulse
 	-- (check pose/capture) doit rester vert.
@@ -2117,7 +2119,7 @@ check("navires, missiles et interpolation", function()
 	-- fromEulerAnglesYXZ (roll Z=axis·π/2, quatre sites). Offset
 	-- local X == 0 / Y == 0 / Z == 2.45. V97 : mesh carrier
 	-- visual.pieces (pas visual.parts). V98 CityWindows rest.X
-	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). V117 recycle LandingSplash (ci-dessous). V118 recycle LaunchWake (ci-dessous). V119 recycle goldPopup (check livraison). V120 recycle floatingText (check vagues). Leftover V77 (Preview hover)
+	-- (check modeles). V99 beacons rest.Z (check modeles). V100 trail offset.Z (check navires). V101 dirtyHead (check construction). V102 compact prefix (check construction). V103 feedEntries (check fil). V104 FactoryOutput / SiloWarning (check modeles). V105 feux offset.X (ci-dessous). V106 wake offset.X (ci-dessous). V107 flag offset.X (ci-dessous). V108 CapitalFlag rest.X/rest.Z (check modeles). V109 PortCraneBoom rest.X (check modeles). V110 PortCraneCable rest.X (check modeles). V111 flame frame.X (ci-dessous). V112 recycle Ground/Border (check construction). V113 recycle Blast (ci-dessous). V114 recycle BlastSmoke (ci-dessous). V115 recycle Shockwave (ci-dessous). V116 recycle DeliveryPulse (check pose/capture). V117 recycle LandingSplash (ci-dessous). V118 recycle LaunchWake (ci-dessous). V119 recycle goldPopup (check livraison). V120 recycle floatingText (check vagues). V121 recycle tileFlash (check vagues). Leftover V77 (Preview hover)
 	-- dans le check apercu.
 	assert(overlay.wakeRot ~= nil and type(overlay.wakeRot.X) == "number", "wakeRot absent")
 	assert(overlay.wakeRot.X == 0 and overlay.wakeRot.Y == 0 and overlay.wakeRot.Z == 0, "wakeRot n'est pas a l'origine")
@@ -2894,14 +2896,23 @@ check("vagues de conquete", function()
 	-- + Text / TextColor3 / TextTransparency 0 / outline Transparency
 	-- 0 avant Tween. Pas Destroy. testFlushDelays parque ; 3e
 	-- floatingText recycle. Distinct de V119 (goldFree, check
-	-- livraison). Distinct de V82 (ConquestPulse pulseRot). Leftover
-	-- V82 Y == surface+0.8 doit rester vert. Leftover V119 goldPopup
-	-- (check livraison) doit rester vert.
+	-- livraison). Distinct de V82 (ConquestPulse pulseRot). Distinct
+	-- de V121 (tileFlash flashFree). Leftover V82 Y == surface+0.8
+	-- doit rester vert. Leftover V119 goldPopup (check livraison)
+	-- doit rester vert.
+	-- V121 : tileFlash free-list flashFree. Recette feel N156 inline
+	-- — ne PAS merger 6cec. Pas de Name. Plaque Neon (pas Billboard).
+	-- Color + Transparency 0.15 + Size TILE×0.4×TILE + CFrame
+	-- height+0.3 avant Tween. Pas Destroy. testFlushDelays parque ;
+	-- 2e vague mine=false recycle. Distinct de V120 (textFree).
+	-- Distinct de V82 (ConquestPulse). Caps 90/28 inchanges.
 	assert(effects.pulseRot ~= nil and type(effects.pulseRot.X) == "number", "pulseRot absent")
 	assert(effects.pulseRot.X == 0 and effects.pulseRot.Y == 0 and effects.pulseRot.Z == 0, "pulseRot n'est pas a l'origine")
 	local bakedPulse = effects.pulseRot
 	assert(type(effects.textFree) == "table", "textFree absent")
 	assert(#effects.textFree == 0, "textFree pre-park non vide")
+	assert(type(effects.flashFree) == "table", "flashFree absent")
+	assert(#effects.flashFree == 0, "flashFree pre-park non vide")
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -2946,6 +2957,17 @@ check("vagues de conquete", function()
 	assert(#texts == 2, "floatingText count apres vagues")
 	assert(seenText["+200"], "texte +200 absent")
 	assert(seenText["-200"], "texte -200 absent")
+	-- V121 : plaques sans BillboardGui (≠ floatingText) et sans
+	-- Name ConquestPulse (≠ onde V82). Vague 200 + {5} (lossWave
+	-- n'eclate pas).
+	local flashes = {}
+	for _, node in effects.root:GetChildren() do
+		if node.Name ~= "ConquestPulse" and not node:FindFirstChildWhichIsA("BillboardGui") then
+			assert(node.Name ~= "GoldPopup", "goldPopup dans Effects.root")
+			table.insert(flashes, node)
+		end
+	end
+	assert(#flashes >= 1, "tileFlash absent")
 	testFlushDelays()
 	assert(texts[1].Parent == nil, "floatingText 1 encore parent apres delay")
 	assert(texts[2].Parent == nil, "floatingText 2 encore parent apres delay")
@@ -2996,6 +3018,45 @@ check("vagues de conquete", function()
 	assert(liveLabel.TextColor3.B == recycleColor.B, "TextColor3 B perdu au recycle")
 	assert(rawequal(liveLabel:FindFirstChildWhichIsA("UIStroke"), strokes[live]), "UIStroke non recycle")
 	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree au recycle texte")
+	-- V121 : flashFree parque au meme flush. 2e vague mine=false
+	-- recycle les plaques sans toucher textFree (leftover V120).
+	assert(#effects.flashFree == #flashes, "flashFree non parque")
+	assert(effects.flashFree[#flashes + 1] == nil, "flashFree leftover slot")
+	local flashSeen = {}
+	for i = 1, #flashes do
+		assert(flashes[i].Parent == nil, "tileFlash encore parent apres delay")
+		flashSeen[flashes[i]] = true
+	end
+	for i = 1, #flashes do
+		assert(flashSeen[effects.flashFree[i]], "flashFree autre Part")
+	end
+	local recycleFlashColor = Color3.fromRGB(9, 87, 165)
+	effects:conquestWave(wave, recycleFlashColor, false)
+	local liveFlashes = {}
+	for _, node in effects.root:GetChildren() do
+		if node.Name ~= "ConquestPulse" and not node:FindFirstChildWhichIsA("BillboardGui") then
+			table.insert(liveFlashes, node)
+		end
+	end
+	assert(#liveFlashes >= 1, "tileFlash count 2e vague")
+	assert(#effects.flashFree == #flashes - #liveFlashes, "flashFree non pop")
+	assert(effects.flashFree[#flashes - #liveFlashes + 1] == nil, "flashFree leftover slot pop")
+	for _, plate in liveFlashes do
+		assert(flashSeen[plate], "tileFlash non recycle")
+		assert(plate.Parent == effects.root, "tileFlash recycle hors root")
+		assert(plate.Color.R == recycleFlashColor.R, "Color R perdu au recycle")
+		assert(plate.Color.G == recycleFlashColor.G, "Color G perdu au recycle")
+		assert(plate.Color.B == recycleFlashColor.B, "Color B perdu au recycle")
+	end
+	local leftoverFlash = effects.flashFree[1]
+	assert(leftoverFlash ~= nil, "leftover flashFree absent")
+	assert(flashSeen[leftoverFlash], "flashFree leftover autre Part")
+	assert(leftoverFlash.Parent == nil, "leftover tileFlash encore parent")
+	for _, plate in liveFlashes do
+		assert(leftoverFlash ~= plate, "leftover flashFree incoherent")
+	end
+	assert(#effects.textFree == 1, "textFree casse par 2e vague")
+	assert(rawequal(effects.pulseRot, bakedPulse), "pulseRot recree au recycle flash")
 end)
 
 check("deltas de terrain et conquetes classees", function()
