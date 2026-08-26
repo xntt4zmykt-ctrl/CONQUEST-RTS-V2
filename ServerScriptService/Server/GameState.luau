@@ -925,6 +925,33 @@ function GameState.removePlayer(self: GameState, slot: number)
 		end
 	end
 
+	-- Transports AVANT setOwner : un bateau n'a pas de targetSlot, on lit
+	-- owner[targetTile]. Apres neutralisation, destOwner==NEUTRAL et on ne
+	-- distinguerait plus une invasion du disparu d'un debarquement volontaire
+	-- sur cote vide. Meme contrat que les fronts terre inbound : restitution
+	-- 100 %, pas BOAT_RETREAT_LOSS (ce n'est pas une retraite, le defenseur
+	-- n'existe plus). kind 1 = transport ; GameState ne require pas Navy
+	-- (cycle Navy -> GameState).
+	for i = #self.boats, 1, -1 do
+		local boat = self.boats[i]
+		if boat.slot == slot then
+			-- L'attaquant qui part : ses troupes embarquees disparaissent.
+			table.remove(self.boats, i)
+		elseif boat.kind == 1 and not boat.retreating then
+			local dest = boat.targetTile
+			if typeof(dest) == "number" and dest >= 0 and dest < Config.TILE_COUNT then
+				if buffer.readu8(self.owner, dest) == slot then
+					local attacker = self.players[boat.slot]
+					if attacker then
+						attacker.troops += math.max(0, boat.troops)
+					end
+					boat.troops = 0
+					table.remove(self.boats, i)
+				end
+			end
+		end
+	end
+
 	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
 	-- (deconnexion), jamais dans la boucle de tick.
 	for index = 0, Config.TILE_COUNT - 1 do
@@ -941,11 +968,6 @@ function GameState.removePlayer(self: GameState, slot: number)
 		elseif atk.target == slot then
 			self:returnCommittedTroops(atk)
 			table.remove(self.attacks, i)
-		end
-	end
-	for i = #self.boats, 1, -1 do
-		if self.boats[i].slot == slot then
-			table.remove(self.boats, i)
 		end
 	end
 	for i = #self.missiles, 1, -1 do

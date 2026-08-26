@@ -62,9 +62,16 @@ function Diplomacy.request(state: GameState, from: number, to: number): (boolean
 	ensure(state.requests, from)
 
 	-- Si l'autre nous avait deja demande, la demande croisee vaut acceptation.
+	-- Bots.step tourne AVANT Diplomacy.step : une proposition inverse perimee
+	-- reste dans requests[] ce tick. Sans le garde, accept refuse "expiree"
+	-- et on n'envoie jamais la nouvelle demande — 1 tick (ou 12 pour une
+	-- tribu) de diplomatie bloquee, meme classe que areAllied / viewFor.
 	local theirs = state.requests[to]
 	if theirs and theirs[from] then
-		return Diplomacy.accept(state, to, from)
+		if requestIsLive(state, theirs[from]) then
+			return Diplomacy.accept(state, to, from)
+		end
+		theirs[from] = nil
 	end
 
 	state.requests[from][to] = state.tick + Config.ALLIANCE_REQUEST_TIMEOUT
