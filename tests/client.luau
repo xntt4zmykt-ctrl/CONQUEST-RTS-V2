@@ -1042,6 +1042,12 @@ check("pose et capture de chaque type de batiment", function()
 	-- segRot, leftover N20 popup or doivent rester verts. Recette visual
 	-- V75 leftover evenements Overlay. applyUnits / applyRouteProgress
 	-- inchanges.
+	-- N162 : DeliveryPulse free-list deliveryFree. Pas de
+	-- testFlushDelays ici — le pulse reste parenté (le flush + reuse
+	-- rawequal est dans « vagues de conquete »). Name DeliveryPulse
+	-- conservé. Leftover N132 euler inline, leftover N136 BuildRing
+	-- doivent rester verts. Recette leftover N161, pas merger visual
+	-- V80 wakeRot. Shockwave leftover N163 non touche.
 	-- N136 : BuildRing fromEulerAnglesYXZ (pas CFrame.Angles). Cylindre
 	-- Z=90. playConstruction via applyBuildingDelta plus haut. Leftover
 	-- N132 pulse, leftover N113 rot chantier, leftover N135 OceanGlint
@@ -1779,7 +1785,7 @@ check("navires, missiles et interpolation", function()
 	-- retraite id=1 N56. Leftover N160 wake, leftover N131 euler
 	-- inline, leftover N151 trail doivent rester verts. Recette
 	-- leftover N160, pas merger visual V79 wakeRot. DeliveryPulse
-	-- leftover N162 non touche.
+	-- leftover N162 (check pose / vagues, pas ici).
 	overlay:stepInterpolation(1 / 60)
 	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
 	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
@@ -1817,7 +1823,14 @@ check("vagues de conquete", function()
 	-- retraite N56). Snapshot avant l'insert N160 ; apres l'insert,
 	-- applyUnits({}, {}) despawn id=99 reparente la meme Part
 	-- (rawequal Parent root, Name LandingSplash). Distinct
-	-- wakeFree / goldFree. DeliveryPulse leftover N162 non touche.
+	-- wakeFree / goldFree.
+	-- N162 : DeliveryPulse free-list. Le check pose n'a pas
+	-- flushé ; ce flush pousse deliveryFree. Snapshot avant
+	-- l'insert N160 ; apres les asserts N161, reconstruire
+	-- FACTORY+CITY + dispatch + step reparente la meme Part
+	-- (rawequal Parent root, Name DeliveryPulse). Distinct
+	-- splashFree / wakeFree / goldFree. Shockwave leftover
+	-- N163 non touche.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
@@ -1882,6 +1895,17 @@ check("vagues de conquete", function()
 	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu")
 	assert(pooledSplash ~= pooledWake, "splashFree partage wakeFree")
 	assert(pooledSplash ~= pooledGold, "splashFree partage goldFree")
+	-- N162 : flush ci-dessus a poussé le DeliveryPulse de « pose ».
+	-- Snapshot avant applyUnits N160 ; reuse après N161.
+	local deliveryPool = overlay.deliveryFree
+	assert(deliveryPool ~= nil and #deliveryPool >= 1, "pulses livraison non poolees")
+	local pooledDelivery = deliveryPool[#deliveryPool]
+	assert(pooledDelivery.Parent == nil, "pulse livraison encore parente")
+	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu")
+	assert(pooledDelivery ~= pooledWake, "deliveryFree partage wakeFree")
+	assert(pooledDelivery ~= pooledSplash, "deliveryFree partage splashFree")
+	assert(pooledDelivery ~= pooledGold, "deliveryFree partage goldFree")
+	assert(pooledDelivery ~= pooledRing, "deliveryFree partage pulseFree")
 	local wakeN = #wakePool
 	overlay:applyUnits({
 		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
@@ -1895,6 +1919,39 @@ check("vagues de conquete", function()
 	assert(#splashPool == splashN - 1, "splash non reutilise")
 	assert(rawequal(pooledSplash.Parent, overlay.root), "splash non reparente")
 	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu au reuse")
+	-- N162 : le check pose a détruit les routes. Reconstruire FACTORY+CITY
+	-- (mêmes indices catalogue) + dispatch + step jusqu'à delivery == nil
+	-- consomme deliveryFree. truckModel.Parent = nil conservé.
+	overlay.animateFrom = 0
+	local cityIndex: number? = nil
+	local factoryIndex: number? = nil
+	local scan = 0
+	for _, def in BuildingDefs.LIST do
+		scan += 137
+		if def.id == Config.BUILDING.CITY then
+			cityIndex = scan
+		elseif def.id == Config.BUILDING.FACTORY then
+			factoryIndex = scan
+		end
+	end
+	assert(cityIndex ~= nil and factoryIndex ~= nil, "ville ou usine absente N162")
+	overlay:applyBuildingDelta({
+		{ index = cityIndex, kind = Config.BUILDING.CITY, slot = 1, level = 1 },
+		{ index = factoryIndex, kind = Config.BUILDING.FACTORY, slot = 1, level = 1, links = { cityIndex } },
+	})
+	local liveRoute = overlay.routes[factoryIndex * 100000 + cityIndex]
+	assert(liveRoute ~= nil, "voie N162 absente")
+	local deliveryN = #deliveryPool
+	overlay:onTradeEvent("dispatch", factoryIndex, cityIndex, 1, 1)
+	assert(liveRoute.delivery ~= nil, "livraison N162 non demarree")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison N162 encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion N162 non retire")
+	assert(#deliveryPool == deliveryN - 1, "pulse livraison non reutilise")
+	assert(rawequal(pooledDelivery.Parent, overlay.root), "pulse livraison non reparente")
+	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu au reuse")
 end)
 
 check("deltas de terrain et conquetes classees", function()

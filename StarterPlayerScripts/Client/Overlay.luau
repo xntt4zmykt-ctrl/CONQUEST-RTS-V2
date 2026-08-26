@@ -1028,26 +1028,72 @@ function Overlay.stepInterpolation(self: Overlay, dt: number)
 		if delivery.progress >= 1 then
 			route.delivery = nil
 			route.truckModel.Parent = nil
-			local pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
-			pulse.Shape = Enum.PartType.Cylinder
+			-- N162 : free-list deliveryFree, pop O(1) depuis la fin. Pas de
+			-- Destroy a 0.85 s : Parent = nil + push si encore parenté
+			-- (un delay fantôme ne double-push pas). LandingSplash
+			-- réutilise déjà (N161, splashFree — ne pas partager).
+			-- LaunchWake réutilise déjà (N160, wakeFree — ne pas
+			-- partager). goldPopup réutilise déjà (N159, goldFree —
+			-- ne pas partager). Distinct flame leftover N152
+			-- (Size = Vector3.new, ≠ visual V74 freeze). Distinct HUD
+			-- N153. Distinct previewTile N154. Distinct selectTile N155.
+			-- Distinct tileFlash N156. Distinct conquestPulse N157
+			-- (pulseFree Effects — ne pas nommer deliveryFree
+			-- pulseFree). Distinct floatingText N158. Distinct
+			-- goldPopup N159. Distinct LaunchWake N160. Distinct
+			-- LandingSplash N161 (splashFree, ne pas partager).
+			-- Distinct N132 (euler DeliveryPulse déjà inline).
+			-- Distinct visual V80 DeliveryPulse wakeRot (ne pas
+			-- merger a597). Distinct Shockwave leftover N163
+			-- (Destroy, ne pas fusionner). Name DeliveryPulse
+			-- conservé. Reset Size (0.22, 2.8, 2.8) + Transparency
+			-- 0.28 + Color colorFor(route.slot) au reuse (le tween
+			-- avait Size (0.22, 11, 11) / Transparency 1 ; le slot
+			-- change). Euler N132 inline conservé. Tween Create
+			-- conservé (Size + Transparency restart). routePart non
+			-- modifié (LaunchWake / LandingSplash / Shockwave /
+			-- BlastSmoke). truckModel.Parent = nil obligatoire.
+			-- Recette leftover N161, pas merger visual. HUD /
+			-- UnitModels / Effects / PlacementPreview / goldPopup /
+			-- LaunchWake / LandingSplash / applyUnits /
+			-- applyRouteProgress inchangés.
+			local free = self.deliveryFree
+			if not free then
+				free = {}
+				self.deliveryFree = free
+			end
+			local n = #free
+			local pulse
+			if n > 0 then
+				pulse = free[n]
+				free[n] = nil
+			else
+				pulse = routePart(self.root, "DeliveryPulse", Vector3.new(0.22, 2.8, 2.8), colorFor(route.slot), Enum.Material.Neon)
+				pulse.Shape = Enum.PartType.Cylinder
+			end
+			pulse.Size = Vector3.new(0.22, 2.8, 2.8)
 			pulse.Transparency = 0.28
+			pulse.Color = colorFor(route.slot)
 			-- N132 : fin de delivery DeliveryPulse. Plus de CFrame.Angles.
 			-- fromEulerAnglesYXZ(0, 0, math.rad(90)) ≡ Angles(0, 0, π/2).
 			-- route.to deja Vector3 (gare) inchange. Tween Size/Transparency +
-			-- task.delay Destroy inchanges. truckModel.Parent = nil inchange.
-			-- Distinct splash N131 (mer, last.X, Y + 0.14). Distinct LaunchWake
-			-- N130. Distinct roues N126. Distinct chantier N113/N115.
-			-- Recette visual V75 leftover evenements Overlay.
-			-- applyUnits / applyRouteProgress non touches.
+			-- task.delay (Parent = nil, plus Destroy). truckModel.Parent = nil
+			-- inchange. Distinct splash N131/N161 (mer, last.X, Y + 0.14).
+			-- Distinct LaunchWake N130/N160. Distinct roues N126. Distinct
+			-- chantier N113/N115. Recette visual V75 leftover evenements
+			-- Overlay. applyUnits / applyRouteProgress non touches.
 			-- PlacementPreview / UnitModels inchanges.
 			pulse.CFrame = CFrame.new(route.to) * CFrame.fromEulerAnglesYXZ(0, 0, math.rad(90))
+			pulse.Parent = self.root
 			TweenService:Create(pulse, TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = Vector3.new(0.22, 11, 11),
 				Transparency = 1,
 			}):Play()
 			task.delay(0.85, function()
 				if pulse.Parent then
-					pulse:Destroy()
+					pulse.Parent = nil
+					local pool = self.deliveryFree
+					pool[#pool + 1] = pulse
 				end
 			end)
 			continue
