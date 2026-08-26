@@ -59,7 +59,7 @@ end)
 
 if failures > 0 then
 	print("\27[31mChargement impossible : le reste du banc est ignore.\27[0m")
-	return
+	os.exit(1)
 end
 
 local screenGui = Instance.new("ScreenGui")
@@ -78,12 +78,114 @@ check("construction du menu principal", function()
 end)
 
 check("selection de chaque nation et de chaque mode", function()
+	-- N171 : drawFlag Parent=nil + flagFree, garder UICorner parent,
+	-- Reset Rotation. N172 : drawTerrainPreview Parent=nil + previewFree,
+	-- pas flagFree, shade frère conservé, Reset Size/ZIndex. Pas de
+	-- testFlushDelays. Leftover N170 chatFree (check messages rapides)
+	-- et leftover N152 flame (check navires) et leftover N169 preview
+	-- (check calques) doivent rester verts. Recette leftover N171, pas
+	-- merger visual V108. HUD / Effects / Overlay / UnitModels /
+	-- drawFlag non retouchés. Pas d'assert Name. Parent flag = playerFlag
+	-- (argument). Parent tuile = featuredPreview (argument).
+	local snapshot = nil
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("Frame") then
+			snapshot = child
+			break
+		end
+	end
+	assert(snapshot, "snapshot bande drapeau manquant")
+	local cornersBefore = 0
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("UICorner") then
+			cornersBefore += 1
+		end
+	end
+	assert(cornersBefore == 1, "UICorner parent manquant avant")
+
 	for _, nation in Nations.LIST do
 		menu:selectNation(nation.id)
 	end
+
+	local reused = rawequal(snapshot.Parent, menu.playerFlag)
+		or rawequal(snapshot.Parent, menu.identityFlag)
+	if snapshot.Parent == nil then
+		local inFree = false
+		for _, band in MainMenu.flagFree do
+			if rawequal(band, snapshot) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "bande ni reparentee ni dans flagFree")
+	else
+		assert(reused, "bande recree")
+	end
+
+	local cornersAfter = 0
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("UICorner") then
+			cornersAfter += 1
+		end
+	end
+	assert(cornersAfter == 1, "UICorner parent detruit")
+
+	-- Rotation leftover diagonal → vertical. Oubli = bandes de travers.
+	menu:selectNation(4)
+	menu:selectNation(1)
+	for _, child in menu.playerFlag:GetChildren() do
+		if child:IsA("Frame") then
+			assert(child.Rotation == 0, "Rotation leftover diagonal")
+		end
+	end
+
+	-- N172 : drawTerrainPreview Parent=nil + previewFree, pas flagFree.
+	-- Shade frère conservé. Snapshot avant selectMode. Pas d'assert Name.
+	-- Pas #previewFree == 32*20 (océan non dessiné). Parent = featuredPreview
+	-- (argument), pas chatBody / playerFlag. Recette leftover N171, pas
+	-- merger visual V108.
+	local previewSnap = nil
+	for _, child in menu.featuredPreview:GetChildren() do
+		if child:IsA("Frame") then
+			previewSnap = child
+			break
+		end
+	end
+	assert(previewSnap, "snapshot tuile preview manquant")
+	local shadeBefore = false
+	for _, child in menu.featuredPreview.Parent:GetChildren() do
+		if child ~= menu.featuredPreview and child:IsA("Frame") and child:FindFirstChildWhichIsA("UIGradient") then
+			shadeBefore = true
+			break
+		end
+	end
+	assert(shadeBefore, "shade frère manquant avant")
+
 	for _, mode in GameModes.LIST do
 		menu:selectMode(mode.id)
 	end
+
+	if previewSnap.Parent == nil then
+		local inFree = false
+		for _, tile in MainMenu.previewFree do
+			if rawequal(tile, previewSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "tuile ni reparentee ni dans previewFree")
+	else
+		assert(rawequal(previewSnap.Parent, menu.featuredPreview), "tuile recree")
+	end
+
+	local shadeAfter = false
+	for _, child in menu.featuredPreview.Parent:GetChildren() do
+		if child ~= menu.featuredPreview and child:IsA("Frame") and child:FindFirstChildWhichIsA("UIGradient") then
+			shadeAfter = true
+			break
+		end
+	end
+	assert(shadeAfter, "shade frère détruit")
 end)
 
 --[[
@@ -228,6 +330,15 @@ check("identite, ere, diplomatie et classement", function()
 		)
 	end
 
+	-- N97 : leftover truncate. Premier update 12 slots, second un seul
+	-- vivant → #ranked == 1, sinon une ligne fantome (VictoryScreen /
+	-- selectFaction). Restaure le 12-slot avant la diplomatie.
+	-- N100 : comparateur module (rankByTiles) — meme loi tiles desc.
+	hud:update({ [3] = stats[3] }, { [3] = roster[3] })
+	assert(#hud.ranked == 1, "leftover ranked non truncate")
+	assert(hud.ranked[1].slot == 3, "ranked ne vise plus le slot vivant")
+	hud:update(stats, roster)
+
 	hud:setDiplomacy({
 		allies = { [2] = true },
 		incoming = { [3] = true },
@@ -277,6 +388,18 @@ check("identite, ere, diplomatie et classement", function()
 end)
 
 check("fil de notifications sature", function()
+	-- N153 : plafond notify decalage prefixe (pas table.remove(1)).
+	-- FIFO / MAX=3 / groupement / croix Dismiss inchanges. Leftover
+	-- N152 flame Size (check navires) doit rester vert. Recette
+	-- hardening N110, portee pas mergee. UnitModels / Overlay non
+	-- touches.
+	-- N167 : free-list feedFree. Pas de testFlushDelays ici — le
+	-- harnais stubbe task.delay pour le rejet (les 40 notify ont
+	-- des delays en file jusqu'aux vagues). Dismiss Activated /
+	-- groupement / N153 prefixe inchanges. Recette leftover N166,
+	-- pas merger visual V103. Overlay / BuildingModels / Effects
+	-- non touches. Reuse rawequal est dans « vagues de conquete ».
+	-- N174 : Dismiss delay parque (vagues). Ne pas flush ici.
 	for i = 1, 40 do
 		hud:notify(`message {i}`, if i % 2 == 0 then "bad" else "info")
 	end
@@ -380,6 +503,12 @@ check("un seul sous-menu ouvert a la fois", function()
 end)
 
 check("messages rapides : catalogue, designation de cible et envoi", function()
+	-- N170 : refreshChatSheet Parent=nil + chatFree, garder UIGridLayout,
+	-- Disconnect Activated. Pas de testFlushDelays. Leftover N152 flame
+	-- (check navires) et leftover N169 preview (check calques) doivent
+	-- rester verts. Recette leftover N169, pas merger visual V103.
+	-- Effects / Overlay / UnitModels / BuildingModels / notify feedFree
+	-- non touches. Dismiss delay Destroy conserve. Pas d'assert Name.
 	local sent = {}
 	hud.onQuickChat = function(id, targetSlot)
 		table.insert(sent, { id = id, target = targetSlot })
@@ -396,6 +525,28 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 
 	hud:openSheet("chat")
 	assert(hud.sheets.chat.Visible, "la feuille de messages ne s'ouvre pas")
+
+	-- N170 : snapshot avant changement d'onglet, autre onglet, retour
+	-- social, rawequal Parent chatBody (pas feed, pas overlay.root).
+	hud.chatCategory = "social"
+	hud.chatPending = nil
+	hud:refreshChatSheet()
+	local snapshot = buttonWithText("Bien joue !")
+	assert(snapshot, "snapshot catalogue social manquant")
+	hud.chatCategory = "attaque"
+	hud:refreshChatSheet()
+	hud.chatCategory = "social"
+	hud.chatPending = nil
+	hud:refreshChatSheet()
+	assert(rawequal(snapshot.Parent, hud.chatBody), "chat bouton recree")
+	assert(not rawequal(snapshot.Parent, hud.feed), "chat bouton reparente au fil")
+	local grids = 0
+	for _, child in hud.chatBody:GetChildren() do
+		if child:IsA("UIGridLayout") then
+			grids += 1
+		end
+	end
+	assert(grids == 1, "UIGridLayout duplique")
 
 	-- Un message sans cible part immediatement.
 	hud.chatCategory = "social"
@@ -427,7 +578,7 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 end)
 
 --[[
-	Disposition OpenFront.
+	Disposition CONQUEST.
 
 	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
 	choses, et c'est exactement ce qui casse quand on deplace une interface :
@@ -501,7 +652,7 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		"la bille du curseur n'est pas dans le panneau de controle"
 	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
-	-- jeu de reference — la puce dit combien part, le curseur decide.
+	-- CONQUEST — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
@@ -621,6 +772,14 @@ check("curseur d'engagement et doctrines", function()
 end)
 
 check("ecran de victoire", function()
+	-- N173 : show Parent=nil + valueFree, pas previewFree. Name Value
+	-- conservé. Reset TextXAlignment. Parent = row (self.rows[i]).
+	-- Early-out Visible conservé. hide inchangé. Pas de testFlushDelays.
+	-- Leftover N172 previewFree (check selection) et leftover N171
+	-- flagFree et leftover N170 chatFree et leftover N152 flame
+	-- doivent rester verts. Recette leftover N172, pas merger visual
+	-- V110. MainMenu / HUD / Effects / Overlay / UnitModels non
+	-- retouchés. Pas d'assert autre Name. Pas #valueFree == 5.
 	victory = VictoryScreen.new(screenGui)
 	local ranked = {}
 	for slot = 1, 8 do
@@ -636,8 +795,29 @@ check("ecran de victoire", function()
 			capturedTiles = 240, lostTiles = 20, capitalsCaptured = 2, buildingsBuilt = 7, attacksLaunched = 8 },
 	}
 	victory:show(1, "Valoria", ranked, roster, 1, summary, { xp = 900, level = 3, matches = 8, wins = 2, betrayals = 0, lastGain = 180 })
+	local snapshot = victory.rows[1]:FindFirstChild("Value")
+	assert(snapshot and snapshot:IsA("TextLabel"), "snapshot Value manquant")
 	victory:hide()
 	victory:show(2, "Kerensk", ranked, roster, 1)
+	if snapshot.Parent == nil then
+		local inFree = false
+		for _, value in VictoryScreen.valueFree do
+			if rawequal(value, snapshot) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "Value ni reparentee ni dans valueFree")
+	else
+		local onRow = false
+		for _, row in victory.rows do
+			if rawequal(snapshot.Parent, row) then
+				onRow = true
+				break
+			end
+		end
+		assert(onRow, "Value recree")
+	end
 	victory:setCountdown(12)
 	victory:hide()
 end)
@@ -650,6 +830,14 @@ local world, overlay, effects, preview
 
 check("construction du monde 3D", function()
 	world = WorldRenderer.new(4242)
+	-- N184 : leftover ConquestWorld Folder recycle (pas Destroy).
+	-- Pas de second new() — volerait world.root aux checks overlay / pose /
+	-- navires / etiquettes. Leftover N106 (partCount) reste plus bas.
+	-- N185 : destroy() parkWorld, pas Destroy. Pas d'appel destroy() ici
+	-- (volerait world.root). PlacementPreview N183 inchange. Overlay
+	-- inchange. rebuildChunk N106 inchange. Leftover N186 Placement.destroy.
+	assert(world.root.Name == "ConquestWorld", "ConquestWorld N184 absent")
+	assert(world.root.Parent ~= nil, "ConquestWorld N184 non parente")
 	-- Vide toute la file de reconstruction, comme le ferait le chargement.
 	local guard = 0
 	while world:initialProgress() < 1 and guard < 5000 do
@@ -657,17 +845,215 @@ check("construction du monde 3D", function()
 		guard += 1
 	end
 	assert(world:initialProgress() >= 1, "la construction initiale ne se termine jamais")
+	-- N106 : partCount = Ground+Border visibles, pas #GetChildren() d'orphelins.
+	local visible = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				visible += 1
+				assert(child.Parent == folder, "Ground/Border orphelin apres construction")
+			end
+		end
+	end
+	assert(world.partCount == visible, "partCount incoherent avec les Parts visibles")
+	-- N112 : curseur dirtyHead, file drainee. Plus de table.remove(1).
+	-- Leftover N106 (partCount) reste au-dessus. Truncate a la consommation.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead == 1, "dirtyHead non reset apres drain")
+	assert(#world.dirtyQueue == 0, "dirtyQueue non vide apres construction")
+
+	-- N114 : compact du prefixe consomme (seuil 32). 40 chunks sales,
+	-- 11 frames × budget 3 = tete 34 → compact des 7 restants a l'index 1.
+	-- Leftover N112 (drain → head 1, file vide) reste au-dessus.
+	-- Pas de table.remove. Recycle Parts N106 inchange.
+	local compactChunks = {}
+	for chunk in world.chunkFolders do
+		table.insert(compactChunks, chunk)
+		if #compactChunks >= 40 then
+			break
+		end
+	end
+	assert(#compactChunks >= 40, "pas assez de chunks pour tester le compact")
+	for _, chunk in compactChunks do
+		world:markChunkDirty(chunk)
+	end
+	assert(#world.dirtyQueue == 40, "file non remplie pour compact")
+	for _ = 1, 11 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1, "dirtyHead non reset apres compact")
+	assert(#world.dirtyQueue == 7, "reste non compacte vers l'index 1")
+	assert(world.dirtyQueue[8] == nil, "surplus non nile")
+	for _ = 1, 4 do
+		world:stepRebuilds()
+	end
+	assert(world.dirtyHead == 1 and #world.dirtyQueue == 0, "file non drainee apres compact")
+
+	-- N107 : houle sans Vector3, Parts stables, CFrame distinct du base.
+	-- N108 : couronnes Y depuis base, plus de CFrame.Angles. Leftover N106
+	-- (partCount) reste au-dessus. Recette visual V58/V59, pas merger.
+	-- N135 : OceanGlint fromEulerAnglesYXZ (pas CFrame.Angles). Yaw `angle`
+	-- variable. Offset Y OCEAN_LEVEL + 0.08. Leftover N114 compact, leftover
+	-- N112 dirtyHead, leftover N108 feuillage Y, leftover N107 houle
+	-- doivent rester verts. Check vagues leftover N134 ring. Check navires
+	-- leftover N133 shockwave. Recette leftover N134, pas merger visual.
+	-- Overlay / Effects / BuildingModels inchanges. step inchange.
+	-- N137 : TreeTrunk / SavannaTrunk fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Cylindre Z=90. buildDecorations seulement. Leftover N135 OceanGlint
+	-- yaw, leftover N114 compact, leftover N108 feuillage Y doivent rester
+	-- verts. Check pose leftover N136 BuildRing. Rock leftover N138 non
+	-- touche. Recette leftover N136, pas merger visual.
+	-- N138 : Rock fromEulerAnglesYXZ (pas CFrame.Angles). Yaw `phase`
+	-- variable. Offset Y ground + 0.55. Leftover N137 trunks Z=90,
+	-- leftover N135 OceanGlint yaw, leftover N108 feuillage Y doivent
+	-- rester verts. Check pose leftover N136 BuildRing. Recette leftover
+	-- N137, pas merger visual. BuildingModels cylinder leftover.
+	local nRipple = #world.oceanRipples
+	assert(nRipple > 0, "aucun reflet ocean")
+	local first = world.oceanRipples[1]
+	local glintPart = first.part
+	local glintBase = first.base
+	local nFoliage = #world.animatedFoliage
+	assert(nFoliage > 0, "aucune couronne")
+	local firstLeaf = world.animatedFoliage[1]
+	local leafPart = firstLeaf.part
+	local leafBase = firstLeaf.base
+	world:step(1 / 60)
+	world:step(1 / 60)
+	assert(#world.oceanRipples == nRipple, "reflets recrees")
+	assert(rawequal(world.oceanRipples[1].part, glintPart), "Part glint recree")
+	assert(glintPart.CFrame.X ~= glintBase.X or glintPart.CFrame.Z ~= glintBase.Z, "houle n'a pas bouge")
+	assert(glintPart.Transparency >= 0.64 and glintPart.Transparency <= 0.82, "Transparency hors bande")
+	assert(#world.animatedFoliage == nFoliage, "couronnes recrees")
+	assert(rawequal(world.animatedFoliage[1].part, leafPart), "Part couronne recree")
+	assert(leafPart.CFrame.Y ~= leafBase.Y, "feuillage n'a pas bouge")
+	local savedRipples = world.oceanRipples
+	world.oceanRipples = {}
+	world:step(1 / 60)
+	world.oceanRipples = savedRipples
+	local savedFoliage = world.animatedFoliage
+	world.animatedFoliage = {}
+	world:step(1 / 60)
+	world.animatedFoliage = savedFoliage
 end)
 
 check("calques d'entites, effets et apercu", function()
+	-- N155 : selectTile reuse Part. 2000 puis 2001 sont deux indices
+	-- distincts — Color/CFrame/Transparency ecrits, Part reutilisee
+	-- (pas Instance.new au 2e). Name SelectedTerritory inchange.
+	-- Tween Create conserve. Leftover N154 previewTile skip (2001
+	-- puis 2002 deux indices, Part reutilisee) doit rester vert.
+	-- N168 : clearSelection Parent = nil, garder self.selection.
+	-- Reselect 2000 reparente (rawequal Parent root). N169 :
+	-- clearActionPreview Parent = nil, garder self.actionPreview.
+	-- Re-preview 2001 reparente (rawequal Parent root). Nil skip
+	-- N154 obligatoire. Pas de testFlushDelays ici. Leftover N167
+	-- fil (check notifications sans flush + vagues reuse) et
+	-- leftover N152 flame (check navires) doivent rester verts.
+	-- Recette leftover N168, pas merger visual V77 PlacementPreview.
+	-- HUD / UnitModels / Overlay / PlacementPreview / BuildingModels
+	-- non touches. tileFlash leftover N156 (check vagues, free-list)
+	-- doit rester vert. HUD refreshChatSheet Destroy conserve
+	-- (leftover N170).
 	overlay = Overlay.new(world.root, terrain)
 	effects = Effects.new(world.root, terrain)
 	preview = PlacementPreview.new(world.root, terrain)
 	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
+	local selection = effects.selection
+	assert(selection ~= nil, "selection manquante")
+	assert(selection.Name == "SelectedTerritory", "Name selection")
+	effects:selectTile(2001, Color3.fromRGB(231, 76, 60))
+	assert(rawequal(effects.selection, selection), "Part selection recree")
+	assert(selection.Name == "SelectedTerritory", "Name selection mute")
 	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
 	effects:previewTile(2002, Color3.fromRGB(231, 76, 60), false)
+	local previewMarker = effects.actionPreview
+	assert(previewMarker ~= nil, "preview manquante")
+	assert(previewMarker.Name == "ActionPreview", "Name preview")
 	effects:clearActionPreview()
+	assert(rawequal(effects.actionPreview, previewMarker), "clearActionPreview a nile")
+	assert(previewMarker.Parent == nil, "clearActionPreview n'a pas unparente")
+	assert(previewMarker.Name == "ActionPreview", "Name preview perdu au clear")
+	assert(effects.actionPreviewIndex == nil, "skip N154 encore pose apres clear")
+	effects:previewTile(2001, Color3.fromRGB(45, 194, 177), true)
+	assert(rawequal(effects.actionPreview, previewMarker), "Part preview recree apres clear")
+	assert(rawequal(previewMarker.Parent, effects.root), "preview non reparentee")
 	effects:clearSelection()
+	assert(rawequal(effects.selection, selection), "clearSelection a nile")
+	assert(selection.Parent == nil, "clearSelection n'a pas unparente")
+	assert(selection.Name == "SelectedTerritory", "Name selection perdu au clear")
+	effects:selectTile(2000, Color3.fromRGB(45, 194, 177))
+	assert(rawequal(effects.selection, selection), "Part selection recree apres clear")
+	assert(rawequal(selection.Parent, effects.root), "selection non reparentee")
+end)
+
+check("hover spawn isolation : lisiere rouge, disque isole vert (N58)", function()
+	local SpawnHint = __require("SpawnHint")
+	local Theme = __require("Theme")
+	local OCEAN = Config.TERRAIN.OCEAN
+	local owner = world.owner
+
+	local land: number? = nil
+	local ocean: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) == OCEAN then
+			if not ocean then
+				ocean = index
+			end
+		else
+			if not land then
+				land = index
+			end
+		end
+		if land and ocean then
+			break
+		end
+	end
+	assert(land ~= nil, "aucune terre")
+	assert(ocean ~= nil, "aucun ocean")
+	assert(SpawnHint.looksClaimable(terrain, owner, land), "disque isole encore rouge")
+	assert(not SpawnHint.looksClaimable(terrain, owner, ocean), "ocean colore comme spawn")
+
+	-- Peint tout le terre comme un empire sauf une lisiere (meme recette N55).
+	local occupier = 1
+	local pocket: number? = nil
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			buffer.writeu8(owner, index, occupier)
+		end
+	end
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(terrain, index) ~= OCEAN then
+			local x, y = MapGen.fromIndex(index)
+			local adj = false
+			for dx = -1, 1 do
+				for dy = -1, 1 do
+					if dx ~= 0 or dy ~= 0 then
+						local nx, ny = x + dx, y + dy
+						if MapGen.inBounds(nx, ny) then
+							local ni = MapGen.toIndex(nx, ny)
+							if buffer.readu8(terrain, ni) ~= OCEAN and buffer.readu8(owner, ni) == occupier then
+								adj = true
+							end
+						end
+					end
+				end
+			end
+			if adj then
+				buffer.writeu8(owner, index, 0)
+				pocket = index
+				break
+			end
+		end
+	end
+	assert(pocket ~= nil, "lisiere introuvable")
+	assert(not SpawnHint.looksClaimable(terrain, owner, pocket), "lisiere encore verte")
+	effects:previewTile(pocket, Theme.color.danger, false)
+	effects:clearActionPreview()
+
+	-- Restaure le buffer owner du monde (tout NEUTRAL) pour les checks suivants.
+	for index = 0, Config.TILE_COUNT - 1 do
+		buffer.writeu8(owner, index, 0)
+	end
 end)
 
 check("pose et capture de chaque type de batiment", function()
@@ -776,6 +1162,48 @@ check("pose et capture de chaque type de batiment", function()
 		`la voie ne s'allonge pas : {atStart} puis {partway}`
 	)
 
+	-- N110 : lift cuit dans layer.origin. Deux frames pendant le chantier :
+	-- Parts stables, Y asphalt ≠ shoulder. Leftover N109 (câble) est dans
+	-- modeles procéduraux. Recette visual V61, portee pas mergee.
+	assert(sample and sample.construction, "chantier absent a mi-voie")
+	local function namedPart(model, name)
+		for _, child in model:GetChildren() do
+			if child.Name == name then
+				return child
+			end
+		end
+		return nil
+	end
+	local road = namedPart(sample.model, "Road")
+	local shoulder = namedPart(sample.model, "Shoulder")
+	local mark = namedPart(sample.model, "CenterMark")
+	assert(road and shoulder and mark, "calques de voie absents")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift chaussee = accotement")
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(namedPart(sample.model, "Road"), road), "Road recree")
+	assert(rawequal(namedPart(sample.model, "Shoulder"), shoulder), "Shoulder recree")
+	assert(rawequal(namedPart(sample.model, "CenterMark"), mark), "CenterMark recree")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres interpolation")
+
+	-- N111 : ox/oy/oz + dx/dy/dz cuits. Deux frames pendant le chantier :
+	-- nombres, oy asphalt ≠ shoulder. Leftover N110 (Parts, Y) reste au-dessus.
+	-- Recette visual V62, portee pas mergee.
+	local firstSeg = sample.construction.segments[1]
+	assert(type(firstSeg.dx) == "number" and type(firstSeg.dy) == "number" and type(firstSeg.dz) == "number", "dx/dy/dz absents")
+	assert(type(firstSeg.layers[1].ox) == "number" and type(firstSeg.layers[1].oy) == "number", "ox/oy shoulder absents")
+	assert(firstSeg.layers[2].oy ~= firstSeg.layers[1].oy, "oy asphalt = shoulder")
+	assert(firstSeg.layers[3].oy ~= firstSeg.layers[2].oy, "oy bande = asphalt")
+	-- N113 : rot cuit a l'origine. Plus de lookAt 60 Hz. Leftover N111
+	-- (nombres) reste au-dessus. Recette visual V63, portee pas mergee.
+	assert(firstSeg.rot ~= nil and type(firstSeg.rot.X) == "number", "rot absent")
+	assert(firstSeg.rot.X == 0 and firstSeg.rot.Y == 0 and firstSeg.rot.Z == 0, "rot n'est pas a l'origine")
+	local bakedRot = firstSeg.rot
+	overlay:stepInterpolation(1 / 60)
+	overlay:stepInterpolation(1 / 60)
+	assert(rawequal(firstSeg.rot, bakedRot), "rot recree pendant le chantier")
+	assert(road.CFrame.Y ~= shoulder.CFrame.Y, "lift perdu apres rot")
+
 	-- Au bout d'un temps largement suffisant, elle est finie et le chantier est
 	-- libere — sinon il resterait a tourner pour rien a chaque image.
 	for _ = 1, 30 do
@@ -795,6 +1223,72 @@ check("pose et capture de chaque type de batiment", function()
 	assert(routesOf(factoryEntry.index) == 1, "les routes obsoletes ne sont pas effacees")
 	overlay:stepInterpolation(1 / 60)
 
+	-- N105 : dispatch → camion parenté, interpolation, arrivée → Parent nil + pulse.
+	-- N115 : segRot cuit (meme index que segmentIndex). rawequal d'un frame a
+	-- l'autre. Leftover N113 (rot chantier) plus haut. Leftover N103/N116
+	-- (unités) reste dans le check navires. Voies encore vivantes ici ; la
+	-- destruction plus bas les vide (le check livraison n'en a plus).
+	-- N126 : roues fromEulerAnglesYXZ (spin = progress * π * 20). Leftover
+	-- N115 segRot rawequal doit rester vert. Recette visual V72, portee
+	-- pas mergee. Recette visual V57 leftover N105. Recette visual
+	-- V64 leftover N115.
+	-- N132 : DeliveryPulse fromEulerAnglesYXZ (pas CFrame.Angles). Fin de
+	-- trajet seulement (progress >= 1). Leftover N126 roues, leftover N115
+	-- segRot, leftover N20 popup or doivent rester verts. Recette visual
+	-- V75 leftover evenements Overlay. applyUnits / applyRouteProgress
+	-- inchanges.
+	-- N162 : DeliveryPulse free-list deliveryFree. Pas de
+	-- testFlushDelays ici — le pulse reste parenté (le flush + reuse
+	-- rawequal est dans « vagues de conquete »). Name DeliveryPulse
+	-- conservé. Leftover N132 euler inline, leftover N136 BuildRing
+	-- euler, leftover N166 BuildRing pool **sans** flush doivent
+	-- rester verts. Recette leftover N161, pas merger visual
+	-- V80 wakeRot. Shockwave leftover N163 (check navires / vagues).
+	-- N136 : BuildRing fromEulerAnglesYXZ (pas CFrame.Angles). Cylindre
+	-- Z=90. playConstruction via applyBuildingDelta plus haut. Leftover
+	-- N132 pulse, leftover N113 rot chantier, leftover N135 OceanGlint
+	-- (check construction) doivent rester verts. Recette leftover N135,
+	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
+	-- N166 : BuildRing free-list ringFree. Pas de testFlushDelays
+	-- ici — les bagues restent parentées au model (le flush +
+	-- reuse rawequal est dans « vagues de conquete »). Name
+	-- BuildRing conservé. Parent = model (pas overlay.root).
+	-- Euler N136 inline. Leftover N162 DeliveryPulse sans flush
+	-- doit rester vert. Recette leftover N165, pas merger visual.
+	-- N167 : HUD notify feedFree. Pas de testFlushDelays dans le
+	-- check notifications (Dismiss stubbe delay). Reuse rawequal
+	-- est dans « vagues de conquete ». Leftover N152 flame Size
+	-- (check navires) doit rester vert. Leftover N174 Dismiss
+	-- delay (vagues, après n167) doit rester vert.
+	local _, liveRoute = routesOf(factoryEntry.index)
+	assert(liveRoute ~= nil, "aucune voie pour tester le camion")
+	assert(liveRoute.segRot ~= nil and #liveRoute.segRot == #liveRoute.path - 1, "segRot absent ou mal taille")
+	local firstSegRot = liveRoute.segRot[1]
+	assert(firstSegRot ~= nil and type(firstSegRot.X) == "number", "segRot[1] absent")
+	assert(firstSegRot.X == 0 and firstSegRot.Y == 0 and firstSegRot.Z == 0, "segRot n'est pas a l'origine")
+	overlay:onTradeEvent("dispatch", factoryEntry.index, cityIndex, 1, 1)
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion non parente au dispatch")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue apres un frame")
+	assert(liveRoute.truckModel.Parent == liveRoute.model, "camion disparu en route")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree pendant la livraison")
+	overlay:stepInterpolation(1 / 60)
+	assert(liveRoute.delivery ~= nil, "livraison perdue au second frame")
+	assert(rawequal(liveRoute.segRot[1], firstSegRot), "segRot recree au second frame")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion non retire a l'arrivee")
+	local pulseFound = false
+	for _, node in overlay.root:GetChildren() do
+		if node.Name == "DeliveryPulse" then
+			pulseFound = true
+			break
+		end
+	end
+	assert(pulseFound, "pas de pulse a l'arrivee")
+
 	-- Une ville qui evolue change reellement de silhouette et conserve son
 	-- niveau dans l'inspecteur client.
 	for _, entry in deltas do
@@ -813,12 +1307,122 @@ check("pose et capture de chaque type de batiment", function()
 	end
 	overlay:applyBuildingDelta(deltas)
 
+	-- N178 : snapshot CITY L3 (upgrade ci-dessus) avant kind=0.
+	-- Recapture slot=2 inchangée. Pas overlay:clear() (N177 déjà,
+	-- Destroy bâtiments leftover N179). Recette leftover N177,
+	-- pas merger visual V116. Distinct leftover N152 flame.
+	-- Leftover N166 ring / N162 pulse sans flush restent verts.
+	local citySnapIndex: number? = nil
+	local citySnap = nil
+	for _, entry in deltas do
+		if entry.kind == Config.BUILDING.CITY then
+			citySnapIndex = entry.index
+			citySnap = overlay.buildings[entry.index]
+			break
+		end
+	end
+	assert(citySnap ~= nil and citySnapIndex ~= nil, "snapshot ville N178 absent")
+
+	-- N180 : snapshot voie factory→city avant kind=0. Recapture
+	-- slot=2 inchangée. Pas overlay:clear() (N181 testé dans
+	-- vagues). Recette leftover N179, pas merger visual
+	-- V118. Distinct leftover N152 flame. truckModel.Parent nil
+	-- (arrivée N162 déjà plus haut).
+	local routeSnap = overlay.routes[factoryEntry.index * 100000 + cityIndex]
+	assert(routeSnap ~= nil, "snapshot voie N180 absent")
+	assert(routeSnap.factory == factoryEntry.index, "factory voie N180 faux")
+	assert(routeSnap.city == cityIndex, "city voie N180 faux")
+
 	-- Destruction
 	for _, entry in deltas do
 		entry.kind = 0
 	end
 	overlay:applyBuildingDelta(deltas)
 	assert(next(overlay.routes) == nil, "une route detruite reste affichee")
+	assert(citySnap.Parent == nil, "ville N178 encore parentee")
+	local buildingPool = overlay.buildingFree
+	assert(buildingPool ~= nil and #buildingPool >= 1, "batiments non poolees")
+	local parked = false
+	for _, model in buildingPool do
+		if rawequal(model, citySnap) then
+			parked = true
+			break
+		end
+	end
+	assert(parked, "ville N178 absente de buildingFree")
+	assert(citySnap:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au park")
+	assert(citySnap:GetAttribute("Level") == 3, "Level perdu au park")
+	assert(routeSnap.model.Parent == nil, "voie N180 encore parentee")
+	assert(routeSnap.truckModel.Parent == nil, "camion N180 encore parent")
+	local routePool = overlay.routeFree
+	assert(routePool ~= nil and #routePool >= 1, "voies non poolees")
+	local routeParked = false
+	for _, rec in routePool do
+		if rawequal(rec, routeSnap) then
+			routeParked = true
+			break
+		end
+	end
+	assert(routeParked, "voie N180 absente de routeFree")
+
+	-- Reuse autre index, même kind+level. Name Building{index}
+	-- réécrit. Parent overlay.root. Pas Destroy. Kind+Level match.
+	-- Recapture same kind+level **non** rejouée ici (déjà plus haut).
+	local reuseIndex = citySnapIndex + 1
+	overlay:applyBuildingDelta({
+		{ index = reuseIndex, kind = Config.BUILDING.CITY, slot = 2, level = 3 },
+	})
+	if citySnap.Parent == nil then
+		local inFree = false
+		for _, model in buildingPool do
+			if rawequal(model, citySnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ville N178 ni reparentee ni dans buildingFree")
+	else
+		assert(rawequal(citySnap.Parent, overlay.root), "ville N178 recree")
+		assert(citySnap.Name == `Building{reuseIndex}`, "Name Building index perdu au reuse")
+		local kind, slot, level = overlay:buildingAt(reuseIndex)
+		assert(kind == Config.BUILDING.CITY and slot == 2 and level == 3, "inspecteur N178 faux")
+	end
+
+	-- N180 : même couple usine+ville reprend le record. Pas Destroy.
+	-- Key factory*100000+city. Parent overlay.root **ou** free-list.
+	-- Pas overlay:clear(). truckModel.Parent nil jusqu'au dispatch.
+	-- animateFrom futur : pas de playConstruction (N166 ringFree
+	-- reste pour « vagues de conquete »).
+	local savedAnimate = overlay.animateFrom
+	overlay.animateFrom = os.clock() + 999
+	overlay:applyBuildingDelta({
+		{ index = factoryEntry.index, kind = Config.BUILDING.FACTORY, slot = 2, level = 1, links = { cityIndex } },
+	})
+	overlay.animateFrom = savedAnimate
+	if routeSnap.model.Parent == nil then
+		local inFree = false
+		for _, rec in routePool do
+			if rawequal(rec, routeSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "voie N180 ni reparentee ni dans routeFree")
+	else
+		assert(rawequal(routeSnap.model.Parent, overlay.root), "voie N180 recree")
+		assert(routeSnap.truckModel.Parent == nil, "camion N180 reparente au reuse")
+		assert(routeSnap.delivery == nil, "livraison fantome au reuse N180")
+		local live = overlay.routes[factoryEntry.index * 100000 + cityIndex]
+		assert(rawequal(live, routeSnap), "voie N180 pas a la cle usine+ville")
+	end
+
+	-- Remettre le slot usine vide : « vagues » N162 pose CITY+FACTORY
+	-- aux mêmes indices catalogue et doit consommer 2 BuildRing.
+	overlay:applyBuildingDelta({
+		{ index = factoryEntry.index, kind = 0, slot = 2, level = 1 },
+	})
+	overlay.animateFrom = savedAnimate
+	assert(next(overlay.routes) == nil, "voie N180 encore live apres park")
 end)
 
 --[[
@@ -880,9 +1484,140 @@ check("modeles procéduraux : le palier change la silhouette", function()
 			`{name} : la hauteur de reference ne suit pas le palier`
 		)
 	end
+
+	-- N109 : câble Y depuis rest, plus de Vector3.new. Leftover N107/N108
+	-- (houle / feuillage) reste dans construction du monde.
+	-- N124 : radar / flag / boom rotation via fromEulerAnglesYXZ, pas
+	-- CFrame.Angles. Factory sans câble : animate ne lève pas.
+	-- Recette visual V70, portee pas mergee.
+	-- N139 : cylinder() fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Cylindre Z=90. Helper seulement. Leftover N124 radar, leftover
+	-- N109 câble Y, leftover N136 BuildRing (check pose) doivent
+	-- rester verts. Toits leftover N140 non touches. Recette leftover
+	-- N138, pas merger visual. WorldRenderer / Overlay / Effects
+	-- inchanges.
+	-- N140 : toits usine fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Z=-12° fixe. buildFactory sheds seulement. Leftover N139
+	-- cylinder cheminees, leftover N124 radar, leftover N109 câble
+	-- Y, leftover N136 BuildRing (check pose) doivent rester verts.
+	-- Portes silo leftover non touchees. Recette leftover N139,
+	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
+	-- N141 : portes silo fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Z=+18° et Z=-18°. buildSilo portes seulement, deux sites.
+	-- Leftover N140 toits FACTORY, leftover N139 cylinder
+	-- cheminees, leftover N124 radar, leftover N109 câble Y,
+	-- leftover N136 BuildRing (check pose) doivent rester verts.
+	-- Rampes SAM leftover non touchees. Recette leftover N140,
+	-- pas merger visual. WorldRenderer / Overlay / Effects inchanges.
+	-- N142 : rampes SAM Interceptor fromEulerAnglesYXZ (pas
+	-- CFrame.Angles). Pitch X=-31° fixe. buildSam launchers
+	-- seulement, quatre missiles 2×2. Leftover N141 portes SILO,
+	-- leftover N140 toits FACTORY, leftover N124 radar doivent
+	-- rester verts. Recette leftover N141, pas merger visual.
+	-- WorldRenderer / Overlay / UnitModels inchanges.
+	-- N149 : CityWindows rest.X (pas child.Position.X). Phase
+	-- depuis RestCFrame. Amplitude / frequence inchangees.
+	-- Leftover N142 Interceptor, leftover N141 portes, leftover
+	-- N140 toits, leftover N139 cylinder, leftover N124 radar
+	-- doivent rester verts. Recette leftover N148, pas merger
+	-- visual. Beacons leftover N150 non touches. UnitModels /
+	-- Overlay inchanges.
+	-- N150 : beacons rest.Z (pas child.Position.Z). CityBeacon /
+	-- PortBeacon / LabBeacon, un elseif. Amplitude / frequence
+	-- inchangees. Leftover N149 fenetres rest.X, leftover N142
+	-- Interceptor, leftover N141 portes, leftover N124 radar
+	-- doivent rester verts. Recette leftover N149, pas merger
+	-- visual. Trail UnitModels leftover non touche. CityWindows
+	-- N149 inchange. UnitModels / Overlay inchanges.
+	local factory = Building.create(Config.BUILDING.FACTORY, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	Building.animate(factory, 1, 1 / 60)
+	local port = Building.create(Config.BUILDING.PORT, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local cable = port:FindFirstChild("PortCraneCable")
+	assert(cable and cable.CFrame, "PORT sans câble")
+	local rest = cable:GetAttribute("RestCFrame")
+	assert(rest, "câble sans RestCFrame")
+	local restY = rest.Y
+	local boom = port:FindFirstChild("PortCraneBoom")
+	assert(boom and boom.CFrame, "PORT sans grue")
+	local boomRest = boom:GetAttribute("RestCFrame")
+	assert(boomRest, "grue sans RestCFrame")
+	Building.animate(port, 1, 1 / 60)
+	Building.animate(port, 2, 1 / 60)
+	assert(rawequal(port:FindFirstChild("PortCraneCable"), cable), "Part câble recreee")
+	assert(cable.CFrame.Y ~= restY, "câble n'a pas bouge")
+	assert(rawequal(port:FindFirstChild("PortCraneBoom"), boom), "Part grue recreee")
+	assert(boom.CFrame.Y == boomRest.Y, "grue convertie en translation")
+	assert(not rawequal(boom.CFrame, boomRest), "grue alias RestCFrame")
+
+	local sam = Building.create(Config.BUILDING.SAM, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local radar = sam:FindFirstChild("Radar")
+	assert(radar and radar.CFrame, "SAM sans radar")
+	local radarRest = radar:GetAttribute("RestCFrame")
+	assert(radarRest, "radar sans RestCFrame")
+	Building.animate(sam, 1, 1 / 60)
+	Building.animate(sam, 2, 1 / 60)
+	assert(rawequal(sam:FindFirstChild("Radar"), radar), "Part radar recreee")
+	assert(radar.CFrame.Y == radarRest.Y, "radar converti en translation")
+	assert(not rawequal(radar.CFrame, radarRest), "radar alias RestCFrame")
+
+	local capital = Building.create(Config.BUILDING.CAPITAL, Color3.fromRGB(200, 60, 60), Vector3.new(0, 0, 0), 1)
+	local flag = capital:FindFirstChild("CapitalFlag")
+	assert(flag and flag.CFrame, "capitale sans drapeau")
+	local flagRest = flag:GetAttribute("RestCFrame")
+	assert(flagRest, "drapeau sans RestCFrame")
+	Building.animate(capital, 1, 1 / 60)
+	Building.animate(capital, 2, 1 / 60)
+	assert(rawequal(capital:FindFirstChild("CapitalFlag"), flag), "Part drapeau recreee")
+	assert(flag.CFrame.Y == flagRest.Y, "drapeau converti en translation")
+	assert(flag.CFrame ~= flagRest, "drapeau n'a pas quitte RestCFrame")
 end)
 
 check("apercu de placement pour chaque batiment", function()
+	-- N129 : footprint fromEulerAnglesYXZ (pas CFrame.Angles). Hauteur 0.4
+	-- (feel). Pas de pulse. Leftover N92 ctx. Recette visual V75 leftover
+	-- deja sur 1b5c — portee euler, pas mergee.
+	-- N183 : snapshot Ghost CITY avant hide. Parent nil + ghostFree.
+	-- Restore setKind(CITY) reuse Parent preview.root **ou** free-list.
+	-- Skip FactionLabels. Skip Overlay. Skip destroy(). Skip footprint.
+	-- Recette leftover N182, pas merger visual V76. Distinct leftover
+	-- N152 flame. Pas overlay:clear() ni labels:clear() ici. Check
+	-- etiquettes leftover N182 doit rester vert. Check accrochage
+	-- (setKind CITY deja) doit rester vert.
+	-- N186 : destroy() parkPlaceRoot, pas Destroy. Pas d'appel
+	-- destroy() ici (volerait preview.root aux checks accrochage).
+	-- Leftover N183 (ghostFree) reste au-dessus. WorldRenderer N185
+	-- inchange. setKind N183 inchange. euler N129 inchange.
+	preview:setKind(Config.BUILDING.CITY)
+	local ghostSnap = preview.model
+	assert(ghostSnap ~= nil, "Ghost CITY N183 absent apres setKind")
+	preview:hide()
+	assert(ghostSnap.Parent == nil, "Ghost N183 encore parentee")
+	local ghostPool = preview.ghostFree
+	assert(ghostPool ~= nil and #ghostPool >= 1, "Ghosts non poolees")
+	local parkedGhost = false
+	for _, rec in ghostPool do
+		if rawequal(rec, ghostSnap) then
+			parkedGhost = true
+			break
+		end
+	end
+	assert(parkedGhost, "Ghost N183 absente de ghostFree")
+
+	preview:setKind(Config.BUILDING.CITY)
+	if ghostSnap.Parent == nil then
+		local inFree = false
+		for _, rec in ghostPool do
+			if rawequal(rec, ghostSnap) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "Ghost N183 ni reparentee ni dans ghostFree")
+	else
+		assert(rawequal(ghostSnap.Parent, preview.root), "Ghost N183 recree")
+		assert(rawequal(preview.model, ghostSnap), "Ghost N183 pas au model")
+	end
+
 	for _, def in BuildingDefs.BUILDABLE do
 		preview:setKind(def.id)
 		preview:update(1000, "exact")
@@ -1014,6 +1749,13 @@ end)
 	jusqu'au moment ou un joueur clique droit et ne voit rien.
 ]]
 check("menu radial : pages, contexte et sorties", function()
+	-- N188 : destroy() parkVeil, pas Destroy. Garder destroy()
+	-- en fin (deja). Pas de second new() (volerait le voile).
+	-- Skip reconnect Activated. Skip Minimap N187. Skip
+	-- PlacementPreview N186. Skip WorldRenderer N185. Skip Overlay.
+	-- Skip init.client (radial unique, destroy absent). Recette
+	-- leftover N187, pas merger visual. Distinct leftover N152 flame.
+	-- Distinct leftover N189 (check direction visuelle).
 	local menu = RadialMenu.new(screenGui)
 	assert(not menu:isOpen(), "le menu est ouvert avant qu'on le demande")
 
@@ -1114,6 +1856,82 @@ check("menu radial : pages, contexte et sorties", function()
 end)
 
 --[[
+	Direction visuelle (Lighting + Terrain).
+
+	Rojo / Play Solo laisse parfois un enfant Lighting homonyme de
+	mauvaise classe. Destroy tuait l'instance ; le pool N189 la
+	parque. Un mismatch Frame sur ConquestBloom ne doit pas detruire
+	le Bloom, et apply() deux fois doit renvoyer la meme Atmosphere.
+]]
+check("direction visuelle : reuse et mismatch", function()
+	-- N189 : effect() park mismatch, pas Destroy. apply() × 2
+	-- rawequal Atmosphere. Frame ConquestBloom → Parent nil + Bloom
+	-- existe. Take BloomEffect d'un leftover parke. Clouds Part
+	-- leftover → Parent nil + Clouds. Skip RadialMenu N188 (garder
+	-- menu:destroy() existant, pas second new()). Skip Minimap N187.
+	-- Skip Overlay. Skip init.client (apply unique, ScreenGui =
+	-- leftover N190). Distinct leftover N152 flame. Recette leftover
+	-- N188, pas merger visual.
+	local VisualDirector = __require("VisualDirector")
+	local Lighting = game:GetService("Lighting")
+	local Workspace = game:GetService("Workspace")
+
+	VisualDirector.apply()
+	local atmo = Lighting:FindFirstChild("ConquestAtmosphere")
+	assert(atmo ~= nil and atmo.ClassName == "Atmosphere", "Atmosphere absente")
+	VisualDirector.apply()
+	assert(rawequal(Lighting:FindFirstChild("ConquestAtmosphere"), atmo), "Atmosphere recreee")
+
+	local bloom = Lighting:FindFirstChild("ConquestBloom")
+	assert(bloom ~= nil, "Bloom absent avant mismatch")
+	bloom.Parent = nil
+	local fakeBloom = Instance.new("Frame")
+	fakeBloom.Name = "ConquestBloom"
+	fakeBloom.Parent = Lighting
+	VisualDirector.apply()
+	assert(fakeBloom.Parent == nil, "Frame mismatch pas parkee")
+	local bloomAfter = Lighting:FindFirstChild("ConquestBloom")
+	assert(bloomAfter ~= nil and bloomAfter.ClassName == "BloomEffect", "Bloom absent apres mismatch")
+
+	-- Take : BloomEffect leftover sur le nom Atmosphere, puis Frame
+	-- sur Bloom. Oubli de take = Instance.new a chaque mismatch.
+	local liveAtmo = Lighting:FindFirstChild("ConquestAtmosphere")
+	assert(liveAtmo, "Atmosphere absente avant take")
+	liveAtmo.Parent = nil
+	local leftoverBloom = Instance.new("BloomEffect")
+	leftoverBloom.Name = "ConquestAtmosphere"
+	leftoverBloom.Parent = Lighting
+	VisualDirector.apply()
+	assert(leftoverBloom.Parent == nil, "BloomEffect leftover pas parke")
+	assert(
+		Lighting:FindFirstChild("ConquestAtmosphere") ~= nil
+			and Lighting:FindFirstChild("ConquestAtmosphere").ClassName == "Atmosphere",
+		"Atmosphere absente apres leftover Bloom"
+	)
+	local currentBloom = Lighting:FindFirstChild("ConquestBloom")
+	assert(currentBloom, "Bloom absent avant take")
+	currentBloom.Parent = nil
+	local fakeTake = Instance.new("Frame")
+	fakeTake.Name = "ConquestBloom"
+	fakeTake.Parent = Lighting
+	VisualDirector.apply()
+	assert(fakeTake.Parent == nil, "Frame take mismatch pas parkee")
+	assert(rawequal(Lighting:FindFirstChild("ConquestBloom"), leftoverBloom), "BloomEffect pool non pris")
+
+	local terrain = Instance.new("Terrain")
+	terrain.Parent = Workspace
+	local fakeCloud = Instance.new("Part")
+	fakeCloud.Name = "ConquestClouds"
+	fakeCloud.Parent = terrain
+	VisualDirector.apply()
+	assert(fakeCloud.Parent == nil, "Part Clouds mismatch pas parkee")
+	local clouds = terrain:FindFirstChild("ConquestClouds")
+	assert(clouds ~= nil and clouds:IsA("Clouds"), "Clouds absent apres mismatch")
+	VisualDirector.apply()
+	assert(rawequal(terrain:FindFirstChild("ConquestClouds"), clouds), "Clouds recrees")
+end)
+
+--[[
 	Etiquettes de faction posees sur la carte.
 
 	Elles n'existent que dans le monde 3D, donc rien a l'ecran ne signale une
@@ -1176,6 +1994,11 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 
 	-- Une faction effacee de la carte perd son etiquette au lieu de la laisser
 	-- flotter sur un territoire qui ne lui appartient plus.
+	-- N182 : snapshot ancre slot 1 (first déjà) avant emptied.
+	-- Parent nil + labelFree. Skip Overlay. Skip surveyTerritories N96.
+	-- Recette leftover N181, pas merger visual 3437. Distinct leftover
+	-- N152 flame. Pas overlay:clear() ici. Check vagues leftover N181
+	-- doit rester vert.
 	local emptied = buffer.create(Config.TILE_COUNT)
     for y = 40, 70 do
         for x = 180, 200 do
@@ -1185,9 +2008,44 @@ check("etiquettes de faction : centre, contenu et disparition", function()
 	labels:refresh(emptied, stats, roster)
 	assert(labels.labels[1] == nil, "une faction sans territoire garde son etiquette")
 	assert(labels.labels[2] ~= nil, "une faction encore vivante a perdu son etiquette")
+	assert(first.anchor.Parent == nil, "ancre N182 encore parentee")
+	local labelPool = labels.labelFree
+	assert(labelPool ~= nil and #labelPool >= 1, "etiquettes non poolees")
+	local parkedLabel = false
+	for _, rec in labelPool do
+		if rawequal(rec, first) then
+			parkedLabel = true
+			break
+		end
+	end
+	assert(parkedLabel, "ancre N182 absente de labelFree")
+
+	-- Restore territoire slot 1 : reuse. Parent labels.root **ou** free-list.
+	-- Arbre Billboard conservé. Pas Destroy. Recette leftover N181.
+	labels:refresh(owner, stats, roster)
+	if first.anchor.Parent == nil then
+		local inFree = false
+		for _, rec in labelPool do
+			if rawequal(rec, first) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ancre N182 ni reparentee ni dans labelFree")
+	else
+		assert(rawequal(first.anchor.Parent, labels.root), "ancre N182 recree")
+		assert(rawequal(labels.labels[1], first), "ancre N182 pas au slot 1")
+		assert(first.name.Text == "Valoria", "texte perdu au reuse N182")
+	end
+
+	-- N96 : owner tout NEUTRAL → plus d'ancres (leftover hash interdit).
+	local barren = buffer.create(Config.TILE_COUNT)
+	labels:refresh(barren, stats, roster)
+	assert(labels.labels[1] == nil and labels.labels[2] == nil, "etiquette fantome apres carte neutre")
 
 	labels:clear()
 	assert(next(labels.labels) == nil, "les etiquettes ne sont pas liberees")
+	assert(labels.labelFree ~= nil and #labels.labelFree >= 1, "labelFree videe au clear")
 end)
 
 --[[
@@ -1198,6 +2056,12 @@ end)
 	pouvait le voir : un popup trop discret s'affiche sans erreur.
 ]]
 check("livraison : le gain s'affiche sur la gare", function()
+	-- N159 : goldPopup Name GoldPopup / Board. Pas de
+	-- testFlushDelays ici — les popups restent parentés (le
+	-- flush + reuse rawequal est dans « vagues de conquete »).
+	-- Distinct leftover N158 textFree (Effects). Distinct
+	-- leftover N152 flame Size. Recette leftover N158, pas
+	-- merger visual V82.
 	overlay:setLocalSlot(1)
 
 	local function popups(): number
@@ -1250,7 +2114,7 @@ end)
 
 check("navires, missiles et interpolation", function()
 	overlay:applyUnits({
-		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1 },
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
 		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
 		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
 	}, {
@@ -1261,19 +2125,726 @@ check("navires, missiles et interpolation", function()
 	assert(#overlay.units[3].visual.pieces >= 8, "le missile est encore un placeholder")
 	assert(overlay.units[1].visual.model.Name == "LandingShip", "mauvais modele de debarquement")
 	assert(overlay.units[2].visual.model.Name == "MerchantShip", "mauvais modele de cargo")
+	-- N98 : extra missile mute, pas remplace. Navire : extra reste nil
+	-- (retraite N56 via retreatTinted).
+	assert(overlay.units[1].extra == nil, "un navire ne doit pas porter extra")
+	local extra = overlay.units[3].extra
+	assert(extra ~= nil and extra.tx == 60 and extra.ty == 60, "extra missile initial absent")
+	-- N101 : insert pose des nombres, plus de Vector2.
+	assert(type(overlay.units[1].targetX) == "number" and type(overlay.units[1].currentX) == "number", "navire target pas un nombre")
+	assert(overlay.units[1].targetX == 10 and overlay.units[1].targetY == 10, "navire target insert")
+	assert(overlay.units[3].targetX == 40 and overlay.units[3].currentY == 40, "missile target insert")
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 40, y = 40, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].extra.tx == 80 and overlay.units[3].extra.ty == 90, "extra missile non mute")
+	assert(rawequal(extra, overlay.units[3].extra), "record extra missile remplace")
+	-- N101 : meme missile, x/y differents → mute target, rawequal du record.
+	local missileUnit = overlay.units[3]
+	overlay:applyUnits({
+		{ id = 1, slot = 1, x = 10, y = 10, troops = 100, kind = 1, retreating = true },
+		{ id = 2, slot = 2, x = 20, y = 30, troops = 0, kind = 2 },
+		{ id = 4, slot = 3, x = 30, y = 30, troops = 0, kind = 3 },
+	}, {
+		{ id = 3, slot = 1, x = 50, y = 55, tx = 80, ty = 90, kind = 1 },
+	})
+	assert(overlay.units[3].targetX == 50 and overlay.units[3].targetY == 55, "missile target non mute")
+	assert(rawequal(overlay.units[3], missileUnit), "record unite missile remplace")
+	local beforeX = overlay.units[3].currentX
+	local beforeY = overlay.units[3].currentY
+	-- N103 : lookAt unique (mag > 0.01) ne casse pas le lerp. Leftover N101.
+	-- N116 : immobile = CFrame.new. Navire 1 (x=y=10) n'avance pas ; missile
+	-- continue de lerper.
+	-- N117 : mouvement = fromEulerAnglesYXZ (pas lookAt). Leftover N116
+	-- (immobile) et leftover N103 (lerp sous yaw) restent verts.
+	-- N125 : roulis fromEulerAnglesYXZ (pas CFrame.Angles). Immobile
+	-- (navire 1) : zero compose — leftover N116 doit rester vert.
+	-- Recette visual V71, portee pas mergee.
+	-- N127 : UnitModels.place radar fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Leftover N125 yaw+roulis, leftover N117, leftover N116 immobile
+	-- doivent rester verts. Recette visual V73 leftover, portee pas mergee.
+	-- N128 : UnitModels.place flag fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Leftover N127 radar euler doit rester vert. Recette visual V73
+	-- leftover, portee pas mergee.
+	-- N130 : LaunchWake insert fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Leftover N128/N127 pieces, leftover N125 roulis, leftover N116
+	-- immobile, leftover N129 apercu doivent rester verts. Recette visual
+	-- V75 leftover evenements Overlay. stepInterpolation inchange.
+	-- N131 : LandingSplash despawn fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Offset Y + 0.14. Skip retraite N56. Leftover N130 wake spawn,
+	-- leftover N128/N127 pieces, leftover N125 roulis, leftover N116
+	-- immobile, leftover N129 apercu doivent rester verts. applyUnits({}, {})
+	-- plus bas ne leve pas. Recette visual V75 leftover evenements Overlay.
+	-- N133 : explosion Shockwave fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Hauteur PLAINS + 0.5. overlay:explosion plus bas ne leve pas.
+	-- Sphere / fumee sans euler. Leftover N131 splash despawn, leftover
+	-- N130 wake spawn, leftover N125 yaw+roulis, leftover N116 immobile
+	-- doivent rester verts. Recette visual V75 leftover evenements Overlay.
+	-- N143 : UnitModels addWake fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Yaw Y=side*11° (deux sides). Leftover N133 Shockwave, leftover
+	-- N131 splash, leftover N130 LaunchWake Overlay, leftover N128
+	-- flag, leftover N127 radar, leftover N125 roulis, leftover N116
+	-- immobile, leftover N142 Interceptor (check modeles) doivent
+	-- rester verts. Recette leftover N142, pas merger visual.
+	-- Proue leftover N144 non touchee. BuildingModels / Overlay
+	-- inchanges.
+	-- N144 : UnitModels Bow fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Yaw Y=π fixe, deux sites (carrier + transport/cargo). Leftover
+	-- N143 houle addWake, leftover N133 Shockwave, leftover N131
+	-- splash, leftover N130 LaunchWake Overlay, leftover N128 flag,
+	-- leftover N127 radar, leftover N125 roulis, leftover N116
+	-- immobile, leftover N142 Interceptor (check modeles) doivent
+	-- rester verts. Recette leftover N143, pas merger visual.
+	-- Rampe leftover N145 / missile leftover non touches. addWake
+	-- N143 inchange. BuildingModels / Overlay inchanges.
+	-- N145 : UnitModels LandingRamp fromEulerAnglesYXZ (pas
+	-- CFrame.Angles). Pitch X=-8° fixe, un site (kind==1). Leftover
+	-- N144 Bow, leftover N143 houle addWake, leftover N133
+	-- Shockwave, leftover N131 splash, leftover N130 LaunchWake
+	-- Overlay, leftover N128 flag, leftover N127 radar, leftover
+	-- N125 roulis, leftover N116 immobile, leftover N142 Interceptor
+	-- (check modeles) doivent rester verts. Recette leftover N144,
+	-- pas merger visual. Missile leftover N146 non touche. Bow N144 /
+	-- addWake N143 inchanges. BuildingModels / Overlay inchanges.
+	-- N146 : UnitModels MissileBody fromEulerAnglesYXZ (pas
+	-- CFrame.Angles). Yaw Y=90° fixe, un site (createMissile). Leftover
+	-- N145 rampe, leftover N144 Bow, leftover N143 houle addWake,
+	-- leftover N133 Shockwave, leftover N131 splash, leftover N130
+	-- LaunchWake Overlay, leftover N128 flag, leftover N127 radar,
+	-- leftover N125 roulis, leftover N116 immobile, leftover N142
+	-- Interceptor (check modeles) doivent rester verts. Recette leftover
+	-- N145, pas merger visual. Ailettes leftover N147 non touchees.
+	-- Rampe N145 / Bow N144 / addWake N143 inchanges. BuildingModels /
+	-- Overlay inchanges.
+	-- N147 : UnitModels Fin fromEulerAnglesYXZ (pas CFrame.Angles).
+	-- Roll Z=axis·π/2, quatre sites (createMissile, boucle axis 0..3).
+	-- Leftover N146 MissileBody, leftover N145 rampe, leftover N144
+	-- Bow, leftover N143 houle addWake, leftover N133 Shockwave,
+	-- leftover N131 splash, leftover N130 LaunchWake Overlay, leftover
+	-- N128 flag, leftover N127 radar, leftover N125 roulis, leftover
+	-- N116 immobile, leftover N142 Interceptor (check modeles) doivent
+	-- rester verts. Recette leftover N146, pas merger visual. Mesh
+	-- leftover N148 non touche. MissileBody N146 / rampe N145 / Bow
+	-- N144 / addWake N143 inchanges. BuildingModels / Overlay
+	-- inchanges.
+	-- N148 : UnitModels buildCarrier mesh visual.pieces (pas
+	-- visual.parts). Un site (CARRIER_MESH_ID ~= ""). CARRIER_MESH_ID
+	-- reste "". Leftover N147 Fin, leftover N146 MissileBody,
+	-- leftover N145 rampe, leftover N144 Bow, leftover N143 houle
+	-- addWake, leftover N133 Shockwave, leftover N131 splash,
+	-- leftover N130 LaunchWake Overlay, leftover N128 flag, leftover
+	-- N127 radar, leftover N125 roulis, leftover N116 immobile,
+	-- leftover N142 Interceptor (check modeles) doivent rester verts.
+	-- Recette leftover N147, pas merger visual. Fin N147 / MissileBody
+	-- N146 / rampe N145 / Bow N144 / addWake N143 inchanges. Coque
+	-- procedurale inchangee. BuildingModels / Overlay inchanges.
+	-- N151 : UnitModels.place trail offset.Z (pas offset.Position.Z).
+	-- Amplitude / frequence / clamp / += Transparency inchanges.
+	-- Leftover N148 mesh visual.pieces, leftover N147 Fin, leftover
+	-- N146 MissileBody doivent rester verts. Recette leftover N150,
+	-- pas merger visual. Flame leftover N152 non touchee (pulse Z
+	-- conserve, ≠ visual V74 freeze). Beacons N150 / fenetres N149
+	-- (check modeles) inchanges. BuildingModels / Overlay inchanges.
+	-- N160 : LaunchWake free-list wakeFree. Pas de testFlushDelays
+	-- ici — les wakes restent parentés (le flush + reuse rawequal
+	-- est dans « vagues de conquete »). Leftover N151 trail
+	-- offset.Z, leftover N152 flame Size, leftover N148 mesh,
+	-- leftover N130 euler inline doivent rester verts. Recette
+	-- leftover N159, pas merger visual V78 wakeRot. goldPopup
+	-- N159 (check livraison / vagues) inchange.
+	-- N161 : LandingSplash free-list splashFree. Pas de
+	-- testFlushDelays ici — les splash restent parentés (le flush
+	-- + reuse rawequal est dans « vagues de conquete »). Skip
+	-- retraite id=1 N56. Leftover N160 wake, leftover N131 euler
+	-- inline, leftover N151 trail doivent rester verts. Recette
+	-- leftover N160, pas merger visual V79 wakeRot. DeliveryPulse
+	-- leftover N162 (check pose / vagues, pas ici).
+	-- N163 : Shockwave free-list shockFree. Pas de
+	-- testFlushDelays ici — l'onde reste parentée (le flush +
+	-- reuse rawequal est dans « vagues de conquete »). Leftover
+	-- N133 euler inline, leftover N161 splash, leftover N160
+	-- wake, leftover N152 flame Size doivent rester verts.
+	-- Recette leftover N162, pas merger visual V81 wakeRot.
+	-- N164 : BlastSmoke free-list smokeFree. Pas de
+	-- testFlushDelays ici — les 5 fumées restent parentées (le
+	-- flush + reuse rawequal est dans « vagues de conquete »).
+	-- Leftover N163 Shockwave, leftover N133 euler, leftover
+	-- N152 flame Size doivent rester verts. Recette leftover
+	-- N163, pas merger visual.
+	-- N165 : Blast sphère free-list blastFree. Pas de
+	-- testFlushDelays ici — la sphère reste parentée (le flush
+	-- + reuse rawequal est dans « vagues de conquete »).
+	-- Leftover N164 BlastSmoke, leftover N163 Shockwave,
+	-- leftover N133 euler, leftover N152 flame Size doivent
+	-- rester verts. Recette leftover N164, pas merger visual.
+	-- PointLight enfant. overlay:explosion plus bas ne leve pas.
+	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
+	-- Pas de testFlushDelays ici — les Model restent parentés
+	-- (le flush + reuse rawequal est dans « vagues de conquete »).
+	-- Skip retraite splash id=1 N56. Leftover N161 splash,
+	-- leftover N160 wake, leftover N152 flame Size doivent rester
+	-- verts. Recette leftover N174, pas merger visual V112.
+	-- Overlay.clear parque live (N177, shipFree/ogiveFree existants).
+	-- HUD dismissFree N174 (check vagues) inchange.
+	-- N176 : Overlay applyUnits missile Parent=nil + ogiveFree.
+	-- Park **immédiat** (pas de delay, pas de testFlushDelays).
+	-- Snapshot après applyUnits({}, {}) plus bas ; reuse rawequal
+	-- est dans « vagues de conquete ». Extra rawequal **avant**
+	-- le despawn. Distinct shipFree. Pas merger visual V113.
 	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive")
+	assert(overlay.units[1].currentY == overlay.units[1].targetY, "navire immobile Y a derive")
+	assert(overlay.units[3].currentX ~= beforeX, "lerp numerique n'a pas avance")
+	assert(overlay.units[3].currentY ~= beforeY, "lerp Y n'a pas avance")
+	-- N117 / N125 : un second frame sous yaw+roulis euler ne casse pas
+	-- le lerp missile.
+	local midX = overlay.units[3].currentX
+	overlay:stepInterpolation(1 / 60)
+	assert(overlay.units[3].currentX ~= midX, "lerp sous yaw euler fige")
+	assert(overlay.units[1].currentX == overlay.units[1].targetX, "navire immobile a derive au 2e frame")
+	-- N176 : snapshot Visual ogive id=3 **après** le park immédiat.
+	-- extra rawequal ci-dessus doit rester vert (record unité, pas
+	-- le Visual). Parent nil ou #ogiveFree. Pas de testFlushDelays.
+	-- Ne pas réutiliser l'id=3 encore vivant. Reuse dans vagues.
+	local pooledOgiveNav = overlay.units[3].visual
+	assert(pooledOgiveNav.isMissile == true, "snapshot ogive sans isMissile")
 	overlay:applyUnits({}, {})
+	assert(pooledOgiveNav.model.Parent == nil, "ogive encore parentee")
+	local ogivePoolNav = overlay.ogiveFree
+	assert(ogivePoolNav ~= nil and #ogivePoolNav >= 1, "ogives non poolees au park")
 	overlay:explosion(50, 50, 9)
 end)
 
 check("vagues de conquete", function()
+	-- N158 : floatingText free-list. Flush → Parent nil + push textFree.
+	-- lossWave (count ≥ 4) reparente la meme ancre (rawequal Parent root).
+	-- Arbre Billboard conserve (pas de recreate descendants). Pas de Name.
+	-- Tween Create conserve. Leftover N157 conquestPulse reuse doit rester
+	-- vert. Leftover N156 tileFlash reuse doit rester vert. Leftover N155
+	-- selectTile reuse (check calques) doit rester vert. Recette leftover
+	-- N157, pas merger visual V82 pulseRot. HUD / UnitModels / Effects /
+	-- PlacementPreview / selectTile / previewTile / tileFlash /
+	-- conquestPulse non touches. Flame leftover N152 (check navires).
+	-- N159 : goldPopup free-list. Le check livraison n'a pas flushé ;
+	-- ce flush pousse goldFree. goldPopup reparente la meme ancre
+	-- (rawequal Parent root, Name GoldPopup). Distinct textFree.
+	-- N160 : LaunchWake free-list. Le check navires n'a pas flushé ;
+	-- ce flush pousse wakeFree. applyUnits nouvel id reparente la
+	-- meme Part (rawequal Parent root, Name LaunchWake). Distinct
+	-- goldFree.
+	-- N161 : LandingSplash free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse splashFree (ids 2 et 4, pas id=1
+	-- retraite N56). Snapshot avant l'insert N160 ; apres l'insert,
+	-- applyUnits({}, {}) despawn id=99 reparente la meme Part
+	-- (rawequal Parent root, Name LandingSplash). Distinct
+	-- wakeFree / goldFree.
+	-- N162 : DeliveryPulse free-list. Le check pose n'a pas
+	-- flushé ; ce flush pousse deliveryFree. Snapshot avant
+	-- l'insert N160 ; apres les asserts N161, reconstruire
+	-- FACTORY+CITY + dispatch + step reparente la meme Part
+	-- (rawequal Parent root, Name DeliveryPulse). Distinct
+	-- splashFree / wakeFree / goldFree.
+	-- N163 : Shockwave free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse shockFree. Snapshot avant
+	-- l'insert N160 ; apres les asserts N162, explosion(40,40,6)
+	-- (rayon ≠ 9) reparente la meme Part (rawequal Parent root,
+	-- Name Shockwave). Distinct deliveryFree / splashFree /
+	-- wakeFree / goldFree / pulseFree.
+	-- N164 : BlastSmoke free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse smokeFree (# >= 5). Snapshot
+	-- avant l'insert N160 ; explosion(40,40,6) N163 consomme
+	-- 5 smokes (un par i). Réparente (rawequal d'au moins une
+	-- Part, Name BlastSmoke). Distinct shockFree / deliveryFree
+	-- / splashFree / wakeFree / goldFree / pulseFree.
+	-- N165 : Blast sphère free-list. Le check navires n'a pas
+	-- flushé ; ce flush pousse blastFree (# >= 1). Snapshot
+	-- avant l'insert N160 ; explosion(40,40,6) N163/N164
+	-- consomme 1 Blast. Réparente (rawequal Parent root, Name
+	-- Blast). Distinct smokeFree / shockFree / deliveryFree /
+	-- splashFree / wakeFree / goldFree / pulseFree. PointLight
+	-- enfant réutilisé.
+	-- N166 : BuildRing free-list. Le check pose n'a pas flushé ;
+	-- ce flush pousse BuildingModels.ringFree (# >= 1). Snapshot
+	-- avant applyUnits N160 **et** avant applyBuildingDelta N162
+	-- (CITY+FACTORY animateFrom=0 consomme 2 bagues). Réparente
+	-- (rawequal Parent overlay.buildings[cityIndex] ou
+	-- overlay.buildings[factoryIndex], pas overlay.root, Name
+	-- BuildRing). Distinct blastFree / smokeFree / shockFree /
+	-- deliveryFree / pulseFree.
+	-- N167 : HUD notify free-list feedFree. Le check notifications
+	-- n'a pas flushé (Dismiss stubbe task.delay) ; ce flush pousse
+	-- les 3 entrées encore parentées du plafond + celles déjà
+	-- poolees par le cap N153. Snapshot avant applyUnits N160 **et**
+	-- avant applyBuildingDelta N166. Réparente (rawequal Parent
+	-- hud.feed, pas overlay.root). Distinct ringFree / blastFree /
+	-- textFree. N174 : Dismiss delay parque (dismissFree), plus
+	-- Destroy. Snapshot + reuse dans ce check après notify n167.
 	local wave = {}
 	for i = 1, 200 do
 		wave[i] = 1000 + i
 	end
 	effects:conquestWave(wave, Color3.fromRGB(255, 0, 0), true)
+	local liveBefore = effects.live
+	assert(liveBefore > 0, "aucune plaque live")
+	assert(effects.flashFree == nil or #effects.flashFree == 0, "free-list trop tot")
+	assert(effects.pulseFree == nil or #effects.pulseFree == 0, "pulseFree trop tot")
+	assert(effects.textFree == nil or #effects.textFree == 0, "textFree trop tot")
+	testFlushDelays()
+	assert(effects.live == 0, "live pas decremente")
+	local free = effects.flashFree
+	assert(free ~= nil and #free == liveBefore, "plaques non poolees")
+	local pooled = free[#free]
+	assert(pooled.Parent == nil, "plaque encore parentee")
+	local pulsePool = effects.pulseFree
+	assert(pulsePool ~= nil and #pulsePool >= 1, "anneaux non poolees")
+	local pooledRing = pulsePool[#pulsePool]
+	assert(pooledRing.Parent == nil, "anneau encore parente")
+	assert(pooledRing.Name ~= "ConquestPulse", "Name visual V82 porte")
+	local textPool = effects.textFree
+	assert(textPool ~= nil and #textPool >= 1, "textes non poolees")
+	local pooledText = textPool[#textPool]
+	assert(pooledText.Parent == nil, "texte encore parente")
+	assert(pooledText.Name ~= "GoldPopup", "Name Overlay goldPopup porte")
 	effects:lossWave(wave, #wave)
+	assert(#pulsePool == 0, "anneau non reutilise")
+	assert(rawequal(pooledRing.Parent, effects.root), "anneau non reparente")
+	assert(#textPool == 0, "texte non reutilise")
+	assert(rawequal(pooledText.Parent, effects.root), "texte non reparente")
 	effects:conquestWave({ 5 }, Color3.fromRGB(0, 255, 0), false)
+	assert(#free == liveBefore - 1, "plaque non reutilisee")
+	assert(rawequal(pooled.Parent, effects.root), "plaque non reparentee")
+	-- N159 : flush ci-dessus a poussé les GoldPopup de « livraison ».
+	local goldPool = overlay.goldFree
+	assert(goldPool ~= nil and #goldPool >= 1, "popups or non poolees")
+	local pooledGold = goldPool[#goldPool]
+	assert(pooledGold.Parent == nil, "popup or encore parente")
+	assert(pooledGold.Name == "GoldPopup", "Name GoldPopup perdu")
+	local goldN = #goldPool
+	overlay:goldPopup(3000, 500, true)
+	assert(#goldPool == goldN - 1, "popup or non reutilise")
+	assert(rawequal(pooledGold.Parent, overlay.root), "popup or non reparente")
+	local reusedBoard = pooledGold:FindFirstChild("Board")
+	local reusedLabel = reusedBoard and reusedBoard:FindFirstChildWhichIsA("TextLabel")
+	assert(reusedLabel ~= nil, "arbre Board perdu au reuse")
+	assert(reusedLabel.Text == "+500 or", `reuse affiche "{reusedLabel.Text}"`)
+	-- N160 : flush ci-dessus a poussé les LaunchWake de « navires ».
+	local wakePool = overlay.wakeFree
+	assert(wakePool ~= nil and #wakePool >= 1, "wakes non poolees")
+	local pooledWake = wakePool[#wakePool]
+	assert(pooledWake.Parent == nil, "wake encore parente")
+	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu")
+	assert(pooledWake ~= pooledGold, "wakeFree partage goldFree")
+	-- N161 : flush ci-dessus a poussé les LandingSplash de « navires »
+	-- (ids 2 et 4, pas id=1 retraite). Snapshot avant l'insert N160.
+	local splashPool = overlay.splashFree
+	assert(splashPool ~= nil and #splashPool >= 1, "splashes non poolees")
+	local pooledSplash = splashPool[#splashPool]
+	assert(pooledSplash.Parent == nil, "splash encore parente")
+	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu")
+	assert(pooledSplash ~= pooledWake, "splashFree partage wakeFree")
+	assert(pooledSplash ~= pooledGold, "splashFree partage goldFree")
+	-- N162 : flush ci-dessus a poussé le DeliveryPulse de « pose ».
+	-- Snapshot avant applyUnits N160 ; reuse après N161.
+	local deliveryPool = overlay.deliveryFree
+	assert(deliveryPool ~= nil and #deliveryPool >= 1, "pulses livraison non poolees")
+	local pooledDelivery = deliveryPool[#deliveryPool]
+	assert(pooledDelivery.Parent == nil, "pulse livraison encore parente")
+	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu")
+	assert(pooledDelivery ~= pooledWake, "deliveryFree partage wakeFree")
+	assert(pooledDelivery ~= pooledSplash, "deliveryFree partage splashFree")
+	assert(pooledDelivery ~= pooledGold, "deliveryFree partage goldFree")
+	assert(pooledDelivery ~= pooledRing, "deliveryFree partage pulseFree")
+	-- N163 : flush ci-dessus a poussé le Shockwave de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse après N162.
+	local shockPool = overlay.shockFree
+	assert(shockPool ~= nil and #shockPool >= 1, "ondes choc non poolees")
+	local pooledShock = shockPool[#shockPool]
+	assert(pooledShock.Parent == nil, "onde choc encore parente")
+	assert(pooledShock.Name == "Shockwave", "Name Shockwave perdu")
+	assert(pooledShock ~= pooledWake, "shockFree partage wakeFree")
+	assert(pooledShock ~= pooledSplash, "shockFree partage splashFree")
+	assert(pooledShock ~= pooledGold, "shockFree partage goldFree")
+	assert(pooledShock ~= pooledDelivery, "shockFree partage deliveryFree")
+	assert(pooledShock ~= pooledRing, "shockFree partage pulseFree")
+	-- N164 : flush ci-dessus a poussé les 5 BlastSmoke de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse lors de explosion(40,40,6).
+	local smokePool = overlay.smokeFree
+	assert(smokePool ~= nil and #smokePool >= 5, "fumees non poolees")
+	local pooledSmoke = smokePool[#smokePool]
+	assert(pooledSmoke.Parent == nil, "fumee encore parente")
+	assert(pooledSmoke.Name == "BlastSmoke", "Name BlastSmoke perdu")
+	assert(pooledSmoke ~= pooledShock, "smokeFree partage shockFree")
+	assert(pooledSmoke ~= pooledWake, "smokeFree partage wakeFree")
+	assert(pooledSmoke ~= pooledSplash, "smokeFree partage splashFree")
+	assert(pooledSmoke ~= pooledGold, "smokeFree partage goldFree")
+	assert(pooledSmoke ~= pooledDelivery, "smokeFree partage deliveryFree")
+	assert(pooledSmoke ~= pooledRing, "smokeFree partage pulseFree")
+	-- N165 : flush ci-dessus a poussé le Blast de « navires ».
+	-- Snapshot avant applyUnits N160 ; reuse lors de explosion(40,40,6).
+	local blastPool = overlay.blastFree
+	assert(blastPool ~= nil and #blastPool >= 1, "spheres Blast non poolees")
+	local pooledBlast = blastPool[#blastPool]
+	assert(pooledBlast.Parent == nil, "sphere Blast encore parentee")
+	assert(pooledBlast.Name == "Blast", "Name Blast perdu")
+	assert(pooledBlast ~= pooledSmoke, "blastFree partage smokeFree")
+	assert(pooledBlast ~= pooledShock, "blastFree partage shockFree")
+	assert(pooledBlast ~= pooledWake, "blastFree partage wakeFree")
+	assert(pooledBlast ~= pooledSplash, "blastFree partage splashFree")
+	assert(pooledBlast ~= pooledGold, "blastFree partage goldFree")
+	assert(pooledBlast ~= pooledDelivery, "blastFree partage deliveryFree")
+	assert(pooledBlast ~= pooledRing, "blastFree partage pulseFree")
+	-- N166 : flush ci-dessus a poussé les BuildRing de « pose »
+	-- (upgrade ville niveau 3, Destroy parent non récursif dans
+	-- les stubs). Snapshot avant applyUnits N160 ; reuse lors de
+	-- applyBuildingDelta CITY+FACTORY N162.
+	local ringPool = BuildingModels.ringFree
+	assert(ringPool ~= nil and #ringPool >= 1, "bagues chantier non poolees")
+	local pooledBuildRing = ringPool[#ringPool]
+	assert(pooledBuildRing.Parent == nil, "bague chantier encore parentee")
+	assert(pooledBuildRing.Name == "BuildRing", "Name BuildRing perdu")
+	assert(pooledBuildRing ~= pooledBlast, "ringFree partage blastFree")
+	assert(pooledBuildRing ~= pooledSmoke, "ringFree partage smokeFree")
+	assert(pooledBuildRing ~= pooledShock, "ringFree partage shockFree")
+	assert(pooledBuildRing ~= pooledWake, "ringFree partage wakeFree")
+	assert(pooledBuildRing ~= pooledSplash, "ringFree partage splashFree")
+	assert(pooledBuildRing ~= pooledGold, "ringFree partage goldFree")
+	assert(pooledBuildRing ~= pooledDelivery, "ringFree partage deliveryFree")
+	assert(pooledBuildRing ~= pooledRing, "ringFree partage pulseFree")
+	-- N167 : flush ci-dessus a poussé les TextLabel du fil
+	-- (plafond N153 + expiration 4.5 s). Snapshot avant
+	-- applyUnits N160 **et** avant applyBuildingDelta N166.
+	local feedPool = hud.feedFree
+	assert(feedPool ~= nil and #feedPool >= 1, "entrees fil non poolees")
+	local pooledFeed = feedPool[#feedPool]
+	assert(pooledFeed.Parent == nil, "entree fil encore parentee")
+	assert(pooledFeed ~= pooledBuildRing, "feedFree partage ringFree")
+	assert(pooledFeed ~= pooledBlast, "feedFree partage blastFree")
+	assert(pooledFeed ~= pooledText, "feedFree partage textFree")
+	local feedN = #feedPool
+	hud:notify("n167 reuse", "good")
+	assert(#feedPool == feedN - 1, "entree fil non reutilisee")
+	assert(rawequal(pooledFeed.Parent, hud.feed), "entree fil non reparentee")
+	assert(not rawequal(pooledFeed.Parent, overlay.root), "entree fil reparentee a overlay.root")
+	assert(pooledFeed.Text == "n167 reuse", `reuse affiche "{pooledFeed.Text}"`)
+	assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse")
+	-- N174 : snapshot Dismiss après n167 reuse, avant un second
+	-- flush. Le delay parque (Parent = nil + dismissFree), plus
+	-- Destroy. notify "n174 reuse" pop O(1). rawequal Parent
+	-- pooledFeed (même TextLabel) ou présence dans dismissFree.
+	-- Name Dismiss conservé. Distinct feedFree. Pas #dismissFree
+	-- == 3. Pas d'assert autre Name. Recette leftover N173.
+	-- N175 : Overlay applyUnits delay Parent=nil + shipFree.
+	-- Le check navires n'a pas flushé ; ce flush pousse shipFree
+	-- (ids 1/2/4). Snapshot avant applyUnits id=99 ; id=99 kind=1
+	-- slot=1 reparente le transport (rawequal Parent overlay.root
+	-- ou présence dans shipFree). Distinct splashFree / wakeFree /
+	-- dismissFree / ogiveFree. Pas #shipFree == 3. Pas d'assert
+	-- autre Name. Recette leftover N174.
+	-- N176 : le check navires a déjà parké l'ogive id=3 (immédiat).
+	-- Snapshot avant applyUnits id=88 ; id=88 kind=1 slot=1
+	-- reparente (rawequal Parent overlay.root ou présence dans
+	-- ogiveFree). Distinct shipFree. Pas #ogiveFree == 1. Pas
+	-- d'assert autre Name. Recette leftover N175.
+	local pooledDismiss = pooledFeed:FindFirstChild("Dismiss")
+	assert(pooledDismiss ~= nil and pooledDismiss:IsA("TextButton"), "snapshot Dismiss manquant")
+	testFlushDelays()
+	hud:notify("n174 reuse", "good")
+	if pooledDismiss.Parent == nil then
+		local inFree = false
+		local dismissPool = hud.dismissFree
+		if dismissPool then
+			for _, cross in dismissPool do
+				if rawequal(cross, pooledDismiss) then
+					inFree = true
+					break
+				end
+			end
+		end
+		assert(inFree, "Dismiss ni reparentee ni dans dismissFree")
+	else
+		assert(rawequal(pooledDismiss.Parent, pooledFeed), "Dismiss recree")
+		assert(pooledDismiss.Name == "Dismiss", "Name Dismiss perdu au reuse")
+		assert(pooledFeed:FindFirstChild("Dismiss") ~= nil, "croix Dismiss absente au reuse N174")
+	end
+	assert(pooledDismiss ~= pooledFeed, "dismissFree partage feedFree")
+	-- N175 : flush ci-dessus a poussé les Model navire de « navires ».
+	-- Snapshot avant applyUnits id=99 (kind=1 slot=1 = transport
+	-- id=1). Distinct splashFree / wakeFree / dismissFree / feedFree.
+	local shipPool = overlay.shipFree
+	assert(shipPool ~= nil and #shipPool >= 1, "navires non poolees")
+	local pooledShip = nil
+	for i = #shipPool, 1, -1 do
+		local vis = shipPool[i]
+		if vis.kind == 1 and vis.slot == 1 then
+			pooledShip = vis
+			break
+		end
+	end
+	if pooledShip == nil then
+		pooledShip = shipPool[#shipPool]
+	end
+	assert(pooledShip ~= nil, "snapshot navire manquant")
+	assert(pooledShip.model.Parent == nil, "navire encore parente")
+	assert(pooledShip.isMissile ~= true, "ogive poussee dans shipFree")
+	assert(pooledShip ~= pooledWake, "shipFree partage wakeFree")
+	assert(pooledShip ~= pooledSplash, "shipFree partage splashFree")
+	assert(pooledShip ~= pooledGold, "shipFree partage goldFree")
+	assert(pooledShip ~= pooledDismiss, "shipFree partage dismissFree")
+	assert(pooledShip ~= pooledFeed, "shipFree partage feedFree")
+	-- N176 : snapshot ogive après park navires, avant applyUnits
+	-- id=88 (kind=1 slot=1 = ogive id=3). Distinct shipFree /
+	-- splashFree / wakeFree / dismissFree / feedFree.
+	local ogivePool = overlay.ogiveFree
+	assert(ogivePool ~= nil and #ogivePool >= 1, "ogives non poolees")
+	local pooledOgive = nil
+	for i = #ogivePool, 1, -1 do
+		local vis = ogivePool[i]
+		if vis.kind == 1 and vis.slot == 1 and vis.isMissile then
+			pooledOgive = vis
+			break
+		end
+	end
+	if pooledOgive == nil then
+		pooledOgive = ogivePool[#ogivePool]
+	end
+	assert(pooledOgive ~= nil, "snapshot ogive manquant")
+	assert(pooledOgive.model.Parent == nil, "ogive encore parentee")
+	assert(pooledOgive.isMissile == true, "navire pousse dans ogiveFree")
+	assert(pooledOgive ~= pooledShip, "ogiveFree partage shipFree")
+	assert(pooledOgive ~= pooledWake, "ogiveFree partage wakeFree")
+	assert(pooledOgive ~= pooledSplash, "ogiveFree partage splashFree")
+	assert(pooledOgive ~= pooledGold, "ogiveFree partage goldFree")
+	assert(pooledOgive ~= pooledDismiss, "ogiveFree partage dismissFree")
+	assert(pooledOgive ~= pooledFeed, "ogiveFree partage feedFree")
+	local ringN = #ringPool
+	local wakeN = #wakePool
+	overlay:applyUnits({
+		{ id = 99, slot = 1, x = 12, y = 14, troops = 50, kind = 1 },
+	}, {
+		{ id = 88, slot = 1, x = 42, y = 42, tx = 62, ty = 62, kind = 1 },
+	})
+	assert(#wakePool == wakeN - 1, "wake non reutilise")
+	assert(rawequal(pooledWake.Parent, overlay.root), "wake non reparente")
+	assert(pooledWake.Name == "LaunchWake", "Name LaunchWake perdu au reuse")
+	-- N175 : id=99 kind=1 slot=1 consomme shipFree. Reset Transparency
+	-- construction. Parent overlay.root. Pas Destroy. Kind match.
+	if pooledShip.model.Parent == nil then
+		local inFree = false
+		for _, vis in shipPool do
+			if rawequal(vis, pooledShip) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "navire ni reparente ni dans shipFree")
+	else
+		assert(rawequal(pooledShip.model.Parent, overlay.root), "navire recree")
+		assert(not pooledShip.isMissile, "reuse ogive")
+	end
+	-- N176 : id=88 kind=1 slot=1 consomme ogiveFree. Reset
+	-- Transparency construction. Parent overlay.root. Pas Destroy.
+	-- Kind+slot match. PointLight enfant conservé. extra frais
+	-- (pas recyclé dans ogiveFree). Pas de LaunchWake.
+	if pooledOgive.model.Parent == nil then
+		local inFree = false
+		for _, vis in ogivePool do
+			if rawequal(vis, pooledOgive) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ogive ni reparentee ni dans ogiveFree")
+	else
+		assert(rawequal(pooledOgive.model.Parent, overlay.root), "ogive recree")
+		assert(pooledOgive.isMissile == true, "reuse navire")
+		local flame = pooledOgive.model:FindFirstChild("EngineFlame")
+		assert(flame ~= nil and flame:FindFirstChildWhichIsA("PointLight") ~= nil, "PointLight enfant perdu au reuse")
+	end
+	-- N161 : despawn id=99 (pas retraite) consomme splashFree.
+	local splashN = #splashPool
+	overlay:applyUnits({}, {})
+	assert(#splashPool == splashN - 1, "splash non reutilise")
+	assert(rawequal(pooledSplash.Parent, overlay.root), "splash non reparente")
+	assert(pooledSplash.Name == "LandingSplash", "Name LandingSplash perdu au reuse")
+	-- N162 : le check pose a détruit les routes. Reconstruire FACTORY+CITY
+	-- (mêmes indices catalogue) + dispatch + step jusqu'à delivery == nil
+	-- consomme deliveryFree. truckModel.Parent = nil conservé.
+	overlay.animateFrom = 0
+	local cityIndex: number? = nil
+	local factoryIndex: number? = nil
+	local scan = 0
+	for _, def in BuildingDefs.LIST do
+		scan += 137
+		if def.id == Config.BUILDING.CITY then
+			cityIndex = scan
+		elseif def.id == Config.BUILDING.FACTORY then
+			factoryIndex = scan
+		end
+	end
+	assert(cityIndex ~= nil and factoryIndex ~= nil, "ville ou usine absente N162")
+	overlay:applyBuildingDelta({
+		{ index = cityIndex, kind = Config.BUILDING.CITY, slot = 1, level = 1 },
+		{ index = factoryIndex, kind = Config.BUILDING.FACTORY, slot = 1, level = 1, links = { cityIndex } },
+	})
+	-- N166 : CITY puis FACTORY consomment 2 bagues. Reset Size
+	-- (0.4, 3, 3) + Transparency 0.4 + Color + CFrame avant Tween
+	-- (ground varie). Parent = model, pas overlay.root.
+	assert(#ringPool == math.max(0, ringN - 2), "bague chantier non reutilisee")
+	local cityModel = overlay.buildings[cityIndex]
+	local factoryModel = overlay.buildings[factoryIndex]
+	assert(
+		rawequal(pooledBuildRing.Parent, cityModel) or rawequal(pooledBuildRing.Parent, factoryModel),
+		"bague chantier non reparentee au model"
+	)
+	assert(pooledBuildRing.Name == "BuildRing", "Name BuildRing perdu au reuse")
+	assert(not rawequal(pooledBuildRing.Parent, overlay.root), "bague chantier reparentee a overlay.root")
+	local liveRoute = overlay.routes[factoryIndex * 100000 + cityIndex]
+	assert(liveRoute ~= nil, "voie N162 absente")
+	local deliveryN = #deliveryPool
+	overlay:onTradeEvent("dispatch", factoryIndex, cityIndex, 1, 1)
+	assert(liveRoute.delivery ~= nil, "livraison N162 non demarree")
+	for _ = 1, 12 do
+		overlay:stepInterpolation(0.02)
+	end
+	assert(liveRoute.delivery == nil, "livraison N162 encore active")
+	assert(liveRoute.truckModel.Parent == nil, "camion N162 non retire")
+	assert(#deliveryPool == deliveryN - 1, "pulse livraison non reutilise")
+	assert(rawequal(pooledDelivery.Parent, overlay.root), "pulse livraison non reparente")
+	assert(pooledDelivery.Name == "DeliveryPulse", "Name DeliveryPulse perdu au reuse")
+	-- N163 : explosion(40, 40, 6) — rayon ≠ 9 du check navires.
+	-- Reset Size (0.32, 5, 5) + Transparency 0.12 avant Tween
+	-- (worldRadius change).
+	-- N164 : la même explosion consomme 5 BlastSmoke. Reset Size
+	-- (5+i, 5+i, 5+i) + Transparency + Color + CFrame avant Tween
+	-- (i et ground varient).
+	-- N165 : la même explosion consomme 1 Blast. Reset Size
+	-- (4, 4, 4) + Transparency 0.15 + Color + CFrame + PointLight
+	-- Brightness/Range avant Tween (worldRadius et ground varient).
+	local shockN = #shockPool
+	local smokeN = #smokePool
+	local blastN = #blastPool
+	overlay:explosion(40, 40, 6)
+	assert(#shockPool == shockN - 1, "onde choc non reutilise")
+	assert(rawequal(pooledShock.Parent, overlay.root), "onde choc non reparente")
+	assert(pooledShock.Name == "Shockwave", "Name Shockwave perdu au reuse")
+	assert(#smokePool == smokeN - 5, "fumee non reutilisee")
+	assert(rawequal(pooledSmoke.Parent, overlay.root), "fumee non reparentee")
+	assert(pooledSmoke.Name == "BlastSmoke", "Name BlastSmoke perdu au reuse")
+	assert(#blastPool == blastN - 1, "sphere Blast non reutilisee")
+	assert(rawequal(pooledBlast.Parent, overlay.root), "sphere Blast non reparentee")
+	assert(pooledBlast.Name == "Blast", "Name Blast perdu au reuse")
+	assert(pooledBlast:FindFirstChildWhichIsA("PointLight") ~= nil, "PointLight enfant perdu au reuse")
+	-- N177 : Overlay.clear Parent=nil + shipFree / ogiveFree existants.
+	-- Spawn ids neufs (≠ 88, ≠ 99, ≠ 3) **après** les reuse N176/N175
+	-- / N161 / N162 / N166 / N163–N165 — clear trop tôt casserait
+	-- splash/wake encore parentés et Destroy les bâtiments N162.
+	-- Skip retraite splash N56. Distinct applyUnits despawn N176.
+	-- Pas #ogiveFree == 1. Pas d'assert autre Name. Recette leftover
+	-- N176. Pas merger visual V114. N179 : Overlay.clear
+	-- Parent=nil + buildingFree existant. Snapshot CITY N162
+	-- avant clear. Skip unités N177. Skip routes N180. Recette
+	-- leftover N178. Pas merger visual V116. Pas d'assert
+	-- applyBuildingDelta après clear (reuse id=55/44).
+	-- N180 testé dans pose (kind=0 + reuse, pas clear).
+	-- N181 : Overlay.clear Parent=nil + routeFree existant
+	-- via parkRoute. Snapshot voie N162 avant clear. Skip
+	-- syncFactoryRoutes. Recette leftover N180. Pas merger
+	-- visual V118. Pas d'assert applyBuildingDelta après
+	-- clear (reuse id=55/44).
+	overlay:applyUnits({
+		{ id = 77, slot = 1, x = 18, y = 16, troops = 40, kind = 1 },
+	}, {
+		{ id = 66, slot = 1, x = 48, y = 48, tx = 68, ty = 68, kind = 1 },
+	})
+	local liveShip = overlay.units[77]
+	local liveOgive = overlay.units[66]
+	assert(liveShip ~= nil and liveOgive ~= nil, "spawn N177 absent")
+	local clearShip = liveShip.visual
+	local clearOgive = liveOgive.visual
+	assert(clearShip.isMissile ~= true, "ogive spawn N177 dans navire")
+	assert(clearOgive.isMissile == true, "navire spawn N177 dans ogive")
+	local clearCity = overlay.buildings[cityIndex]
+	assert(clearCity ~= nil, "snapshot ville N179 absent")
+	-- N181 : snapshot voie N162 encore live avant clear.
+	-- Pas overlay:applyBuildingDelta après clear.
+	local clearRoute = overlay.routes[factoryIndex * 100000 + cityIndex]
+	assert(clearRoute ~= nil, "snapshot voie N181 absent")
+	overlay:clear()
+	assert(overlay.units[77] == nil and overlay.units[66] == nil, "units live apres clear")
+	assert(clearShip.model.Parent == nil, "navire clear encore parent")
+	assert(clearOgive.model.Parent == nil, "ogive clear encore parentee")
+	local shipPoolClear = overlay.shipFree
+	local ogivePoolClear = overlay.ogiveFree
+	assert(shipPoolClear ~= nil, "shipFree absent apres clear")
+	assert(ogivePoolClear ~= nil, "ogiveFree absent apres clear")
+	assert(next(overlay.buildings) == nil, "batiments survivant clear")
+	assert(next(overlay.routes) == nil, "routes survivant clear")
+	assert(clearCity.Parent == nil, "ville clear encore parentee")
+	local buildingPoolClear = overlay.buildingFree
+	assert(buildingPoolClear ~= nil, "buildingFree absent apres clear")
+	local cityInFree = false
+	for _, model in buildingPoolClear do
+		if rawequal(model, clearCity) then
+			cityInFree = true
+			break
+		end
+	end
+	assert(cityInFree, "ville N179 absente de buildingFree")
+	assert(clearCity:GetAttribute("Kind") == Config.BUILDING.CITY, "Kind perdu au clear")
+	assert(clearRoute.model.Parent == nil, "voie clear encore parentee")
+	assert(clearRoute.truckModel.Parent == nil, "camion clear encore parent")
+	local routePoolClear = overlay.routeFree
+	assert(routePoolClear ~= nil, "routeFree absent apres clear")
+	local routeInFree = false
+	for _, rec in routePoolClear do
+		if rawequal(rec, clearRoute) then
+			routeInFree = true
+			break
+		end
+	end
+	assert(routeInFree, "voie N181 absente de routeFree")
+	assert(clearRoute.city == cityIndex, "city perdu au clear")
+	assert(clearRoute.factory == factoryIndex, "factory perdu au clear")
+	overlay:applyUnits({
+		{ id = 55, slot = 1, x = 20, y = 18, troops = 40, kind = 1 },
+	}, {
+		{ id = 44, slot = 1, x = 50, y = 50, tx = 70, ty = 70, kind = 1 },
+	})
+	if clearShip.model.Parent == nil then
+		local inFree = false
+		for _, vis in shipPoolClear do
+			if rawequal(vis, clearShip) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "navire clear ni reparente ni dans shipFree")
+	else
+		assert(rawequal(clearShip.model.Parent, overlay.root), "navire clear recree")
+		assert(not clearShip.isMissile, "reuse ogive au clear")
+	end
+	if clearOgive.model.Parent == nil then
+		local inFree = false
+		for _, vis in ogivePoolClear do
+			if rawequal(vis, clearOgive) then
+				inFree = true
+				break
+			end
+		end
+		assert(inFree, "ogive clear ni reparentee ni dans ogiveFree")
+	else
+		assert(rawequal(clearOgive.model.Parent, overlay.root), "ogive clear recree")
+		assert(clearOgive.isMissile == true, "reuse navire au clear")
+		local flameClear = clearOgive.model:FindFirstChild("EngineFlame")
+		assert(
+			flameClear ~= nil and flameClear:FindFirstChildWhichIsA("PointLight") ~= nil,
+			"PointLight enfant perdu au clear reuse"
+		)
+	end
 end)
 
 check("deltas de terrain et conquetes classees", function()
@@ -1285,7 +2856,93 @@ check("deltas de terrain et conquetes classees", function()
 	local changed, gains, losses, others = world:applyDelta(delta, 1)
 	assert(changed == 4, "le nombre de tuiles modifiees est faux")
 	assert(gains ~= nil and losses ~= nil and others ~= nil, "conquetes non classees")
+
+	-- N95 : prise sur une faction puis delta vide → leftover truncate.
+	-- Coloniser du neutre ne classe rien ; occuper en 2 puis capturer en 1
+	-- produit un gain. Le second applyDelta (payload vide) doit renvoyer
+	-- les memes pools a # == 0, sinon un splash fantome rejouerait la tuile.
+	local occupy = buffer.create(5)
+	buffer.writeu32(occupy, 0, 2100)
+	buffer.writeu8(occupy, 4, 2)
+	world:applyDelta(occupy, 1)
+	local capture = buffer.create(5)
+	buffer.writeu32(capture, 0, 2100)
+	buffer.writeu8(capture, 4, 1)
+	local _, g2, l2, o2 = world:applyDelta(capture, 1)
+	assert(#g2 == 1 and g2[1] == 2100, "prise locale non classee en gain")
+	assert(#l2 == 0 and #o2 == 0, "prise locale mal classee")
+	local empty = buffer.create(0)
+	local changed0, g3, l3, o3 = world:applyDelta(empty, 1)
+	assert(changed0 == 0, "delta vide count")
+	assert(#g3 == 0 and #l3 == 0 and #o3 == 0, "leftover applyDelta non truncate")
+	assert(rawequal(g2, g3) and rawequal(l2, l3) and rawequal(o2, o3), "pools applyDelta non recycles")
+
 	world:stepRebuilds()
+	world:stepRebuilds()
+	-- N112 : curseur, pas table.remove. Tete avancee ou file truncatee.
+	-- Leftover N106 (partCount / Ground recycle) reste plus bas.
+	assert(type(world.dirtyHead) == "number" and world.dirtyHead >= 1, "dirtyHead absent apres deltas")
+	if world.dirtyHead > #world.dirtyQueue then
+		assert(#world.dirtyQueue == 0 and world.dirtyHead == 1, "file non truncatee une fois consommee")
+	else
+		-- N114 : tant que la file vit, le prefixe consomme ne depasse pas 32.
+		assert(world.dirtyHead <= 32, "prefixe consomme non compacte")
+	end
+
+	-- N106 : deux rebuildChunk du meme chunk recyclent Ground ; leftover
+	-- Parent = nil ; partCount = visibles. Recette N85, pas de pool global.
+	-- On prend un chunk TERRE (un chunk ocean n'a pas de Ground).
+	local sampleChunk: number? = nil
+	local sampleFolder = nil
+	local firstGround
+	for chunk, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" then
+				sampleChunk = chunk
+				sampleFolder = folder
+				firstGround = child
+				break
+			end
+		end
+		if sampleChunk then
+			break
+		end
+	end
+	assert(sampleChunk ~= nil and sampleFolder ~= nil and firstGround ~= nil, "aucun chunk terre")
+	world:rebuildChunk(sampleChunk)
+	local recycled
+	local groundKids = 0
+	for _, child in sampleFolder:GetChildren() do
+		if child.Name == "Ground" then
+			groundKids += 1
+			assert(child.Parent == sampleFolder, "Ground orphelin apres rebuild")
+			if not recycled then
+				recycled = child
+			end
+		elseif child.Name == "Border" then
+			assert(child.Parent == sampleFolder, "Border orphelin apres rebuild")
+		end
+	end
+	assert(rawequal(firstGround, recycled), "Ground non recycle")
+	local pool = world.chunkGround[sampleChunk]
+	assert(pool ~= nil and #pool >= groundKids, "pool Ground absent")
+	for i = 1, #pool do
+		local p = pool[i]
+		if i <= groundKids then
+			assert(p.Parent == sampleFolder, "Ground visible hors folder")
+		else
+			assert(p.Parent == nil, "leftover Ground encore parent")
+		end
+	end
+	local vis = 0
+	for _, folder in world.chunkFolders do
+		for _, child in folder:GetChildren() do
+			if child.Name == "Ground" or child.Name == "Border" then
+				vis += 1
+			end
+		end
+	end
+	assert(world.partCount == vis, "partCount incoherent apres recycle")
 end)
 
 check("camera strategique", function()
@@ -1294,9 +2951,53 @@ check("camera strategique", function()
 	camera:setDistance(300, true)
 	camera:focusTile(5000, true)
 	camera:step(1 / 60)
+	-- N118 : compose CFrame.new * rotation. Plus de lookAt.
+	-- N119 : shake nombres (punch + decroissance).
+	-- N120 : offset trig YXZ. Pas d'assert Z == focus.Z + distance
+	-- (pitch defaut 58°, pas l'identite stub VectorToWorldSpace).
+	-- N121 : lerp focus en nombres.
+	-- N122 : champ focusX/Y/Z. Plus de Vector3.new idle.
+	-- N123 : Minimap.setFocus(x,y,z) nombres (check minimap).
+	assert(camera.camera.CFrame ~= nil, "camera CFrame absent")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame pas compose")
+	local pose = camera.camera.CFrame
+	local d = camera.distance
+	local ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
+	local oy = d * math.sin(camera.pitch)
+	local oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
+	assert(pose.X == camera.focusX + ox, "oeil X hors formule")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors formule")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors formule")
+	-- N121/N122 : un frame rapproche sans sauter. Pose utilise fx/fy/fz.
+	local beforeX = camera.focusX
+	local beforeY = camera.focusY
+	local beforeZ = camera.focusZ
+	camera.targetFocus = Vector3.new(camera.focusX + 40, camera.focusY, camera.focusZ)
+	camera:step(1 / 60)
+	assert(camera.focusX > beforeX, "lerp focus n'avance pas")
+	assert(camera.focusX < camera.targetFocus.X, "lerp focus saute la cible")
+	assert(camera.focusY == beforeY, "lerp focus mute Y")
+	assert(camera.focusZ == beforeZ, "lerp focus mute Z")
+	pose = camera.camera.CFrame
+	d = camera.distance
+	ox = d * math.cos(camera.pitch) * math.sin(camera.yaw)
+	oy = d * math.sin(camera.pitch)
+	oz = d * math.cos(camera.pitch) * math.cos(camera.yaw)
+	assert(pose.X == camera.focusX + ox, "oeil X hors lerp")
+	assert(pose.Y == camera.focusY + oy, "oeil Y hors lerp")
+	assert(pose.Z == camera.focusZ + oz, "oeil Z hors lerp")
+	camera.focusX = camera.targetFocus.X
+	camera.focusY = camera.targetFocus.Y
+	camera.focusZ = camera.targetFocus.Z
+	camera.focus = camera.targetFocus
+	camera:punch(1)
+	assert(camera.shake > 0, "punch n'arme pas le shake")
+	camera:step(1 / 60)
+	assert(camera.shake < 1, "shake ne decroit pas")
+	assert(type(camera.camera.CFrame.X) == "number", "camera CFrame apres shake")
 
 	--[[
-		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Panoramique libre au clic du milieu, le geste CONQUEST.
 		Les faux InputObject sont de simples tables : le code ne lit que
 		UserInputType, Position et Delta.
 	]]
@@ -1389,6 +3090,13 @@ check("camera tactile : panoramique, pincement et torsion", function()
 end)
 
 check("minimap", function()
+	-- N123 : (x, y, z) nombres. Origine monde → centre de la carte.
+	-- Recette visual V69 leftover minimap, portee pas mergee.
+	-- N187 : destroy() parkPanel, pas Destroy. Garder destroy()
+	-- en fin (deja). Pas de second new() (volerait le panel).
+	-- Skip setFocus. Skip PlacementPreview. Skip WorldRenderer.
+	-- Skip Overlay. Skip init.client. Recette leftover N186,
+	-- pas merger visual V69. Distinct leftover N152 flame.
 	local minimap = Minimap.new(screenGui, terrain, function() end)
 	if minimap then
 		local delta = buffer.create(5)
@@ -1396,7 +3104,19 @@ check("minimap", function()
 		buffer.writeu8(delta, 4, 3)
 		minimap:applyDelta(delta)
 		minimap:flush()
-		minimap:setFocus(Vector3.new(0, 0, 0))
+		minimap:setFocus(0, 0, 0)
+		assert(minimap.marker.Position.X.Scale == 0.5, "marqueur X hors centre")
+		assert(minimap.marker.Position.Y.Scale == 0.5, "marqueur Y hors centre")
+		local camera = WorldCamera.new()
+		camera:setMode("overview")
+		camera:setDistance(300, true)
+		camera:focusTile(5000, true)
+		camera:step(1 / 60)
+		minimap:setFocus(camera.focusX, camera.focusY, camera.focusZ)
+		local u = math.clamp((camera.focusX + Config.WORLD_WIDTH / 2) / Config.WORLD_WIDTH, 0, 1)
+		local v = math.clamp((camera.focusZ + Config.WORLD_DEPTH / 2) / Config.WORLD_DEPTH, 0, 1)
+		assert(minimap.marker.Position.X.Scale == u, "marqueur ne suit pas focusX")
+		assert(minimap.marker.Position.Y.Scale == v, "marqueur ne suit pas focusZ")
 		minimap:destroy()
 	end
 end)
@@ -1413,7 +3133,7 @@ end)
 	Barre d'action tactile.
 
 	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
-	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	que personne ne la force — c'est le contrat de la disposition CONQUEST. On
 	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
 	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
 
@@ -1471,4 +3191,5 @@ if failures == 0 then
 	print("\27[32mTous les ecrans se construisent et s'executent sans erreur.\27[0m")
 else
 	print(`\27[31m{failures} defaillance(s) client.\27[0m`)
+	os.exit(1)
 end

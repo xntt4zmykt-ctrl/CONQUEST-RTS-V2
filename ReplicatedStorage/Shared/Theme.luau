@@ -18,9 +18,8 @@ local Theme = {}
 --=============================================================================
 
 --[[
-	Palette du jeu de reference (OpenFront), relevee dans sa base de code
-	publique : gris ardoise Tailwind pour les surfaces, et les deux bleus de
-	sa charte — "malibu" pour l'action, "aquarius" pour l'information.
+	Palette CONQUEST (Blackline Studio) : gris ardoise pour les surfaces, bleu
+	vif pour l'action, bleu secondaire pour l'information.
 
 	Les noms de jetons ne changent pas : seules les valeurs bougent, donc
 	aucun ecran n'a a etre reecrit pour suivre le nouveau style.
