@@ -321,6 +321,10 @@ local function startMatch()
 	TickMetrics.reset()
 	table.clear(snapshotCooldown)
 	table.clear(snapshotCount)
+	-- Un JoinRequest en fin de partie precedente ne doit pas throttle le
+	-- deploiement du round suivant (le refus `ended` n'ecrit plus le cooldown,
+	-- mais un spam lobby proche de la relance le ferait encore).
+	table.clear(joinCooldown)
 
 	state = GameState.new(seed)
 	state.mode = activeMode

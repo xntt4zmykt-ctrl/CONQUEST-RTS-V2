@@ -860,6 +860,14 @@ function GameState.addPlayer(
 	self.allianceCooldowns[slot] = {}
 	self.requests[slot] = {}
 	self.embargoes[slot] = {}
+	-- Ceinture : un slot recycle n'herite pas du cadran du predecesseur
+	-- meme si removePlayer a ete contourne (spawn rate, tests).
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
 
 	local center = self:findSpawn(rng)
 	if not center then
@@ -988,6 +996,32 @@ function GameState.removePlayer(self: GameState, slot: number)
 		for marker, target in self.targetMarks do
 			if target == slot then
 				self.targetMarks[marker] = nil
+			end
+		end
+	end
+	-- Cadran : doomWarnedAt / doomUnderSince sont indexes par slot. Sans
+	-- purge, le prochain addPlayer herite warn/drain/rot du predecesseur.
+	if self.doomWarnedAt then
+		self.doomWarnedAt[slot] = nil
+	end
+	if self.doomUnderSince then
+		self.doomUnderSince[slot] = nil
+	end
+	-- Colis : indexes par tuile d'usine, mais delivery.slot est le payeur.
+	-- Trade.step tourne AVANT stepElimination : un JoinRequest entre deux
+	-- ticks peut reposer une usine sur la meme tuile avec le slot recycle
+	-- et encaisser le colis du disparu.
+	if self.tradeDeliveries then
+		for index, delivery in self.tradeDeliveries do
+			if delivery.slot == slot then
+				self.tradeDeliveries[index] = nil
+			end
+		end
+	end
+	if self.tradeCooldowns then
+		for index in self.tradeCooldowns do
+			if not self.buildings[index] then
+				self.tradeCooldowns[index] = nil
 			end
 		end
 	end

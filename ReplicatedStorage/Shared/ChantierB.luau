@@ -483,8 +483,12 @@ function ChantierB.install(GameState, Nukes)
 				self.doomUnderSince[slot] = nil
 				continue
 			end
-			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une armee fantome.
+			-- Pas encore spawn, ou deja elimine : le cadran ne saigne pas une
+			-- armee fantome. On EFFACE les timers : sinon un AFK strip puis
+			-- claimSpawn herite d'un warn deja ecoule et saigne au premier tick.
 			if ps.awaitingSpawn or ps.tiles == 0 then
+				self.doomWarnedAt[slot] = nil
+				self.doomUnderSince[slot] = nil
 				continue
 			end
 			if not self.doomWarnedAt[slot] then
