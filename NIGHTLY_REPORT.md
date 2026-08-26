@@ -1,9 +1,9 @@
-# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 98)
+# CONQUEST RTS — Rapport nocturne (2026-08-26, passe 99)
 
-Déclencheur : ouverture de la **PR #256** (`cursor/analyse-nocturne-du-codebase-913d`) — RadialMenu.destroy veil rematch recycle (N188), specs N152 / N189.
+Déclencheur : ouverture de la **PR #258** (`cursor/analyse-nocturne-du-codebase-01f4`) — VisualDirector.effect class-mismatch recycle (N189), specs N152 / N190 / N191.
 
-Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-01f4`.
-`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#257. Pas d’outil Slack.
+Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-39b0`.
+`gh` est en lecture seule : les issues ci-dessous sont des **spec worker-ready**. Aucun commentaire n’a pu être posté sur #16–#258. Pas d’outil Slack.
 
 ---
 
@@ -11,45 +11,47 @@ Branche de ce rapport : `cursor/analyse-nocturne-du-codebase-01f4`.
 
 Le moteur reste **server-authoritative**. Aucun `RemoteFunction`. Aucun **cycle de `require`**. Les clients n’envoient que tuile / kind / sequence ; or, troupes, `targetSlot` invasion, `retreating` et slot cible diplomatique sont dérivés serveur. Les index posted ne sont pas répliqués.
 
-VisualDirector `effect()` leftover class mismatch : `Parent = nil` + push `effectFree[ClassName]` réelle (**N189**, map `className` → `{ Instance }`, take du **ClassName voulu**, chemin class match **inchangé**, Clouds leftover hors Clouds → `effectFree` pas `cloudFree`, take `cloudFree` **ou** `Instance.new("Clouds")`, skip `Parent == nil`, skip RadialMenu N188, skip Minimap N187, skip Overlay, skip `init.client` — `apply()` **unique**, **ne pas** l’ajouter au rematch, ScreenGui stale = leftover **N190**). `VisualDirector.luau` **zéro** `:Destroy()`. RadialMenu `destroy` leftover `RadialMenu` : `veilFree` (**N188**). Minimap `destroy` leftover `Minimap` : `panelFree` (**N187**). PlacementPreview `destroy` leftover `Placement` : `placeRootFree` (**N186**). WorldRenderer `destroy` leftover `ConquestWorld` : `worldFree` (**N185**). WorldRenderer `new` leftover `ConquestWorld` : `worldFree` (**N184**). PlacementPreview `setKind` : `ghostFree` (**N183**). FactionLabels `refresh` + `clear` : `labelFree` (**N182**). Overlay `clear` routes : `parkRoute` (**N181**). Overlay `syncFactoryRoutes` : `routeFree` (**N180**). Overlay `clear` bâtiments : `buildingFree` (**N179**). Overlay `applyBuildingDelta` : `buildingFree` (**N178**). Overlay `clear` unités : `shipFree` / `ogiveFree` (**N177**). Overlay despawn ogive : `ogiveFree` (**N176**). Overlay despawn navire : `shipFree` (**N175**). HUD `Dismiss` : `dismissFree` (**N174**). VictoryScreen `Value` : `valueFree` (**N173**). MainMenu miniature : `previewFree` (**N172**). MainMenu drapeau : `flagFree` (**N171**). HUD chat : `chatFree` (**N170**). Effects `clearActionPreview` (**N169**). Effects `clearSelection` (**N168**). HUD feed : `feedFree` (**N167**). BuildingModels BuildRing : `ringFree` (**N166**). Overlay Blast / BlastSmoke / Shockwave : `blastFree` / `smokeFree` / `shockFree` (**N165–N163**). PointLight reste **enfant** de Blast / EngineFlame. **`Overlay.luau` n’a plus aucun `:Destroy()`.** **`FactionLabels.luau` n’a plus aucun `:Destroy()`.** **`PlacementPreview.luau` n’a plus aucun `:Destroy()`.** **`WorldRenderer.luau` n’a plus aucun `:Destroy()`.** **`Minimap.luau` n’a plus aucun `:Destroy()`.** **`RadialMenu.luau` n’a plus aucun `:Destroy()`.** **`VisualDirector.luau` n’a plus aucun `:Destroy()`** (`effect()` N189). UnitModels `place` flamme `Size = Vector3.new` encore 60 Hz (leftover **N152**, pulse Z **conservé**, **≠** visual V74 freeze — **non livré** : l’API `Size` exige un `Vector3`). `init.client` leftover ScreenGui stale `child:Destroy` encore (leftover **N190**, Rojo reload, **hors bundle**).
+WorldBuilder `build()` leftover `ConquestCollision` : `Parent = nil` + push `collisionFree` (**N191**, Folder, take n’importe quel Folder, Name `ConquestCollision`, Parent Workspace, enfants Ground / Seabed / murs → `collisionPartFree` **avant** take, leftover non-Folder `Parent = nil`, skip `Parent == nil`, skip `init.client` N190, skip VisualDirector N189, skip WorldRenderer `worldFree` N184, `Terrain:Clear()` **inchangé**, `clearDefaultScene` = leftover **N192**). `WorldBuilder.build` **zéro** `:Destroy()`. VisualDirector `effect()` leftover class mismatch : `effectFree[ClassName]` (**N189**). RadialMenu `destroy` leftover `RadialMenu` : `veilFree` (**N188**). Minimap `destroy` leftover `Minimap` : `panelFree` (**N187**). PlacementPreview `destroy` leftover `Placement` : `placeRootFree` (**N186**). WorldRenderer `destroy` leftover `ConquestWorld` : `worldFree` (**N185**). WorldRenderer `new` leftover `ConquestWorld` : `worldFree` (**N184**). … (N163–N183 inchangés). **`WorldBuilder.build` n’a plus aucun `:Destroy()`.** **`VisualDirector.luau` n’a plus aucun `:Destroy()`.** UnitModels `place` flamme `Size = Vector3.new` encore 60 Hz (leftover **N152**, pulse Z **conservé**, **≠** visual V74 freeze — **non livré** : l’API `Size` exige un `Vector3`). `init.client` leftover ScreenGui stale `child:Destroy` encore (leftover **N190**, Rojo reload, **hors bundle**, Lua state neuf / pools vides → **skip** cette passe, comme N152 freeze).
+
+**N190 non livré :** au reload Rojo le Lua state est **neuf**, `guiFree` / `feedFree` / `veilFree` sont **vides**, les enfants du ScreenGui stale ne sont pas takeables. `Parent = nil` sans take = fuite. Take avec enfants = double HUD. Strip orphelin = fuite DataModel. Destroy du stale **est** le contrat Rojo. Spec : si le seul patch est unsafe, **ne pas livrer**. Livrer N191 seulement.
 
 **Feel #19 conservé :** `PREPARATION_DURATION = 0`, `combatUnlocked` dès le déploiement, intentions **appliquées à l’enqueue**.
 
 **20K CCU** = ~1 700 shards × 8 humains / 12 factions publiques (+ 6 tribus = **18** slots Classique), pas un monde unique.
 
-**PR #256 (passe 97) : claims vérifiés.** RadialMenu.destroy leftover Parent=nil, `parkVeil(self.veil)`, take `new()`, Ring / Hub `FindFirstChild` reuse, petals leftover `leftoverPetal`, `Activated` **seulement** si pas de leftover, skip `Parent == nil`, skip `init.client` (`radial:destroy()` **absent**), skip Minimap N187, skip PlacementPreview N186, skip WorldRenderer N185, skip Overlay. `RadialMenu.luau` zéro `:Destroy()`. Minimap N187 inchangé. PlacementPreview N186 inchangé. WorldRenderer N185 inchangé. Overlay N181 inchangé. N152 non livré (freeze Size=API = visual V74, interdit). Stub `Disconnect` inchangé. **N189 livré ici.** Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé. Visual **branche `1b6b`** passe 110 `refreshChatSheet` Parent=nil — feel N170 **déjà**, **pas merger**. Visual **branche `c6c6`** passe 109 `clearActionPreview` Parent=nil — feel N169 **déjà**, **pas merger**. Visual **branche `f71e`** passe 108 `clearSelection` Parent=nil — feel N168 **déjà**, **pas merger**. Ne pas merger visual `1b6b` / `c6c6` / `f71e` / `a18e` / `a971` / `340e` / `58fe` / `d555` / `3437` / `8cc5` / `73e0` / `87c1` / `eaa4` / `057c` / `fb11` / `1aab` / `3ba1` / `9922` ni hardening `41e2` / `93f6`.
+**PR #258 (passe 98) : claims vérifiés.** VisualDirector.effect leftover Parent=nil, `parkEffect` / `effectFree[ClassName]`, take du ClassName voulu, chemin match **inchangé**, Clouds leftover non-Clouds → `effectFree` pas `cloudFree`, skip `Parent == nil`, skip RadialMenu N188, skip `init.client` (`apply()` **unique**). `VisualDirector.luau` zéro `:Destroy()`. RadialMenu N188 inchangé. N152 non livré (freeze Size=API = visual V74, interdit). Stub `FindFirstChildOfClass` déjà. **N191 livré ici.** Combat vivant = `ChantierB.stepAttacks`. `MAX_TILES_PER_TICK` non lu par le combat installé. Visual **branche `737c`** passe 112 Overlay `clear` Parent=nil — feel N179 **déjà**, **pas merger**. Visual **branche `8d07`** passe 111 `applyBuildingDelta` Parent=nil — feel N178 **déjà**, **pas merger**. Visual **branche `1b6b`** passe 110 `refreshChatSheet` Parent=nil — feel N170 **déjà**, **pas merger**. Ne pas merger visual `737c` / `8d07` / `1b6b` / `c6c6` / `f71e` / `a18e` / `a971` / `340e` / `58fe` / `d555` / `3437` / `8cc5` ni hardening `41e2` / `93f6`.
 
-Cette passe a **livré N189** (ce que #256 a documenté). **N152 non livré** : le seul patch distinct de l’API serait un freeze Size=API (visual V74 / `c0ec`) — interdit par la spec.
+Cette passe a **livré N191** (ce que #258 a documenté si N190 skip). **N152 non livré**. **N190 non livré** (reload-diverged).
 
 Banc headless (`./tests/run.sh`) : voir §7.
 
 ---
 
-## 2. Revue PR #256
+## 2. Revue PR #258
 
-| Claim #256 | Réalité à l’ouverture |
+| Claim #258 | Réalité à l’ouverture |
 |---|---|
-| RadialMenu.destroy leftover Parent=nil (N188) | Oui. `parkVeil(self.veil)`, take `new()`, Ring / Hub `FindFirstChild` reuse, petals leftover `leftoverPetal`, `Activated` **seulement** si pas de leftover, skip `Parent == nil`, skip `init.client`, skip Minimap, skip PlacementPreview, skip WorldRenderer, skip Overlay. `RadialMenu.luau` zéro `:Destroy()`. |
+| VisualDirector.effect leftover Parent=nil (N189) | Oui. `parkEffect` / `effectFree[ClassName]`, take du ClassName voulu, Clouds leftover non-Clouds → `effectFree` pas `cloudFree`, chemin match inchangé, skip `Parent == nil`, skip RadialMenu, skip `init.client`. `VisualDirector.luau` zéro `:Destroy()`. |
 | N152 non livré | Oui. `piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)` inchangé. Pulse Z conservé. Freeze Size=API = visual V74, interdit. |
-| Specs N152 / N189 | **N189 livré ici.** N152 **laissé ouvert** (pulse Z conservé ; freeze Size=API = visual V74, ne pas merger `c0ec`). |
+| Specs N152 / N190 / N191 | **N191 livré ici.** N190 **skip** (Lua state neuf, hors bundle). N152 **laissé ouvert**. |
 
-PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #160/`41e2` (N107–N108), feel jusqu’à #256, visuelles #257/`1b6b` passe 110 chat / `c6c6` passe 109 clearActionPreview / `f71e` passe 108 clearSelection / `a18e` passe 107 selectTile / `a971` passe 106 HUD feed / `340e` passe 105 BuildRing / `58fe` passe 104 conquestPulse / `d555` passe 103 tileFlash / `3437` V120 floatingText / `8cc5` V119 goldPopup. **#256 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `1b6b` / `c6c6` / `f71e` / `a18e` / `a971` / `340e` / `58fe` / `d555` / `3437` / `8cc5` ni hardening `41e2` / `93f6` sans rebase.
+PRs ouvertes au moment de la revue : #16 P0, hardening jusqu’à #160/`41e2` (N107–N108), feel jusqu’à #258, visuelles #259/`737c` passe 112 Overlay.clear / #257/`8d07` passe 111 applyBuildingDelta / `1b6b` passe 110 chat. **#258 + cette passe** est le sur-ensemble feel à merger. La ligne P0 sans feel reste distincte. Ne pas merger visual `737c` / `8d07` / `1b6b` ni hardening `41e2` / `93f6` sans rebase.
 
-**Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. `JoinRequest` reste hors IntentValidator (chemin menu dédié, ended+cooldown déjà). N189 est cosmétique éclairage (Lighting / Terrain leftover). Risques documentés, non corrigés ici (hors N189) : Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
+**Revue autorité :** pas de RemoteFunction ; pas de chemin client gold/troupes/owner ; pas de cycle Server/Shared. `JoinRequest` reste hors IntentValidator (chemin menu dédié, ended+cooldown déjà). N191 est cosmétique collision invisible (serveur, non cliquable). Risques documentés, non corrigés ici (hors N191) : Persistence `math.max` perd les +1 concurrents (N6) ; `RequestSnapshot` buffer owner complet.
 
-**Revue combat/éco :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip `rng > 0.12` seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. Aucun bug clair sûr hors N189. Overlay explosion n’a plus de `Destroy`. RadialMenu.destroy rematch **poolé**. VisualDirector.effect mismatch **poolé**. UnitModels flamme `Size = Vector3.new` encore (leftover N152, **≠** visual V74 freeze — **non livré**). `init.client` ScreenGui stale Destroy encore (leftover **N190**). WorldBuilder `ConquestCollision:Destroy` encore (leftover **N191**, serveur).
+**Revue combat/éco :** `areAllied` deux sens + expiry OK ; bots `humanTargetProtected` OK. **Tribus** : `Tribes.decideAttack` n’appelle pas `humanTargetProtected` (88 % skip `rng > 0.12` seulement) — écart feel vs hardening/visual, **non porté** cette passe (gameplay, pas stub). Scan cadran O(carte) encore N9. Aucun bug clair sûr hors N191. Overlay explosion n’a plus de `Destroy`. VisualDirector.effect mismatch **déjà** poolé. WorldBuilder.build leftover **poolé**. UnitModels flamme `Size = Vector3.new` encore (leftover N152, **≠** visual V74 freeze — **non livré**). `init.client` ScreenGui stale Destroy encore (leftover **N190**, skip). WorldBuilder `clearDefaultScene` Baseplate Destroy encore (leftover **N192**).
 
 ---
 
 ## 3. Correctifs livrés (sûrs, server-authoritative)
 
-Feel #19 inchangé. Pas de réinvention : N189 du rapport #256. N152 **non livré** (spec : si le seul patch est un freeze, ne pas livrer). Stub `FindFirstChildOfClass` ajouté (manquait ; `apply()` Terrain + WorldCamera Humanoid).
+Feel #19 inchangé. Pas de réinvention : N191 du rapport #258 (si N190 skip). N152 **non livré**. N190 **non livré**. Stub Workspace Instance + `Terrain:Clear` (manquait ; `build()` FindFirstChild / Parent / Terrain).
 
 | Bug | Fichiers | Pourquoi 20K CCU / autorité |
 |---|---|---|
-| VisualDirector `effect()` leftover `existing:Destroy` class mismatch (N189) | `VisualDirector.luau` (`effect()` park `effectFree[ClassName]`, take du ClassName voulu, Clouds `parkCloudsLeftover` + `cloudFree`, chemin match inchangé, skip RadialMenu, skip Minimap, skip Overlay, skip `init.client`), `tests/guistubs.luau` (`FindFirstChildOfClass`), `tests/client.luau` (check « direction visuelle » leftover N189 ; **garder** `menu:destroy()` existant, **sans** extra `RadialMenu.new`) | Leftover N188. Rojo / Play Solo enfant Lighting homonyme mauvaise classe → `Destroy` + `Instance.new`. 8 clients. Pas d’autorité (éclairage). **Skip Parent nil** sinon double-push. **Take ClassName voulu obligatoire** (park sans take = fuite). **Pas park du match** (Bloom empilé). **Pas `apply()` au rematch** (`apply()` unique). **Pas RadialMenu** (N188). **Pas ScreenGui** (N190). Clouds leftover Part → `effectFree["Part"]` **pas** `cloudFree` (sinon take Clouds recevrait un Part). Cosmétique. Flame leftover N152 **alors**. ScreenGui leftover N190 **alors**. |
+| WorldBuilder `build()` leftover `existing:Destroy` ConquestCollision (N191) | `WorldBuilder.luau` (`build()` park `collisionFree`, take Folder, park enfants `collisionPartFree` avant take, leftover non-Folder Parent=nil, skip `Parent == nil`, skip `clearDefaultScene` N192, skip `Terrain:Clear` sémantique, skip VisualDirector, skip `init.client`, skip WorldRenderer), `tests/stubs.luau` (Workspace Instance + Terrain:Clear), `tests/simulate.luau` (check collision leftover N191 ; **garder** seuils 1500 blocs / client 9000) | Leftover N189. Nouvelle partie, **même** Lua state serveur → pools module **vivants** (≠ N190 reload). 1 Folder + O(blocs) Parts Destroy à chaque match. Pas d’autorité (collision invisible, CanQuery false). **Skip Parent nil** sinon double-push. **Take Folder obligatoire** (park sans take = fuite). **Park enfants obligatoire** (take sans park = Ground empilés). **Pas `worldFree` client** (N184). **Pas ScreenGui** (N190). **Pas `clearDefaultScene`** (N192). Cosmétique collision. Flame leftover N152 **alors**. ScreenGui leftover N190 **alors** (skip). |
 
-**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), UnitModels flamme `Size = Vector3.new` (**N152**, **≠** visual V74 freeze — **non livré**), `init.client` ScreenGui stale Destroy (**N190**), WorldBuilder `ConquestCollision:Destroy` (**N191**), flamme Size = API leftover visual V74 fermée Option A — feel **garde** le pulse, ne pas merger, tribus `humanTargetProtected`. RadialMenu.destroy N188 **inchangé**. Minimap.destroy N187 **inchangé**. PlacementPreview.destroy N186 **inchangé**. WorldRenderer N184/N185 **inchangés**. Overlay **inchangé**. `init.client` **inchangé** (`apply()` unique, ScreenGui Destroy conservé). `UnitModels.luau` **non** touché.
+**Non modifié (volontaire) :** apply immédiat (N14), câblage `MAX_TILES_PER_TICK` (N11), coalescence skip-si-inchangé (N2 restant), DataStore merge additif (N6), tribus vs capa (N12), fusion Config/ChantierB (N1), cap humains éliminés (N17), heap AimFront vs ChantierB (N18), embargo allié (N19), MAX_BOATS (N25), RequestSnapshot client (N28), landing bonus mort (N33), bateau allié = retraite 25 % (N10.8 design), `stepDoomsday` skip AFK, `seedBeachhead` Attack+queued+Heap (N5 ouvert), pool `building.links`, scan cadran O(carte) (**N9**), corps mort `GameState.stepAttacks` `local collapsing` (**N8**), UnitModels flamme `Size = Vector3.new` (**N152**, **≠** visual V74 freeze — **non livré**), `init.client` ScreenGui stale Destroy (**N190**, skip), flamme Size = API leftover visual V74 fermée Option A — feel **garde** le pulse, ne pas merger, tribus `humanTargetProtected`. VisualDirector N189 **inchangé**. RadialMenu.destroy N188 **inchangé**. Minimap.destroy N187 **inchangé**. PlacementPreview.destroy N186 **inchangé**. WorldRenderer N184/N185 **inchangés**. Overlay **inchangé**. `init.client` **inchangé** (`apply()` unique, ScreenGui Destroy conservé). `UnitModels.luau` **non** touché. `clearDefaultScene` **inchangé** (N192).
 
 ---
 
@@ -81,23 +83,23 @@ SystemsBootstrap.install()  monkey-patch : ChantierB (combat/éco/spawn/doom,
 - **Beachhead vivant** = `BoatFront.seedBeachhead` : frontier = voisins encore à la cible, flag `isBeachhead`. Stub = `error(...)`. Deux débarquements du même couple = **deux** tas (N5 ouvert). Wrap `launchAttack` gare via `parkedBuf` (**N87**).
 - **`areAllied`** = deux directions **et** `tick < expiry` (`true` legacy tests reste vivant).
 - **Réplication :** StateDelta / UnitSnapshot / BuildingDelta / plunder / trade / explosions / notify&sfx / Diplomacy.viewFor 1 Hz. Playing 10 Hz ; lobby vide et ended → 1 Hz.
-- VisualDirector `effect()` mismatch poolé (**N189**, `effectFree[className]` / `cloudFree`). RadialMenu.destroy leftover TextButton poolé (**N188**, `veilFree`). Minimap.destroy leftover Frame poolé (**N187**, `panelFree`). … (N163–N186 inchangés). UnitModels flamme `Size = Vector3.new` encore 60 Hz (**N152**). `init.client` ScreenGui stale Destroy encore (**N190**). WorldBuilder `ConquestCollision:Destroy` encore (**N191**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
+- WorldBuilder `build` leftover Folder poolé (**N191**, `collisionFree` / `collisionPartFree`). VisualDirector `effect()` mismatch poolé (**N189**, `effectFree[className]` / `cloudFree`). RadialMenu.destroy leftover TextButton poolé (**N188**, `veilFree`). … (N163–N190 inchangés hors N190 skip). UnitModels flamme `Size = Vector3.new` encore 60 Hz (**N152**). `init.client` ScreenGui stale Destroy encore (**N190**). WorldBuilder `clearDefaultScene` Destroy encore (**N192**). N2 restant = skip-si-inchangé (payloads encore envoyés chaque tick).
 
 ---
 
-## 5. Issues worker-ready (N152 restant + N190 / N191)
+## 5. Issues worker-ready (N152 restant + N190 skip + N192)
 
-`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N151, **N153–N189** = faits. N22 = **N67 fait**. N27 = doc only. **N152** reste ouvert (non livrable sans freeze V74). **N189** fermé ici. **N190** = leftover `init.client` ScreenGui stale `child:Destroy` Rojo reload (`guiFree` ScreenGui, **hors bundle**, Lua state neuf → **piège livrabilité**, skip VisualDirector N189). **N191** = leftover serveur `WorldBuilder.build` `ConquestCollision:Destroy` (recette N184, même Lua state, livrable si N190 skip).
+`gh issue create` n’est pas disponible. Copier chaque bloc. **N1–N19, N25, N28, N33 restent ouverts.** N20/N21/N23/N24/N26, N29–N151, **N153–N189**, **N191** = faits. N22 = **N67 fait**. N27 = doc only. **N152** reste ouvert (non livrable sans freeze V74). **N189** fermé passe 98. **N190** skip ici (reload-diverged, hors bundle). **N191** fermé ici. **N192** = leftover `WorldBuilder.clearDefaultScene` Baseplate / SpawnLocation `child:Destroy` (jamais recréés, **peut skip** comme N190).
 
-Leftover feel UnitModels flamme `Size = Vector3.new` = **N152** (**≠** visual V74 freeze Size=API — feel **garde** le pulse, ne pas merger `c0ec` ; **si le seul patch est un freeze : ne pas livrer N152**). Leftover `init.client` ScreenGui Destroy = **N190**. Leftover WorldBuilder collision Destroy = **N191**. Visual passe 110 chat **fermée** sur `1b6b` (feel N170 **déjà** — ne pas merger). Visual passe 109 clearActionPreview **fermée** sur `c6c6` (feel N169 **déjà** — ne pas merger). Ne pas merger visual `1b6b` / `c6c6` / `f71e` / `a18e` / `a971` / `340e` / `58fe` / `d555` / `3437` / `8cc5`.
+Leftover feel UnitModels flamme `Size = Vector3.new` = **N152** (**≠** visual V74 freeze Size=API — feel **garde** le pulse, ne pas merger `c0ec` ; **si le seul patch est un freeze : ne pas livrer N152**). Leftover `init.client` ScreenGui Destroy = **N190** (skip passe 99). Leftover WorldBuilder collision Destroy = **N191** (**fermé**). Leftover `clearDefaultScene` = **N192**. Visual passe 112 Overlay.clear **fermée** sur `737c` (feel N179 **déjà** — ne pas merger). Visual passe 111 applyBuildingDelta **fermée** sur `8d07` (feel N178 **déjà** — ne pas merger). Visual passe 110 chat **fermée** sur `1b6b` (feel N170 **déjà** — ne pas merger). Ne pas merger visual `737c` / `8d07` / `1b6b` / `c6c6` / `f71e` / `a18e`.
 
 ---
 
 ### ISSUE-N152 — UnitModels `place` flamme `Size = Vector3.new` 60 Hz (feel)
 
-**Priorité :** P3 alloc client UnitModels. Leftover explicite après N151 (trail `offset.Z` déjà), N153–N189 (pools Overlay/Effects/BuildingModels/HUD/selection/preview/chat/drapeau/miniature/podium/Dismiss/navire/ogive/`clear` / Ghost / ConquestWorld / rematch destroy / RadialMenu / VisualDirector **déjà**). Distinct de visual V74 (Size = API freeze — **ne pas merger** `c0ec`). `UnitModels.place` branche `piece.role == "flame"` **seulement**.
+**Priorité :** P3 alloc client UnitModels. Leftover explicite après N151 (trail `offset.Z` déjà), N153–N191 (pools Overlay/Effects/BuildingModels/HUD/selection/preview/chat/drapeau/miniature/podium/Dismiss/navire/ogive/`clear` / Ghost / ConquestWorld / rematch destroy / RadialMenu / VisualDirector / WorldBuilder collision **déjà**). Distinct de visual V74 (Size = API freeze — **ne pas merger** `c0ec`). `UnitModels.place` branche `piece.role == "flame"` **seulement**.
 
-**Problème :** N189 ferme le pool mismatch Lighting. Reste, **chaque frame** :
+**Problème :** N191 ferme le pool collision serveur. Reste, **chaque frame** :
 
 ```
 piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
@@ -105,106 +107,75 @@ piece.part.Size = Vector3.new(0.62, 0.62, 1.8 + math.sin(time * 18) * 0.45)
 
 `Vector3.new` alloue pour écrire `Size`. Visual V74 Option A a **gelé** Size = API (`c0ec` / PR #151). Feel **garde** le pulse Z `sin(time * 18)` **sans** phase spatiale. Amplitude `0.45` / fréquence `time * 18` / base `1.8` / XY `0.62` **inchangés**.
 
-**Pourquoi 20K CCU :** leftover N151. 8 clients × ogives × 60 Hz × `Vector3` pour un pulse de Size. Pas d’autorité. VisualDirector **déjà** N189 — ne pas y revenir. **Passes 61–98 ont refusé de livrer N152** : le seul patch distinct de l’API serait le freeze.
+**Pourquoi 20K CCU :** leftover N151. 8 clients × ogives × 60 Hz × `Vector3` pour un pulse de Size. Pas d’autorité. WorldBuilder **déjà** N191 — ne pas y revenir. **Passes 61–99 ont refusé de livrer N152** : le seul patch distinct de l’API serait le freeze.
 
 **Worker :**
 
 1. Dans `UnitModels.place` branche `role == "flame"` seulement : **conserver** le pulse. **Ne pas** geler Size (visual V74, ne pas merger `c0ec`). L’API `Size` exige un `Vector3` : garder la ligne actuelle.
 
-2. **Si le seul patch possible est un freeze Size=API : ne pas livrer N152. Laisser la ligne inchangée. Livrer N190 ou N191 seulement.** N152 reste alors ouvert. Ne pas inventer un cache Size.
+2. **Si le seul patch possible est un freeze Size=API : ne pas livrer N152. Laisser la ligne inchangée. Livrer N192 seulement (ou skip N192 si Destroy Studio est le contrat).** N152 reste alors ouvert. Ne pas inventer un cache Size.
 
-3. Tests « navires » leftover N151 / N152 **doivent rester verts**. Tests « direction visuelle » leftover N189 **doivent rester verts**. Client **36/36**. `./tests/run.sh`. 6000 ticks serveur inchangé.
+3. Tests « navires » leftover N151 / N152 **doivent rester verts**. Tests collision leftover N191 **doivent rester verts**. Client **36/36**. `./tests/run.sh`. 6000 ticks serveur inchangé.
 
-4. Fichiers : `UnitModels.luau` **seulement si** un patch feel distinct de V74 existe. Sinon **aucun** fichier flame. VisualDirector **non**. `init.client` **non**. WorldBuilder **non**.
+4. Fichiers : `UnitModels.luau` **seulement si** un patch feel distinct de V74 existe. Sinon **aucun** fichier flame. WorldBuilder **non**. `init.client` **non**. VisualDirector **non**.
 
-**Contraintes :** pas de RemoteFunction. **N152 feel ≠ visual V74 (freeze, ne pas merger) ≠ N189 (VisualDirector déjà) ≠ N190 (ScreenGui) ≠ N191 (WorldBuilder).** Non réentrant. Pulse Z **conservé**.
+**Contraintes :** pas de RemoteFunction. **N152 feel ≠ visual V74 (freeze, ne pas merger) ≠ N191 (WorldBuilder déjà) ≠ N190 (ScreenGui skip) ≠ N192 (clearDefaultScene).** Non réentrant. Pulse Z **conservé**.
 
 ---
 
-### ISSUE-N190 — `init.client` leftover ScreenGui stale `child:Destroy` Rojo reload (feel)
+### ISSUE-N190 — `init.client` leftover ScreenGui stale `child:Destroy` Rojo reload (feel) — SKIP passe 99
 
-**Priorité :** P3 alloc client init. Leftover explicite après N189 (`VisualDirector.luau` **zéro** `:Destroy()`). Distinct de N189 (Lighting mismatch **déjà**), de N188 (RadialMenu.destroy **déjà**), de N152 (flame Size). `init.client` lignes ~77–88 : `child:Destroy()` si `Name == "ConquestRTS"` **ou** `FindFirstChild("MainMenu", true)`. `apply()` **unique** hors rematch — **ne pas** l’ajouter. Ne pas toucher VisualDirector (N189). Ne pas toucher RadialMenu (N188). Ne pas toucher Overlay. Ne pas retoucher `effectFree`. **`init.client` est hors bundle** (`tests/bundle.js` EXCLUDE).
+**Priorité :** P3 alloc client init. **Non livré passe 99** (Lua state neuf / hors bundle). Distinct de N191 (WorldBuilder **déjà**), de N189 (Lighting **déjà**), de N152 (flame Size). `init.client` lignes ~77–88 : `child:Destroy()` si `Name == "ConquestRTS"` **ou** `FindFirstChild("MainMenu", true)`. `apply()` **unique** hors rematch — **ne pas** l’ajouter. Ne pas toucher WorldBuilder (N191). Ne pas toucher VisualDirector (N189). **`init.client` est hors bundle** (`tests/bundle.js` EXCLUDE).
 
-**Problème :** N189 ferme le pool Lighting. `StarterPlayerScripts/Client/*.luau` n’a plus de `Destroy` **sauf** `init.client` :
+**Problème / piège (inchangé depuis #258) :** au reload, **tous** les modules sont réinstanciés. `veilFree` / `effectFree` / `feedFree` / `collisionFree` sont **vides**. Les enfants du ScreenGui stale **ne peuvent pas** être take via les pools N167–N191. `Parent = nil` du ScreenGui puis take **sans** strip = `HUD.new` **duplique** l’arbre. Strip `child.Parent = nil` **sans** Destroy = orphelins DataModel. **Destroy du ScreenGui stale EST le contrat Rojo.**
+
+**Pourquoi skip 20K CCU :** leftover N189 documenté. 8 clients × reload Studio. Pas d’autorité. **Oubli de strip** = double HUD. **Park sans take** = fuite. La passe 99 a choisi le skip **sûr** et livré N191 (même Lua state serveur).
+
+**Worker :**
+
+1. Relire le piège Lua state. **Si le seul patch est Parent=nil sans take, un take qui garde les enfants, un strip qui orpheline l’arbre, un `apply()` au rematch, ou un retouch VisualDirector / WorldBuilder : ne pas livrer N190. Laisser `child:Destroy()`. Livrer N192 seulement.** N190 reste ouvert (reload-diverged, comme N152 freeze).
+
+2. Tests « direction visuelle » leftover N189 **doivent rester verts**. Collision leftover N191 **vert**. Client **36/36**. `./tests/run.sh`. **Pas** de check `init.client` (hors bundle).
+
+3. Fichiers : `init.client.luau` **seulement si** livrable. WorldBuilder **non**. VisualDirector **non**. Overlay **non**. `tests/client.luau` **non**. **Ne pas** merger visual `8d07`.
+
+**Contraintes :** pas de RemoteFunction. **N190 feel ≠ N191 (WorldBuilder déjà) ≠ N189 (VisualDirector déjà) ≠ N152 (flame) ≠ N192 (clearDefaultScene) ≠ visual passe 111 (applyBuildingDelta fermée `8d07`, ne pas merger).** Non réentrant. **Ne pas fusionner N190 et N192.**
+
+---
+
+### ISSUE-N192 — `WorldBuilder.clearDefaultScene` leftover Baseplate / SpawnLocation `Destroy` (feel)
+
+**Priorité :** P3 alloc serveur Studio defaults. Leftover explicite après N191 (`WorldBuilder.build` **zéro** `:Destroy()`). Distinct de N191 (Folder collision **déjà**), de N190 (ScreenGui client skip), de N184 (WorldRenderer client **déjà**). `WorldBuilder.clearDefaultScene` : `child:Destroy()` si `Name == "Baseplate"` **ou** `IsA("SpawnLocation")`. `Terrain:Clear()` **inchangé** (N191). `build()` **inchangé** (N191). `init.client` **inchangé** (N190).
+
+**Problème :** N191 ferme le pool collision. Reste, **une fois au boot Studio** :
 
 ```
-for _, child in playerGui:GetChildren() do
-	if not child:IsA("ScreenGui") then
-		continue
-	end
-	local hasOldMenu = child.Name == "ConquestRTS" or child:FindFirstChild("MainMenu", true) ~= nil
-	if hasOldMenu then
-		warn(`[CONQUEST UI] removing stale interface {child:GetFullName()}`)
+for _, child in Workspace:GetChildren() do
+	if child.Name == "Baseplate" or child:IsA("SpawnLocation") then
 		child:Destroy()
 	end
 end
-local screenGui = Instance.new("ScreenGui")
 ```
 
-Rojo / Play Solo relance le LocalScript ; l’ancien `ConquestRTS` reste dans `PlayerGui`. `Destroy` tue l’arbre HUD/menu/intro/victory/radial.
+`Destroy` tue la dalle Studio + le spawn par défaut. **Jamais recréés** dans CONQUEST (pas de `Instance.new("Baseplate")`, pas de `Instance.new("SpawnLocation")` gameplay — le spawn joueur est `PivotTo` capitale).
 
-**Piège Lua state neuf :** au reload, **tous** les modules sont réinstanciés. `veilFree` / `effectFree` / `feedFree` sont **vides**. Les enfants du ScreenGui stale **ne peuvent pas** être take via les pools N167–N188. `Parent = nil` du ScreenGui puis take **sans** strip = `HUD.new` **duplique** l’arbre. Strip `child.Parent = nil` **sans** Destroy = orphelins DataModel (fuite nette vs Destroy). **Destroy du ScreenGui stale EST le contrat Rojo** (Lua state neuf, pools vides).
+**Piège jamais recréé :** `collisionFree` / `collisionPartFree` sont des Parts de collision **recyclées à chaque match**. Un Baseplate parké dans `collisionPartFree` serait take comme Ground → dalle Studio 512² au milieu de la carte. **Ne pas** pousser Baseplate dans `collisionPartFree`. **Ne pas** pousser dans `collisionFree` (Folder).
 
-**Piège hors bundle :** `init.client` n’est **pas** dans le banc. `__require("init.client")` impossible. **Ne pas** extraire un helper juste pour le test. `FindFirstChild(name, true)` récursif : le stub ignore le 2e arg — ne pas s’en servir comme preuve.
+**Piège Parent=nil sans take :** Baseplate `Parent = nil` sans référence Lua → le collecteur Roblox peut le ramasser, **mais** `Destroy` coupe aussi les connexions et verrouille l’instance. Pour un objet **jamais repris**, Destroy **est** le contrat Studio (comme N190 Destroy stale). **Si le seul patch est Parent=nil sans take : ne pas livrer N192. Laisser `child:Destroy()`.**
 
-**Piège apply() :** `VisualDirector.apply()` **unique** ligne ~160. **Ne pas** l’ajouter au rematch MapInit. ScreenGui ≠ Lighting.
+**Piège N191 :** ne **pas** retoucher `build()`. Ne **pas** retirer `Terrain:Clear()`. Ne **pas** merger `worldFree` client.
 
-**Pourquoi 20K CCU :** leftover N189. 8 clients × reload Studio. Pas d’autorité. VisualDirector **déjà** N189. **Oubli de strip** = double HUD. **Park sans take** = fuite. **Take avec enfants** = double construction.
+**Pourquoi 20K CCU :** leftover N191. 1 Baseplate + 1 SpawnLocation Destroy **une fois** par serveur, pas par match. Impact CCU **négligeable** vs N191 (O(blocs) chaque match). Documenté pour épuiser la chaîne `:Destroy()` production. Pas d’autorité.
 
 **Worker :**
 
-1. Lire le piège Lua state. **Si le seul patch est Parent=nil sans take, un take qui garde les enfants, un strip qui orpheline l’arbre, un `apply()` au rematch, ou un retouch VisualDirector : ne pas livrer N190. Laisser `child:Destroy()`. Livrer N191 seulement.** N190 reste alors ouvert (reload-diverged, comme N152 freeze).
+1. Lire le piège jamais recréé. **Si le seul patch est Parent=nil sans take, un push vers `collisionPartFree` / `collisionFree`, ou un retouch `build()` : ne pas livrer N192. Laisser `child:Destroy()`.** N192 reste alors ouvert (boot-once, comme N190 reload).
 
-2. Si une recette **sûre** existe (même run, take ScreenGui **vide**, enfants déjà `destroy()` via N186/N187 **avant** — ce n’est **pas** le chemin Rojo reload) : `guiFree` `{ ScreenGui }`, skip `Parent == nil`, skip non-ScreenGui, take **avant** `Instance.new`, Name `ConquestRTS`, Parent `playerGui`. **Pas** VisualDirector. **Pas** RadialMenu. Warn `GetFullName` **conservé**.
+2. Si une recette **sûre** existe (pool **dédié** `studioFree` jamais take dans `build`, skip `Parent == nil`, skip non-Baseplate / non-SpawnLocation) : `Parent = nil` + push, **aucun** take dans `build()`. Tests collision leftover N191 **doivent rester verts** (`rawequal` Folder, Ground recycle). Client **36/36**. `./tests/run.sh`. 6000 ticks inchangé.
 
-3. Tests « direction visuelle » leftover N189 **doivent rester verts**. Tests « menu radial » leftover N188 **garder** `menu:destroy()`. Client **36/36**. `./tests/run.sh`. **Pas** de check `init.client` (hors bundle).
+3. Fichiers : `WorldBuilder.luau` (`clearDefaultScene()` **seulement**). `build()` **non**. `tests/simulate.luau` **seulement** si check Baseplate leftover **sans** casser N191. VisualDirector **non**. `init.client` **non**. WorldRenderer **non**. Overlay **non**. **Ne pas** merger visual `8d07`. **Ne pas** éditer le client.
 
-4. Fichiers : `init.client.luau` **seulement si** livrable. VisualDirector **non**. RadialMenu **non**. Overlay **non**. WorldBuilder **non**. `tests/client.luau` **non** (hors bundle). **Ne pas** merger visual `1b6b` (passe 110 chat = feel N170 **déjà**).
-
-**Contraintes :** pas de RemoteFunction. **N190 feel ≠ N189 (VisualDirector déjà) ≠ N188 (RadialMenu déjà) ≠ N152 (flame) ≠ N191 (WorldBuilder serveur) ≠ visual passe 110 (chat fermée `1b6b`, ne pas merger).** Non réentrant. **Si N190 non livrable : livrer N191. Ne pas fusionner N190 et N191.**
-
----
-
-### ISSUE-N191 — WorldBuilder `build` leftover `ConquestCollision:Destroy` (feel)
-
-**Priorité :** P3 alloc serveur collision. Leftover explicite si N190 skip (dernier `:Destroy()` **client** = init.client ; dernier `:Destroy()` **serveur** hors tests = `WorldBuilder`). Distinct de N190 (ScreenGui client), de N189 (Lighting client), de N184 (WorldRenderer **client** `ConquestWorld` Folder **déjà**). Recette analogique N184 (`worldFree` Folder) **sans** merger visual. `WorldBuilder.build` `existing:Destroy()` si `FindFirstChild("ConquestCollision")`. `WorldBuilder.clearDefaultScene` Baseplate/SpawnLocation Destroy = **N192**, pas ici. `Workspace.Terrain:Clear()` **inchangé**.
-
-**Problème :** N189/N188 ferment le client. Reste, **chaque rebuild collision** (nouvelle partie, même Lua state serveur) :
-
-```
-local existing = Workspace:FindFirstChild("ConquestCollision")
-if existing then
-	existing:Destroy()
-end
-local folder = Instance.new("Folder")
-folder.Name = "ConquestCollision"
-```
-
-`Destroy` du Folder tue N Ground + 4 murs. `new()` peut take. Distinct leftover N184 (client `ConquestWorld`, **déjà**). Distinct leftover N190 (client ScreenGui).
-
-**Piège liste :** `collisionFree` `{ Folder }` **nouveau**, **pas** `worldFree` (client), **pas** `effectFree`, **pas** `guiFree`. Take **avant** `Instance.new`. Skip `Parent == nil`. Skip `ClassName ~= "Folder"`.
-
-**Piège enfants :** leftover Ground / murs. Recette N184 `parkWorldChildren` : park Ground → pool parts (nouveau `collisionPartFree`, pas `chunkGround` client N106), leftover autre `Parent = nil`. **Take Folder sans park enfants = leftover Ground empilés + nouveaux blocs.** **Si park Folder sans take : ne pas livrer (fuite).** **Si take sans park enfants : ne pas livrer.**
-
-**Piège Terrain:Clear :** `Workspace.Terrain:Clear()` **conservé** (SmoothTerrain partie précédente). Ne pas le retirer. Ne pas le pooler.
-
-**Piège clearDefaultScene :** Baseplate / SpawnLocation Destroy = **N192**. **Ne pas** y toucher.
-
-**Piège client :** WorldRenderer N184/N185 **inchangés**. Pas merger `worldFree`. Visual **non**.
-
-**Pourquoi 20K CCU :** leftover client Destroy **épuisé** hors N190 non livrable. 1 Folder + O(blocs) Parts Destroy à chaque match. Même process serveur, pools module **vivants** (≠ N190 reload). Pas d’autorité (collision invisible). **Oubli de park enfants** = Parts fantômes CanCollide. **Park sans take** = fuite Folder.
-
-**Worker :**
-
-1. Dans `WorldBuilder.build` : **ne plus** `Destroy` le leftover Folder. `Parent = nil` + push `collisionFree`, skip `Parent == nil`, skip non-Folder. Park enfants Ground/murs **avant** take. Puis take `collisionFree` **ou** `Instance.new("Folder")`. Name `ConquestCollision`. `Terrain:Clear()` **inchangé**. `clearDefaultScene` **inchangé**. VisualDirector **inchangé**. `init.client` **inchangé**.
-
-2. **Garder le marqueur.** Ne **pas** fusionner avec `worldFree` client. Ne **pas** livrer N190 dans le même worker. Après N189. Flame **non**. Overlay **non**.
-
-3. Tests serveur collision (`cout du monde 3D` / `collision serveur : N blocs`) **doivent rester verts**. Client **36/36** inchangé (WorldBuilder est dans le bundle **serveur**). `./tests/run.sh`. 6000 ticks inchangé. Si check leftover N191 : deux `WorldBuilder.build`, `rawequal` Folder **ou** leftover Parent nil + take.
-
-4. Fichiers : `WorldBuilder.luau` (`build()` leftover park + take, park enfants, pas `clearDefaultScene`, pas Terrain:Clear sémantique). `tests/simulate.luau` **seulement** si check collision leftover. VisualDirector **non**. `init.client` **non**. WorldRenderer **non**. Overlay **non**. **Ne pas** merger visual `1b6b`. **Ne pas** éditer le client.
-
-**Contraintes :** pas de RemoteFunction. **N191 feel ≠ N190 (ScreenGui client) ≠ N189 (VisualDirector déjà) ≠ N184 (WorldRenderer client déjà) ≠ N152 (flame) ≠ N192 (`clearDefaultScene` Baseplate, alors).** Non réentrant. **Pas Destroy** du Folder leftover. **Skip Parent nil.** Take Folder **obligatoire**. Park enfants **obligatoire**. **Si park sans take ou take sans park enfants : ne pas livrer N191.**
+**Contraintes :** pas de RemoteFunction. **N192 feel ≠ N191 (build déjà) ≠ N190 (ScreenGui skip) ≠ N189 (VisualDirector déjà) ≠ N184 (WorldRenderer client déjà) ≠ N152 (flame).** Non réentrant. **Pas Destroy** seulement si pool dédié **sans** take dans `build`. **Si park sans isolation d’avec `collisionPartFree` : ne pas livrer.** **Si N192 non livrable : ne pas inventer un N193 Destroy. Enchaîner N2 skip-si-inchangé (P1) ou N6 DataStore.**
 
 ---
 
@@ -213,7 +184,7 @@ folder.Name = "ConquestCollision"
 | ID | Titre | Prio | Statut |
 |---|---|---|---|
 | N1 | Source unique Config vs `ChantierB.apply` | P1 | ouvert (SAM chance aligné ; range/CD encore driftés ; **SILO_COOLDOWN** Config=90, apply ne le touche pas) |
-| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; VisualDirector mismatch → **N189 fait** ; reste skip-si-inchangé) |
+| N2 | Delta `stats` + UnitSnapshot dirty | P1 | ouvert (`buildPrices` → **N75 fait** ; … ; VisualDirector mismatch → **N189 fait** ; WorldBuilder collision → **N191 fait** ; reste skip-si-inchangé) |
 | N3 | Timebase tick vs `os.clock()` | P1 | ouvert |
 | N4 | Resync bâtiments (`structureHash` ignoré) | P1 | ouvert ; étendu N28 |
 | N5 | Beachheads hors `MAX_ACTIVE_ATTACKS_PER_PLAYER` | P2 | ouvert (BoatFront **gare** les ponts pendant le cap ; deux `seedBeachhead` = deux tas ; `parked` → **N87 fait**) |
@@ -221,7 +192,7 @@ folder.Name = "ConquestCollision"
 | N7 | Matchmaking 20K CCU (MemoryStore / Teleport) | P2 | ouvert |
 | N8 | Combat mort vs combat vivant | P2 | ouvert (corps `GameState.stepAttacks` alloue encore `collapsing`) |
 | N9 | `stepDoomsday` O(TILE_COUNT) par faction | P2 | ouvert (alloc `toStrip` → **N93**) |
-| N10 | Divers P3 | P3 | ouvert (… ; VisualDirector class mismatch → **N189** ; Overlay/RadialMenu/Minimap clos ; ScreenGui stale = **N190** ; WorldBuilder collision = **N191**) |
+| N10 | Divers P3 | P3 | ouvert (… ; VisualDirector class mismatch → **N189** ; WorldBuilder collision → **N191** ; Overlay/RadialMenu/Minimap clos ; ScreenGui stale = **N190** skip ; clearDefaultScene = **N192**) |
 | N11 | Câbler ou supprimer `MAX_TILES_PER_TICK` | P1 | ouvert |
 | N12 | Tribus vs `PUBLIC_MATCH_CAPACITY` (18 factions) | P1 | ouvert |
 | N13 | Parité combat (ère / cost factor / constantes mortes) | P2 | ouvert |
@@ -237,13 +208,12 @@ folder.Name = "ConquestCollision"
 | N27 | Embargo land trade | P2 | **doc** maritime-only |
 | N28 | `RequestSnapshot` mort client | P2 | ouvert (serveur rate-limite ; client n’envoie jamais) |
 | N33 | `BOAT_LANDING_BONUS` mort | P2 | ouvert |
-| N34–N151, N153–N189 | (voir rapport #256) | — | **faits** |
-| N152 | UnitModels `place` flamme `Size = Vector3.new` 60 Hz | P3 | **ouvert** (`place`, pulse Z **conservé**, **≠** visual V74 freeze ; **non livré** passes 61–98) |
-| N190 | `init.client` leftover ScreenGui stale `child:Destroy` Rojo reload | P3 | **nouveau** (hors bundle ; Lua state neuf / pools vides → **peut être non livrable**, comme N152 ; si skip → N191) |
-| N191 | WorldBuilder `build` leftover `ConquestCollision:Destroy` | P3 | **nouveau livrable** si N190 skip (recette N184, `collisionFree` Folder, park enfants, pas `clearDefaultScene` = N192, pas `worldFree` client) |
-| N192 | `WorldBuilder.clearDefaultScene` Baseplate/SpawnLocation Destroy | P3 | alors (après N191) |
+| N34–N151, N153–N189, N191 | (voir rapport #258) | — | **faits** |
+| N152 | UnitModels `place` flamme `Size = Vector3.new` 60 Hz | P3 | **ouvert** (`place`, pulse Z **conservé**, **≠** visual V74 freeze ; **non livré** passes 61–99) |
+| N190 | `init.client` leftover ScreenGui stale `child:Destroy` Rojo reload | P3 | **ouvert skip** (hors bundle ; Lua state neuf / pools vides ; Destroy = contrat Rojo) |
+| N192 | `WorldBuilder.clearDefaultScene` Baseplate/SpawnLocation Destroy | P3 | **nouveau** (boot-once, jamais recréés ; **peut skip** si Parent=nil sans take ou mix `collisionPartFree` ; alors N2 P1) |
 
-Textes worker-ready N1–N25, N28, N33 : PR #21 … #256 `NIGHTLY_REPORT.md` historique.
+Textes worker-ready N1–N25, N28, N33 : PR #21 … #258 `NIGHTLY_REPORT.md` historique.
 
 ---
 
@@ -275,7 +245,7 @@ Textes worker-ready N1–N25, N28, N33 : PR #21 … #256 `NIGHTLY_REPORT.md` his
 | `COLLAPSE_MIN_TILES` | 100 | 100 | oui (N86 wrap, N88 scan) |
 | `SPAWN_RADIUS` | 3 | n/a | oui (N93 banc `keep=8`, N94 strip, N55 isolation) |
 | `CHUNK_REBUILDS_PER_FRAME` | 3 | n/a | oui (N102/N104/N106/N112/N114 compact seuil 32) |
-| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde … N189 `effectFree` mismatch) |
+| `TILE_SIZE` | 12 | n/a | oui (N101 lerp monde … N191 `collisionFree` Folder) |
 
 ---
 
@@ -288,6 +258,7 @@ Serveur :
 ```
 seed 7 / 99991 / 31337 / 1234567 : 18 factions, invariants OK
 factions : 18
+collision leftover : Folder rawequal, Ground recycle, mismatch Part (N191)
 intentions : sequence, idempotence, apply immediat, rate limit OK
 stripBuf : rot sous quota, deux camps, tiles vs buffer (N93)
 stripTerritory : table.clear in-place, voisin intact (N94)
@@ -295,22 +266,22 @@ allyBuf : bot sans pacte, next nil (N91)
 validTiles : deux resolve CITY, tile identique (N90)
 destroyBuf : leftover A→B, CITY B survit (N89)
 combat vivant : MAX_TILES_PER_TICK=56 (inutilise) attackTilesPerTick(10k,nil,1)=2 guard=80
-metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.72
+metrics : ticks=6000 avgChanged=12.0 p95Changed=26 maxChanged=479 avgTickMs=0.32 p95TickMs=0.75
 MAX_TILES_PER_TICK reste 56
 Tous les invariants tiennent.
 ```
 
-Client : **36/36 OK** — dont **nouveau** `direction visuelle : reuse et mismatch` leftover N189 (`apply()` × 2 `rawequal` Atmosphere, Frame `ConquestBloom` Parent nil, take `BloomEffect` leftover, Part `ConquestClouds` Parent nil + Clouds `rawequal`) ; `menu radial` leftover N188 commentaire **sans** extra `new()` + `destroy()` existant **gardé** ; `minimap` leftover N187 ; `apercu de placement` leftover N186 / N183 ; `construction du monde 3D` leftover N185 / N184 / N106 ; `etiquettes de faction` leftover N182 ; `vagues de conquete` leftover N181–N160 ; `pose et capture` leftover N180 / N178 ; `navires` leftover N152 flame Size **inchangé** ; `calques` leftover N169 / N168 / N155. Serveur **non** touché cette passe (hors stub client `FindFirstChildOfClass`). `UnitModels.luau` **non** touché. Overlay **non** touché. FactionLabels **non** touché. WorldRenderer **non** touché. PlacementPreview **non** touché. Minimap **non** touché. RadialMenu **non** touché. HUD **non** touché. BuildingModels **non** touché. Effects **non** touché. MainMenu **non** touché. VictoryScreen **non** touché. `init.client` **non** touché. WorldBuilder **non** touché. Pulse flamme Size **inchangé** (N152). ScreenGui stale Destroy **inchangé** (N190). VisualDirector.effect mismatch **poolé**. `VisualDirector.luau` **zéro** `:Destroy()`. Stub `FindFirstChildOfClass` **ajouté**. Stub `Disconnect` **inchangé**.
+Client : **36/36 OK** — dont `direction visuelle : reuse et mismatch` leftover N189 **inchangé** ; `menu radial` leftover N188 ; `minimap` leftover N187 ; `apercu de placement` leftover N186 / N183 ; `construction du monde 3D` leftover N185 / N184 / N106 ; `etiquettes de faction` leftover N182 ; `vagues de conquete` leftover N181–N160 ; `pose et capture` leftover N180 / N178 ; `navires` leftover N152 flame Size **inchangé** ; `calques` leftover N169 / N168 / N155. Client **non** touché cette passe. `UnitModels.luau` **non** touché. Overlay **non** touché. FactionLabels **non** touché. WorldRenderer **non** touché. PlacementPreview **non** touché. Minimap **non** touché. RadialMenu **non** touché. HUD **non** touché. BuildingModels **non** touché. Effects **non** touché. MainMenu **non** touché. VictoryScreen **non** touché. VisualDirector **non** touché. `init.client` **non** touché. Pulse flamme Size **inchangé** (N152). ScreenGui stale Destroy **inchangé** (N190 skip). WorldBuilder.build leftover **poolé**. `WorldBuilder.build` **zéro** `:Destroy()`. Stub Workspace Instance + `Terrain:Clear` **ajouté**. Stub `FindFirstChildOfClass` **inchangé**. Stub `Disconnect` **inchangé**.
 
-Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass98.log`
+Artefact : `/opt/cursor/artifacts/headless-tests-nightly-pass99.log`
 
-Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N189 est un recycle Lighting/Terrain class mismatch vérifié par le banc headless (`direction visuelle` leftover N189). Pulse flamme Size **inchangé** (N152). `init.client` ScreenGui Destroy **inchangé** (N190).
+Studio / client Roblox réel : non exercé dans cet environnement (pas de DataModel live). N191 est un recycle Folder/Parts collision vérifié par le banc headless (`collision leftover` N191 : deux `build`, `rawequal` Folder, Ground recycle, Part mismatch Parent nil). Pulse flamme Size **inchangé** (N152). `init.client` ScreenGui Destroy **inchangé** (N190).
 
 ---
 
 ## 8. Require DAG (re-vérifié)
 
-Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N189 n’ajoute **pas** de require (`parkEffect` local). VisualDirector ne require que Lighting / Workspace. Intro continue de `require` MainMenu pour `drawFlag` (déjà). N152 restera dans `UnitModels.place` flame. N190 restera dans `init.client` (hors bundle). N191 restera dans `WorldBuilder.build` (serveur).
+Pas de cycle. `SpawnHint` → `Config` + `MapGen` seulement (Shared). `ChantierB` / `BoatFront` / `AimFront` dans ReplicatedStorage (`install()` serveur seulement). `IntentValidator` ne require pas `GameState`. `Research` reste sans Remotes. `Persistence` n’est pas requis par `GameState`. Les index posted sont des champs d’état, pas des modules. N191 n’ajoute **pas** de require (`parkCollision` local). WorldBuilder require `Config` + `MapGen` + `GreedyMesh` + `WorldSpace` seulement. Intro continue de `require` MainMenu pour `drawFlag` (déjà). N152 restera dans `UnitModels.place` flame. N190 restera dans `init.client` (hors bundle). N192 restera dans `WorldBuilder.clearDefaultScene` (serveur).
 
 Ordre des wraps `launchAttack` : Bootstrap (AimFront) → BoatFront (park `isBeachhead` via `parkedBuf`) → `GameState.launchAttack`.
 Wrap `retreatAttack` : Bootstrap appelle `Navy.retreatBoats` **même si** `origRetreat` a dit déjà ordonnée.
@@ -319,8 +290,8 @@ Piège N64 (toujours vrai) : ne **pas** référencer `IS_STATION` depuis `refres
 
 Piège N152 (à venir) : flame seulement. Pulse Z **conservé**. **Ne pas** geler Size (visual V74, ne pas merger `c0ec`). Si le seul patch est un freeze : **ne pas livrer N152**.
 
-Piège N189 : `VisualDirector.effect` mismatch + Clouds. **Pas** Destroy du mismatch. Free-list `effectFree[className]` (pas `veilFree`). Take du **ClassName voulu**. Chemin class match **inchangé**. Clouds leftover non-Clouds → `effectFree` **pas** `cloudFree`. Skip `Parent == nil`. Skip `init.client` (`apply()` **unique**). Skip RadialMenu N188. Skip ScreenGui stale (**N190**). **Ne pas** vider `effectFree`. **Si park sans take : ne pas livrer.** **Si park du match : ne pas livrer.**
+Piège N190 (ouvert, skip) : `init.client` ScreenGui stale. **Hors bundle.** Lua state neuf au reload → pools vides, enfants non takeables. **Si take avec enfants / strip orphelin / park sans take : ne pas livrer.** Destroy stale **est** le contrat Rojo.
 
-Piège N190 (à venir) : `init.client` ScreenGui stale. **Hors bundle.** Lua state neuf au reload → pools vides, enfants non takeables. **Si take avec enfants / strip orphelin / park sans take : ne pas livrer.** Destroy stale **peut rester** le contrat Rojo. Alors livrer **N191**.
+Piège N191 (fermé ici) : `WorldBuilder.build` Folder. **Pas** Destroy. `collisionFree` (pas `worldFree` client). Park enfants **avant** take. `Terrain:Clear()` conservé. `clearDefaultScene` = **N192**. **Pas park sans take.** **Pas take sans park enfants.**
 
-Piège N191 (à venir) : `WorldBuilder.build` Folder. **Pas** Destroy. `collisionFree` (pas `worldFree` client). Park enfants **avant** take. `Terrain:Clear()` conservé. `clearDefaultScene` = **N192**. **Si park sans take ou take sans park enfants : ne pas livrer.**
+Piège N192 (à venir) : `clearDefaultScene` Baseplate / SpawnLocation. **Jamais recréés.** **Pas** `collisionPartFree` (take Ground recevrait un Baseplate). **Si Parent=nil sans take : ne pas livrer** (Destroy = contrat Studio, comme N190).
