@@ -57,6 +57,12 @@ function WorldCamera.new(): WorldCamera
 
 	self.camera = Workspace.CurrentCamera
 	self.focus = Vector3.zero
+	-- V69 : mire idle en nombres. `focus` Vector3 n'est plus reecrit
+	-- 60 Hz (geste `focusTile(instant)` seulement). targetFocus reste
+	-- un Vector3 (pan / clamp, evenements).
+	self.focusX = 0
+	self.focusY = 0
+	self.focusZ = 0
 	self.targetFocus = Vector3.zero
 	self.distance = 320
 	self.targetDistance = 320
@@ -221,6 +227,9 @@ function WorldCamera.focusTile(self: WorldCamera, index: number, instant: boolea
 	self.targetFocus = Vector3.new(position.X, 0, position.Z)
 	if instant then
 		self.focus = self.targetFocus
+		self.focusX = position.X
+		self.focusY = 0
+		self.focusZ = position.Z
 	end
 end
 
@@ -509,15 +518,18 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	-- Lissage exponentiel encadre : reste correct quel que soit le framerate,
 	-- contrairement a un simple `dt * k` qui devient instable sous 30 FPS.
 	local alpha = 1 - math.exp(-12 * dt)
-	-- V68 : lerp focus en nombres. Plus de += / - / * Vector3 60 Hz.
-	-- Un Vector3.new a l'ecriture (pan / clamp / minimap lisent encore
-	-- self.focus). Offset ox/oy/oz inchange (V67). Shake sx/sy/sz
-	-- inchange (V66). Pose CFrame.new * rotation inchangee (V66).
-	-- Champ focusX/Y/Z leftover V69.
-	local fx = self.focus.X + (self.targetFocus.X - self.focus.X) * alpha
-	local fy = self.focus.Y + (self.targetFocus.Y - self.focus.Y) * alpha
-	local fz = self.focus.Z + (self.targetFocus.Z - self.focus.Z) * alpha
-	self.focus = Vector3.new(fx, fy, fz)
+	-- V69 : lerp et pose lisent/ecrivent focusX/Y/Z. Plus de
+	-- Vector3.new dans step overview. V68 (lerp nombres) inchange —
+	-- fx branche sur focusX. Offset ox/oy/oz inchange (V67). Shake
+	-- sx/sy/sz inchange (V66). Pose CFrame.new * rotation inchangee
+	-- (V66). self.focus n'est PAS reecrit 60 Hz (geste focusTile).
+	-- Radar / flag / boom leftover V70.
+	local fx = self.focusX + (self.targetFocus.X - self.focusX) * alpha
+	local fy = self.focusY + (self.targetFocus.Y - self.focusY) * alpha
+	local fz = self.focusZ + (self.targetFocus.Z - self.focusZ) * alpha
+	self.focusX = fx
+	self.focusY = fy
+	self.focusZ = fz
 	self.distance += (self.targetDistance - self.distance) * alpha
 	self.yaw += (self.targetYaw - self.yaw) * alpha
 	self.pitch += (self.targetPitch - self.pitch) * alpha
@@ -530,10 +542,10 @@ function WorldCamera.step(self: WorldCamera, dt: number)
 	--   ox = d * cos(pitch) * sin(yaw)
 	--   oy = d * sin(pitch)
 	--   oz = d * cos(pitch) * cos(yaw)
-	-- Shake 0 : identique a V66 (oeil = focus + offset). Shake > 0 :
-	-- translation seulement (V66). Lerp focus V68 (nombres, un Vector3
-	-- a l'ecriture). Champ nombres leftover V69.
-	-- Unites yaw inchangees (V65). Camion segRot inchange (V64).
+	-- Shake 0 : identique a V68 (oeil = focusX + offset). Shake > 0 :
+	-- translation seulement (V66). Lerp focus V69 (champs nombres, plus
+	-- de Vector3.new idle). Unites yaw inchangees (V65). Camion
+	-- segRot inchange (V64).
 	local d = self.distance
 	local pitch, yaw = self.pitch, self.yaw
 	local cosPitch, sinPitch = math.cos(pitch), math.sin(pitch)
