@@ -74,6 +74,8 @@ export type PlayerState = {
 	capitalsCaptured: number,
 	buildingsBuilt: number,
 	attacksLaunched: number,
+	-- Tick de pose de capitale (immunite nucleaire OF).
+	spawnTick: number?,
 }
 
 export type Attack = {
@@ -617,7 +619,10 @@ function GameState.refreshRailNetwork(self: GameState, slot: number)
 				periodSum += math.max(1, math.ceil(d / Config.TRUCK_SPEED)) + Config.TRUCK_COOLDOWN
 			end
 			local n = #links
-			income += (goldSum * building.level) / (periodSum / n)
+			-- Meme multiplicateurs que Trade.deliveryValue : × liens via
+			-- /(periodSum/n), × TRAIN_STOP_BONUS (plafonne a +80 %).
+			local stopBonus = 1 + math.min(0.8, (n - 1) * (Config.TRAIN_STOP_BONUS or 0.12))
+			income += (goldSum * building.level * stopBonus) / (periodSum / n)
 		end
 	end
 
@@ -848,6 +853,7 @@ function GameState.addPlayer(
 		capitalsCaptured = 0,
 		buildingsBuilt = 0,
 		attacksLaunched = 0,
+		spawnTick = 0,
 	}
 	self.players[slot] = state
 	self.alliances[slot] = {}
@@ -881,6 +887,7 @@ function GameState.addPlayer(
 	-- La capitale est posee par le moteur, jamais achetee.
 	self:placeBuilding(center, B.CAPITAL, slot)
 	state.capitalTile = center
+	state.spawnTick = self.tick
 
 	return state
 end
@@ -891,24 +898,34 @@ function GameState.removePlayer(self: GameState, slot: number)
 		return
 	end
 
-	-- Balayage complet, mais uniquement au depart d'un joueur (rare), jamais
-	-- dans la boucle de tick.
-	for index = 0, Config.TILE_COUNT - 1 do
-		if buffer.readu8(self.owner, index) == slot then
-			buffer.writeu8(self.owner, index, NEUTRAL)
-			self.dirty[index] = true
-		end
-	end
-
+	-- Detruire d'abord les structures : setOwner transfere sinon vers NEUTRAL.
 	for index, building in self.buildings do
 		if building.slot == slot then
 			self:destroyBuilding(index)
 		end
 	end
 
+	-- Passer par setOwner pour rafraichir border/coast des voisins. Rare
+	-- (deconnexion), jamais dans la boucle de tick.
+	for index = 0, Config.TILE_COUNT - 1 do
+		if buffer.readu8(self.owner, index) == slot then
+			self:setOwner(index, NEUTRAL)
+		end
+	end
+
+	-- Les troupes engagees contre ce slot doivent revenir a l'attaquant :
+	-- les jeter avec le front ferait disparaitre de la population sans
+	-- conquete (deconnexion / admin). L'attaquant qui part abandonne les
+	-- siennes : plus de PlayerState pour les recevoir.
 	for i = #self.attacks, 1, -1 do
 		local atk = self.attacks[i]
-		if atk.attacker == slot or atk.target == slot then
+		if atk.attacker == slot then
+			table.remove(self.attacks, i)
+		elseif atk.target == slot then
+			local attackerPs = self.players[atk.attacker]
+			if attackerPs then
+				attackerPs.troops += math.max(0, atk.troops)
+			end
 			table.remove(self.attacks, i)
 		end
 	end
@@ -939,6 +956,20 @@ function GameState.removePlayer(self: GameState, slot: number)
 	self.allianceCooldowns[slot] = nil
 	self.requests[slot] = nil
 	self.embargoes[slot] = nil
+	self.targetMarks[slot] = nil
+	-- Propositions / embargos / marques *vers* ce slot : sinon viewFor et
+	-- canTrade gardent des cibles fantomes jusqu'au prochain Diplomacy.step.
+	for _, targets in self.requests do
+		targets[slot] = nil
+	end
+	for _, set in self.embargoes do
+		set[slot] = nil
+	end
+	for marker, target in self.targetMarks do
+		if target == slot then
+			self.targetMarks[marker] = nil
+		end
+	end
 
 	self.players[slot] = nil
 	table.insert(self.freeSlots, slot)
@@ -972,8 +1003,9 @@ function GameState.holdsGrudge(self: GameState, slot: number, against: number): 
 end
 
 function GameState.areAllied(self: GameState, a: number, b: number): boolean
-	local set = self.alliances[a]
-	return set ~= nil and set[b] ~= nil
+	local ab = self.alliances[a]
+	local ba = self.alliances[b]
+	return ab ~= nil and ab[b] ~= nil and ba ~= nil and ba[a] ~= nil
 end
 
 --=============================================================================
@@ -1083,7 +1115,7 @@ end
 	qui donne l'impression que le jeu prend des blocs au hasard, parce que c'est
 	exactement ce qu'il faisait.
 
-	Trois termes, repris du jeu de reference, et chacun produit un comportement
+	Trois termes, propres a CONQUEST, et chacun produit un comportement
 	que le joueur peut lire sur la carte :
 
 	  - **`+ tick`** — une tuile entree tot dans la file passe avant une tuile
@@ -1159,8 +1191,10 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 	end
 
 	-- Une seule offensive par couple attaquant/cible : relancer la renforce.
+	-- Jamais fusionner dans une tete de pont (BoatFront gare deja isBeachhead ;
+	-- ce garde tient si le wrap est absent).
 	for _, atk in self.attacks do
-		if atk.attacker == attackerSlot and atk.target == targetSlot then
+		if atk.attacker == attackerSlot and atk.target == targetSlot and not atk.isBeachhead then
 			attacker.troops -= committed
 			atk.troops += committed
 			return true, `Front renforce : {committed} troupes supplementaires.`
@@ -1215,21 +1249,32 @@ function GameState.launchAttack(self: GameState, attackerSlot: number, targetSlo
 end
 
 --[[
-	Rappelle une offensive en cours, modele OpenFront : l'ordre n'est pas
+	Rappelle une offensive en cours, regle CONQUEST : l'ordre n'est pas
 	honore immediatement mais apres un delai (RETREAT_DELAY ticks), pendant
 	lequel le front continue de se battre. Une retraite instantanee ferait de
 	chaque engagement un essai sans risque ; le delai rend la decision
 	couteuse a prendre, et les survivants rentrent ensuite au pays.
 ]]
 function GameState.retreatAttack(self: GameState, attackerSlot: number, targetSlot: number): (boolean, string?)
+	-- Terre + tete de pont contre le meme slot sont deux Attack. Un clic
+	-- retraite doit les marquer tous (delai et malus inchanges).
+	local marked = 0
+	local already = 0
 	for _, atk in self.attacks do
 		if atk.attacker == attackerSlot and atk.target == targetSlot then
 			if atk.retreatAt then
-				return false, "La retraite est deja ordonnee."
+				already += 1
+			else
+				atk.retreatAt = self.tick + Config.RETREAT_DELAY
+				marked += 1
 			end
-			atk.retreatAt = self.tick + Config.RETREAT_DELAY
-			return true, "Retraite ordonnee : le front se degage."
 		end
+	end
+	if marked > 0 then
+		return true, "Retraite ordonnee : le front se degage."
+	end
+	if already > 0 then
+		return false, "La retraite est deja ordonnee."
 	end
 	return false, "Aucune offensive sur ce front."
 end
@@ -1237,25 +1282,14 @@ end
 --[[
 	Cree une tete de pont apres un debarquement : l'offensive demarre depuis une
 	tuile isolee, sans contact terrestre prealable.
-]]
-function GameState.seedBeachhead(self: GameState, attackerSlot: number, targetSlot: number, troops: number, tile: number)
-	for _, atk in self.attacks do
-		if atk.attacker == attackerSlot and atk.target == targetSlot then
-			atk.troops += troops
-			enqueueFront(self, atk, tile)
-			return
-		end
-	end
 
-	local attack: Attack = {
-		attacker = attackerSlot,
-		target = targetSlot,
-		troops = troops,
-		frontier = Heap.new(),
-		queued = {},
-	}
-	enqueueFront(self, attack, tile)
-	table.insert(self.attacks, attack)
+	Le vivant est `BoatFront.install()` : frontier = voisins encore a la
+	cible, flag `isBeachhead`, jamais de fusion terre. Ce stub leve pour
+	qu'un test / outil qui saute le bootstrap ne reintroduise pas le bug
+	(tuile debarquee enfilee + merge land). Voir ISSUE-N30.
+]]
+function GameState.seedBeachhead(_self: GameState, _attackerSlot: number, _targetSlot: number, _troops: number, _tile: number)
+	error("GameState.seedBeachhead requiert SystemsBootstrap/BoatFront.install()")
 end
 
 --[[

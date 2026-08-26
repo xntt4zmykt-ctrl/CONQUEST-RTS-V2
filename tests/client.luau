@@ -427,7 +427,7 @@ check("messages rapides : catalogue, designation de cible et envoi", function()
 end)
 
 --[[
-	Disposition OpenFront.
+	Disposition CONQUEST.
 
 	Le banc ne juge pas l'apparence — mais il peut verifier ou vivent les
 	choses, et c'est exactement ce qui casse quand on deplace une interface :
@@ -501,7 +501,7 @@ check("disposition : panneau de controle en bas, aucun classement maison", funct
 		"la bille du curseur n'est pas dans le panneau de controle"
 	)
 	-- Le libelle vit dans sa propre puce, a gauche du rail : c'est la forme du
-	-- jeu de reference — la puce dit combien part, le curseur decide.
+	-- CONQUEST — la puce dit combien part, le curseur decide.
 	assert(hud.ratioReadout.Parent.Name == "RatioChip", "le libelle d'engagement n'est pas dans sa puce")
 	assert(hud.ratioReadout.Parent.Parent == hud.controlPanel, "la puce d'engagement n'est pas dans le panneau")
 	assert(hud.troopsLabel.Parent == hud.troopsFill.Parent, "le compteur d'armee n'est pas pose sur sa jauge")
@@ -1296,7 +1296,7 @@ check("camera strategique", function()
 	camera:step(1 / 60)
 
 	--[[
-		Panoramique libre au clic du milieu, le geste du jeu de reference.
+		Panoramique libre au clic du milieu, le geste CONQUEST.
 		Les faux InputObject sont de simples tables : le code ne lit que
 		UserInputType, Position et Delta.
 	]]
@@ -1413,7 +1413,7 @@ end)
 	Barre d'action tactile.
 
 	Le banc simule un poste de travail : la barre ne doit donc PAS exister tant
-	que personne ne la force — c'est le contrat de la disposition OpenFront. On
+	que personne ne la force — c'est le contrat de la disposition CONQUEST. On
 	la construit ensuite a la main pour verifier qu'elle arme les modes comme le
 	clavier, qu'elle decale les feuilles du bas, et qu'elle ne se duplique pas.
 

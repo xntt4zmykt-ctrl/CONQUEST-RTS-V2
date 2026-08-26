@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Marine : debarquements, commerce, retraite en mer (OpenFront).
+	Marine : debarquements, commerce, retraite en mer .
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -197,7 +197,8 @@ function Navy.launchInvasion(state: GameState, slot: number, targetTile: number)
 	end
 
 	local doctrine = state:doctrineOf(slot)
-	local troops = math.floor(ps.troops / 5 * (doctrine.boatCapacity or 1))
+	local ratio = Config.BOAT_TROOP_RATIO or 0.2
+	local troops = math.floor(ps.troops * ratio * (doctrine.boatCapacity or 1))
 	if troops < Config.MIN_BOAT_TROOPS then
 		return false, `Il faut au moins {Config.MIN_BOAT_TROOPS} troupes embarquables.`
 	end
@@ -436,8 +437,8 @@ end
 	Warships (porte-avions / bases navales) — port OF WarshipExecution.
 
 	Priorité cibles : Transport > Warship > TradeShip.
-	Portée : WARSHIP_TARGET_RANGE (OF 130).
-	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (OF 20).
+	Portée : WARSHIP_TARGET_RANGE (130).
+	Cadence : un shell toutes les WARSHIP_SHELL_RATE ticks (20).
 	Pas pilotable : orbite autour de la base (design Conquest).
 ]]
 local function stepCarriers(state: GameState)
